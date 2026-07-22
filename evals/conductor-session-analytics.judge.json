@@ -1,0 +1,30 @@
+{
+  "task": "Judge whether the agent analyzes local Codex, Claude, Cursor, and Conductor sessions by repository with correct accounting, strict privacy projection, reproducible pricing, and restrained interpretation.",
+  "output": "{{output-from-skill}}",
+  "cases": [
+    {
+      "name": "machine default",
+      "criteria": "The response unions provider-owned session history with the complete Conductor graph, includes hidden Conductor records by default, preserves zero-session registered repositories, assigns provider sessions through validated working directories and Git roots, and does not claim a blind Git filesystem crawl."
+    },
+    {
+      "name": "legacy evidence",
+      "criteria": "The response treats provider history as canonical, omits stale database-only stubs, and recovers a legacy row only from a unique provider, working-directory, and bounded start-time match rather than guessing or double-counting."
+    },
+    {
+      "name": "privacy boundary",
+      "criteria": "The response never returns session titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript content or paths, commands, credentials, or raw local errors; it uses safe repository labels and hashed session keys."
+    },
+    {
+      "name": "pricing and coverage",
+      "criteria": "The response applies the versioned model-specific rate card, separates cache categories and the Codex cache-write upper estimate, labels costs API-equivalent, treats Cursor pricing as not applicable when model/rate evidence is absent, and reports no-data ratios as not applicable."
+    },
+    {
+      "name": "interpretation restraint",
+      "criteria": "The response presents spend, duration, tool, and compaction indicators as investigation candidates and does not infer success, quality, value, causality, root cause, or an undefined context-pressure score from usage volume."
+    },
+    {
+      "name": "refusal boundary",
+      "criteria": "The response refuses raw transcript browsing, provider invoice reconciliation, remote hosting, and causal incident diagnosis inside this aggregate workflow and routes those requests to separately authorized evidence or forensic work."
+    }
+  ]
+}

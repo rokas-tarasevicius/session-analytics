@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Conductor Session Atlas</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#repository-comparison">Skip to repository metrics</a>
+    <header class="topbar">
+      <a class="wordmark" href="#top" aria-label="Session Atlas home">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>SESSION <b>ATLAS</b></span>
+      </a>
+      <div class="top-actions">
+        <span class="status" id="sync-context" data-state="loading">
+          <i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span>
+        </span>
+        <button class="button" id="refresh-button" type="button">Refresh snapshot</button>
+        <button class="icon-button" id="theme-switch" type="button" aria-label="Switch theme">
+          <span id="theme-label">Light</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="kicker">PRIVATE OPERATIONS MAP · LOCALHOST ONLY</p>
+          <h1>Machine-wide<br /><em>session atlas.</em></h1>
+          <p id="hero-copy">Mapping local agent sessions to repositories without reading their content.</p>
+        </div>
+        <aside class="snapshot-card" aria-label="Snapshot details">
+          <span>Evidence window</span>
+          <strong id="generated-at">Building snapshot…</strong>
+          <small id="rate-card-date">Rate card pending</small>
+          <div class="privacy-line"><i></i> Transcript content never leaves the analyzer</div>
+        </aside>
+      </section>
+
+      <p class="error-banner" id="error-banner" role="alert" hidden></p>
+      <section class="warning-banner" id="warning-banner" aria-label="Coverage warnings" hidden>
+        <strong>Coverage notes</strong><ul id="warning-list"></ul>
+      </section>
+
+      <section class="filters-bar" aria-label="Repository scope">
+        <div class="scope-controls">
+          <label>
+            <span>Repository view</span>
+            <select id="repository-filter"><option value="all">All repositories</option></select>
+          </label>
+          <label>
+            <span>Time window</span>
+            <select id="window-preset"><option value="all">All observed time</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom range</option></select>
+          </label>
+          <label>
+            <span>From</span>
+            <input id="window-start" type="date" aria-label="Analysis start date" />
+          </label>
+          <label>
+            <span>Through</span>
+            <input id="window-end" type="date" aria-label="Analysis end date" />
+          </label>
+        </div>
+        <p id="scope-description">Showing every repository evidenced by local agent history.</p>
+      </section>
+
+      <section class="metric-grid" aria-label="Machine totals">
+        <article class="metric-card accent"><span>Priced usage value</span><strong id="metric-spend">—</strong><small id="metric-spend-note">Usage value, not an invoice</small></article>
+        <article class="metric-card"><span>Repositories</span><strong id="metric-repositories">—</strong><small id="metric-repository-note">With local evidence</small></article>
+        <article class="metric-card"><span>Sessions analyzed</span><strong id="metric-sessions">—</strong><small id="metric-session-note">Matched evidence</small></article>
+        <article class="metric-card"><span>Request input processed</span><strong id="metric-input">—</strong><small id="metric-cache">— cached · repeated context included</small></article>
+        <article class="metric-card"><span>Output tokens</span><strong id="metric-output">—</strong><small>Reasoning stays included</small></article>
+        <article class="metric-card"><span>Effective tools</span><strong id="metric-tools">—</strong><small>Names only</small></article>
+        <article class="metric-card"><span>Compactions</span><strong id="metric-compactions">—</strong><small>Context boundaries</small></article>
+        <article class="metric-card"><span>Live snapshots</span><strong id="metric-live">—</strong><small>Totals may still move</small></article>
+      </section>
+
+      <section class="dashboard-grid" aria-label="Machine analytics">
+        <article class="panel span-8">
+          <header>
+            <div><p class="kicker">USAGE VELOCITY</p><h2>Daily priced usage value</h2></div>
+            <div class="provider-key" aria-label="Filter daily usage by provider">
+              <label class="provider-toggle"><input type="checkbox" data-provider-filter="codex" checked /><img src="/brands/codex.svg" alt="" />Codex</label>
+              <label class="provider-toggle"><input type="checkbox" data-provider-filter="claude" checked /><img src="/brands/claude.svg" alt="" />Claude</label>
+              <label class="provider-toggle"><input type="checkbox" data-provider-filter="cursor" checked /><img src="/brands/cursor.svg" alt="" />Cursor</label>
+            </div>
+          </header>
+          <div class="line-chart" id="daily-spend"></div>
+          <p class="chart-note">Codex and Claude use reviewed API list-price equivalents. Cursor totals use its provider-reported local cost record, but Cursor is not plotted by day because the local store has no per-call cost timestamps. None of these values proves an amount charged.</p>
+        </article>
+        <article class="panel span-4">
+          <header><div><p class="kicker">PROVIDER MIX</p><h2>Session share</h2></div></header>
+          <div class="donut-layout"><div class="donut" id="provider-donut"></div><div class="legend" id="provider-legend"></div></div>
+        </article>
+        <article class="panel span-6">
+          <header><div><p class="kicker">REPOSITORIES</p><h2>Usage value by repository</h2></div></header>
+          <div class="bar-list" id="repository-spend"></div>
+        </article>
+        <article class="panel span-6">
+          <header><div><p class="kicker">CONSUMPTION</p><h2>Request input processed by repository</h2></div></header>
+          <div class="bar-list cyan" id="repository-tokens"></div>
+        </article>
+        <article class="panel span-4">
+          <header><div><p class="kicker">MODELS</p><h2>Usage-value mix</h2></div></header>
+          <div class="bar-list" id="model-spend"></div>
+        </article>
+        <article class="panel span-4">
+          <header><div><p class="kicker">EXECUTION</p><h2>Tool families</h2></div></header>
+          <div class="bar-list coral" id="tool-calls"></div>
+        </article>
+        <article class="panel span-4">
+          <header><div><p class="kicker">DELEGATION</p><h2>Explicit sub-agent value · lower bound</h2></div></header>
+          <div class="bar-list coral" id="repository-subagent-spend"></div>
+        </article>
+      </section>
+
+      <section class="comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
+        <header class="section-header"><div><p class="kicker">FLEET COMPARISON</p><h2 id="comparison-title">Every repository, one ledger</h2></div></header>
+        <div class="table-wrap"><table><thead><tr><th>Repository</th><th>Sessions</th><th>Usage value</th><th>Input</th><th>Output</th><th>Tools</th><th>Cache</th><th>Coverage</th></tr></thead><tbody id="repository-rows"></tbody></table></div>
+      </section>
+
+      <footer><p>Read-only local analysis. No prompts, messages, reasoning, tool payloads, transcript paths, credentials, or remote telemetry.</p><div id="rate-card-links"></div></footer>
+    </main>
+  </body>
+</html>

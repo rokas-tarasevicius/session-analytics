@@ -1,0 +1,30 @@
+{
+  "api_version": "gbrain-skillpack-v1",
+  "name": "conductor-session-analytics",
+  "version": "0.2.1",
+  "description": "Analyze privacy-safe machine-wide Codex, Claude, Cursor, and Conductor session usage by repository through a local dashboard and CLI.",
+  "author": "Rokas Tarasevicius",
+  "license": "MIT",
+  "homepage": "https://github.com/rokas-tarasevicius/skillpacks/tree/master/skillpacks/conductor-session-analytics",
+  "gbrain_min_version": "0.42.59.0",
+  "skills": [
+    "skills/conductor-session-analytics"
+  ],
+  "runbooks": {
+    "bootstrap": "runbooks/bootstrap.md"
+  },
+  "changelog": "CHANGELOG.md",
+  "unit_tests": [
+    "test/**/*.test.ts",
+    "skills/conductor-session-analytics/scripts/*.test.ts"
+  ],
+  "e2e_tests": [
+    "e2e/**/*.test.ts"
+  ],
+  "llm_evals": [
+    "evals/*.judge.json"
+  ],
+  "routing_evals": [
+    "skills/conductor-session-analytics/routing-eval.jsonl"
+  ]
+}

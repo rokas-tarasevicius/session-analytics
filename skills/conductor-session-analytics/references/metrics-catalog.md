@@ -1,0 +1,110 @@
+# Session analytics metric and interpretation catalog
+
+This reference defines the privacy boundary, current metrics, and candidate extensions for the local session analytics dashboard. Update it together with parser tests whenever a metric changes meaning.
+
+## Evidence boundary
+
+The analyzer may read provider transcripts locally, but its returned data is restricted to:
+
+- a stable local repository key and display name;
+- a one-way hashed local session key, provider, status, and timestamps;
+- provider session identity and workspace CWD used internally only for correlation;
+- model and reasoning-effort identifiers;
+- physical token counters and context-window sizes;
+- event-class counts and timestamps;
+- tool names and stable call IDs, never arguments or results;
+- transcript file count, validation status, and bounded parser warnings;
+- costs derived from the versioned rate card.
+
+The CLI JSON, API, and dashboard must not return prompts, messages, reasoning, session titles, branches, workspace metadata, repository roots/remotes, raw Conductor IDs, provider session IDs, tool arguments, tool results, commands, file paths, transcript paths, process arguments, credentials, raw local errors, or arbitrary environment output.
+
+The default scope is the union of local Codex, Claude, and Cursor session history with the complete Conductor repository graph. It is evidence-led rather than a blind filesystem crawl: provider working directories, Cursor file references, Conductor workspace mappings, and canonical Git roots determine repository assignment. Repository summaries and a single flattened session collection share stable repository IDs; sessions are not duplicated inside public repository objects.
+
+Provider transcript stores are canonical evidence that a session can be analyzed. Stale Conductor rows without matching evidence are excluded. A legacy row without a provider ID is recovered only after a unique provider, working-directory, and start-time match. This prevents database stubs from inflating session counts or creating repetitive coverage notes.
+
+## Current measures
+
+### Spend and usage
+
+- input, uncached input, cache-read input, and observable cache-write input tokens;
+- output and, where exposed, reasoning-output tokens;
+- non-reasoning output derived only when reasoning output is separately exposed;
+- ordinary API-equivalent estimate and cache-write upper estimate;
+- priced usage value by session and model, plus activity day only where cost timestamps are evidenced;
+- price coverage: the share of observed input plus output tokens assigned to a known rate, or not applicable when no tokens were observed;
+- cache-read ratio and cache-write volume;
+- largest per-call input and configured context window, retained as parser diagnostics rather than promoted as a dashboard score.
+
+Codex input is request-context consumption, not unique transcript text: the same cached context is counted again whenever it is processed by another model call. Codex also broadcasts the same process-wide `total_token_usage` snapshot into multiple session files. Deduplicate exact total/last-usage states across the full evidence union, attribute each state to its earliest observation, and sum `last_token_usage`; never sum a process-wide cumulative delta once per file. A new `session_meta` can change a file from sub-agent to top-level execution, so allocate each deduplicated request to the execution segment active at that observation. Claude cache creation and reads are separate physical counters. Provider reasoning output remains included in output pricing.
+
+### Execution shape
+
+- user-visible turns;
+- assistant/model responses;
+- model calls inferred from distinct positive usage increments or response IDs;
+- task starts and completions when the provider emits them;
+- context compactions and summary boundaries;
+- effective tool calls by tool name;
+- transport/orchestrator tool calls before code-mode expansion;
+- Claude queue operations and delegated-agent identities;
+- session wall span and provider-event span;
+- live versus terminal status when observable.
+
+Machine views also include repository count, repositories with selected sessions, working-snapshot count, explicit top-level/sub-agent execution value, and per-repository comparison dimensions. Usage-value comparisons must show transcript and pricing coverage beside totals.
+
+Tool names are useful for workload shape. Tool call counts do not prove useful work, failure, or causal responsibility.
+
+### Evidence health
+
+- provider evidence validation status;
+- provider session ID and workspace CWD validation;
+- transcript files in the evidence set;
+- stable versus working snapshot;
+- cumulative-counter monotonicity;
+- malformed records skipped;
+- unsupported provider, schema, or model price.
+
+## Useful derived indicators
+
+These can be added without reading content, provided they are labeled as indicators:
+
+- priced usage value per user turn, task completion, model call, effective tool call, or active hour;
+- cache savings compared with pricing all input as uncached;
+- context churn: cumulative input divided by largest context window or event span;
+- compactions per hour and spend between compactions;
+- tool diversity and concentration by family;
+- delegation fan-out and tool use per delegated actor for Claude;
+- model-switch count and spend allocation across model changes;
+- concurrency timeline: number of repository sessions with overlapping event spans;
+- priced-usage velocity by day or week and rolling change from the preceding period;
+- analyzed-session count, price coverage, working-snapshot share, and the eligible denominator for provider-specific measures;
+- outlier ranks for priced usage value, duration, tool calls, and compactions.
+
+Ratios with tiny denominators need a minimum-activity guard. Ratios with no denominator are not applicable, never 0% or 100%. A session with one task-complete marker is not necessarily more efficient than a session whose provider does not emit that marker.
+
+## Metrics requiring independent evidence
+
+Do not derive these from transcripts alone:
+
+- successful or failed outcome;
+- merged pull requests, closed issues, deployed artifacts, or recovered systems;
+- value delivered, human time saved, correctness, or quality;
+- root cause, death-spiral diagnosis, or missed stop point;
+- cloud, provider-tool, CI, or human labor cost not present in usage receipts;
+- billable invoice amounts under a subscription, enterprise agreement, discount, priority tier, region modifier, tax, or provider credit.
+
+These require Git, GitHub, CI, deployment, provider billing, or explicit human evidence. Correlate them through a bounded forensic or product-ledger workflow rather than inferring them from volume.
+
+## Pricing semantics
+
+`rate-cards.json` is a reproducibility input, not a claim that prices never change. Each entry records an effective date and primary source. An unrecognized model remains unpriced until a reviewed entry is added.
+
+Cursor local composer history exposes modern `bubbleId` token counters and stable `toolFormerData` tool-call IDs. `usageData.costInCents` is a provider-reported local usage value and may be aggregated by session, repository, and model. It is not assigned to a day because the local store does not retain per-call cost timestamps. Cursor API rate coverage remains not applicable.
+
+The `gpt-5.3-codex-spark` entry uses zero rates because the provider documents the model as a research preview available through a subscription workflow rather than a separately metered API model. Zero here means “no observable API-equivalent charge,” not a claim that the subscription is free.
+
+For OpenAI Codex transcripts, cached input is observable but cache writes are not separately identified in the cumulative usage counter. The ordinary estimate prices uncached input at the base rate. The upper estimate applies the configured cache-write premium to every uncached input token. The API-equivalent value should fall between those values when no other pricing modifier applies; neither value proves a subscription invoice or cash charge.
+
+For Claude transcripts, deduplicate assistant `message.id` values before summing usage. Use the cache-creation TTL breakdown when present. If only aggregate cache creation exists, label the assumed TTL rather than silently claiming an exact cache-write price.
+
+Apply long-context modifiers per request, not to the repository aggregate. Separately priced hosted tools, containers, search calls, storage, and network services require their own observable counters before they can enter the estimate.

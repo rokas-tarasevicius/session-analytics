@@ -1,0 +1,125 @@
+{
+  "currency": "USD",
+  "effectiveDate": "2026-07-22",
+  "models": {
+    "gpt-5.5": {
+      "provider": "codex",
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 30,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.5"
+    },
+    "gpt-5.4": {
+      "provider": "codex",
+      "inputPerMillion": 2.5,
+      "cachedInputPerMillion": 0.25,
+      "outputPerMillion": 15,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.4"
+    },
+    "gpt-5.4-mini": {
+      "provider": "codex",
+      "inputPerMillion": 0.75,
+      "cachedInputPerMillion": 0.075,
+      "outputPerMillion": 4.5,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.4-mini"
+    },
+    "gpt-5.3-codex": {
+      "provider": "codex",
+      "inputPerMillion": 1.75,
+      "cachedInputPerMillion": 0.175,
+      "outputPerMillion": 14,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.3-codex"
+    },
+    "gpt-5.3-codex-spark": {
+      "provider": "codex",
+      "inputPerMillion": 0,
+      "cachedInputPerMillion": 0,
+      "outputPerMillion": 0,
+      "cacheWriteMultiplier": 1,
+      "cacheWriteObservable": false,
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.3-codex-spark"
+    },
+    "gpt-5.6-sol": {
+      "provider": "codex",
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 30,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "gpt-5.6-terra": {
+      "provider": "codex",
+      "inputPerMillion": 2.5,
+      "cachedInputPerMillion": 0.25,
+      "outputPerMillion": 15,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+    },
+    "claude-opus-4-8": {
+      "provider": "claude",
+      "inputPerMillion": 5,
+      "cacheReadPerMillion": 0.5,
+      "cacheWrite5mPerMillion": 6.25,
+      "cacheWrite1hPerMillion": 10,
+      "outputPerMillion": 25,
+      "source": "https://www-cdn.anthropic.com/files/4zrzovbb/website/3684c2faafb97418665782cea0001f439f74b1d2.pdf"
+    },
+    "claude-fable-5": {
+      "provider": "claude",
+      "inputPerMillion": 10,
+      "cacheReadPerMillion": 1,
+      "cacheWrite5mPerMillion": 12.5,
+      "cacheWrite1hPerMillion": 20,
+      "outputPerMillion": 50,
+      "source": "https://platform.claude.com/docs/en/about-claude/models/overview"
+    },
+    "claude-sonnet-5": {
+      "provider": "claude",
+      "inputPerMillion": 2,
+      "cacheReadPerMillion": 0.2,
+      "cacheWrite5mPerMillion": 2.5,
+      "cacheWrite1hPerMillion": 4,
+      "outputPerMillion": 10,
+      "source": "https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5"
+    },
+    "claude-haiku-4-5-20251001": {
+      "provider": "claude",
+      "inputPerMillion": 1,
+      "cacheReadPerMillion": 0.1,
+      "cacheWrite5mPerMillion": 1.25,
+      "cacheWrite1hPerMillion": 2,
+      "outputPerMillion": 5,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    }
+  }
+}
