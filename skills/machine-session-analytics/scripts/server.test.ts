@@ -74,16 +74,17 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const port = await availablePort();
+    const childEnvironment = {
+      ...process.env,
+      CONDUCTOR_CLAUDE_PROJECTS_ROOT: fixture.claudeRoot,
+      CONDUCTOR_CODEX_ARCHIVED_SESSIONS_ROOT: fixture.codexArchiveRoot,
+      CONDUCTOR_CODEX_SESSIONS_ROOT: fixture.codexRoot,
+      CONDUCTOR_CURSOR_DATABASE: fixture.cursorDatabasePath,
+      CONDUCTOR_ANALYTICS_DATABASE: fixture.databasePath,
+    };
     child = spawn(process.execPath, [serverPath, "--port", String(port)], {
       cwd: repositoryRoot,
-      env: {
-        ...process.env,
-        CONDUCTOR_CLAUDE_PROJECTS_ROOT: fixture.claudeRoot,
-        CONDUCTOR_CODEX_ARCHIVED_SESSIONS_ROOT: fixture.codexArchiveRoot,
-        CONDUCTOR_CODEX_SESSIONS_ROOT: fixture.codexRoot,
-        CONDUCTOR_CURSOR_DATABASE: fixture.cursorDatabasePath,
-        CONDUCTOR_ANALYTICS_DATABASE: fixture.databasePath,
-      },
+      env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -97,7 +98,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       stderr += chunk;
     });
     await waitFor(
-      () => stdout.includes("Conductor session analytics ready:"),
+      () => stdout.includes("Machine session analytics ready:"),
       () => `Server did not start. stdout=${stdout} stderr=${stderr}`,
     );
 
@@ -105,7 +106,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const health = await fetch(`${origin}/api/health`);
     assert.equal(health.status, 200);
     const healthBody = (await health.json()) as Record<string, unknown>;
-    assert.equal(healthBody.service, "conductor-session-analytics");
+    assert.equal(healthBody.service, "machine-session-analytics");
     assert.equal(healthBody.status, "ok");
     assert.ok(["building", "not-started", "ready"].includes(String(healthBody.snapshot)));
     assert.match(health.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
@@ -130,6 +131,21 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal((await fetch(`${origin}/api/health`, { method: "POST" })).status, 405);
     assert.equal((await fetch(`${origin}/missing`)).status, 404);
     assert.equal(await requestWithHost(port, "analytics.example.test"), 403);
+
+    const reused = spawn(process.execPath, [serverPath, "--port", String(port)], {
+      cwd: repositoryRoot,
+      env: childEnvironment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let reusedStdout = "";
+    let reusedStderr = "";
+    reused.stdout?.setEncoding("utf8");
+    reused.stderr?.setEncoding("utf8");
+    reused.stdout?.on("data", (chunk: string) => { reusedStdout += chunk; });
+    reused.stderr?.on("data", (chunk: string) => { reusedStderr += chunk; });
+    const [reuseExitCode] = await once(reused, "exit");
+    assert.equal(reuseExitCode, 0, reusedStderr);
+    assert.match(reusedStdout, /Machine session analytics already running:/);
   } finally {
     if (child) await stopServer(child);
     await rm(temporaryDirectory, { force: true, recursive: true });

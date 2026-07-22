@@ -45,16 +45,17 @@ for (let index = 2; index < process.argv.length; index += 1) {
   }
 }
 if (process.argv.includes("--help")) {
-  process.stdout.write(`Conductor Session Analytics server 0.2.1
+  process.stdout.write(`Machine Session Analytics server 0.3.1
 
 Usage: node scripts/server.ts [--open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
-Run cli.ts --help for the shared analysis options.
+With --open, this one command performs the complete scan and opens the dashboard.
+If a compatible dashboard already uses the port, the command reuses it.
 `);
   process.exit(0);
 }
 if (process.argv.includes("--version")) {
-  process.stdout.write("0.2.1\n");
+  process.stdout.write("0.3.1\n");
   process.exit(0);
 }
 
@@ -97,7 +98,7 @@ async function sendFile(response: ServerResponse, path: string): Promise<void> {
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (message.includes("rate card")) return "The configured rate card is invalid or unavailable.";
-  if (message.includes("repository")) return "The requested Conductor repository could not be selected.";
+  if (message.includes("repository")) return "The requested repository could not be selected.";
   return "Local analytics evidence is unavailable or could not be parsed.";
 }
 
@@ -126,22 +127,22 @@ const staticFiles = new Map<string, string>([
   ["/brands/cursor.svg", join(publicRoot, "brands", "cursor.svg")],
 ]);
 
-const repositoryName = argument("--repo-name") ?? process.env["CONDUCTOR_SESSION_REPO_NAME"];
-const repositoryId = argument("--repo-id") ?? process.env["CONDUCTOR_SESSION_REPO_ID"];
+const repositoryName = argument("--repo-name") ?? process.env["MACHINE_SESSION_REPO_NAME"] ?? process.env["CONDUCTOR_SESSION_REPO_NAME"];
+const repositoryId = argument("--repo-id") ?? process.env["MACHINE_SESSION_REPO_ID"] ?? process.env["CONDUCTOR_SESSION_REPO_ID"];
 const repositoryRemote =
-  argument("--repo-remote") ?? process.env["CONDUCTOR_SESSION_REPO_REMOTE"];
-const databasePath = argument("--database") ?? process.env["CONDUCTOR_ANALYTICS_DATABASE"];
-const codexRoot = argument("--codex-root") ?? process.env["CONDUCTOR_CODEX_SESSIONS_ROOT"];
+  argument("--repo-remote") ?? process.env["MACHINE_SESSION_REPO_REMOTE"] ?? process.env["CONDUCTOR_SESSION_REPO_REMOTE"];
+const databasePath = argument("--database") ?? process.env["MACHINE_SESSION_METADATA_DATABASE"] ?? process.env["CONDUCTOR_ANALYTICS_DATABASE"];
+const codexRoot = argument("--codex-root") ?? process.env["MACHINE_CODEX_SESSIONS_ROOT"] ?? process.env["CONDUCTOR_CODEX_SESSIONS_ROOT"];
 const codexArchiveRoot =
-  argument("--codex-archive-root") ?? process.env["CONDUCTOR_CODEX_ARCHIVED_SESSIONS_ROOT"];
-const claudeRoot = argument("--claude-root") ?? process.env["CONDUCTOR_CLAUDE_PROJECTS_ROOT"];
-const cursorDatabasePath = argument("--cursor-database") ?? process.env["CONDUCTOR_CURSOR_DATABASE"];
-const rateCardPath = argument("--rate-card") ?? process.env["CONDUCTOR_SESSION_RATE_CARD"];
+  argument("--codex-archive-root") ?? process.env["MACHINE_CODEX_ARCHIVED_SESSIONS_ROOT"] ?? process.env["CONDUCTOR_CODEX_ARCHIVED_SESSIONS_ROOT"];
+const claudeRoot = argument("--claude-root") ?? process.env["MACHINE_CLAUDE_PROJECTS_ROOT"] ?? process.env["CONDUCTOR_CLAUDE_PROJECTS_ROOT"];
+const cursorDatabasePath = argument("--cursor-database") ?? process.env["MACHINE_CURSOR_DATABASE"] ?? process.env["CONDUCTOR_CURSOR_DATABASE"];
+const rateCardPath = argument("--rate-card") ?? process.env["MACHINE_SESSION_RATE_CARD"] ?? process.env["CONDUCTOR_SESSION_RATE_CARD"];
 
 const analyzeOptions: AnalyzeOptions = {
   includeHidden: !process.argv.includes("--exclude-hidden"),
-  ...(argument("--repo-root") || process.env["CONDUCTOR_SESSION_REPO_ROOT"]
-    ? { repositoryRoot: argument("--repo-root") ?? process.env["CONDUCTOR_SESSION_REPO_ROOT"] }
+  ...(argument("--repo-root") || process.env["MACHINE_SESSION_REPO_ROOT"] || process.env["CONDUCTOR_SESSION_REPO_ROOT"]
+    ? { repositoryRoot: argument("--repo-root") ?? process.env["MACHINE_SESSION_REPO_ROOT"] ?? process.env["CONDUCTOR_SESSION_REPO_ROOT"] }
     : {}),
   ...(repositoryName ? { repositoryName } : {}),
   ...(repositoryId ? { repositoryId } : {}),
@@ -186,7 +187,7 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/api/health") {
       sendJson(response, 200, {
-        service: "conductor-session-analytics",
+        service: "machine-session-analytics",
         snapshot: snapshotReady ? "ready" : analyticsPending ? "building" : "not-started",
         status: "ok",
       });
@@ -211,7 +212,11 @@ const server = createServer(async (request, response) => {
 const conductorPort = process.env["CONDUCTOR_PORT"];
 const companionPort = conductorPort ? String(Number(conductorPort) + 4) : null;
 const requestedPort =
-  argument("--port") ?? process.env["CONDUCTOR_SESSION_ANALYTICS_PORT"] ?? companionPort ?? "4174";
+  argument("--port") ??
+  process.env["MACHINE_SESSION_ANALYTICS_PORT"] ??
+  process.env["CONDUCTOR_SESSION_ANALYTICS_PORT"] ??
+  companionPort ??
+  "4174";
 const port = Number(requestedPort);
 if (!Number.isInteger(port) || port < 1024 || port > 65_535) {
   throw new Error(
@@ -219,9 +224,48 @@ if (!Number.isInteger(port) || port < 1024 || port > 65_535) {
   );
 }
 
+const dashboardUrl = `http://127.0.0.1:${port}`;
+
+async function openDashboard(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    execFile("open", [dashboardUrl], (error) => {
+      if (error) process.stderr.write(`Could not open the browser: ${error.message}\n`);
+      resolve();
+    });
+  });
+}
+
+async function compatibleDashboardIsRunning(): Promise<boolean> {
+  try {
+    const response = await fetch(`${dashboardUrl}/api/health`, {
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) return false;
+    const body = await response.json() as { service?: unknown; status?: unknown };
+    return body.service === "machine-session-analytics" && body.status === "ok";
+  } catch {
+    return false;
+  }
+}
+
+server.on("error", (error: NodeJS.ErrnoException) => {
+  void (async () => {
+    if (error.code === "EADDRINUSE" && await compatibleDashboardIsRunning()) {
+      process.stdout.write(`Machine session analytics already running: ${dashboardUrl}\n`);
+      if (process.argv.includes("--open")) await openDashboard();
+      process.exit(0);
+    }
+    if (error.code === "EADDRINUSE") {
+      process.stderr.write(`Port ${port} is already in use by another local service.\n`);
+    } else {
+      process.stderr.write(`Machine session analytics could not start: ${safeError(error)}\n`);
+    }
+    process.exit(1);
+  })();
+});
+
 server.listen(port, "127.0.0.1", () => {
-  const dashboardUrl = `http://127.0.0.1:${port}`;
-  process.stdout.write(`Conductor session analytics ready: ${dashboardUrl}\n`);
+  process.stdout.write(`Machine session analytics ready: ${dashboardUrl}\n`);
   process.stdout.write("Read-only local analysis; transcript message and reasoning content is not returned.\n");
   const warmup = analytics(false);
   void warmup
@@ -236,11 +280,6 @@ server.listen(port, "127.0.0.1", () => {
       process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);
     });
   if (process.argv.includes("--open")) {
-    const openDashboard = () => {
-      execFile("open", [dashboardUrl], (error) => {
-        if (error) process.stderr.write(`Could not open the browser: ${error.message}\n`);
-      });
-    };
     void warmup.then(openDashboard, openDashboard);
   }
 });

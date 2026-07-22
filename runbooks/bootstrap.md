@@ -1,11 +1,13 @@
-# Bootstrap Conductor session analytics
+# Bootstrap machine session analytics
 
-GBrain displays these steps; it does not execute them.
+No manual bootstrap or preprocessing is required after the pack is installed.
 
-1. Confirm macOS and Node.js 24 or newer are available. Conductor metadata improves attribution but is not the only evidence source.
-2. Preview the installed skill and its content-free evidence boundary before running local analysis.
-3. Run `node .agents/skills/conductor-session-analytics/scripts/cli.ts --help`.
-4. Launch the read-only dashboard with `node .agents/skills/conductor-session-analytics/scripts/server.ts --open`.
-5. Review the selected time window, analyzed-session count, provider mix, and pricing coverage before interpreting cross-repository comparisons.
+When asked to show the analytics, the agent runs one command:
 
-The dashboard reads standard local Codex, Claude, Cursor, and Conductor stores. It never needs cloud credentials, network access, a consuming repository dependency, or a non-loopback bind address.
+```bash
+node .agents/skills/machine-session-analytics/scripts/server.ts --open
+```
+
+That command discovers the standard Codex, Claude, and Cursor stores, performs the complete machine-wide analysis, starts or reuses the read-only localhost dashboard, and opens it in the browser. Do not run `cli.ts --help`, ask the user to select repositories, or require Conductor first.
+
+The only runtime requirement is macOS with Node.js 24 or newer. Missing provider stores are reported as coverage information without blocking the providers that are present.

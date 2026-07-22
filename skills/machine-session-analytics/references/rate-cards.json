@@ -94,6 +94,15 @@
       "outputPerMillion": 25,
       "source": "https://www-cdn.anthropic.com/files/4zrzovbb/website/3684c2faafb97418665782cea0001f439f74b1d2.pdf"
     },
+    "claude-opus-4-6": {
+      "provider": "claude",
+      "inputPerMillion": 5,
+      "cacheReadPerMillion": 0.5,
+      "cacheWrite5mPerMillion": 6.25,
+      "cacheWrite1hPerMillion": 10,
+      "outputPerMillion": 25,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
     "claude-fable-5": {
       "provider": "claude",
       "inputPerMillion": 10,

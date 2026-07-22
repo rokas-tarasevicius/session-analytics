@@ -5,8 +5,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const skillRoot = resolve(here, "../skills/conductor-session-analytics");
+const skillRoot = resolve(here, "../skills/machine-session-analytics");
 const skill = readFileSync(resolve(skillRoot, "SKILL.md"), "utf8");
+const bootstrap = readFileSync(resolve(here, "../runbooks/bootstrap.md"), "utf8");
 const metrics = readFileSync(
   resolve(skillRoot, "references/metrics-catalog.md"),
   "utf8",
@@ -21,30 +22,46 @@ const manifest = JSON.parse(
   readFileSync(resolve(here, "../skillpack.json"), "utf8"),
 ) as { skills?: string[]; unit_tests?: string[] };
 test("ships session analytics as a separate manifest-listed skill", () => {
-  assert.ok(manifest.skills?.includes("skills/conductor-session-analytics"));
+  assert.ok(manifest.skills?.includes("skills/machine-session-analytics"));
   assert.ok(
     manifest.unit_tests?.includes(
-      "skills/conductor-session-analytics/scripts/*.test.ts",
+      "skills/machine-session-analytics/scripts/*.test.ts",
     ),
   );
-  assert.match(skill, /union of active and archived global Codex transcripts, Claude Code plus Claude Desktop local-agent transcripts, Cursor's local composer and bubble history/);
-  assert.match(skill, /Omit database-only stubs rather than guessing or double-counting them/);
-  assert.match(skill, /node \.agents\/skills\/conductor-session-analytics\/scripts\/server\.ts --open/);
+  assert.match(skill, /Codex: `~\/\.codex\/sessions\/` and `~\/\.codex\/archived_sessions\/`/);
+  assert.match(skill, /Claude Code: `~\/\.claude\/projects\/`/);
+  assert.match(skill, /Cursor: `~\/Library\/Application Support\/Cursor/);
+  assert.match(skill, /node \.agents\/skills\/machine-session-analytics\/scripts\/server\.ts --open/);
+  assert.match(skill, /Provider stores define the scan/);
+  assert.match(skill, /Conductor is optional enrichment and is never required/);
+});
+
+test("launches through one automatic idempotent command", () => {
+  assert.match(skill, /immediately run exactly one command/);
+  assert.match(skill, /Do not ask the user to run commands/);
+  assert.match(skill, /safe to rerun/);
+  assert.doesNotMatch(skill, /node \.agents\/skills\/machine-session-analytics\/scripts\/cli\.ts/);
+  assert.match(bootstrap, /No manual bootstrap or preprocessing is required/);
+  assert.equal(
+    bootstrap.match(/node \.agents\/skills\/machine-session-analytics\/scripts\/server\.ts --open/g)?.length,
+    1,
+  );
 });
 
 test("enforces a content-free localhost-only interface", () => {
-  assert.match(skill, /without returning prompts, reasoning, tool arguments, tool results/);
-  assert.match(skill, /binds only to `127\.0\.0\.1`/);
-  assert.match(skill, /Do not bind the dashboard to a LAN address/);
-  assert.match(skill, /returns no transcript content/);
+  assert.match(skill, /never return transcript content, prompts, reasoning, tool arguments or results/);
+  assert.match(skill, /bound to `127\.0\.0\.1`/);
+  assert.match(skill, /bind to a LAN address/);
+  assert.match(skill, /Do not return transcript content/);
   assert.match(metrics, /must not return prompts, messages, reasoning/);
 });
 
 test("preserves model-specific accounting and estimate caveats", () => {
-  assert.match(skill, /process-wide snapshot/);
-  assert.match(skill, /deduplicate repeated assistant response IDs/);
-  assert.match(skill, /reasoning-output tokens as part of output/);
-  assert.match(skill, /API-equivalent estimates/);
+  assert.match(skill, /deduplicate broadcast counters, repeated messages, subagent traces/);
+  assert.match(skill, /API list-price equivalents/);
+  assert.match(metrics, /process-wide `total_token_usage` snapshot/);
+  assert.match(metrics, /deduplicate assistant `message\.id` values/);
+  assert.match(metrics, /reasoning output remains included in output pricing/);
   assert.match(metrics, /cache-write upper estimate/i);
   assert.match(rateCard.effectiveDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
   for (const model of Object.values(rateCard.models ?? {})) {
@@ -53,8 +70,8 @@ test("preserves model-specific accounting and estimate caveats", () => {
 });
 
 test("routes causal claims to a separate bounded forensic workflow", () => {
-  assert.match(skill, /separate, explicitly scoped forensic workflow/);
-  assert.match(skill, /operational proxies rather than verified outcomes/);
-  assert.match(skill, /without declaring their cause/);
-  assert.match(skill, /Do not call task completion “success,” cost “value,”/);
+  assert.match(skill, /separately scoped forensic workflow/);
+  assert.match(skill, /do not prove quality, success, causation, or value delivered/);
+  assert.match(metrics, /Tool call counts do not prove useful work, failure, or causal responsibility/);
+  assert.match(metrics, /successful or failed outcome/);
 });

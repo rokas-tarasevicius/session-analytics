@@ -1,10 +1,10 @@
 {
-  "task": "Judge whether the agent analyzes local Codex, Claude, Cursor, and Conductor sessions by repository with correct accounting, strict privacy projection, reproducible pricing, and restrained interpretation.",
+  "task": "Judge whether the agent analyzes all locally evidenced Codex, Claude, and Cursor sessions by repository with correct accounting, optional Conductor enrichment, strict privacy projection, reproducible pricing, and restrained interpretation.",
   "output": "{{output-from-skill}}",
   "cases": [
     {
       "name": "machine default",
-      "criteria": "The response unions provider-owned session history with the complete Conductor graph, includes hidden Conductor records by default, preserves zero-session registered repositories, assigns provider sessions through validated working directories and Git roots, and does not claim a blind Git filesystem crawl."
+      "criteria": "The response treats provider-owned session history as the machine-wide canonical scope, uses Conductor only as optional enrichment, includes hidden optional metadata by default, preserves registered zero-session repositories when available, assigns provider sessions through validated working directories and Git roots, and does not claim a blind Git filesystem crawl."
     },
     {
       "name": "legacy evidence",

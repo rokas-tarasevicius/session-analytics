@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,7 +8,7 @@ import { analyzeMachineSessions, analyzeRepositorySessions } from "./analyzer.ts
 import { createSessionAnalyticsFixture } from "./test-support.ts";
 
 test("analyzes Codex, Claude, and Cursor sessions without returning transcript content", async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "conductor-session-analytics-"));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "machine-session-analytics-"));
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const result = await analyzeRepositorySessions({
@@ -27,7 +27,7 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.equal(result.summary.missingTranscripts, 0);
     assert.equal(result.summary.pricedTokenCoverage, 1);
     assert.equal(result.summary.providerReportedSpendUsd, 1.48);
-    assert.equal(result.summary.subagentSessions, 1);
+    assert.equal(result.summary.subagentSessions, 2);
     assert.equal(result.summary.topLevelSessions, 5);
 
     const codex = result.sessions.find(({ provider }) => provider === "codex");
@@ -51,7 +51,9 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.equal(codex.metrics.contextUtilizationPeak, 0.5);
     assert.equal(codex.executionKind, "top-level");
     assert.equal(codex.costBasis, "api-list-price-equivalent");
-    const archivedSubagent = result.sessions.find(({ executionKind }) => executionKind === "mixed");
+    const archivedSubagent = result.sessions.find(
+      ({ executionKind, provider }) => provider === "codex" && executionKind === "mixed",
+    );
     assert.ok(archivedSubagent);
     assert.equal(archivedSubagent.provider, "codex");
     assert.equal(archivedSubagent.tokens.inputTokens, 100);
@@ -81,6 +83,9 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.equal(claude.metrics.userTurns, 1);
     assert.equal(claude.metrics.delegatedAgents, 1);
     assert.equal(claude.transcript.files, 2);
+    assert.equal(claude.executionKind, "mixed");
+    assert.equal(claude.costByExecution.subagentUsd, 0.00055);
+    assert.equal(claude.costByExecution.topLevelUsd, 0.0030875);
 
     const cursor = result.sessions.find(({ models }) => models.some(({ model }) => model === "cursor-fixture-model"));
     assert.ok(cursor);
@@ -96,6 +101,7 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.deepEqual(metadataOnlyCursor.spendByDay, {});
     assert.equal(metadataOnlyCursor.metrics.modelCalls, 1);
     assert.equal(metadataOnlyCursor.tokens.inputTokens, 300);
+    assert.equal(metadataOnlyCursor.firstEventAt, "2026-07-19T14:00:00.000Z");
     assert.deepEqual(metadataOnlyCursor.tools, { search_code: 1 });
 
     const serialized = JSON.stringify(result);
@@ -131,6 +137,39 @@ test("scans every visible Conductor repository and preserves zero-session reposi
     assert.equal(result.repositories[1]?.summary.sessions, 0);
     assert.equal(result.sessions.every(({ repositoryName }) => repositoryName === "conductor"), true);
 
+    const sessionInput = result.sessions.reduce((total, session) => total + session.tokens.inputTokens, 0);
+    const sessionOutput = result.sessions.reduce((total, session) => total + session.tokens.outputTokens, 0);
+    const sessionValue = result.sessions.reduce((total, session) => total + session.cost.totalUsd, 0);
+    assert.equal(result.summary.totalInputTokens, sessionInput);
+    assert.equal(result.summary.outputTokens, sessionOutput);
+    assert.equal(result.summary.estimatedSpendUsd, sessionValue);
+    for (const session of result.sessions) {
+      assert.equal(
+        session.cost.totalUsd,
+        session.models.reduce((total, model) => total + model.totalUsd, 0),
+      );
+      assert.equal(
+        session.cost.totalUsd,
+        session.costByExecution.subagentUsd +
+          session.costByExecution.topLevelUsd +
+          session.costByExecution.unknownUsd,
+      );
+      if (session.provider !== "cursor") {
+        assert.equal(
+          session.tokens.inputTokens,
+          session.models.reduce((total, model) => total + model.inputTokens, 0),
+        );
+        assert.equal(
+          session.tokens.outputTokens,
+          session.models.reduce((total, model) => total + model.outputTokens, 0),
+        );
+        assert.equal(
+          session.cost.totalUsd,
+          Object.values(session.spendByDay).reduce((total, value) => total + value, 0),
+        );
+      }
+    }
+
     const withoutHidden = await analyzeMachineSessions({
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
@@ -142,6 +181,79 @@ test("scans every visible Conductor repository and preserves zero-session reposi
     assert.equal(withoutHidden.summary.repositories, 2);
     assert.equal(withoutHidden.repositories.at(-1)?.repository.name, "quiet-repository");
     assert.equal(withoutHidden.repositories.some(({ repository }) => repository.name === "hidden-repository"), false);
+  } finally {
+    await rm(temporaryDirectory, { force: true, recursive: true });
+  }
+});
+
+test("keeps unknown provider models unpriced instead of applying a database-model fallback", async () => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "conductor-session-unpriced-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    const codexDay = join(fixture.codexRoot, "2026/07/20");
+    const [filename] = await readdir(codexDay);
+    assert.ok(filename);
+    const transcript = join(codexDay, filename);
+    const evidence = await readFile(transcript, "utf8");
+    await writeFile(transcript, evidence.replaceAll("gpt-5.6-sol", "unknown-test-model"));
+
+    const result = await analyzeRepositorySessions({
+      claudeRoot: fixture.claudeRoot,
+      codexArchiveRoot: fixture.codexArchiveRoot,
+      codexRoot: fixture.codexRoot,
+      cursorDatabasePath: fixture.cursorDatabasePath,
+      databasePath: fixture.databasePath,
+      repositoryRemote: fixture.remote,
+      repositoryRoot: fixture.repositoryRoot,
+    });
+    const session = result.sessions.find(({ models }) =>
+      models.some(({ model }) => model === "unknown-test-model")
+    );
+    assert.ok(session);
+    assert.equal(session.tokens.inputTokens, 1500);
+    assert.equal(session.cost.totalUsd, 0);
+    assert.equal(session.costComplete, false);
+    assert.equal(session.pricedTokenCoverage, 0);
+    assert.equal(
+      session.transcript.warnings.some((warning) => warning === "No rate card is configured for unknown-test-model."),
+      true,
+    );
+  } finally {
+    await rm(temporaryDirectory, { force: true, recursive: true });
+  }
+});
+
+test("discovers provider sessions when optional Conductor metadata is absent", async () => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "machine-session-no-metadata-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    const result = await analyzeMachineSessions({
+      claudeRoot: fixture.claudeRoot,
+      codexArchiveRoot: fixture.codexArchiveRoot,
+      codexRoot: fixture.codexRoot,
+      cursorDatabasePath: fixture.cursorDatabasePath,
+      databasePath: join(temporaryDirectory, "missing-conductor.db"),
+    });
+    assert.equal(result.summary.sessions, 5);
+    assert.deepEqual(
+      [...new Set(result.sessions.map(({ provider }) => provider))].sort(),
+      ["claude", "codex", "cursor"],
+    );
+    assert.equal(result.summary.missingTranscripts, 0);
+    assert.ok(result.summary.repositoriesWithSessions >= 1);
+
+    const cursorSession = result.sessions.find(({ provider }) => provider === "cursor");
+    assert.ok(cursorSession);
+    const cursorRepository = await analyzeRepositorySessions({
+      claudeRoot: fixture.claudeRoot,
+      codexArchiveRoot: fixture.codexArchiveRoot,
+      codexRoot: fixture.codexRoot,
+      cursorDatabasePath: fixture.cursorDatabasePath,
+      databasePath: join(temporaryDirectory, "missing-conductor.db"),
+      repositoryId: cursorSession.repositoryId,
+    });
+    assert.ok(cursorRepository.summary.sessions >= 1);
+    assert.equal(cursorRepository.sessions.every(({ provider }) => provider === "cursor"), true);
   } finally {
     await rm(temporaryDirectory, { force: true, recursive: true });
   }

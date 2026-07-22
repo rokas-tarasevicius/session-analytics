@@ -36,20 +36,20 @@ for (let index = 2; index < process.argv.length; index += 1) {
 }
 
 if (process.argv.includes("--help")) {
-  process.stdout.write(`Conductor Session Analytics 0.2.1
+  process.stdout.write(`Machine Session Analytics 0.3.1
 
 Usage: node scripts/cli.ts [options]
 
-By default, unions all local Codex, Claude, Cursor, and Conductor session evidence and includes hidden Conductor records.
+By default, unions all local Codex, Claude, and Cursor session evidence across the machine. Conductor metadata is optional enrichment and hidden metadata records are included.
 
 Options:
   --json                 Print the content-free snapshot as JSON
-  --exclude-hidden       Exclude hidden Conductor repositories and sessions
-  --repo-id ID           Narrow to one Conductor repository ID
+  --exclude-hidden       Exclude hidden optional repository/session metadata
+  --repo-id ID           Narrow to one stable repository ID
   --repo-name NAME       Narrow to one uniquely named repository
-  --repo-root PATH       Narrow by canonical Conductor repository root
+  --repo-root PATH       Narrow by canonical repository root
   --repo-remote URL      Narrow by canonical Git remote
-  --database PATH        Override the Conductor SQLite database
+  --database PATH        Override the optional Conductor metadata database
   --codex-root PATH      Override the Codex transcript root
   --codex-archive-root PATH Override the archived Codex transcript root
   --claude-root PATH     Override the Claude transcript root
@@ -61,7 +61,7 @@ Options:
   process.exit(0);
 }
 if (process.argv.includes("--version")) {
-  process.stdout.write("0.2.1\n");
+  process.stdout.write("0.3.1\n");
   process.exit(0);
 }
 
@@ -105,7 +105,7 @@ const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
 if (process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);
 } else {
-  process.stdout.write("Conductor session analytics · all local repositories\n");
+  process.stdout.write("Machine session analytics · all locally evidenced repositories\n");
   process.stdout.write(`Generated: ${analytics.generatedAt}\n`);
   process.stdout.write(
     `Repositories: ${analytics.summary.repositoriesWithSessions}/${analytics.summary.repositories} with sessions\n`,

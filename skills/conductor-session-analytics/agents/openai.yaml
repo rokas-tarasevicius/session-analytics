@@ -1,4 +1,0 @@
-interface:
-  display_name: "Conductor Session Analytics"
-  short_description: "Compare private session metrics across local repositories."
-  default_prompt: "Use $conductor-session-analytics to scan every visible local Conductor repository, calculate content-free usage and API-equivalent spend metrics, and launch the read-only localhost dashboard."

@@ -85,6 +85,13 @@ interface TokenEvent {
   inputForRequest: number;
 }
 
+interface CodexCounterOwner {
+  activityDeltaMilliseconds: number;
+  modelFallback: string | null;
+  path: string;
+  timestamp: string;
+}
+
 interface TranscriptCandidate {
   cwd: string;
   id: string;
@@ -125,6 +132,10 @@ function asRecord(value: unknown): JsonRecord | null {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function nonNegativeNumberValue(value: unknown): number {
+  return Math.max(0, numberValue(value));
 }
 
 function stringValue(value: unknown): string | null {
@@ -420,10 +431,10 @@ async function selectTranscript(
 }
 
 function codexUsage(raw: JsonRecord | null): TokenUsage {
-  const inputTokens = numberValue(raw?.["input_tokens"]);
-  const cachedInputTokens = numberValue(raw?.["cached_input_tokens"]);
-  const outputTokens = numberValue(raw?.["output_tokens"]);
-  const reasoningOutputTokens = numberValue(raw?.["reasoning_output_tokens"]);
+  const inputTokens = nonNegativeNumberValue(raw?.["input_tokens"]);
+  const cachedInputTokens = nonNegativeNumberValue(raw?.["cached_input_tokens"]);
+  const outputTokens = nonNegativeNumberValue(raw?.["output_tokens"]);
+  const reasoningOutputTokens = nonNegativeNumberValue(raw?.["reasoning_output_tokens"]);
   return {
     ...zeroTokens(),
     cachedInputTokens,
@@ -441,14 +452,14 @@ function codexCounterFingerprint(
 ): string | null {
   if (!total || !last) return null;
   return [
-    numberValue(total["input_tokens"]),
-    numberValue(total["cached_input_tokens"]),
-    numberValue(total["output_tokens"]),
-    numberValue(total["reasoning_output_tokens"]),
-    numberValue(last["input_tokens"]),
-    numberValue(last["cached_input_tokens"]),
-    numberValue(last["output_tokens"]),
-    numberValue(last["reasoning_output_tokens"]),
+    nonNegativeNumberValue(total["input_tokens"]),
+    nonNegativeNumberValue(total["cached_input_tokens"]),
+    nonNegativeNumberValue(total["output_tokens"]),
+    nonNegativeNumberValue(total["reasoning_output_tokens"]),
+    nonNegativeNumberValue(last["input_tokens"]),
+    nonNegativeNumberValue(last["cached_input_tokens"]),
+    nonNegativeNumberValue(last["output_tokens"]),
+    nonNegativeNumberValue(last["reasoning_output_tokens"]),
   ].join(":");
 }
 
@@ -497,25 +508,66 @@ function nestedToolNames(input: unknown): string[] {
   return names;
 }
 
-async function buildCodexCounterLedger(paths: string[]): Promise<Map<string, string>> {
-  const earliestTimestamp = new Map<string, string>();
+function codexCounterOwnerPrecedes(
+  candidate: CodexCounterOwner,
+  current: CodexCounterOwner | undefined,
+): boolean {
+  if (!current) return true;
+  if (candidate.activityDeltaMilliseconds !== current.activityDeltaMilliseconds) {
+    return candidate.activityDeltaMilliseconds < current.activityDeltaMilliseconds;
+  }
+  if (candidate.timestamp !== current.timestamp) return candidate.timestamp < current.timestamp;
+  return candidate.path < current.path;
+}
+
+async function buildCodexCounterLedger(paths: string[]): Promise<Map<string, CodexCounterOwner>> {
+  const owners = new Map<string, CodexCounterOwner>();
+  const modelsByPath = new Map<string, Set<string>>();
   for (const path of paths) {
+    let lastLocalActivityTimestamp: string | null = null;
+    const models = new Set<string>();
+    modelsByPath.set(path, models);
     await visitJsonLines(path, (record) => {
-      if (record["type"] !== "event_msg") return;
       const payload = asRecord(record["payload"]);
-      if (payload?.["type"] !== "token_count") return;
+      const timestamp = stringValue(record["timestamp"]);
+      if (record["type"] === "turn_context") {
+        const model = stringValue(payload?.["model"]);
+        if (model) models.add(model);
+      }
+      const tokenEvent = record["type"] === "event_msg" && payload?.["type"] === "token_count";
+      if (!tokenEvent) {
+        if (record["type"] !== "session_meta" && record["type"] !== "turn_context" && timestamp) {
+          lastLocalActivityTimestamp = timestamp;
+        }
+        return;
+      }
       const info = asRecord(payload["info"]);
       const fingerprint = codexCounterFingerprint(
         asRecord(info?.["total_token_usage"]),
         asRecord(info?.["last_token_usage"]),
       );
-      const timestamp = stringValue(record["timestamp"]);
       if (!fingerprint || !timestamp) return;
-      const prior = earliestTimestamp.get(fingerprint);
-      if (!prior || timestamp < prior) earliestTimestamp.set(fingerprint, timestamp);
+      const eventTime = Date.parse(timestamp);
+      const activityTime = Date.parse(lastLocalActivityTimestamp ?? "");
+      const candidate: CodexCounterOwner = {
+        activityDeltaMilliseconds:
+          Number.isFinite(eventTime) && Number.isFinite(activityTime) && eventTime >= activityTime
+            ? eventTime - activityTime
+            : Number.POSITIVE_INFINITY,
+        modelFallback: null,
+        path,
+        timestamp,
+      };
+      if (codexCounterOwnerPrecedes(candidate, owners.get(fingerprint))) {
+        owners.set(fingerprint, candidate);
+      }
     });
   }
-  return earliestTimestamp;
+  for (const owner of owners.values()) {
+    const models = modelsByPath.get(owner.path);
+    owner.modelFallback = models?.size === 1 ? [...models][0] ?? null : null;
+  }
+  return owners;
 }
 
 async function analyzeCodex(
@@ -523,7 +575,7 @@ async function analyzeCodex(
   path: string,
   rateCard: RateCard,
   inheritedWarnings: string[],
-  counterLedger: Map<string, string> | null = null,
+  counterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCounters: Set<string> = new Set<string>(),
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
@@ -568,11 +620,11 @@ async function analyzeCodex(
         const total = asRecord(info?.["total_token_usage"]);
         if (total) {
           const last = asRecord(info?.["last_token_usage"]);
-          const inputForRequest = numberValue(last?.["input_tokens"]);
+          const inputForRequest = nonNegativeNumberValue(last?.["input_tokens"]);
           state.maxInputTokensPerCall = Math.max(state.maxInputTokensPerCall, inputForRequest);
           state.maxContextWindow = Math.max(
             state.maxContextWindow,
-            numberValue(info?.["model_context_window"]),
+            nonNegativeNumberValue(info?.["model_context_window"]),
           );
           tokenEvents.push({
             executionKind: state.executionKind,
@@ -618,10 +670,10 @@ async function analyzeCodex(
     const fallbackDelta = reset ? event.total : tokenDelta(event.total, previous);
     previous = event.total;
     let observed = fallbackDelta;
+    const owner = event.fingerprint ? counterLedger?.get(event.fingerprint) : undefined;
     if (event.last && tokenCount(event.last) > 0 && event.fingerprint) {
-      const ownerTimestamp = counterLedger?.get(event.fingerprint);
       if (
-        (ownerTimestamp && ownerTimestamp !== event.timestamp) ||
+        (owner && (owner.path !== path || owner.timestamp !== event.timestamp)) ||
         claimedCounters.has(event.fingerprint)
       ) {
         sharedSnapshots += 1;
@@ -634,10 +686,13 @@ async function analyzeCodex(
     }
     sumTokens(finalTokens, observed);
     if (tokenCount(observed) > 0) {
+      const model = event.model === "<unknown>"
+        ? owner?.modelFallback ?? event.model
+        : event.model;
       addModelUsage(
         state,
         rateCard,
-        event.model,
+        model,
         observed,
         event.inputForRequest,
         event.timestamp,
@@ -669,13 +724,13 @@ async function analyzeCodex(
 }
 
 function claudeUsage(raw: JsonRecord): TokenUsage {
-  const input = numberValue(raw["input_tokens"]);
-  const cacheRead = numberValue(raw["cache_read_input_tokens"]);
-  const cacheWrite = numberValue(raw["cache_creation_input_tokens"]);
-  const output = numberValue(raw["output_tokens"]);
+  const input = nonNegativeNumberValue(raw["input_tokens"]);
+  const cacheRead = nonNegativeNumberValue(raw["cache_read_input_tokens"]);
+  const cacheWrite = nonNegativeNumberValue(raw["cache_creation_input_tokens"]);
+  const output = nonNegativeNumberValue(raw["output_tokens"]);
   const cacheCreation = asRecord(raw["cache_creation"]);
-  let cacheWrite5m = numberValue(cacheCreation?.["ephemeral_5m_input_tokens"]);
-  const cacheWrite1h = numberValue(cacheCreation?.["ephemeral_1h_input_tokens"]);
+  let cacheWrite5m = nonNegativeNumberValue(cacheCreation?.["ephemeral_5m_input_tokens"]);
+  const cacheWrite1h = nonNegativeNumberValue(cacheCreation?.["ephemeral_1h_input_tokens"]);
   if (cacheWrite > 0 && cacheWrite5m + cacheWrite1h === 0) cacheWrite5m = cacheWrite;
   return {
     cacheWrite1hInputTokens: cacheWrite1h,
@@ -729,6 +784,8 @@ async function analyzeClaude(
   const totals = zeroTokens();
 
   for (const path of paths) {
+    const executionKind = path === mainPath ? "top-level" : "subagent";
+    state.executionKindsSeen.add(executionKind);
     await visitJsonLines(path, (record, line) => {
       if (record["__parse_error"] === true) {
         parseErrors += 1;
@@ -765,6 +822,7 @@ async function analyzeClaude(
                 usage.inputTokens,
                 timestamp,
                 row.updated_at,
+                executionKind,
               );
             }
           }
@@ -1115,7 +1173,7 @@ async function analyzeTranscriptCandidate(
   repository: RepositoryRow,
   rateCard: RateCard,
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
-  codexCounterLedger: Map<string, string> | null = null,
+  codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
 ): Promise<SessionAnalytics> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
@@ -1159,7 +1217,11 @@ function cursorPaths(data: JsonRecord): string[] {
 }
 
 function millisecondTimestamp(value: unknown): string | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < Date.parse("2000-01-01T00:00:00Z")
+  ) return null;
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? null : date.toISOString();
 }
@@ -1243,7 +1305,7 @@ function analyzeCursorComposer(
     trackTimestamp(state, millisecondTimestamp(timing?.["clientStartTime"]));
     trackTimestamp(state, millisecondTimestamp(timing?.["clientEndTime"]));
     const tokenCountRecord = asRecord(bubble["tokenCount"]);
-    const input = numberValue(tokenCountRecord?.["inputTokens"]), output = numberValue(tokenCountRecord?.["outputTokens"]);
+    const input = nonNegativeNumberValue(tokenCountRecord?.["inputTokens"]), output = nonNegativeNumberValue(tokenCountRecord?.["outputTokens"]);
     if (input + output > 0) {
       tokens.inputTokens += input; tokens.uncachedInputTokens += input;
       tokens.outputTokens += output; tokens.nonReasoningOutputTokens += output;
@@ -1512,8 +1574,8 @@ function chooseRepository(
   if (repositoryName) {
     const matches = repositories.filter(({ name }) => name === repositoryName);
     if (matches.length === 1 && matches[0]) return matches[0];
-    if (matches.length > 1) throw new Error(`Several Conductor repositories are named ${repositoryName}.`);
-    throw new Error(`Conductor does not contain a repository named ${repositoryName}.`);
+    if (matches.length > 1) throw new Error(`Several repositories are named ${repositoryName}.`);
+    throw new Error(`No evidenced repository is named ${repositoryName}.`);
   }
   const normalized = normalizeRemote(repositoryRemote);
   const matches = repositories.filter(
@@ -1521,9 +1583,39 @@ function chooseRepository(
   );
   if (matches.length === 1 && matches[0]) return matches[0];
   if (matches.length === 0) {
-    throw new Error("The current Git remote does not match a repository in Conductor.");
+    throw new Error("The requested Git remote does not match an evidenced repository.");
   }
-  throw new Error("The current Git remote matches more than one Conductor repository.");
+  throw new Error("The requested Git remote matches more than one evidenced repository.");
+}
+
+function selectRepositories(
+  repositories: RepositoryRow[],
+  options: AnalyzeOptions,
+): RepositoryRow[] {
+  if (options.repositoryId) {
+    const repository = repositories.find(({ id }) => id === options.repositoryId);
+    if (!repository) throw new Error("No evidenced repository has the requested ID.");
+    return [repository];
+  }
+  if (options.repositoryName) {
+    return [chooseRepository(repositories, options.repositoryName, options.repositoryRemote ?? "")];
+  }
+  if (options.repositoryRemote) {
+    return [chooseRepository(repositories, undefined, options.repositoryRemote)];
+  }
+  if (options.repositoryRoot) {
+    const canonicalRoot = resolve(options.repositoryRoot);
+    const matches = repositories.filter(({ root_path }) => resolve(root_path) === canonicalRoot);
+    if (matches.length !== 1 || !matches[0]) {
+      throw new Error(
+        matches.length === 0
+          ? "No evidenced repository has the requested root."
+          : "The requested root matches more than one evidenced repository.",
+      );
+    }
+    return [matches[0]];
+  }
+  return repositories;
 }
 
 function mergeModelUsage(target: Map<string, ModelUsage>, source: ModelUsage): void {
@@ -1648,52 +1740,34 @@ async function analyzeSelectedRepositories(
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
-  const database = new DatabaseSync(databasePath, { readOnly: true });
+  let database: DatabaseSync | null = null;
+  try {
+    await stat(databasePath);
+    database = new DatabaseSync(databasePath, { readOnly: true });
+  } catch (error) {
+    const code = asRecord(error)?.["code"];
+    if (code !== "ENOENT") {
+      throw new Error("The optional repository metadata database is unavailable.");
+    }
+  }
   try {
     const explicitRepositoryFilter = Boolean(
       options.repositoryId || options.repositoryName || options.repositoryRemote || options.repositoryRoot,
     );
     const includeHidden = options.includeHidden ?? !explicitRepositoryFilter;
     const availableRepositories = database
-      .prepare(
-        `SELECT id, name, root_path, remote_url, default_branch
-         FROM repos
-         WHERE (? = 1 OR hidden = 0)
-         ORDER BY lower(name), id`,
-      )
-      .all(includeHidden ? 1 : 0) as unknown as RepositoryRow[];
-    let selectedRepositories = availableRepositories;
-    if (options.repositoryId) {
-      const repository = availableRepositories.find(({ id }) => id === options.repositoryId);
-      if (!repository) throw new Error("Conductor does not contain the requested repository ID.");
-      selectedRepositories = [repository];
-    } else if (options.repositoryName) {
-      selectedRepositories = [
-        chooseRepository(availableRepositories, options.repositoryName, options.repositoryRemote ?? ""),
-      ];
-    } else if (options.repositoryRemote) {
-      selectedRepositories = [
-        chooseRepository(availableRepositories, undefined, options.repositoryRemote),
-      ];
-    } else if (options.repositoryRoot) {
-      const canonicalRoot = resolve(options.repositoryRoot);
-      const matches = availableRepositories.filter(
-        ({ root_path }) => resolve(root_path) === canonicalRoot,
-      );
-      if (matches.length !== 1 || !matches[0]) {
-        throw new Error(
-          matches.length === 0
-            ? "Conductor does not contain the requested repository root."
-            : "The requested repository root matches more than one Conductor repository.",
-        );
-      }
-      selectedRepositories = [matches[0]];
-    }
-    const rows = sessionRows(
-      database,
-      selectedRepositories.map(({ id }) => id),
-      includeHidden,
-    );
+      ? database
+          .prepare(
+            `SELECT id, name, root_path, remote_url, default_branch
+             FROM repos
+             WHERE (? = 1 OR hidden = 0)
+             ORDER BY lower(name), id`,
+          )
+          .all(includeHidden ? 1 : 0) as unknown as RepositoryRow[]
+      : [];
+    const rows = database
+      ? sessionRows(database, availableRepositories.map(({ id }) => id), includeHidden)
+      : [];
     const repositoryById = new Map(availableRepositories.map((repository) => [repository.id, repository]));
     const workspaceRepositories = new Map<string, RepositoryRow>();
     for (const row of rows) {
@@ -1792,7 +1866,6 @@ async function analyzeSelectedRepositories(
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      if (explicitRepositoryFilter && !selectedRepositories.some(({ id }) => id === repository.id)) return null;
       try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters); } catch { return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
@@ -1812,24 +1885,27 @@ async function analyzeSelectedRepositories(
     } catch {
       throw new Error("Cursor analysis returned an invalid result.");
     }
-    const cursorSelected = explicitRepositoryFilter
-      ? cursorResult.sessions.filter((session) => selectedRepositories.some(({ id }) => id === session.repositoryId))
-      : cursorResult.sessions;
-    const sessions = [
+    const allRepositories = [...availableRepositories, ...discovered.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    const selectedRepositories = selectRepositories(allRepositories, options);
+    const selectedIds = new Set(selectedRepositories.map(({ id }) => id));
+    const allSessions = [
       ...analyzedRows.filter((session): session is SessionAnalytics => session !== null),
       ...recovered.filter((session): session is SessionAnalytics => session !== null),
       ...discoveredSessions.filter((session): session is SessionAnalytics => session !== null),
-      ...cursorSelected,
+      ...cursorResult.sessions,
     ];
+    const sessions = explicitRepositoryFilter
+      ? allSessions.filter(({ repositoryId }) => selectedIds.has(repositoryId))
+      : allSessions;
     const sessionsByRepository = new Map<string, SessionAnalytics[]>();
     for (const session of sessions) {
       const repositorySessions = sessionsByRepository.get(session.repositoryId) ?? [];
       repositorySessions.push(session);
       sessionsByRepository.set(session.repositoryId, repositorySessions);
     }
-    const repositoriesForOutput = explicitRepositoryFilter
-      ? selectedRepositories
-      : [...selectedRepositories, ...discovered.values()].sort((left, right) => left.name.localeCompare(right.name));
+    const repositoriesForOutput = selectedRepositories;
     return {
       rateCard,
       repositories: repositoriesForOutput.map((repository) => {
@@ -1844,7 +1920,7 @@ async function analyzeSelectedRepositories(
       }),
     };
   } finally {
-    database.close();
+    database?.close();
   }
 }
 
@@ -1898,7 +1974,7 @@ function aggregateMachine(
   };
 }
 
-/** Analyze every non-hidden Conductor repository unless an explicit repository filter is supplied. */
+/** Analyze every locally evidenced repository unless an explicit repository filter is supplied. */
 export async function analyzeMachineSessions(
   options: AnalyzeOptions = {},
 ): Promise<MachineAnalytics> {
@@ -1922,6 +1998,6 @@ export async function analyzeRepositorySessions(
   }
   const result = await analyzeSelectedRepositories(options);
   const repository = result.repositories[0];
-  if (!repository) throw new Error("No Conductor repository matched the requested filter.");
+  if (!repository) throw new Error("No evidenced repository matched the requested filter.");
   return repository;
 }

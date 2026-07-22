@@ -77,6 +77,15 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
       bubbleId: "bubble-one",
       tokenCount: { inputTokens: 300, outputTokens: 50 },
       toolFormerData: { name: "search_code", toolCallId: "cursor-tool-one" },
+      timingInfo: { clientStartTime: 123, clientEndTime: 456 },
+      type: 2,
+    }),
+  );
+  cursorDatabase.prepare("INSERT INTO cursorDiskKV (key,value) VALUES (?,?)").run(
+    "bubbleId:cursor-metadata-only:bubble-invalid-negative",
+    JSON.stringify({
+      bubbleId: "bubble-invalid-negative",
+      tokenCount: { inputTokens: -999, outputTokens: -999 },
       type: 2,
     }),
   );
@@ -289,11 +298,6 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
       type: "session_meta",
     },
     {
-      payload: { model: "gpt-5.6-sol" },
-      timestamp: "2026-07-18T10:01:01Z",
-      type: "turn_context",
-    },
-    {
       payload: {
         info: {
           last_token_usage: { cached_input_tokens: 80, input_tokens: 100, output_tokens: 10 },
@@ -305,9 +309,18 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
       type: "event_msg",
     },
     {
+      // Older evidence can emit its first usage state before the sole model
+      // context. A unique file-level model remains safe to recover.
+      payload: { model: "gpt-5.6-sol" },
+      timestamp: "2026-07-18T10:02:01Z",
+      type: "turn_context",
+    },
+    {
       // Codex broadcasts process-wide cumulative snapshots into more than one
       // session file. This is the same request already recorded by the main
-      // fixture session and must not be priced a second time here.
+      // fixture session and must not be priced a second time here. The stale
+      // receiver timestamp is deliberately earlier so ownership must use the
+      // main file's much closer response activity, not observation order.
       payload: {
         info: {
           last_token_usage: {
@@ -325,7 +338,7 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
         },
         type: "token_count",
       },
-      timestamp: "2026-07-21T10:03:00Z",
+      timestamp: "2026-07-20T10:02:59Z",
       type: "event_msg",
     },
   ];
