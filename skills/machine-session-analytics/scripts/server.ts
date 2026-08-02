@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
+import { version } from "./version.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
@@ -45,7 +46,7 @@ for (let index = 2; index < process.argv.length; index += 1) {
   }
 }
 if (process.argv.includes("--help")) {
-  process.stdout.write(`Machine Session Analytics server 0.3.1
+  process.stdout.write(`Machine Session Analytics server ${version}
 
 Usage: node scripts/server.ts [--open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
@@ -55,7 +56,7 @@ If a compatible dashboard already uses the port, the command reuses it.
   process.exit(0);
 }
 if (process.argv.includes("--version")) {
-  process.stdout.write("0.3.1\n");
+  process.stdout.write(`${version}\n`);
   process.exit(0);
 }
 

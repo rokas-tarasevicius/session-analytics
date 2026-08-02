@@ -18,7 +18,10 @@ const claudeWorkspace = "/fixtures/workspaces/conductor/claude-workspace";
 const codexSessionId = "11111111-1111-4111-8111-111111111111";
 const claudeSessionId = "22222222-2222-4222-8222-222222222222";
 
-export async function createSessionAnalyticsFixture(root: string): Promise<SessionAnalyticsFixture> {
+export async function createSessionAnalyticsFixture(
+  root: string,
+  claudeModel = "claude-opus-5",
+): Promise<SessionAnalyticsFixture> {
   const databasePath = join(root, "conductor.db");
   const cursorDatabasePath = join(root, "cursor.db");
   const codexRoot = join(root, "codex");
@@ -183,7 +186,7 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
       "2026-07-20T12:00:00Z",
       "2026-07-20T13:00:00Z",
       claudeSessionId,
-      "claude-opus-4-8",
+      claudeModel,
       "workspace-claude",
     );
   database.close();
@@ -372,7 +375,7 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
           },
         ],
         id: "message-one",
-        model: "claude-opus-4-8",
+        model: claudeModel,
         role: "assistant",
         usage: {
           cache_creation: {
@@ -402,7 +405,7 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
           },
         ],
         id: "message-one",
-        model: "claude-opus-4-8",
+        model: claudeModel,
         role: "assistant",
         usage: {
           cache_creation: {
@@ -439,7 +442,7 @@ export async function createSessionAnalyticsFixture(root: string): Promise<Sessi
     message: {
       content: [{ id: "tool-two", input: { path: "secret-path" }, name: "Read", type: "tool_use" }],
       id: "message-two",
-      model: "claude-opus-4-8",
+      model: claudeModel,
       role: "assistant",
       usage: {
         cache_creation_input_tokens: 0,

@@ -16,7 +16,15 @@ const rateCard = JSON.parse(
   readFileSync(resolve(skillRoot, "references/rate-cards.json"), "utf8"),
 ) as {
   effectiveDate?: string;
-  models?: Record<string, { source?: string }>;
+  models?: Record<string, {
+    cacheReadPerMillion?: number;
+    cacheWrite1hPerMillion?: number;
+    cacheWrite5mPerMillion?: number;
+    inputPerMillion?: number;
+    outputPerMillion?: number;
+    provider?: string;
+    source?: string;
+  }>;
 };
 const manifest = JSON.parse(
   readFileSync(resolve(here, "../skillpack.json"), "utf8"),
@@ -67,6 +75,16 @@ test("preserves model-specific accounting and estimate caveats", () => {
   for (const model of Object.values(rateCard.models ?? {})) {
     assert.match(model.source ?? "", /^https:\/\//);
   }
+  assert.deepEqual(rateCard.models?.["claude-opus-5"], {
+    provider: "claude",
+    inputPerMillion: 5,
+    cacheReadPerMillion: 0.5,
+    cacheWrite5mPerMillion: 6.25,
+    cacheWrite1hPerMillion: 10,
+    outputPerMillion: 25,
+    source: "https://platform.claude.com/docs/en/about-claude/pricing",
+  });
+  assert.match(metrics, /Claude Opus 5 entry uses Anthropic's standard global API rates/);
 });
 
 test("routes causal claims to a separate bounded forensic workflow", () => {

@@ -1,5 +1,6 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import type { AnalyzeOptions } from "./types.ts";
+import { version } from "./version.ts";
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -36,7 +37,7 @@ for (let index = 2; index < process.argv.length; index += 1) {
 }
 
 if (process.argv.includes("--help")) {
-  process.stdout.write(`Machine Session Analytics 0.3.1
+  process.stdout.write(`Machine Session Analytics ${version}
 
 Usage: node scripts/cli.ts [options]
 
@@ -61,7 +62,7 @@ Options:
   process.exit(0);
 }
 if (process.argv.includes("--version")) {
-  process.stdout.write("0.3.1\n");
+  process.stdout.write(`${version}\n`);
   process.exit(0);
 }
 

@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "effectiveDate": "2026-07-22",
+  "effectiveDate": "2026-08-02",
   "models": {
     "gpt-5.5": {
       "provider": "codex",
@@ -84,6 +84,15 @@
         "thresholdInputTokens": 272000
       },
       "source": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+    },
+    "claude-opus-5": {
+      "provider": "claude",
+      "inputPerMillion": 5,
+      "cacheReadPerMillion": 0.5,
+      "cacheWrite5mPerMillion": 6.25,
+      "cacheWrite1hPerMillion": 10,
+      "outputPerMillion": 25,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
     },
     "claude-opus-4-8": {
       "provider": "claude",

@@ -2,6 +2,16 @@
 
 All notable changes to this package are documented here.
 
+## [0.3.2] - 2026-08-02
+
+### Added
+
+- Price Claude Opus 5 usage at Anthropic's standard global API rates, including separate cache-read, five-minute cache-write, one-hour cache-write, input, and output categories.
+
+### Changed
+
+- Document that fast-mode, US-only inference, batch, and partner-platform pricing modifiers remain excluded when local session evidence does not identify them.
+
 ## [0.3.1] - 2026-07-22
 
 ### Changed
