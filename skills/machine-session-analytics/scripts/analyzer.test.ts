@@ -43,8 +43,8 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
       reasoningOutputTokens: 50,
       uncachedInputTokens: 300,
     });
-    assert.equal(codex.cost.totalUsd, 0.0066);
-    assert.equal(codex.cost.upperEstimateUsd, 0.006975);
+    assert.equal(codex.cost.totalUsd, 0.00468);
+    assert.equal(Number(codex.cost.upperEstimateUsd.toFixed(8)), 0.00498);
     assert.deepEqual(codex.tools, { apply_patch: 1, exec_command: 1 });
     assert.equal(codex.metrics.taskCompletions, 1);
     assert.equal(codex.metrics.compactions, 1);

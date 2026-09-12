@@ -101,6 +101,8 @@ These require Git, GitHub, CI, deployment, provider billing, or explicit human e
 
 The Claude Opus 5 entry uses Anthropic's standard global API rates. The analyzer does not apply fast-mode, US-only inference, batch, or partner-platform modifiers because local Claude history does not establish those billing dimensions.
 
+The Claude Fable 5.1 entry prices cache hits at 0.025x base input, the published exception to Anthropic's standard 0.1x cache-read multiplier; its base input, cache-write, and output rates match Claude Fable 5.
+
 Cursor local composer history exposes modern `bubbleId` token counters and stable `toolFormerData` tool-call IDs. `usageData.costInCents` is a provider-reported local usage value and may be aggregated by session, repository, and model. Bubble token counters are session-level because the local bubble schema does not retain a model identifier that can be joined safely to provider-reported model cost. It is not assigned to a day because the local store does not retain per-call cost timestamps. Relative timing values are not Unix timestamps and must not affect session spans. Cursor API rate coverage remains not applicable.
 
 The `gpt-5.3-codex-spark` entry uses zero rates because the provider documents the model as a research preview available through a subscription workflow rather than a separately metered API model. Zero here means “no observable API-equivalent charge,” not a claim that the subscription is free.

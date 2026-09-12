@@ -2,6 +2,20 @@
 
 All notable changes to this package are documented here.
 
+## [0.3.3] - 2026-09-12
+
+### Added
+
+- Add reviewed rate-card entries for `gpt-6-astra` (including its 272K long-context modifiers) and `claude-fable-5-1`, so sessions on those models are priced instead of counted as unpriced.
+
+### Fixed
+
+- Correct the `gpt-5.6-sol` and `gpt-5.6-terra` rates to the published $4/$0.40/$20 and $2/$0.20/$12 per million tokens; both entries previously carried the `gpt-5.5` and `gpt-5.4` rates and overstated API-equivalent value.
+
+### Changed
+
+- Move the rate-card effective date to 2026-09-12 after reverifying every entry against its primary source, and document Claude Fable 5.1's 0.025x cache-read multiplier.
+
 ## [0.3.2] - 2026-08-02
 
 ### Added

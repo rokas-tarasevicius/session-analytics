@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "effectiveDate": "2026-08-02",
+  "effectiveDate": "2026-09-12",
   "models": {
     "gpt-5.5": {
       "provider": "codex",
@@ -57,11 +57,25 @@
       "cacheWriteObservable": false,
       "source": "https://developers.openai.com/api/docs/models/gpt-5.3-codex-spark"
     },
+    "gpt-6-astra": {
+      "provider": "codex",
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 1,
+      "outputPerMillion": 50,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra"
+    },
     "gpt-5.6-sol": {
       "provider": "codex",
-      "inputPerMillion": 5,
-      "cachedInputPerMillion": 0.5,
-      "outputPerMillion": 30,
+      "inputPerMillion": 4,
+      "cachedInputPerMillion": 0.4,
+      "outputPerMillion": 20,
       "cacheWriteMultiplier": 1.25,
       "cacheWriteObservable": false,
       "longContext": {
@@ -73,9 +87,9 @@
     },
     "gpt-5.6-terra": {
       "provider": "codex",
-      "inputPerMillion": 2.5,
-      "cachedInputPerMillion": 0.25,
-      "outputPerMillion": 15,
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 12,
       "cacheWriteMultiplier": 1.25,
       "cacheWriteObservable": false,
       "longContext": {
@@ -110,6 +124,15 @@
       "cacheWrite5mPerMillion": 6.25,
       "cacheWrite1hPerMillion": 10,
       "outputPerMillion": 25,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-fable-5-1": {
+      "provider": "claude",
+      "inputPerMillion": 10,
+      "cacheReadPerMillion": 0.25,
+      "cacheWrite5mPerMillion": 12.5,
+      "cacheWrite1hPerMillion": 20,
+      "outputPerMillion": 50,
       "source": "https://platform.claude.com/docs/en/about-claude/pricing"
     },
     "claude-fable-5": {

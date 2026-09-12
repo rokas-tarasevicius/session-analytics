@@ -1,6 +1,6 @@
 ---
 name: machine-session-analytics
-version: 0.3.2
+version: 0.3.3
 description: Launch a privacy-safe localhost dashboard for machine-wide Codex, Claude, and Cursor session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, tools, models, execution shape, pricing coverage, or API-equivalent usage across repositories.
 mutating: false
 brain_first: false
