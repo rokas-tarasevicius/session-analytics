@@ -661,15 +661,26 @@ async function analyzeCodex(
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
   const finalTokens = zeroTokens();
   let previous = zeroTokens();
+  let baselined = false;
   let counterResets = 0;
   let sharedSnapshots = 0;
   let missingLastUsage = 0;
+  let unattributableBaselines = 0;
   for (const event of tokenEvents) {
     const reset = !monotonic(event.total, previous);
     if (reset) counterResets += 1;
-    const fallbackDelta = reset ? event.total : tokenDelta(event.total, previous);
+    // A Codex cumulative counter is process-wide, so the first snapshot a file
+    // observes - and the first after the counter moves backwards - already
+    // contains requests this session never issued. Only the delta between two
+    // snapshots this file actually observed is attributable to it; charging a
+    // whole counter to one event bills an entire process history to a single
+    // session and a single calendar day.
+    const attributableDelta = baselined && !reset
+      ? tokenDelta(event.total, previous)
+      : zeroTokens();
     previous = event.total;
-    let observed = fallbackDelta;
+    baselined = true;
+    let observed = attributableDelta;
     const owner = event.fingerprint ? counterLedger?.get(event.fingerprint) : undefined;
     if (event.last && tokenCount(event.last) > 0 && event.fingerprint) {
       if (
@@ -683,6 +694,9 @@ async function analyzeCodex(
       observed = event.last;
     } else {
       missingLastUsage += 1;
+      if (tokenCount(attributableDelta) === 0 && tokenCount(event.total) > 0) {
+        unattributableBaselines += 1;
+      }
     }
     sumTokens(finalTokens, observed);
     if (tokenCount(observed) > 0) {
@@ -703,7 +717,7 @@ async function analyzeCodex(
   }
   if (counterResets > 0) {
     state.warnings.push(
-      `${counterResets} cumulative token counter reset${counterResets === 1 ? " was" : "s were"} treated as a new observed segment.`,
+      `${counterResets} cumulative token counter reset${counterResets === 1 ? " was" : "s were"} re-baselined as a new observed segment.`,
     );
   }
   if (tokenEvents.length === 0) state.warnings.push("No cumulative Codex token counter was found.");
@@ -714,7 +728,12 @@ async function analyzeCodex(
   }
   if (missingLastUsage > 0) {
     state.warnings.push(
-      `${missingLastUsage} token event${missingLastUsage === 1 ? " lacks" : "s lack"} per-request usage and used a cumulative-counter fallback.`,
+      `${missingLastUsage} token event${missingLastUsage === 1 ? " lacks" : "s lack"} per-request usage; only deltas between snapshots this session observed were counted.`,
+    );
+  }
+  if (unattributableBaselines > 0) {
+    state.warnings.push(
+      `${unattributableBaselines} process-wide counter baseline${unattributableBaselines === 1 ? " was" : "s were"} excluded because the requests inside it were not observed by this session.`,
     );
   }
   state.warnings.push(

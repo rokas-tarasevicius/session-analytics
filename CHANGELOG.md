@@ -2,6 +2,17 @@
 
 All notable changes to this package are documented here.
 
+## [0.3.4] - 2026-09-13
+
+### Fixed
+
+- Stop charging an unobserved process-wide Codex counter baseline to one session and one calendar day. A Codex cumulative counter is shared by every session file its process owns, so a session that starts mid-run opens on a snapshot describing requests it never issued. When that opening snapshot carried no per-request `last_token_usage`, the whole counter was billed as a single request, inflating the spend of heavily parallel sub-agent workspaces by an order of magnitude and concentrating it on the day each sub-agent happened to start. Only deltas between two snapshots the same evidence file observed are now attributable, and a non-monotonic counter re-baselines instead of billing its full total.
+
+### Added
+
+- Warn per session when a process-wide counter baseline is excluded, and distinguish that case from token events that lacked per-request usage but still yielded an observed delta.
+- Regression coverage asserting that an unobserved 900M-token opening snapshot contributes neither session value nor daily spend.
+
 ## [0.3.3] - 2026-09-12
 
 ### Added

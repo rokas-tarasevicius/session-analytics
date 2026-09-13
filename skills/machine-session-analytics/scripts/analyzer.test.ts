@@ -287,3 +287,95 @@ test("discovers provider sessions when optional Conductor metadata is absent", a
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
 });
+
+test("never charges an unobserved process-wide counter baseline to a session or a day", async () => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "machine-session-counter-baseline-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    // Codex broadcasts one process-wide cumulative counter into every session
+    // file the process owns. A sub-agent spawned mid-run therefore sees a large
+    // opening snapshot describing requests it never issued, and Codex does not
+    // always attach per-request `last_token_usage` to it. Only the delta between
+    // two snapshots this file observed is attributable.
+    const sessionId = "44444444-4444-4444-8444-444444444444";
+    const records = [
+      {
+        payload: { cwd: fixture.repositoryRoot, id: sessionId },
+        timestamp: "2026-07-20T11:00:00Z",
+        type: "session_meta",
+      },
+      {
+        payload: { effort: "high", model: "gpt-5.6-sol" },
+        timestamp: "2026-07-20T11:00:01Z",
+        type: "turn_context",
+      },
+      {
+        payload: {
+          info: {
+            total_token_usage: {
+              cached_input_tokens: 890_000_000,
+              input_tokens: 900_000_000,
+              output_tokens: 5_000_000,
+              reasoning_output_tokens: 1_000_000,
+            },
+          },
+          type: "token_count",
+        },
+        timestamp: "2026-07-20T11:00:02Z",
+        type: "event_msg",
+      },
+      {
+        payload: {
+          info: {
+            total_token_usage: {
+              cached_input_tokens: 890_100_000,
+              input_tokens: 900_120_000,
+              output_tokens: 5_000_300,
+              reasoning_output_tokens: 1_000_100,
+            },
+          },
+          type: "token_count",
+        },
+        timestamp: "2026-07-20T11:00:03Z",
+        type: "event_msg",
+      },
+    ];
+    await writeFile(
+      join(fixture.codexRoot, "2026/07/20", `rollout-2026-07-20T11-00-00-${sessionId}.jsonl`),
+      `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    );
+
+    const result = await analyzeRepositorySessions({
+      claudeRoot: fixture.claudeRoot,
+      codexArchiveRoot: fixture.codexArchiveRoot,
+      codexRoot: fixture.codexRoot,
+      cursorDatabasePath: fixture.cursorDatabasePath,
+      databasePath: fixture.databasePath,
+      repositoryRemote: fixture.remote,
+      repositoryRoot: fixture.repositoryRoot,
+    });
+    const session = result.sessions.find(
+      ({ firstEventAt, provider }) =>
+        provider === "codex" && firstEventAt === "2026-07-20T11:00:00Z",
+    );
+    assert.ok(session);
+    assert.equal(session.tokens.inputTokens, 120_000);
+    assert.equal(session.tokens.cachedInputTokens, 100_000);
+    assert.equal(session.tokens.uncachedInputTokens, 20_000);
+    assert.equal(session.tokens.outputTokens, 300);
+    assert.equal(Number(session.cost.totalUsd.toFixed(6)), 0.126);
+    assert.equal(
+      session.transcript.warnings.some((warning) =>
+        warning.includes("process-wide counter baseline")
+      ),
+      true,
+    );
+    const day = result.spendByDay.find(({ name }) => name === "2026-07-20");
+    assert.ok(day);
+    // The 900M-token opening snapshot must not land on the calendar day the
+    // sub-agent happened to start on.
+    assert.ok(day.value < 1, `unexpected daily spend ${day.value}`);
+  } finally {
+    await rm(temporaryDirectory, { force: true, recursive: true });
+  }
+});
