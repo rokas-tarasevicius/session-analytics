@@ -13,6 +13,7 @@ The analyzer may read provider transcripts locally, but its returned data is res
 - physical token counters and context-window sizes;
 - event-class counts and timestamps;
 - tool names and stable call IDs, never arguments or results;
+- normalized skill identifiers derived from explicit Claude `Skill` events or canonical Codex `SKILL.md` reads, never skill arguments or paths;
 - transcript file count, validation status, and bounded parser warnings;
 - costs derived from the versioned rate card.
 
@@ -45,6 +46,7 @@ Codex input is request-context consumption, not unique transcript text: the same
 - task starts and completions when the provider emits them;
 - context compactions and summary boundaries;
 - effective tool calls by tool name;
+- skill invocations by normalized identifier, with evidence labeled explicit for Claude, inferred lower bound for Codex, and unavailable for Cursor;
 - transport/orchestrator tool calls before code-mode expansion;
 - Claude queue operations and delegated-agent identities;
 - session wall span and provider-event span;
@@ -53,6 +55,8 @@ Codex input is request-context consumption, not unique transcript text: the same
 Machine views also include repository count, repositories with selected sessions, working-snapshot count, explicit top-level/sub-agent execution value, and per-repository comparison dimensions. Usage-value comparisons must show transcript and pricing coverage beside totals.
 
 Tool names are useful for workload shape. Tool call counts do not prove useful work, failure, or causal responsibility.
+
+Skill names are a reviewed derived field rather than raw tool input. Accept only bounded canonical identifiers. Claude exposes an explicit `Skill` tool with the skill identifier in structured input. Codex does not expose a dedicated skill event, so count at most one invocation per tool call and skill identifier when a read-capable call references a canonical `<skill>/SKILL.md`; label these counts as an inferred lower bound. Do not infer skill usage from system instructions, user messages, arbitrary transcript text, directory enumeration, or an installed-skill inventory. Cursor skill coverage is not applicable until its local history exposes a stable invocation signal.
 
 ### Evidence health
 

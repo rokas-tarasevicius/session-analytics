@@ -1,6 +1,7 @@
 export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
+export type SkillEvidence = "explicit" | "inferred" | "unavailable";
 
 export interface LongContextRate {
   inputMultiplier: number;
@@ -102,6 +103,8 @@ export interface SessionAnalytics {
   repositoryId: string;
   repositoryName: string;
   sessionKey: string;
+  skillEvidence: SkillEvidence;
+  skills: Record<string, number>;
   spendByDay: Record<string, number>;
   status: string;
   tokens: TokenUsage;

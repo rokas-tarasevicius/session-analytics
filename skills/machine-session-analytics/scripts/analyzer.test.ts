@@ -46,6 +46,8 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.equal(codex.cost.totalUsd, 0.00468);
     assert.equal(Number(codex.cost.upperEstimateUsd.toFixed(8)), 0.00498);
     assert.deepEqual(codex.tools, { apply_patch: 1, exec_command: 1 });
+    assert.deepEqual(codex.skills, { "frontend-design": 1 });
+    assert.equal(codex.skillEvidence, "inferred");
     assert.equal(codex.metrics.taskCompletions, 1);
     assert.equal(codex.metrics.compactions, 1);
     assert.equal(codex.metrics.contextUtilizationPeak, 0.5);
@@ -82,7 +84,9 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
       claude.models.map(({ model, priced }) => ({ model, priced })),
       [{ model: "claude-opus-5", priced: true }],
     );
-    assert.deepEqual(claude.tools, { Bash: 1, Read: 1 });
+    assert.deepEqual(claude.tools, { Bash: 1, Read: 1, Skill: 1 });
+    assert.deepEqual(claude.skills, { review: 1 });
+    assert.equal(claude.skillEvidence, "explicit");
     assert.equal(claude.metrics.assistantMessages, 2);
     assert.equal(claude.metrics.userTurns, 1);
     assert.equal(claude.metrics.delegatedAgents, 1);
@@ -99,6 +103,8 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.equal(cursor.cost.totalUsd, 1.23);
     assert.equal(cursor.costBasis, "provider-reported");
     assert.deepEqual(cursor.tools, { edit_file: 1 });
+    assert.deepEqual(cursor.skills, {});
+    assert.equal(cursor.skillEvidence, "unavailable");
     const metadataOnlyCursor = result.sessions.find(({ models }) => models.some(({ model }) => model === "cursor-archived-model"));
     assert.ok(metadataOnlyCursor);
     assert.equal(metadataOnlyCursor.cost.totalUsd, 0.25);
@@ -109,7 +115,7 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.deepEqual(metadataOnlyCursor.tools, { search_code: 1 });
 
     const serialized = JSON.stringify(result);
-    assert.doesNotMatch(serialized, /secret-command|secret-path|content-is-not-returned/);
+    assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath|Codex fixture session|codex-fixture/);
     assert.doesNotMatch(serialized, /Codex fixture|Claude fixture|example\/conductor\.git/);
     assert.doesNotMatch(serialized, /11111111-1111-4111-8111-111111111111/);

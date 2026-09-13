@@ -114,6 +114,7 @@ interface MutableSession {
   maxInputTokensPerCall: number;
   models: Map<string, ModelUsage>;
   queueOperations: number;
+  skills: Record<string, number>;
   spendByDay: Record<string, number>;
   summaries: number;
   taskCompletions: number;
@@ -338,6 +339,7 @@ function createMutableSession(): MutableSession {
     maxInputTokensPerCall: 0,
     models: new Map<string, ModelUsage>(),
     queueOperations: 0,
+    skills: {},
     spendByDay: {},
     summaries: 0,
     taskCompletions: 0,
@@ -508,6 +510,23 @@ function nestedToolNames(input: unknown): string[] {
   return names;
 }
 
+function normalizedSkillName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(name) ? name : null;
+}
+
+function inferredSkillNames(input: unknown): string[] {
+  if (typeof input !== "string") return [];
+  const names = new Set<string>();
+  const pattern = /(?:^|[\\/'"`\s])([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/SKILL\.md\b/g;
+  for (const match of input.matchAll(pattern)) {
+    const name = normalizedSkillName(match[1]);
+    if (name) names.add(name);
+  }
+  return [...names];
+}
+
 function codexCounterOwnerPrecedes(
   candidate: CodexCounterOwner,
   current: CodexCounterOwner | undefined,
@@ -650,6 +669,13 @@ async function analyzeCodex(
       const transportName = stringValue(payload?.["name"]) ?? payloadType;
       increment(state.transportTools, transportName);
       const nested = payloadType === "custom_tool_call" ? nestedToolNames(payload?.["input"]) : [];
+      const canReadSkill =
+        ["Bash", "Read", "exec_command", "read_file"].includes(transportName) ||
+        nested.some((name) => ["exec_command", "read_file"].includes(name));
+      if (canReadSkill) {
+        const skillInput = payload?.["input"] ?? payload?.["arguments"];
+        for (const name of inferredSkillNames(skillInput)) increment(state.skills, name);
+      }
       if (nested.length === 0) {
         increment(state.tools, transportName);
       } else {
@@ -855,6 +881,10 @@ async function analyzeClaude(
           const name = stringValue(block["name"]) ?? "tool_use";
           increment(state.tools, name);
           increment(state.transportTools, name);
+          if (name === "Skill") {
+            const skill = normalizedSkillName(asRecord(block["input"])?.["skill"]);
+            if (skill) increment(state.skills, skill);
+          }
         }
       }
       if (type === "user" && message) {
@@ -948,6 +978,13 @@ function finalizeSession(
     repositoryId: row.repository_id,
     repositoryName: row.repository_name,
     sessionKey: createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12),
+    skillEvidence:
+      row.agent_type === "claude"
+        ? "explicit"
+        : row.agent_type === "codex"
+          ? "inferred"
+          : "unavailable",
+    skills: state.skills,
     spendByDay: state.spendByDay,
     status: row.status,
     tokens,

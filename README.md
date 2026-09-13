@@ -2,7 +2,7 @@
 
 A product-neutral GBrain v1 package for content-free analysis of every locally evidenced Codex, Claude, and Cursor session, grouped by repository across the machine. Conductor is an optional repository/workspace enrichment source, not the scope boundary.
 
-The package includes a dependency-free localhost dashboard, a human/JSON CLI, streaming Codex and Claude JSONL parsers, a read-only Cursor history reader, a versioned API rate card, machine and repository aggregations, privacy-safe public projections, routing fixtures, deterministic tests, and judge cases.
+The package includes a dependency-free localhost dashboard, a human/JSON CLI, streaming Codex and Claude JSONL parsers, a read-only Cursor history reader, a versioned API rate card, machine and repository aggregations, privacy-safe public projections, routing fixtures, deterministic tests, and judge cases. Focused dashboard views cover up to six repository distributions with heavy-tail-aware bins, seven-level green activity heatmaps with per-cell hover and keyboard values, cost components, provider-separated models, repository tool distribution, and provider-aware skill distribution. Light mode is the first-run default; an explicit saved theme remains respected.
 
 ## Requirements
 
@@ -27,6 +27,8 @@ The default scope unions active and archived Codex history, Claude Code and Clau
 Database-only historical stubs are not counted as sessions. A legacy Conductor row is recovered only when exactly one provider transcript matches its provider, working directory, and start time. Cursor history contributes modern bubble token/tool metrics and provider-reported local usage value where available; Cursor value is not plotted by day because the local store does not retain per-call cost timestamps.
 
 Dollar totals are priced usage values, not invoices. Codex and Claude use versioned API list-price equivalents; Cursor remains a separate provider-reported local value. Unknown-model tokens stay unpriced in the coverage denominator. Duplicated Codex process snapshots are owned by the file with the closest local response activity rather than whichever receiver happened to record the snapshot first. Codex execution transitions are segmented at each `session_meta`, and Claude usage from nested sub-agent evidence is accounted separately inside its composite session.
+
+Skill counts use explicit Claude `Skill` tool events and an inferred lower bound from Codex calls that read canonical `SKILL.md` files. Cursor has no reliable local skill signal. The public snapshot returns normalized skill identifiers and counts only, never tool arguments or file paths.
 
 ## Validate
 

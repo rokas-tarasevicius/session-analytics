@@ -62,6 +62,15 @@ test("enforces a content-free localhost-only interface", () => {
   assert.match(skill, /bind to a LAN address/);
   assert.match(skill, /Do not return transcript content/);
   assert.match(metrics, /must not return prompts, messages, reasoning/);
+  assert.match(metrics, /normalized skill identifiers/);
+  assert.match(metrics, /never skill arguments or paths/);
+});
+
+test("documents provider-aware skill evidence without overstating coverage", () => {
+  assert.match(skill, /explicit for Claude `Skill` tool events/);
+  assert.match(skill, /inferred lower bound for Codex/);
+  assert.match(skill, /unavailable for Cursor/);
+  assert.match(metrics, /Do not infer skill usage from system instructions/);
 });
 
 test("preserves model-specific accounting and estimate caveats", () => {

@@ -238,7 +238,7 @@ export async function createSessionAnalyticsFixture(
       payload: {
         call_id: "call-one",
         input:
-          'await tools.exec_command({cmd:"secret-command"}); await tools.apply_patch("secret patch");',
+          'await tools.exec_command({cmd:"secret-command /fixture-skills/frontend-design/SKILL.md"}); await tools.apply_patch("secret patch");',
         name: "exec",
         type: "custom_tool_call",
       },
@@ -373,6 +373,12 @@ export async function createSessionAnalyticsFixture(
             name: "Bash",
             type: "tool_use",
           },
+          {
+            id: "tool-skill",
+            input: { args: "secret-skill-args", skill: "review" },
+            name: "Skill",
+            type: "tool_use",
+          },
         ],
         id: "message-one",
         model: claudeModel,
@@ -401,6 +407,12 @@ export async function createSessionAnalyticsFixture(
             id: "tool-one",
             input: { command: "secret-command" },
             name: "Bash",
+            type: "tool_use",
+          },
+          {
+            id: "tool-skill",
+            input: { args: "secret-skill-args", skill: "review" },
+            name: "Skill",
             type: "tool_use",
           },
         ],

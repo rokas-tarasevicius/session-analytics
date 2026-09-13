@@ -2,6 +2,58 @@
 
 All notable changes to this package are documented here.
 
+## [0.4.4] - 2026-08-05
+
+### Changed
+
+- Replace the mixed Activity palette with seven green-only intensity levels while preserving logarithmic bucketing.
+- Bump the package to `0.4.4` for the corrected Activity palette.
+
+## [0.4.3] - 2026-08-05
+
+### Changed
+
+- Expand Activity to a seven-level, logarithmically distributed cool-to-warm color scale so low, medium, and peak session counts remain distinguishable.
+- Use light mode as the first-run default while preserving an explicit saved theme preference.
+- Bump the package to `0.4.3` for the revised Activity scale and theme default.
+
+## [0.4.2] - 2026-08-05
+
+### Changed
+
+- Remove the oversized dashboard hero and explanatory copy, retaining only compact snapshot metadata alongside the scope controls.
+- Bump the package to `0.4.2` for the streamlined dashboard layout.
+
+## [0.4.1] - 2026-08-05
+
+### Added
+
+- Show the exact session count and local weekday/hour in a GitHub-style tooltip when an Activity heatmap cell is hovered or keyboard-focused.
+
+### Changed
+
+- Bump the package to `0.4.1` for the new dashboard interaction.
+
+## [0.4.0] - 2026-08-04
+
+### Added
+
+- Add focused dashboard views for multi-repository distributions, local-time session activity, cost components, provider-separated model usage, per-repository tool distribution, and provider-aware skill distribution.
+- Parse explicit Claude `Skill` tool events and infer a lower bound for Codex skill use from read-capable calls that reference canonical `SKILL.md` files.
+- Publish normalized skill identifiers, counts, and evidence method without returning skill arguments or file paths.
+
+### Changed
+
+- Group model bars by provider and keep Cursor provider-reported value visually separate from Codex and Claude API-equivalent estimates.
+- Limit distribution comparisons to six uniquely colored repositories, place selected and high-activity repositories first, and use logarithmic bins for heavy-tailed duration, cost, and tool-call data.
+- Bump the package to `0.4.0` for the new public session fields and dashboard views.
+
+### Fixed
+
+- Render only the active analytics view so provider and time-window controls do not rebuild thousands of hidden elements or stall on machine-scale snapshots.
+- Keep distribution selectors and repository distribution tables inside the mobile viewport while retaining internal scrolling for the full repository set.
+- Represent tool and skill categories outside the six-item legend as an explicit `Other` segment instead of leaving an unexplained blank share.
+
 ## [0.3.4] - 2026-09-13
 
 ### Fixed

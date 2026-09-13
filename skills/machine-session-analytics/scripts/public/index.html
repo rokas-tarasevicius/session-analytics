@@ -27,20 +27,6 @@
     </header>
 
     <main id="top">
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="kicker">PRIVATE OPERATIONS MAP · LOCALHOST ONLY</p>
-          <h1>Machine-wide<br /><em>session atlas.</em></h1>
-          <p id="hero-copy">Mapping local agent sessions to repositories without reading their content.</p>
-        </div>
-        <aside class="snapshot-card" aria-label="Snapshot details">
-          <span>Evidence window</span>
-          <strong id="generated-at">Building snapshot…</strong>
-          <small id="rate-card-date">Rate card pending</small>
-          <div class="privacy-line"><i></i> Transcript content never leaves the analyzer</div>
-        </aside>
-      </section>
-
       <p class="error-banner" id="error-banner" role="alert" hidden></p>
       <section class="warning-banner" id="warning-banner" aria-label="Coverage warnings" hidden>
         <strong>Coverage notes</strong><ul id="warning-list"></ul>
@@ -65,8 +51,23 @@
             <input id="window-end" type="date" aria-label="Analysis end date" />
           </label>
         </div>
-        <p id="scope-description">Showing every repository evidenced by local agent history.</p>
+        <div class="filters-context">
+          <p id="scope-description">Showing every repository evidenced by local agent history.</p>
+          <p class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></p>
+        </div>
       </section>
+
+      <nav class="view-tabs" aria-label="Analytics views">
+        <button type="button" data-view-button="summary" aria-current="page">Summary</button>
+        <button type="button" data-view-button="distributions">Distributions</button>
+        <button type="button" data-view-button="activity">Activity</button>
+        <button type="button" data-view-button="costs">Costs</button>
+        <button type="button" data-view-button="models">Models</button>
+        <button type="button" data-view-button="tools">Tools</button>
+        <button type="button" data-view-button="skills">Skills</button>
+      </nav>
+
+      <div class="analytics-view" data-view-panel="summary">
 
       <section class="metric-grid" aria-label="Machine totals">
         <article class="metric-card accent"><span>Priced usage value</span><strong id="metric-spend">—</strong><small id="metric-spend-note">Usage value, not an invoice</small></article>
@@ -121,6 +122,60 @@
       <section class="comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
         <header class="section-header"><div><p class="kicker">FLEET COMPARISON</p><h2 id="comparison-title">Every repository, one ledger</h2></div></header>
         <div class="table-wrap"><table><thead><tr><th>Repository</th><th>Sessions</th><th>Usage value</th><th>Input</th><th>Output</th><th>Tools</th><th>Cache</th><th>Coverage</th></tr></thead><tbody id="repository-rows"></tbody></table></div>
+      </section>
+      </div>
+
+      <section class="analytics-view" data-view-panel="distributions" hidden aria-labelledby="distributions-title">
+        <header class="view-header"><div><p class="kicker">COMPARE REPOSITORIES</p><h2 id="distributions-title">Distributions</h2><p>Each line is normalized to the share of sessions in its repository.</p></div></header>
+        <fieldset class="compare-repositories"><legend>Repositories to compare · up to 6</legend><div id="distribution-repository-options"></div></fieldset>
+        <div class="comparison-key" id="distribution-key"></div>
+        <div class="view-grid">
+          <article class="panel"><header><div><p class="kicker">DURATION</p><h2>Session duration</h2></div><span>Minutes · log bins</span></header><div class="distribution-chart" id="distribution-duration"></div></article>
+          <article class="panel"><header><div><p class="kicker">USAGE VALUE</p><h2>API-equivalent value</h2></div><span>USD · log bins</span></header><div class="distribution-chart" id="distribution-cost"></div></article>
+          <article class="panel"><header><div><p class="kicker">TOOLS</p><h2>Effective tool calls</h2></div><span>Calls · log bins</span></header><div class="distribution-chart" id="distribution-tools"></div></article>
+          <article class="panel"><header><div><p class="kicker">COMPACTIONS</p><h2>Context boundaries</h2></div><span>Count</span></header><div class="distribution-chart" id="distribution-compactions"></div></article>
+        </div>
+      </section>
+
+      <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
+        <header class="view-header"><div><p class="kicker">SESSION STARTS</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour.</p></div><div class="provider-key" id="activity-provider-filters"></div></header>
+        <article class="panel activity-panel"><div class="activity-heatmap" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
+        <div class="heatmap-tooltip" id="activity-tooltip" role="tooltip" hidden></div>
+        <article class="panel activity-repositories"><header><div><p class="kicker">REPOSITORIES</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list cyan" id="activity-repositories"></div></article>
+      </section>
+
+      <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
+        <header class="view-header"><div><p class="kicker">USAGE VALUE</p><h2 id="costs-title">Costs</h2><p>API-equivalent components and provider-reported Cursor value remain separate.</p></div></header>
+        <div class="metric-grid compact-metrics" aria-label="Cost totals">
+          <article class="metric-card accent"><span>API-equivalent value</span><strong id="cost-api-total">—</strong><small>Codex and Claude</small></article>
+          <article class="metric-card"><span>Upper estimate</span><strong id="cost-upper-total">—</strong><small>Cache-write assumption</small></article>
+          <article class="metric-card"><span>Provider-reported value</span><strong id="cost-provider-total">—</strong><small>Cursor · separate</small></article>
+          <article class="metric-card"><span>Pricing coverage</span><strong id="cost-coverage">—</strong><small>Observed tokens</small></article>
+        </div>
+        <div class="view-grid costs-grid">
+          <article class="panel"><header><div><p class="kicker">PROVIDERS</p><h2>Cost components</h2></div></header><div id="provider-cost-components"></div></article>
+          <article class="panel"><header><div><p class="kicker">REPOSITORIES</p><h2>Cost components by repository</h2></div></header><div id="repository-cost-components"></div></article>
+        </div>
+      </section>
+
+      <section class="analytics-view" data-view-panel="models" hidden aria-labelledby="models-title">
+        <header class="view-header"><div><p class="kicker">PROVIDERS</p><h2 id="models-title">Models</h2><p>Bars use a separate scale inside each provider.</p></div><div class="metric-switch" id="model-metric-switch"><button type="button" data-model-metric="value" aria-pressed="true">Usage value</button><button type="button" data-model-metric="calls" aria-pressed="false">Model calls</button><button type="button" data-model-metric="input" aria-pressed="false">Input</button><button type="button" data-model-metric="output" aria-pressed="false">Output</button></div></header>
+        <div id="models-by-provider"></div>
+      </section>
+
+      <section class="analytics-view" data-view-panel="tools" hidden aria-labelledby="tools-title">
+        <header class="view-header"><div><p class="kicker">REPOSITORIES</p><h2 id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters"></div></header>
+        <article class="panel"><div class="distribution-table" id="tools-by-repository"></div><div class="comparison-key" id="tools-key"></div></article>
+        <article class="panel detail-panel"><header><div><p class="kicker">SELECTED REPOSITORY</p><h2 id="tools-detail-title">—</h2></div></header><div class="bar-list cyan" id="tools-detail"></div></article>
+      </section>
+
+      <section class="analytics-view" data-view-panel="skills" hidden aria-labelledby="skills-title">
+        <header class="view-header"><div><p class="kicker">REPOSITORIES</p><h2 id="skills-title">Skills</h2><p>Observed skill invocations with provider-specific evidence coverage.</p></div><div class="provider-key" id="skills-provider-filters"></div></header>
+        <article class="panel"><div class="distribution-table" id="skills-by-repository"></div><div class="comparison-key" id="skills-key"></div></article>
+        <div class="view-grid skills-detail-grid">
+          <article class="panel"><header><div><p class="kicker">SELECTED REPOSITORY</p><h2 id="skills-detail-title">—</h2></div></header><div class="bar-list" id="skills-detail"></div></article>
+          <article class="panel"><header><div><p class="kicker">PROVIDER COVERAGE</p><h2>Skill detection</h2></div></header><div class="coverage-list"><div><strong>Claude</strong><span>Explicit Skill tool</span><em data-status="ok">Reliable</em></div><div><strong>Codex</strong><span>Canonical SKILL.md reads</span><em data-status="warning">Lower bound</em></div><div><strong>Cursor</strong><span>No stable local signal</span><em>N/A</em></div></div><p class="chart-note">Skill names are allowlisted derived identifiers. Tool arguments and file paths are never returned.</p></article>
+        </div>
       </section>
 
       <footer><p>Read-only local analysis. No prompts, messages, reasoning, tool payloads, transcript paths, credentials, or remote telemetry.</p><div id="rate-card-links"></div></footer>

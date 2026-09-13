@@ -1,6 +1,6 @@
 ---
 name: machine-session-analytics
-version: 0.3.3
+version: 0.4.4
 description: Launch a privacy-safe localhost dashboard for machine-wide Codex, Claude, and Cursor session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, tools, models, execution shape, pricing coverage, or API-equivalent usage across repositories.
 mutating: false
 brain_first: false
@@ -75,6 +75,9 @@ The dashboard contains:
 - Usage value: API list-price equivalents, cache-write upper estimates, Cursor provider-reported local value, and top-level versus subagent allocation. These are not invoices or subscription charges.
 - Execution shape: turns, model responses and calls, task markers, tool calls by name, compactions, summaries, queue operations, delegated agents, duration, and working or terminal state.
 - Comparisons: repository totals, provider and model mix, daily priced-usage velocity, selectable time windows, ranked sessions, cache ratio, tool distribution, and immediate repository drill-down.
+- Focused views: multi-repository distributions, session-start activity heatmaps, cost components, provider-separated model bars, per-repository tool distribution, and provider-aware skill distribution.
+
+Skill usage is explicit for Claude `Skill` tool events, an inferred lower bound for Codex calls that read a canonical `SKILL.md`, and unavailable for Cursor. Only normalized skill identifiers and counts enter the public projection; tool arguments and paths remain excluded.
 
 Processed input is request-context consumption, not unique authored text. Tools and task markers describe activity; they do not prove quality, success, causation, or value delivered.
 

@@ -1,7 +1,7 @@
 {
   "api_version": "gbrain-skillpack-v1",
   "name": "machine-session-analytics",
-  "version": "0.3.4",
+  "version": "0.4.4",
   "description": "Analyze privacy-safe machine-wide Codex, Claude, and Cursor session usage across every evidenced repository, with optional Conductor enrichment.",
   "author": "Rokas Tarasevicius",
   "license": "MIT",
