@@ -61,12 +61,16 @@ M2 links agent sessions to the code they produced, retroactively from existing l
 
 ### Human and agent interaction
 
-- [ ] Autonomy run length, human turns per session, turn wall time, and the split between waiting for a human, agent activity, and waiting on permissions.
-- [ ] Interrupts, mid-turn steering, plan-mode use, and plan rejections.
-- [ ] Concurrency: parallel sessions over time and effective parallelism, which matters most for orchestrator users.
-- [ ] Session archetypes (quick, standard, deep, marathon) and abandonment.
-- [ ] Model, effort, and CLI-version mix, with regression detection when a CLI or model version changes.
-- [ ] Slash-command and skill usage, including installed-but-unused skills.
+- [x] Autonomy run length, human turns per session, turn wall time, and estimated waiting-for-human versus agent-active time, with coverage and explicit idle thresholds.
+- [ ] Separate permission-wait time from agent activity using stable permission lifecycle evidence.
+- [x] Codex interrupts, opt-in Claude marker counts, mid-turn steering, queue reason classes and plan-mode use.
+- [ ] Plan-rejection evidence and rates (permission approvals are not plan rejections).
+- [x] Concurrency: active sessions over time, daily peaks, effective parallelism and repository-level concurrency.
+- [x] Session archetypes (quick, standard, deep, marathon) and a labeled stale-open-session abandonment heuristic.
+- [x] Model, effort, CLI-version, entrypoint and originator mix with guarded, descriptive before/after comparisons.
+- [ ] Task-matched regression attribution; observed timing changes alone cannot establish a regression.
+- [x] Leading slash-command names and skill usage, including discovered installations without an observed invocation in scope.
+- [x] Workflow dashboard and report, UTC active-time/value heatmaps and activity streaks.
 
 ## M3: Agent-facing
 

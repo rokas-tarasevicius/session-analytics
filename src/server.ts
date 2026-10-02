@@ -5,7 +5,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
 import type { MachineAnalytics } from "./types.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
@@ -14,7 +14,7 @@ const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, "--port"]);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
+const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -37,6 +37,8 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it.
+--workflow-content-rules opts into local Claude interruption marker counts (P2).
+--no-workflow-content-rules overrides an environment opt-in.
 `);
   process.exit(0);
 }
@@ -105,6 +107,9 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
 const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
+  ["/workflow.js", join(publicRoot, "workflow.js")],
+  ["/workflow-data.js", join(publicRoot, "workflow-data.js")],
+  ["/workflow.css", join(publicRoot, "workflow.css")],
   ["/styles.css", join(publicRoot, "styles.css")],
   ["/fonts/space-grotesk-latin.woff2", join(publicRoot, "fonts", "space-grotesk-latin.woff2")],
   ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],

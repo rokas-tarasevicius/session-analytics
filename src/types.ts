@@ -1,3 +1,6 @@
+import type { SessionWorkflow, WorkflowSummary } from "./metrics/workflow-types.ts";
+export type * from "./metrics/workflow-types.ts";
+
 export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
@@ -83,6 +86,7 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  workflow?: SessionWorkflow;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -120,6 +124,7 @@ export interface NamedMetric {
 }
 
 export interface RepositoryAnalytics {
+  workflow?: WorkflowSummary;
   generatedAt: string;
   rateCard: {
     currency: "USD";
@@ -158,6 +163,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  workflow?: WorkflowSummary;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];
   repositories: RepositoryRollup[];
@@ -203,6 +209,7 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  workflowContentRules?: boolean;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;

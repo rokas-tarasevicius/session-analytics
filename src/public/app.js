@@ -1,3 +1,5 @@
+import { renderWorkflow } from "./workflow.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -569,6 +571,7 @@ function clearInactiveAnalyticsViews(activeName) {
     models: [elements.modelsByProvider],
     skills: [elements.skillsProviderFilters, elements.skillsByRepository, elements.skillsKey, elements.skillsDetail],
     tools: [elements.toolsProviderFilters, elements.toolsByRepository, elements.toolsKey, elements.toolsDetail],
+    workflow: [document.querySelector("#workflow-content")],
   };
   for (const [name, elementsForView] of Object.entries(containers)) {
     if (name === activeName) continue;
@@ -578,6 +581,7 @@ function clearInactiveAnalyticsViews(activeName) {
 
 function renderActiveAnalyticsView(view) {
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
+  if (name === "workflow") renderWorkflow(view, snapshot);
   if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
   if (name === "costs") renderCosts(view);

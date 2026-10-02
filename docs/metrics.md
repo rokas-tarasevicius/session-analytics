@@ -70,7 +70,81 @@ Skill names are a reviewed derived field rather than raw tool input. Accept only
 - malformed records skipped;
 - unsupported provider, schema, or model price.
 
-## Useful derived indicators
+## Workflow: human and agent interaction
+
+The optional `session.workflow` object covers Claude's **primary transcript** and individual Codex threads. A Claude sub-agent's prompt is an agent input, not a human decision: child files still contribute to existing accounting totals but never extend the parent's workflow clock, tools or mix. Codex child threads retain timing and concurrency, with `humanTurns: null` and no autonomy-run samples. Cursor and failed parses have no workflow object; missing evidence is not a zero-duration session. `MachineAnalytics.workflow` and single-repository `RepositoryAnalytics.workflow` aggregate the supported sessions. Existing metric and accounting meanings are unchanged.
+
+### Autonomy and timing
+
+| Measure | Definition and limits |
+| --- | --- |
+| Human turns | Distinct primary Claude user messages with text, excluding structured tool results, metadata, compact summaries and sidechain/agent-origin inputs. Codex selects the richer of legacy `user_message` events and distinct `UserMessage` items; it never sums both shapes. Untimed turns remain in counts. With Claude content rules off, text control markers can remain indistinguishable from human text. |
+| Tools between human turns | Effective calls after each observed human input until the next, including zero-tool runs and the final observed run. Calls before the first human are unassigned. Codex chooses the richer of deduplicated response calls (including code-mode expansion) and typed tool items. If events are untimed or truncated, run samples are unavailable rather than silently spanning a missing boundary. |
+| `WorkflowHistogram` | Exact discrete `{value,count}` bins; `samples` is the sum of counts. p50 and p95 use nearest rank (`ceil(p × n)`), `max` is the maximum. Empty samples return null, including a null maximum. Aggregate percentiles pool bins, never average session percentiles. Tool samples are counts; turn samples are milliseconds. |
+| Turn wall time | Prefer positive finite provider `task_complete` / `turn_aborted.duration_ms` or Claude `system/turn_duration.durationMs` (up to 7 days). Otherwise pair starts/human inputs with terminal markers. Claude/legacy histories can infer a turn end from the final assistant event before the next human or file end; open explicit turns are excluded. The number of provider durations and event-derived spans is always exposed. A later Claude duration replaces its inferred end once; final streamed end markers use their latest timestamp. Wall time includes permission/tool waiting. |
+| Agent activity (estimated) | Sort recognized human, start, assistant, tool, result and terminal events by normalized ISO timestamp. Join consecutive gaps **≤5 minutes**, except after a terminal event or between two human inputs. Coalesce adjacent intervals within a session. There is no guessed leading/trailing duration. Long sparse tool calls may be undercounted. Broadcast Codex token snapshots, metadata-only records and queue bookkeeping never create activity. |
+| Waiting for human (estimated) | A terminal marker followed by the next human with no intervening work supplies `min(gap, 30 minutes)`. Unrecorded completion cannot prove waiting. This does not measure a person's attention or labor. |
+| Idle/unclassified | First-to-last recognized event span minus agent-active and capped human-wait intervals. The three partitions sum to the observed span. Unobserved time before/after the transcript is not extrapolated. Permission waiting remains unavailable. |
+| Coverage | `timing` is `observed`, `partial` (missing timestamps or a cap), or `unavailable` (no positive event span). `timestampedEvents`, `untimedEvents` and `droppedEvents` count retained/omitted normalized signals; duplicate lifecycle shapes can supply several signals before selection. Processing stops after 100,000 normalized signals or dedupe identities per session, marks partial coverage and suppresses tool-run and abandonment claims. Metadata samples cap at 10,000. |
+| Ending | `terminal`: final explicit completion; `interrupted`: abort marker; `inferred`: final assistant without an open explicit task; `open`: no observed ending; `unavailable`: no timed work events. These are evidence labels, not success labels. |
+
+Human turns per session uses the eligible primary-session denominator and is null below **5 sessions**. Interruptions per human turn is null below **5 eligible turns** and uses Codex plus Claude sessions with enabled marker rules only. It is an event frequency, not a success/failure percentage; sub-agent interruption notifications are separate. Histograms show their sample counts even for small samples; a p95 of one observation has no population-level significance.
+
+Item-only Codex tool histories locate calls at their completion timestamps; a call finishing after human steering can fall in a later observed run. Selecting the richer lifecycle shape avoids duplicate inflation but can undercount a file that changes formats mid-session. These are observations with coverage limits, not a measure of independence or work quality.
+
+### Steering and planning
+
+Codex `turn_aborted.reason` maps to `interrupted`, `replaced`, or `other`, deduplicated by turn ID when present. Distinct `SubAgentActivity(kind=interrupted)` items are counted separately. Mid-turn steering counts a new human input while an explicit task or a tool run remains open; it is a conservative indicator, not a classification of intent. Interrupt frequency can rise with expertise; it is not a failure signal.
+
+Claude queue `operation` maps to `enqueue`, `dequeue`, `remove`, or `other`. Reasons map exact known labels into `prompt`, `interrupt`, `completion`, `cancellation`, `other`, or `unspecified`; arbitrary reasons are discarded. A transition into Claude permission mode `plan` or Codex `collaboration_mode.mode=plan` adds one plan entry. Duplicate snapshots in the same mode do not add entries. Distinct typed `Plan` items are separate counts. Plan rejections and permission approvals are not inferred from these counters.
+
+**P2 opt-in:** `--workflow-content-rules` or `SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES=1` enables the `claude-interrupt-marker` rule: exact whole-message or single-text-block matches of the provider's two fixed interruption markers. It retains a count (`interruptions.claudeMarkers`), never text. Embedded quotations do not match. `--no-workflow-content-rules` wins over both opt-ins. Default off: the count is null, not zero. The demo enables this rule against synthetic records only.
+
+### Concurrency and time patterns
+
+Concurrency is an exact interval sweep **over estimated active spans**, not over a session's whole lifetime. Intervals are half-open `[start,end)`, so an ending session and a session starting at the same instant do not overlap. Spans within each session are unioned first to prevent self-overlap. The timeline retains `{start,end,sessions}` segments; daily peaks split segments at **UTC midnight**. Repository concurrency uses a separate union for each repository.
+
+`effectiveParallelism = activeSessionMilliseconds / wallClockActiveMilliseconds`, where the numerator sums activity across sessions and the denominator is its union across the selected scope. The ratio is null below **60 seconds** of wall-clock activity. Show both durations and eligible active-session count beside it. A single sufficiently observed session has parallelism 1. This measures concurrent session activity, not CPU utilization, agent workers inside a Claude parent, or simultaneous model requests.
+
+The weekday × hour heatmaps use **UTC**, independent of browser timezone or daylight saving. Active time is split at each hour; overlap between sessions adds together. API-equivalent value is assigned to the UTC hour of each **deduplicated, priced request's recorded timestamp**, not spread across activity intervals or placed at session start. Claude child usage is excluded from its parent workflow heatmap; Codex child threads have their own value. Untimed, unpriced and Cursor provider-reported value is excluded. `timestampedPricedRequests / pricedRequests` makes temporal coverage explicit; this is API-equivalent value, not an invoice.
+
+An active day has a positive active interval, not just a session start. `longestStreakDays` counts adjacent UTC active days; `currentStreakDays` ends today or yesterday relative to the snapshot's `asOfDay`, and is zero if neither is active. Streaks follow the selected scope and never imply performance targets.
+
+The dashboard follows the existing **session-start window** convention: all evidence from sessions started in the selected date window is included, including events after the window. All workflow calculations rerun on the selected repository/provider/session cohort. They use the same module as report and JSON, avoiding divergent filtering formulas.
+
+### Archetypes and abandonment
+
+Archetypes are **heuristics** over active duration, human turns and primary-transcript tool calls, evaluated in this order:
+
+| Archetype | Threshold |
+| --- | --- |
+| Marathon | ≥4 hours active, **or** ≥30 human turns, **or** ≥300 tools |
+| Deep | ≥1 hour active, **or** ≥10 turns, **or** ≥80 tools |
+| Quick | <10 minutes active **and** ≤2 turns **and** ≤10 tools |
+| Standard | Remaining sessions with positive estimated activity |
+| Unavailable | No positive estimated activity; sparse timestamps cannot establish a short session |
+
+Session length misleads without a same-repository/task baseline. These buckets do not identify a task, difficulty, productivity or success. Partial timing can change a session's bucket; inspect coverage before comparing it.
+
+The **abandonment heuristic** flags a primary session with ≥1 observed human, ≥3 tools, no terminal/interruption or final-assistant ending, no truncated evidence, and ≥24 hours since its last work event. A working snapshot or recent open ending is `ongoing`; unsupported/sub-agent/low-activity/truncated evidence is `insufficient-evidence`; other eligible sessions are `not-flagged`. An explicit abort is not abandonment. Terminal evidence does not prove completion of the user's objective. No flag is a verdict; deleted or incomplete transcripts can cause false positives.
+
+### Mix and before/after comparisons
+
+Session `mix` retains bounded metadata changes and the first metadata observation on each UTC day: model ID, allowlisted effort, numeric CLI version (optional `alpha`, `beta`, `rc`, `dev` suffix), entrypoint and originator enums. Unknown or malformed labels are excluded or labeled unknown. No custom originator, nickname, plugin payload, branch or environment text is returned. Aggregate `mix` counts a session once for each day/provider/dimension/name observed; multiple models or versions may count the same session in multiple rows. These are **session-day observations**, not token or time shares.
+
+Before/after compares adjacent first-observed model or CLI eras within the **same repository, provider, archetype, effort, entrypoint and duration-evidence class**, keeping the other model/CLI dimension constant. Exclude mixed/unknown metadata, partial timing, open/inferred/interrupted endings, and working snapshots. Compare sessions within 28 days on each side of the new era's first observation. Require ≥5 sessions per side; overlapping eras are explicitly ineligible. Output both cohort sizes, pooled turn/run p50s and eligibility. A fractional turn-time change is computed only for eligible cohorts with a baseline ≥1 second; otherwise null. Negative means shorter, positive means longer.
+
+This is a descriptive comparison, **not regression attribution**. Archetypes are an imperfect proxy and can themselves change with tool usage; task identity and difficulty are unavailable. A longer turn may reflect deeper work or more autonomy. Compare samples and context before drawing conclusions.
+
+### Slash commands and installed skills
+
+Read only `history.jsonl` adjacent to each selected Claude projects root. Match by the session ID internally; discard unmatched entries. From `display`, accept the whole leading `/command` token only, using the bounded skill-name grammar (with a leading slash). Reject paths with additional slashes, partial matches, punctuation and whitespace prefixes. Retain `{name,at}` and deduplicate by session/name/timestamp. Arguments and all following text are discarded. `commandHistoryAvailable` means a readable matched-profile history, not complete historical coverage.
+
+Inventory only directory names with a readable `SKILL.md`: selected Claude/Codex profile `skills/`, Codex `.system/`, default shared `~/.agents/skills` only when Codex roots are not overridden, and each selected repository's `.claude/skills`, `.codex/skills`, `.agents/skills`. Support symlink installations, deduplicate provider/repository/name, and never read skill bodies. Explicit roots never fall back to home inventories. Count absent/unreadable directories and malformed/unavailable histories without returning their paths or error strings.
+
+`installedSkills[].observedInvocations` joins the existing skill counters by name/provider and, for project installations, repository. Profile installs are a union across the selected provider profiles; their invocation counts do not establish which profile supplied a skill. A zero means **no observed invocation in this scope**, not that the skill has never been used. Codex evidence remains a lower bound, and profile/project installations of the same name can overlap.
+
+## Other useful derived indicators
 
 These can be added without reading content, provided they are labeled as indicators:
 

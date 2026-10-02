@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { addWorkflowDemo } from "./demo-workflow.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -234,7 +235,8 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   const state: ClaudeTurnState = { clock: options.start, compactions: 0, context: options.subagent ? integer(9_000, 16_000) : integer(18_000, 32_000) };
   const effort = model.includes("haiku") ? undefined : weighted(effortLevels);
   const longCache = !options.subagent && chance(0.35);
-  const base = { cwd, sessionId, version: "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
+  const base = { cwd, sessionId, version: options.start < Date.now() - 30 * DAY ? "2.3.0" : "2.4.0", entrypoint: "cli", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
+  let humanStarted = state.clock;
   let parent: string | null = null;
   let spawned = 0;
   const push = (record: Record<string, unknown>): void => {
@@ -243,6 +245,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
     parent = uuidValue;
   };
   const human = (): void => {
+    humanStarted = state.clock;
     push({ type: "user", message: { role: "user", content: "[synthetic demo prompt]" } });
     state.clock += integer(4, 25) * 1000;
   };
@@ -250,6 +253,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   human();
   for (let index = 0; index < options.messages; index += 1) {
     if (!options.subagent && index > 0 && chance(0.12)) {
+      push({ type: "system", subtype: "turn_duration", durationMs: state.clock - humanStarted });
       state.clock += integer(1, 9) * 60_000;
       human();
     }
@@ -302,6 +306,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       state.compactions += 1;
     }
   }
+  push({ type: "system", subtype: "turn_duration", durationMs: state.clock - humanStarted });
   return { records, end: state.clock, spawned };
 }
 
@@ -365,8 +370,9 @@ function writeCodexSession(
   const children: number[] = [];
   for (let turn = 0; turn < turns; turn += 1) {
     clock += integer(20, 600) * 1000;
+    const turnStarted = clock;
     push("event_msg", { type: "user_message", message: "[synthetic demo prompt]", images: [] });
-    push("event_msg", { type: "task_started", model_context_window: 272_000 });
+    push("event_msg", { type: "task_started", turn_id: `turn-${turn}`, model_context_window: 272_000 });
     const calls = heavy(parentThreadId ? 5 : 7, 0.7, 60);
     for (let call = 0; call < calls; call += 1) {
       clock += integer(2, 45) * 1000;
@@ -400,7 +406,8 @@ function writeCodexSession(
     }
     clock += integer(2, 20) * 1000;
     push("event_msg", { type: "agent_message", message: "[synthetic demo response]" });
-    push("event_msg", { type: "task_complete", last_agent_message: "[synthetic]" });
+    if (chance(0.08)) push("event_msg", { type: "turn_aborted", turn_id: `turn-${turn}`, reason: turn % 2 ? "interrupted" : "replaced", duration_ms: clock - turnStarted });
+    else push("event_msg", { type: "task_complete", turn_id: `turn-${turn}`, duration_ms: clock - turnStarted, last_agent_message: "[synthetic]" });
   }
   // Older sessions have usually been archived; recent ones stay in the dated tree.
   const archived = now - start > 14 * DAY && chance(0.45);
@@ -533,6 +540,7 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
     }
   }
   writeCursorDatabase(cursorDatabase, cursorSessions);
+  addWorkflowDemo(claudeRoot, codexRoot, repositories, now);
   process.stderr.write(`Generated ${sessions} synthetic top-level sessions across ${repositories.length} repositories in ${root}\n`);
   return { claudeRoot, codexRoot, codexArchiveRoot, cursorDatabase, home };
 }
@@ -575,6 +583,7 @@ for (const [key, value] of Object.entries(process.env)) {
 environment["HOME"] = sources.home;
 
 const sourceFlags = [
+  "--workflow-content-rules", // Synthetic marker examples only; real scans default off.
   "--claude-root", sources.claudeRoot,
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,

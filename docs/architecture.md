@@ -13,6 +13,10 @@
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/metrics/workflow.ts`, `workflow-types.ts` | Streaming workflow projection and namespaced public types; primary-transcript timing, bounded metadata, deduplicated events and heuristic labels. |
+| `src/metrics/workflow-inventory.ts` | Read-only matched Claude command history and scoped skill-directory inventories. Raw IDs remain internal. |
+| `src/public/workflow-data.js` | Pure workflow calculations shared by the worker and browser: exact pooled quantiles, interval sweep, UTC patterns and guarded comparisons. The adjacent declaration file defines its TypeScript contract. |
+| `src/public/workflow.js`, `workflow.css`, `src/report/workflow.ts` | Workflow tab, scoped styles and terminal formatting. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |

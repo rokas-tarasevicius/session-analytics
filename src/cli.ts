@@ -1,10 +1,11 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
+import { workflowReport } from "./report/workflow.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 
 const valueFlags = new Set(analysisValueFlags);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
+const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -41,6 +42,8 @@ Options:
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
   --rate-card PATH       Override the reviewed rate card
+  --workflow-content-rules Enable local Claude interruption marker counts (P2)
+  --no-workflow-content-rules Disable those rules, including an environment opt-in
   --version              Print the version
   --help                 Show this help
 `);
@@ -107,6 +110,7 @@ if (process.argv.includes("--json")) {
       `tools: ${compactNumber(analytics.summary.toolCalls)}; ` +
       `compactions: ${analytics.summary.compactions}\n`,
   );
+  if (analytics.workflow) process.stdout.write(workflowReport(analytics.workflow, analytics.repositories));
   process.stdout.write("\nTop sessions by priced usage value\n");
   for (const session of [...analytics.sessions]
     .sort((left, right) => right.cost.totalUsd - left.cost.totalUsd)

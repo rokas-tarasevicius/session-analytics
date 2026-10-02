@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Workflow dashboard tab, terminal report section, and optional namespaced JSON metrics for human turns, autonomy runs, turn timing, interruptions, plan use, queue reasons, active-session concurrency, UTC time/value patterns, streaks, session archetypes and a labeled abandonment heuristic.
+- Model, effort, CLI-version, entrypoint and originator histories with guarded, same-repository before/after comparisons; matched Claude slash-command names and installed skills without observed invocations.
+- Explicit coverage and sample counts, idle/wait thresholds, typed-event deduplication, synthetic workflow demos, and privacy regression tests. Local Claude interruption-text rules require `--workflow-content-rules` (P2, off by default).
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

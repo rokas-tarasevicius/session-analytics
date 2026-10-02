@@ -57,7 +57,8 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Tokens by class.** Input, uncached input, cache reads, cache writes split by 5-minute and 1-hour TTL, output, and reasoning output where the provider records it.
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
-- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
+- **Workflow.** Human turns, tools between turns, turn p50/p95, estimated active and human-wait time, steering and planning, daily peak concurrency and effective parallelism, UTC active-time/value heatmaps, streaks, version comparisons, slash-command names and installed skills without observed use. Coverage and heuristic labels accompany the numbers; activity does not prove quality or success.
+- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Workflow (interaction and parallel work), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
 - **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
 
@@ -115,7 +116,7 @@ The server binds to `127.0.0.1` only and answers read-only `GET` requests. **Ref
 session-analytics report
 ```
 
-Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, the 15 highest-value sessions by hashed key, and coverage warnings.
+Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, workflow and concurrency measures, the 15 highest-value sessions by hashed key, and coverage warnings.
 
 ### JSON snapshot
 
@@ -144,9 +145,13 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
+| `--workflow-content-rules` | both | Opt into the local P2 rule that counts exact Claude interruption markers. Only counts leave the parser. Default off; `SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES=1` also enables it. |
+| `--no-workflow-content-rules` | both | Disable the rule, including an environment opt-in. |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+
+Workflow estimates join work events at most five minutes apart; a terminal marker followed by a human supplies at most 30 minutes of estimated human waiting. Permission waiting is unavailable. Concurrency counts overlapping active session spans, with summed activity divided by its wall-clock union for effective parallelism. Claude child transcripts remain inside their parent for accounting but are excluded from the parent's interaction clock; Codex child threads have their own clocks. Cursor workflow timing is unavailable. See [workflow definitions and thresholds](docs/metrics.md#workflow-human-and-agent-interaction) before interpreting the comparisons or heuristics.
 
 ## Supported agents and evidence
 

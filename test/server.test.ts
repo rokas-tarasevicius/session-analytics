@@ -122,6 +122,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(serialized, /"skills":\{"review":1\}/);
     assert.match(serialized, /"skillEvidence":"explicit"/);
     assert.match(serialized, /"skillEvidence":"inferred"/);
+    assert.match(serialized, /"workflow":\{"schemaVersion":1/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
 
@@ -132,6 +133,12 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const pageText = await page.text();
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
+    assert.match(pageText, /data-view-button="workflow"/);
+    for (const asset of ["workflow.js", "workflow-data.js", "workflow.css"]) {
+      const response = await fetch(`${origin}/${asset}`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+    }
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
     const application = await fetch(`${origin}/app.js`);

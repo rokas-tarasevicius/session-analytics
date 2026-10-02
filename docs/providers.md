@@ -168,6 +168,21 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 - Conductor's per-session result records (turns, durations, reported cost) are not yet used as fallback evidence when a provider transcript has been deleted.
 - Agent types other than Claude Code and Codex are reported as unsupported.
 
+## Workflow evidence
+
+The Workflow view, report and JSON add a separate primary-transcript projection. Claude's sub-agent files still enter accounting but not the parent's human-turn, timing or metadata measures. Codex sub-agent threads retain their own activity spans; their inputs are not human turns. Cursor workflow timing is unavailable. Full definitions, thresholds and guards are in [metrics.md](metrics.md#workflow-human-and-agent-interaction).
+
+| Source | Additional fields inspected locally | Retained evidence |
+| --- | --- | --- |
+| Claude primary records | `version`, `entrypoint`, `effort`, `permissionMode`; `permission-mode`/`mode`; `queue-operation.operation` and `reason`; `system/turn_duration.durationMs`; assistant `stop_reason`; structured `isMeta`, `isCompactSummary`, `isSidechain`, `origin.kind` | Bounded versions/enums, timestamps and counts; arbitrary queue reasons become `other` |
+| Claude user control markers | Exact whole-message or single-text-block interruption markers, **only with `--workflow-content-rules`** | P2 rule count; text is never retained |
+| Codex lifecycle | `task_started`, `task_complete.duration_ms`, `turn_aborted.reason/duration_ms`, `turn_id`, typed `UserMessage`, `AgentMessage`, `CommandExecution`, `FileChange`, `McpToolCall`, `WebSearch`, `SubAgentActivity.kind`, `Plan` | Deduplicated event counts and timestamps; raw IDs stay internal; richer tool/human shape wins instead of adding duplicates |
+| Codex metadata | `session_meta.cli_version`, `source`, `originator`; `turn_context.model`, `effort`, `collaboration_mode.mode` | Bounded model/version IDs and fixed effort/source/originator enums |
+| Matched Claude profile `history.jsonl` | `sessionId`, `timestamp`, leading `/command` token in `display` | Command identifier and ISO timestamp, no arguments; unmatched sessions excluded |
+| Selected provider/repository skill directories | Directory entry names and existence of `SKILL.md`, including symlinks and Codex `.system` | Bounded names, provider, existing repository key or null; no skill body/frontmatter/path |
+
+Explicit provider roots also constrain history and profile skill discovery. The shared default `.agents/skills` directory is read only when Codex discovery is enabled. Project inventories follow selected canonical repository roots. Missing directories/histories and malformed history records contribute only coverage counters.
+
 ## Adding a provider
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-provider) for the checklist. A new source needs a discovery rule with an explicit override option, an identity check, a parser that only accumulates allowlisted counters, fixtures with sentinel content, and a section on this page.

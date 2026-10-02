@@ -15,6 +15,7 @@ const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
 ];
 
 export const analysisValueFlags = analysisSettings.map(([, flag]) => flag);
+export const analysisBooleanFlags = ["--workflow-content-rules", "--no-workflow-content-rules"];
 
 export function argument(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -33,6 +34,8 @@ export function setting(
 
 export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): AnalyzeOptions {
   const options: AnalyzeOptions = { includeHidden: !argv.includes("--exclude-hidden") };
+  options.workflowContentRules = argv.includes("--no-workflow-content-rules") ? false
+    : argv.includes("--workflow-content-rules") || environment["SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES"] === "1";
   for (const [property, flag, variable] of analysisSettings) {
     const value = setting(argv, environment, flag, variable);
     if (value) options[property] = value as never;

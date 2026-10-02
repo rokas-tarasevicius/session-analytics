@@ -7,6 +7,11 @@ import { basename, dirname, join, parse, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { WorkflowCollector } from "./metrics/workflow.ts";
+import { addRepositorySkills, historyForTranscript, loadWorkflowSources } from "./metrics/workflow-inventory.ts";
+import type { WorkflowSources } from "./metrics/workflow-inventory.ts";
+import type { WorkflowInventory } from "./metrics/workflow-types.ts";
+import { summarizeWorkflow } from "./public/workflow-data.js";
 
 import type {
   AnalyzeOptions,
@@ -101,6 +106,7 @@ interface TranscriptCandidate {
 }
 
 interface MutableSession {
+  workflow?: WorkflowCollector;
   assistantMessages: number;
   compactions: number;
   delegatedAgents: Set<string>;
@@ -317,6 +323,9 @@ function addModelUsage(
     return;
   }
   const cost = calculateCost(rate, usage, inputForRequest);
+  // Claude child transcripts contribute to accounting, but not to their
+  // parent's interaction clock. Codex child threads have their own clock.
+  session.workflow?.value(timestamp, cost.totalUsd, executionKind);
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
@@ -598,6 +607,7 @@ async function analyzeCodex(
   claimedCounters: Set<string> = new Set<string>(),
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  state.workflow = new WorkflowCollector("codex");
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
@@ -622,6 +632,7 @@ async function analyzeCodex(
     }
     const timestamp = stringValue(record["timestamp"]);
     trackTimestamp(state, timestamp);
+    state.workflow?.observe(record, line);
     const type = stringValue(record["type"]);
     const payload = asRecord(record["payload"]);
     const payloadType = stringValue(payload?.["type"]);
@@ -692,6 +703,7 @@ async function analyzeCodex(
       const transportName = stringValue(payload?.["name"]) ?? payloadType;
       increment(state.transportTools, transportName);
       const nested = payloadType === "custom_tool_call" ? nestedToolNames(payload?.["input"]) : [];
+      state.workflow?.tool(timestamp, Math.max(1, nested.length));
       const canReadSkill =
         ["Bash", "Read", "exec_command", "read_file"].includes(transportName) ||
         nested.some((name) => ["exec_command", "read_file"].includes(name));
@@ -842,8 +854,11 @@ async function analyzeClaude(
   mainPath: string,
   rateCard: RateCard,
   inheritedWarnings: string[],
+  workflowSources?: WorkflowSources,
+  contentRules = false,
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  state.workflow = new WorkflowCollector("claude", contentRules, historyForTranscript(mainPath, workflowSources));
   state.effort = null;
   state.executionKind = "top-level";
   state.executionKindsSeen.add("top-level");
@@ -882,6 +897,7 @@ async function analyzeClaude(
       }
       const timestamp = stringValue(record["timestamp"]);
       trackTimestamp(state, timestamp);
+      if (path === mainPath) state.workflow?.observe(record, line);
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
       const agentId = stringValue(record["agentId"]);
@@ -936,6 +952,7 @@ async function analyzeClaude(
           const toolId = stringValue(block["id"]) ?? `${path}:${line}`;
           if (seenToolCalls.has(toolId)) continue;
           seenToolCalls.add(toolId);
+          if (path === mainPath) state.workflow?.tool(timestamp);
           const name = stringValue(block["name"]) ?? "tool_use";
           increment(state.tools, name);
           increment(state.transportTools, name);
@@ -1028,6 +1045,7 @@ function finalizeSession(
     userTurns: state.userTurns,
   };
   return {
+    ...(state.workflow ? { workflow: state.workflow.finish(Date.now(), row.status === "working") } : {}),
     cost,
     costBasis:
       row.agent_type === "cursor"
@@ -1387,12 +1405,14 @@ async function analyzeTranscriptCandidate(
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
+  workflowSources?: WorkflowSources,
+  contentRules = false,
 ): Promise<SessionAnalytics> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   return candidate.provider === "codex"
     ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters)
-    : await analyzeClaude(row, candidate.path, rateCard, warnings);
+    : await analyzeClaude(row, candidate.path, rateCard, warnings, workflowSources, contentRules);
 }
 
 function cursorPaths(data: JsonRecord): string[] {
@@ -1977,7 +1997,7 @@ function aggregate(
 
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
-): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[] }> {
+): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[]; workflowInventory: WorkflowInventory }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
@@ -2049,6 +2069,8 @@ async function analyzeSelectedRepositories(
       ? [options.codexRoot, options.codexArchiveRoot].filter((root): root is string => Boolean(root))
       : discoveredRoots.codex;
     const claudeRoots = options.claudeRoot ? [options.claudeRoot] : discoveredRoots.claude;
+    const workflowSources = await loadWorkflowSources(claudeRoots, codexRoots,
+      options.codexRoot || options.codexArchiveRoot ? undefined : join(homedir(), ".agents", "skills"));
     const [codexIndexes, claudeIndexes] = await Promise.all([
       Promise.all(codexRoots.map((root) => indexProviderTranscripts(root, null, "codex"))),
       Promise.all(claudeRoots.map((root) => indexProviderTranscripts(root, null, "claude"))),
@@ -2096,7 +2118,7 @@ async function analyzeSelectedRepositories(
       try {
         const session = provider === "codex"
           ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, selected.path, rateCard, selected.warnings);
+          : await analyzeClaude(row, selected.path, rateCard, selected.warnings, workflowSources, options.workflowContentRules);
         claimed.add(`${provider}:${row.provider_session_id}`);
         return session;
       } catch (error) {
@@ -2118,13 +2140,13 @@ async function analyzeSelectedRepositories(
       try {
         return candidate.provider === "codex"
           ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]);
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], workflowSources, options.workflowContentRules);
       } catch { return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters); } catch { return null; }
+      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, workflowSources, options.workflowContentRules); } catch { return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {
@@ -2164,10 +2186,13 @@ async function analyzeSelectedRepositories(
       sessionsByRepository.set(session.repositoryId, repositorySessions);
     }
     const repositoriesForOutput = selectedRepositories;
+    await addRepositorySkills(workflowSources.inventory, selectedRepositories);
     return {
       rateCard,
+      workflowInventory: workflowSources.inventory,
       repositories: repositoriesForOutput.map((repository) => {
         const result = aggregate(repository, sessionsByRepository.get(repository.id) ?? [], rateCard);
+        result.workflow = summarizeWorkflow(result.sessions, workflowSources.inventory, result.generatedAt);
         result.warnings.push(
           ...[codexIndex.warning, claudeIndex.warning, cursorResult.warning].filter(
             (warning): warning is string => Boolean(warning),
@@ -2237,7 +2262,9 @@ export async function analyzeMachineSessions(
   options: AnalyzeOptions = {},
 ): Promise<MachineAnalytics> {
   const result = await analyzeSelectedRepositories(options);
-  return aggregateMachine(result.repositories, result.rateCard);
+  const machine = aggregateMachine(result.repositories, result.rateCard);
+  machine.workflow = summarizeWorkflow(machine.sessions, result.workflowInventory, machine.generatedAt);
+  return machine;
 }
 
 /** Backward-compatible single-repository entry point for callers that intentionally narrow scope. */

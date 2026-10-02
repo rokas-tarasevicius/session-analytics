@@ -11,6 +11,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - Token counters by class, cost figures, counts of events, durations, and ISO timestamps.
 - Model IDs and reasoning-effort labels as the provider recorded them.
 - Tool names, and skill identifiers that match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
+- Bounded numeric CLI versions, fixed entrypoint/originator/effort enums, and leading slash-command identifiers using the skill-name grammar (never arguments or the rest of the command).
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
 - Fixed-text parser warnings, which may include counts and model IDs.
@@ -46,10 +47,10 @@ Every field belongs to a tier. The tiers also govern planned features (see [road
 | --- | --- | --- |
 | **P0** | Counts, token counters, costs, timestamps, durations, model IDs, tool and skill names, enumerated labels | Returned today |
 | **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys and repository metadata only) |
-| **P2** | Results of local rules over commands or diffs, where only rule IDs and counts leave the parser | Not implemented; will be opt-in |
+| **P2** | Results of local rules over content, where only fixed rule identifiers and counts leave the parser | Exact Claude interruption-marker counts are opt-in; no command/diff rules |
 | **P3** | Text shown to you or sent to an LLM, such as an opt-in session review | Not implemented; will be opt-in per run, stored separately, and labeled |
 
-P2 and P3 features will always be off by default.
+P2 and P3 features are off by default. The workflow `claude-interrupt-marker` rule requires `--workflow-content-rules` or `SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES=1`; `--no-workflow-content-rules` overrides both. It only matches one of two whole provider control markers, emits `claudeMarkers` counts, and excludes recognized markers from human-turn counts. No prompt fragments or regex captures leave the parser. Timing derived from those control events is marked by `coverage.contentRules` per session and `coverage.contentRuleSessions` in aggregates.
 
 ## Field manifest
 
@@ -73,6 +74,7 @@ Returned by `/api/analytics` and `report --json`.
 | `summary` | Machine totals; see [Summary](#summary) | P0 |
 | `topTools[]` | `{ name, value }`, effective tool calls by tool name, descending | P0 |
 | `warnings[]` | Fixed-text coverage notes (unpriced models, missing or unmatched transcripts, unreadable roots) | P0 |
+| `workflow` | Optional workflow aggregate; also present on the single-repository analysis result. See the workflow manifest below | P0/P1/P2 |
 
 ### Repository rollup (`RepositoryRollup`)
 
@@ -125,6 +127,7 @@ Repository summaries and the machine summary share these fields.
 | `status` | Session status label: Conductor's status when registered there, Cursor's composer status, otherwise `idle` | P0 |
 | `createdAt` | Session start time | P0 |
 | `updatedAt` | Conductor's or Cursor's last-updated time when available; otherwise the session start time | P0 |
+| `workflow` | Optional primary-transcript workflow projection; absent for unsupported/failed parses. See below | P0/P2 |
 | `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
 | `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
 | `effort` | Reasoning-effort label as recorded, or `null` | P0 |
@@ -208,6 +211,86 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 | `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
 | `calls` | Requests attributed to this model | P0 |
 | `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
+
+### Workflow field manifest
+
+Types are declared in [`src/metrics/workflow-types.ts`](../src/metrics/workflow-types.ts) and re-exported from `src/types.ts`. All output objects are projections of counters, bounded labels and normalized timestamps. Raw IDs used for matching/deduplication, history `display` text, custom originator strings, queue reasons, skill bodies and directory paths stay internal. Fixtures in `test/workflow.test.ts` and `test/workflow-integration.test.ts` plant sentinels in all these sources and assert their absence through session/repository/machine JSON, the worker boundary and terminal report. The API uses the same worker projection, with additional coverage in `test/server.test.ts`.
+
+Paths below are relative to `session.workflow`, except where specified. Unavailable histogram values and denominators are null, not zero.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `schemaVersion` | Workflow contract version, `1` | P0 |
+| `scope` | `primary-transcript` | P0 |
+| `ending` | `terminal`, `interrupted`, `inferred`, `open`, `unavailable` | P0 |
+| `coverage.timing` | `observed`, `partial`, `unavailable` timing coverage | P0 |
+| `coverage.humanTurns` | `observed` or `not-applicable` for a child thread | P0 |
+| `coverage.timestampedEvents`, `coverage.untimedEvents`, `coverage.droppedEvents` | Normalized signal and cap counters | P0 |
+| `coverage.contentRules` | Whether the P2 marker rule was enabled for this session | P0 |
+| `humanTurns` | Observed primary human inputs, null for sub-agent threads | P0 |
+| `toolCalls` | Selected primary-transcript tool-call count, including untimed calls | P0 |
+| `toolRuns`, `turnWallTime` | Histogram objects: `bins[].value`, `bins[].count`, `samples`, `p50`, `p95`, `max`; counts for runs, milliseconds for turns | P0 |
+| `recordedTurnDurations`, `inferredTurnDurations` | Histogram sample counts by timing evidence | P0 |
+| `time.activeMilliseconds`, `time.waitingForHumanMilliseconds`, `time.unclassifiedMilliseconds`, `time.observedSpanMilliseconds` | Estimated activity/wait/idle partition and observed wall span | P0 |
+| `time.idleThresholdMilliseconds`, `time.waitingCapMilliseconds` | Fixed 300,000 / 1,800,000 ms thresholds | P0 |
+| `time.activeSpans[].start`, `time.activeSpans[].end` | Coalesced, half-open ISO activity intervals; no event IDs | P0 |
+| `interruptions.interrupted`, `interruptions.replaced`, `interruptions.other` | Deduplicated structured Codex abort counts | P0 |
+| `interruptions.subagentInterrupted` | Distinct interrupted sub-agent activity items | P0 |
+| `interruptions.claudeMarkers` | Fixed rule `claude-interrupt-marker` count; null when off | P2 |
+| `steering.midTurnHumanTurns`, `steering.planEntries`, `steering.planItems` | Steering and distinct planning evidence counters | P0 |
+| `steering.queueOperations.enqueue`, `.dequeue`, `.remove`, `.other` | Fixed operation enum counters | P0 |
+| `steering.queueReasons.prompt`, `.interrupt`, `.completion`, `.cancellation`, `.other`, `.unspecified` | Fixed reason-class counters, never original reason text | P0 |
+| `archetype` | `quick`, `standard`, `deep`, `marathon`, or null; heuristic | P0 |
+| `abandonment` | `flagged`, `not-flagged`, `insufficient-evidence`, `ongoing`; heuristic | P0 |
+| `mix[].at` | ISO metadata observation timestamp | P0 |
+| `mix[].model` | Bounded structured model identifier or null | P0 |
+| `mix[].effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, or null | P0 |
+| `mix[].cliVersion` | Numeric three-component version; optional numeric alpha/beta/rc/dev suffix; null otherwise | P0 |
+| `mix[].entrypoint` | `cli`, `sdk-ts`, `local-agent`, `vscode`, `exec`, `subagent`, `review`, `unknown` | P0 |
+| `mix[].originator` | `codex_cli_rs`, `codex_vscode`, `codex_exec`, `codex_sdk`, `app-server`, `unknown` | P0 |
+| `commands[].name`, `commands[].at` | Whole leading slash-command identifier and normalized timestamp from matched Claude history | P0 |
+| `commandHistoryAvailable` | Whether the matching profile history was readable | P0 |
+| `valueByHour[].hour`, `valueByHour[].usd` | UTC-hour timestamp and API-equivalent value of timestamped priced primary requests | P0 |
+| `pricedRequests`, `timestampedPricedRequests` | Value heatmap denominator/numerator | P0 |
+
+The following paths are relative to `MachineAnalytics.workflow` or `RepositoryAnalytics.workflow`. Public `RepositoryRollup` does not duplicate this large aggregate; per-repository concurrency is inside `workflow.repositories`.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `schemaVersion` | Workflow contract version, `1` | P0 |
+| `coverage.sessions`, `.supportedSessions`, `.timedSessions`, `.humanSessions`, `.contentRuleSessions`, `.partialSessions` | Selected, supported, timed, primary-human, P2-enabled and partial session counts | P0 |
+| `autonomy.humanTurns`, `.turnsPerSession` | Primary human inputs and guarded mean (null below five sessions) | P0 |
+| `autonomy.toolRuns`, `.turnWallTime` | Pooled histograms with the same six histogram fields as above | P0 |
+| `autonomy.recordedTurnDurations`, `.inferredTurnDurations` | Pooled timing evidence counts | P0 |
+| `time.activeMilliseconds`, `.waitingForHumanMilliseconds`, `.unclassifiedMilliseconds` | Sums of session partitions, not a cross-session wall union | P0 |
+| `interruptions.interrupted`, `.replaced`, `.other`, `.subagentInterrupted`, `.claudeMarkers` | Summed counters above, preserving null for disabled marker rules | P0/P2 |
+| `interruptions.eligibleHumanTurns`, `.eligibleSessions`, `.perHumanTurn` | Covered denominator, session count and guarded event frequency; may include enabled P2 counts | P0/P2 |
+| `steering.midTurnHumanTurns`, `.planEntries`, `.planItems`, `.queueOperations`, `.queueReasons` | Summed counters with exactly the same nested keys as session steering | P0 |
+| `concurrency.peak`, `.eligibleSessions` | Peak activity overlap and sessions with positive activity spans | P0 |
+| `concurrency.activeSessionMilliseconds`, `.wallClockActiveMilliseconds`, `.effectiveParallelism` | Summed session activity, wall union and guarded ratio | P0 |
+| `concurrency.timeline[].start`, `.end`, `.sessions` | ISO interval boundaries and concurrently active session count | P0 |
+| `concurrency.daily[].day`, `.peak`, `.activeSessionMilliseconds`, `.wallClockActiveMilliseconds` | UTC date, daily peak, activity sum and wall union | P0 |
+| `repositories[].repositoryId` | Existing pseudonymous repository key | P1 |
+| `repositories[].sessions`, `.peak`, `.effectiveParallelism`, `.activeSessionMilliseconds`, `.wallClockActiveMilliseconds` | Per-repository supported count and concurrency measures | P0 |
+| `archetypes.quick`, `.standard`, `.deep`, `.marathon`, `.unavailable` | Counts by heuristic bucket | P0 |
+| `abandonment.flagged`, `.eligible`, `.ongoing`, `.insufficientEvidence` | Heuristic numerator and coverage counts | P0 |
+| `patterns.timezone`, `.asOfDay` | `UTC` and the snapshot's reference date | P0 |
+| `patterns.cells[].weekday`, `.hour`, `.activeMilliseconds`, `.apiEquivalentUsd` | Sunday=0 weekday, 0–23 UTC hour, summed activity and priced request value; 168 cells | P0 |
+| `patterns.activeDays`, `.longestStreakDays`, `.currentStreakDays` | Active-day and UTC streak counts | P0 |
+| `patterns.pricedRequests`, `.timestampedPricedRequests` | Summed heatmap coverage counters | P0 |
+| `mix[].day`, `.provider`, `.dimension`, `.name`, `.sessions` | UTC date, provider, model/effort/cliVersion/entrypoint/originator dimension, bounded name and distinct session-day count | P0 |
+| `comparisons[].repositoryId` | Existing pseudonymous repository key | P1 |
+| `comparisons[].provider`, `.dimension`, `.archetype`, `.effort`, `.entrypoint`, `.heldConstant` | Comparable context: provider, `cliVersion`/`model`, bucket, effort, entrypoint and the fixed other identifier | P0 |
+| `comparisons[].durationEvidence` | `provider-duration`, `event-derived`, `mixed` timing class held constant | P0 |
+| `comparisons[].before`, `.after`, `.changedAt` | Bounded before/after identifiers and first new-era ISO timestamp | P0 |
+| `comparisons[].beforeSessions`, `.afterSessions`, `.status` | Cohort sizes and `eligible`, `small-cohort`, `overlapping-eras` guard label | P0 |
+| `comparisons[].beforeTurnP50`, `.afterTurnP50`, `.beforeRunP50`, `.afterRunP50`, `.turnTimeChange` | Pooled turn/run medians and guarded fractional timing change; nullable | P0 |
+| `commands[].name`, `.count`, `commandHistorySessions` | Leading command-name counts and readable-history session denominator | P0 |
+| `installedSkills[].name`, `.provider`, `.observedInvocations` | Bounded installed name, Claude/Codex provider and observed scoped invocation count | P0 |
+| `installedSkills[].repositoryId` | Existing repository key for project installations; null for provider profile/shared inventory | P1 |
+| `inventory.directoriesRead`, `.directoriesUnavailable`, `.historyFilesRead`, `.historyFilesUnavailable`, `.malformedHistoryRecords` | Inventory coverage counters; no directory names, history filenames or errors | P0 |
+
+Derived timing/turn/heuristic fields can incorporate P2 interruption control events **only when enabled**, as indicated by coverage. All such values remain counters, enums and timestamps. No P3 content is introduced. New workflow controls persist no extra browser state; only the existing selected-tab/theme storage is used.
 
 ### Health endpoint
 
