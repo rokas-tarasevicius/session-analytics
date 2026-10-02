@@ -14,6 +14,8 @@
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
+| `src/metrics/{limits,cache-context,context-windows,limits-config,limits-report}.ts` | Profile quota collection, request-level cache/context aggregation, reviewed window table, optional read-only configuration, and report projection. New types live in `limits-cache-types.ts`; no second transcript scan is added. |
+| `src/public/views/limits-cache.{js,css}` | Scoped view and request-date aggregation, served through the existing static allowlist/CSP. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
 | `data/rate-cards.json` | Versioned model rates with an effective date and a source URL per model. |

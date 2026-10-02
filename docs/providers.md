@@ -2,6 +2,8 @@
 
 This page lists every evidence source, where it is read from, which fields the parser uses, how faithful the resulting numbers are, and what is not covered yet. All sources are read-only. Field names below are provider field names used for counting and correlation; none of their content is returned except where the [privacy contract](privacy.md) allows it (counters, names, model IDs, timestamps).
 
+Account quota observations and supplemental profile usage stores are described in [Limits, cache, and context](limits-cache.md#evidence-and-profile-scope). Codex quotas are independent of per-session token-counter ownership; Claude status-only quota records never imply a numeric percentage. Claude Code, custom-profile caches and Desktop histories remain separately evidenced, with pseudonymous labels and no credential reads.
+
 Fidelity labels:
 
 - **Exact**: copied from a provider counter, after deduplication.
@@ -33,6 +35,8 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | `assistant` | `effort`; `message.id`, `message.model`; `message.usage`: `input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `cache_creation.ephemeral_5m_input_tokens`, `cache_creation.ephemeral_1h_input_tokens`, `output_tokens`, `output_tokens_details.thinking_tokens`; `tool_use` blocks: `id`, `name`, and `input.skill` for the `Skill` tool only |
 | `user` | whether `message.content` is non-empty text (to count human turns; tool results are not turns) |
 | `queue-operation`, compaction and summary records | counted by type |
+| quota and cache diagnostics | `quotaLimits.{status,rateLimitType,resetsAt,isUsingOverage}`, numeric `apiErrorStatus`/`error.status`, allowlisted `diagnostics.cache_miss_reason.type`; message IDs deduplicate streamed errors |
+| `compact_boundary` | `compactMetadata.{trigger,preTokens,postTokens}`; canonical boundary UUIDs deduplicate repeats |
 
 **Fidelity:**
 
@@ -52,7 +56,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 - Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). History it has deleted cannot be analyzed.
 - `stats-cache.json` and other provider-reported totals are not yet used for reconciliation.
 - Git evidence in transcripts (branches, commit and pull-request records) is not used yet; see [M2](roadmap.md#m2-outcomes).
-- Views do not yet show which profile a session came from.
+- Profile labels and keys are available in Limits & cache; other views do not yet expose a profile dimension.
 
 ## Claude Desktop local agents
 
@@ -84,6 +88,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | `turn_context` | `payload.model`, `payload.effort` |
 | `event_msg` | `payload.type`: `user_message`, `agent_message`, `task_started`, `task_complete`, `context_compacted`, `item_completed` (`item.type` of `UserMessage`, `AgentMessage`, or `ContextCompaction`, and `item.id`), and `token_count` (`info.total_token_usage`, `info.last_token_usage`, `info.model_context_window`) |
 | `compacted` | counted as a compaction |
+| rate-limit snapshots and errors | `token_count.rate_limits.{limit_id,plan_type,primary,secondary,credits}`, with timestamp deduplication; `payload.error.codex_error_info` for usage-limit errors and optional `turn_id` for deduplication |
 | `response_item` | `function_call` and `custom_tool_call`: `name`, `call_id`. A `custom_tool_call` input is scanned for code-mode `tools.<name>(` invocations. The input of a read-capable call (`exec_command`, `read_file`, `Bash`, `Read`, or a code-mode call to one of the first two) is scanned for `<skill>/SKILL.md`. Only tool names and skill identifiers are kept. |
 
 **Fidelity:**
@@ -103,7 +108,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 - Codex's `state_5.sqlite` is not read.
 - `token_usage_record` events and the paginated rollout format are not parsed yet.
-- Rate-limit snapshots, tool exit codes, and durations are recorded by Codex but not used yet; see [M1](roadmap.md#m1-reliability-and-economics).
+- Tool exit codes and durations are recorded by Codex but not used yet; see [M1](roadmap.md#m1-reliability-and-economics).
 
 ## Cursor
 

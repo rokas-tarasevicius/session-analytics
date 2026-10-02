@@ -2,6 +2,7 @@ import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
+import { limitsCacheReport } from "./metrics/limits-report.ts";
 
 const valueFlags = new Set(analysisValueFlags);
 const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
@@ -41,6 +42,7 @@ Options:
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
   --rate-card PATH       Override the reviewed rate card
+  --data-dir PATH        Directory containing optional config.json plan settings
   --version              Print the version
   --help                 Show this help
 `);
@@ -107,6 +109,7 @@ if (process.argv.includes("--json")) {
       `tools: ${compactNumber(analytics.summary.toolCalls)}; ` +
       `compactions: ${analytics.summary.compactions}\n`,
   );
+  process.stdout.write(limitsCacheReport(analytics));
   process.stdout.write("\nTop sessions by priced usage value\n");
   for (const session of [...analytics.sessions]
     .sort((left, right) => right.cost.totalUsd - left.cost.totalUsd)

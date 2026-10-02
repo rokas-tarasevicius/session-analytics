@@ -7,6 +7,7 @@
     <title>Session Analytics</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/views/limits-cache.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -63,6 +64,7 @@
         <button type="button" data-view-button="distributions">Distributions</button>
         <button type="button" data-view-button="activity">Activity</button>
         <button type="button" data-view-button="costs">Costs</button>
+        <button type="button" data-view-button="limits-cache">Limits &amp; cache</button>
         <button type="button" data-view-button="models">Models</button>
         <button type="button" data-view-button="tools">Tools</button>
         <button type="button" data-view-button="skills">Skills</button>
@@ -158,6 +160,8 @@
           <article class="panel"><header><div><p class="kicker">REPOSITORIES</p><h2>Cost components by repository</h2></div></header><div id="repository-cost-components"></div></article>
         </div>
       </section>
+
+      <section class="analytics-view" data-view-panel="limits-cache" id="limits-cache-view" hidden aria-label="Limits and cache analytics"></section>
 
       <section class="analytics-view" data-view-panel="models" hidden aria-labelledby="models-title">
         <header class="view-header"><div><p class="kicker">PROVIDERS</p><h2 id="models-title">Models</h2><p>Bars use a separate scale inside each provider.</p></div><div class="metric-switch" id="model-metric-switch"><button type="button" data-model-metric="value" aria-pressed="true">Usage value</button><button type="button" data-model-metric="calls" aria-pressed="false">Model calls</button><button type="button" data-model-metric="input" aria-pressed="false">Input</button><button type="button" data-model-metric="output" aria-pressed="false">Output</button></div></header>

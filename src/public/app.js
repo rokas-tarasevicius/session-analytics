@@ -1,3 +1,5 @@
+import { clearLimitsCacheView, renderLimitsCache } from "./views/limits-cache.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -567,12 +569,15 @@ function clearInactiveAnalyticsViews(activeName) {
     costs: [elements.providerCostComponents, elements.repositoryCostComponents],
     distributions: [elements.distributionRepositoryOptions, elements.distributionKey, elements.distributionDuration, elements.distributionCost, elements.distributionTools, elements.distributionCompactions],
     models: [elements.modelsByProvider],
+    "limits-cache": [$("#limits-cache-view")],
     skills: [elements.skillsProviderFilters, elements.skillsByRepository, elements.skillsKey, elements.skillsDetail],
     tools: [elements.toolsProviderFilters, elements.toolsByRepository, elements.toolsKey, elements.toolsDetail],
   };
   for (const [name, elementsForView] of Object.entries(containers)) {
     if (name === activeName) continue;
-    for (const element of elementsForView) clear(element);
+    for (const element of elementsForView) {
+      if (name === "limits-cache") clearLimitsCacheView(element); else clear(element);
+    }
   }
 }
 
@@ -581,6 +586,7 @@ function renderActiveAnalyticsView(view) {
   if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
   if (name === "costs") renderCosts(view);
+  if (name === "limits-cache") renderLimitsCache($("#limits-cache-view"), snapshot, { ...selectedWindow(), repositoryId: selectedRepository()?.repository.id ?? null });
   if (name === "models") renderModels(view);
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
@@ -751,7 +757,7 @@ function populateRepositories() {
 }
 
 function configureWindow() {
-  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay)]).sort();
+  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay, limitsCache }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay), ...(limitsCache?.buckets ?? []).flatMap(({ day }) => day ? [day] : [])]).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10), maximum = dates.at(-1) || minimum;
   for (const input of [elements.windowStart, elements.windowEnd]) { input.min = minimum; input.max = maximum; }
   elements.windowStart.value = minimum; elements.windowEnd.value = maximum; elements.windowPreset.value = "all";
@@ -843,6 +849,7 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
   });
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
-const storedView = localStorage.getItem("session-analytics-view");
+const requestedView = location.hash.slice(1);
+const storedView = viewPanels.some(({ dataset }) => dataset.viewPanel === requestedView) ? requestedView : localStorage.getItem("session-analytics-view");
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
 setTheme(localStorage.getItem("session-analytics-theme") || "light"); void load(false);

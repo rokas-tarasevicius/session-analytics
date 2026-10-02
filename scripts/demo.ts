@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { demoRateLimits, writeLimitsDemo } from "./demo-limits-cache.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -272,6 +273,13 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       tools.push({ id: `toolu_${hex(24)}`, name, input });
     }
     const usage = claudeUsage(model, state, output, longCache);
+    const cacheMiss = index > 0 && chance(0.08) ? pick(["tools_changed", "system_changed", "messages_changed"] as const) : null;
+    if (cacheMiss) {
+      usage.cache_creation_input_tokens += usage.cache_read_input_tokens;
+      if (longCache) usage.cache_creation.ephemeral_1h_input_tokens += usage.cache_read_input_tokens;
+      else usage.cache_creation.ephemeral_5m_input_tokens += usage.cache_read_input_tokens;
+      usage.cache_read_input_tokens = 0;
+    }
     const content = [
       { type: "text", text: "[synthetic demo response]" },
       ...tools.map(({ id, name, input }) => ({ type: "tool_use", id, name, input })),
@@ -289,7 +297,8 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       push({ type: "assistant", requestId, ...(effort ? { effort } : {}), message: message(content.slice(0, 1), Math.max(1, Math.round(output * 0.2))) });
       state.clock += integer(1, 6) * 1000;
     }
-    push({ type: "assistant", requestId, ...(effort ? { effort } : {}), message: message(content, output) });
+    push({ type: "assistant", requestId, ...(effort ? { effort } : {}), message: message(content, output),
+      ...(cacheMiss ? { diagnostics: { cache_miss_reason: { type: cacheMiss } } } : {}) });
     state.clock += integer(3, 40) * 1000;
     for (const tool of tools) {
       push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: tool.id, content: "[synthetic tool result]" }] } });
@@ -297,8 +306,10 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
     }
     state.context += integer(600, 3_200);
     if (state.context > 165_000) {
-      push({ type: "system", subtype: "compact_boundary", content: "Conversation compacted" });
-      state.context = integer(24_000, 38_000);
+      const postTokens = integer(24_000, 38_000);
+      push({ type: "system", subtype: "compact_boundary", content: "Conversation compacted",
+        compactMetadata: { trigger: "auto", preTokens: state.context, postTokens } });
+      state.context = postTokens;
       state.compactions += 1;
     }
   }
@@ -376,7 +387,7 @@ function writeCodexSession(
       const reasoning = Math.round(output * between(0.25, 0.65));
       const last = { cached_input_tokens: cached, input_tokens: input, output_tokens: output, reasoning_output_tokens: reasoning, total_tokens: input + output };
       for (const key of Object.keys(total) as Array<keyof CodexCounter>) total[key] += last[key];
-      push("event_msg", { type: "token_count", info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 272_000 } });
+      push("event_msg", { type: "token_count", info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 272_000 }, rate_limits: demoRateLimits(clock) });
       const callId = `call_${hex(24)}`;
       const kind = weighted([["exec_command", 52], ["apply_patch", 26], ["update_plan", 8], ["write_stdin", 6], ["skill", 3], ["none", 5]] as const);
       if (kind === "apply_patch") {
@@ -533,6 +544,7 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
     }
   }
   writeCursorDatabase(cursorDatabase, cursorSessions);
+  writeLimitsDemo({ root, claudeRoot, codexRoot, repository: repositories[0]!.root, now });
   process.stderr.write(`Generated ${sessions} synthetic top-level sessions across ${repositories.length} repositories in ${root}\n`);
   return { claudeRoot, codexRoot, codexArchiveRoot, cursorDatabase, home };
 }
@@ -575,6 +587,7 @@ for (const [key, value] of Object.entries(process.env)) {
 environment["HOME"] = sources.home;
 
 const sourceFlags = [
+  "--data-dir", join(root, "analytics-data"),
   "--claude-root", sources.claudeRoot,
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,

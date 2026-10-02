@@ -72,10 +72,22 @@ Skill names are a reviewed derived field rather than raw tool input. Accept only
 
 ## Useful derived indicators
 
+### Limits, cache, and context (implemented)
+
+The optional snapshot `limitsCache` namespace carries profile quota timelines and monthly subscription comparisons; its session namespace carries cache economics, per-request context coverage/curves, daily model/execution buckets, cache-break flags and compaction detail. [Limits, cache, and context](limits-cache.md) defines every formula, source location, retention bound and guard, with configuration examples.
+
+- Quotas are account-wide observations grouped by pseudonymous profile, never repository consumption. Timestamp duplicates are removed independently of token ownership. Headroom expires after 15 minutes or reset. Exposure only covers adjacent numeric observations at most 15 minutes apart, clipped at resets; ratios need three numeric snapshots and five observed minutes. Time-to-limit is a guarded projection, not a promise.
+- Cache hit share uses cache-read / all input tokens and needs three requests and 1,000 input tokens. Net savings compare the same input priced without caching to observed uncached/read/write value, with per-request long-context pricing and negative savings allowed. Missing prices or request input reduce coverage. Re-cache write value on flagged requests is counted once; flags are not causal claims.
+- Context peak is the maximum paired per-request input/window ratio, replacing the ratio of two independent maxima. Codex windows are recorded; Claude windows are reviewed model capacities. Strictly-above-40/60/80% shares use eligible requests with a three-request guard. Missing compaction sizes stay null; intervals count human turns within a stream.
+- Monthly leverage compares dated input-plus-output API-equivalent value with an explicitly configured full monthly USD plan price. Three active days, positive price and complete coverage are required. Plan type never supplies a price. There is no extrapolation or claim of cash saved.
+
+Quota panels ignore repository/date filters because quota is shared. Cache/context panels use request dates; unknown time is excluded from dated views/monthly comparisons, not fabricated from file modification time. Reports include undated request totals. Detail arrays expose sampling flags; aggregate counters use all eligible requests.
+
+### Further candidates
+
 These can be added without reading content, provided they are labeled as indicators:
 
 - priced usage value per user turn, task completion, model call, effective tool call, or active hour;
-- cache savings compared with pricing all input as uncached;
 - context churn: cumulative input divided by largest context window or event span;
 - compactions per hour and spend between compactions;
 - tool diversity and concentration by family;

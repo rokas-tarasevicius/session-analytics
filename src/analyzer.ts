@@ -7,6 +7,10 @@ import { basename, dirname, join, parse, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { CacheContextCollector, claudeRequestEvidence, type RequestEvidence } from "./metrics/cache-context.ts";
+import { claudeContextWindow } from "./metrics/context-windows.ts";
+import { LimitsCollector } from "./metrics/limits.ts";
+import type { LimitsCacheAnalytics } from "./metrics/limits-cache-types.ts";
 
 import type {
   AnalyzeOptions,
@@ -76,6 +80,7 @@ export interface RepositoryRow {
 }
 
 interface TokenEvent {
+  evidence: RequestEvidence;
   executionKind: SessionAnalytics["executionKind"];
   fingerprint: string | null;
   last: TokenUsage | null;
@@ -101,6 +106,8 @@ interface TranscriptCandidate {
 }
 
 interface MutableSession {
+  limitsCache: CacheContextCollector;
+  limitsProvider: "claude" | "codex" | null;
   assistantMessages: number;
   compactions: number;
   delegatedAgents: Set<string>;
@@ -297,6 +304,7 @@ function addModelUsage(
   timestamp: string | null,
   fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
+  requestEvidence?: RequestEvidence,
 ): void {
   let aggregate = session.models.get(model);
   if (!aggregate) {
@@ -312,11 +320,20 @@ function addModelUsage(
   aggregate.calls += 1;
   sumTokens(aggregate, usage);
   const rate = rateCard.models[model];
+  const cost = rate ? calculateCost(rate, usage, inputForRequest) : null;
+  if (requestEvidence && session.limitsProvider) {
+    session.limitsCache.addRequest(model, usage, rate, cost, timestamp, executionKind, requestEvidence, session.limitsProvider);
+    if (requestEvidence.requestInputKnown) {
+      session.maxInputTokensPerCall = Math.max(session.maxInputTokensPerCall, usage.inputTokens);
+      session.maxContextWindow = Math.max(session.maxContextWindow,
+        requestEvidence.contextWindow ?? (session.limitsProvider === "claude" ? claudeContextWindow(model) : null) ?? 0);
+    }
+  }
   if (!rate) {
     aggregate.priced = false;
     return;
   }
-  const cost = calculateCost(rate, usage, inputForRequest);
+  if (!cost) return;
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
@@ -326,6 +343,8 @@ function addModelUsage(
 
 function createMutableSession(): MutableSession {
   return {
+    limitsCache: new CacheContextCollector(),
+    limitsProvider: null,
     assistantMessages: 0,
     compactions: 0,
     delegatedAgents: new Set<string>(),
@@ -596,8 +615,11 @@ async function analyzeCodex(
   inheritedWarnings: string[],
   counterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCounters: Set<string> = new Set<string>(),
+  limits?: LimitsCollector,
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  state.limitsProvider = "codex";
+  state.limitsCache.profileKey = limits?.profileKey(path) ?? null;
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
@@ -625,6 +647,7 @@ async function analyzeCodex(
     const type = stringValue(record["type"]);
     const payload = asRecord(record["payload"]);
     const payloadType = stringValue(payload?.["type"]);
+    limits?.observe(path, record, row.conductor_session_id);
 
     if (type === "session_meta") {
       state.executionKind = asRecord(payload?.["source"])?.["subagent"]
@@ -641,6 +664,7 @@ async function analyzeCodex(
     }
     if (type === "compacted") {
       compactedRecords.count += 1;
+      state.limitsCache.addCompaction(path, "compacted", `${line}`, timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
       return;
     }
     if (type === "event_msg") {
@@ -648,14 +672,20 @@ async function analyzeCodex(
       if (payloadType === "agent_message") legacy.agentMessages += 1;
       if (payloadType === "task_started") state.taskStarts += 1;
       if (payloadType === "task_complete") state.taskCompletions += 1;
-      if (payloadType === "context_compacted") legacy.compactions += 1;
+      if (payloadType === "context_compacted") {
+        legacy.compactions += 1;
+        state.limitsCache.addCompaction(path, "legacy", `${line}`, timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
+      }
       if (payloadType === "item_completed") {
         const item = asRecord(payload?.["item"]);
         const itemId = stringValue(item?.["id"]) ?? `${line}`;
         const itemType = stringValue(item?.["type"]);
         if (itemType === "UserMessage") items.userMessages.add(itemId);
         if (itemType === "AgentMessage") items.agentMessages.add(itemId);
-        if (itemType === "ContextCompaction") items.compactions.add(itemId);
+        if (itemType === "ContextCompaction") {
+          items.compactions.add(itemId);
+          state.limitsCache.addCompaction(path, "item", itemId, timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
+        }
       }
       if (payloadType === "token_count") {
         const info = asRecord(payload?.["info"]);
@@ -669,6 +699,9 @@ async function analyzeCodex(
             nonNegativeNumberValue(info?.["model_context_window"]),
           );
           tokenEvents.push({
+            evidence: { stream: path, contextWindow: nonNegativeNumberValue(info?.["model_context_window"]) || null,
+              requestInputKnown: typeof last?.["input_tokens"] === "number" && Number.isFinite(last["input_tokens"]) && last["input_tokens"] >= 0,
+              compactions: Math.max(legacy.compactions, compactedRecords.count, items.compactions.size), reportedReason: null, ttlMinutes: null },
             executionKind: state.executionKind,
             fingerprint: codexCounterFingerprint(total, last),
             inputForRequest,
@@ -764,6 +797,7 @@ async function analyzeCodex(
         event.timestamp,
         row.updated_at,
         event.executionKind,
+        event.evidence,
       );
     }
   }
@@ -842,8 +876,11 @@ async function analyzeClaude(
   mainPath: string,
   rateCard: RateCard,
   inheritedWarnings: string[],
+  limits?: LimitsCollector,
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  state.limitsProvider = "claude";
+  state.limitsCache.profileKey = limits?.profileKey(mainPath) ?? null;
   state.effort = null;
   state.executionKind = "top-level";
   state.executionKindsSeen.add("top-level");
@@ -854,6 +891,7 @@ async function analyzeClaude(
   // only the final snapshot - the one with the most output - is the message's
   // usage. Pricing the first snapshot undercounts output and reasoning.
   const assistantUsage = new Map<string, {
+    evidence: RequestEvidence;
     executionKind: SessionAnalytics["executionKind"];
     model: string;
     reasoningExposed: boolean;
@@ -872,6 +910,8 @@ async function analyzeClaude(
   const totals = zeroTokens();
 
   for (const path of paths) {
+    let streamTurns = 0, streamCompactions = 0;
+    const streamBoundaries = new Set<string>();
     const executionKind: SessionAnalytics["executionKind"] =
       path === mainPath ? "top-level" : "subagent";
     state.executionKindsSeen.add(executionKind);
@@ -884,10 +924,20 @@ async function analyzeClaude(
       trackTimestamp(state, timestamp);
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
+      let repeatedBoundary = false;
+      limits?.observe(mainPath, record, row.conductor_session_id);
+      if (subtype === "compact_boundary") {
+        const identity = stringValue(record["uuid"]) ?? `${line}`;
+        repeatedBoundary = streamBoundaries.has(identity);
+        if (!streamBoundaries.has(identity)) {
+          streamBoundaries.add(identity); streamCompactions++;
+          state.limitsCache.addCompaction(path, "boundary", identity, timestamp, executionKind, streamTurns, record["compactMetadata"]);
+        }
+      }
       const agentId = stringValue(record["agentId"]);
       if (agentId) state.delegatedAgents.add(agentId);
       if (type === "queue-operation") state.queueOperations += 1;
-      if (type.includes("compact") || subtype.includes("compact")) state.compactions += 1;
+      if (!repeatedBoundary && (type.includes("compact") || subtype.includes("compact"))) state.compactions += 1;
       if (type.includes("summary") || subtype.includes("summary")) state.summaries += 1;
 
       const message = asRecord(record["message"]);
@@ -907,6 +957,7 @@ async function analyzeClaude(
         const usageRecord = asRecord(message["usage"]);
         const usage = usageRecord ? claudeUsage(usageRecord) : zeroTokens();
         const snapshot = {
+          evidence: claudeRequestEvidence(record, path, streamCompactions),
           executionKind,
           model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
           reasoningExposed: Boolean(asRecord(usageRecord?.["output_tokens_details"])),
@@ -927,8 +978,11 @@ async function analyzeClaude(
         if (replaces) {
           assistantUsage.set(messageId, {
             ...snapshot,
+            evidence: { ...snapshot.evidence, reportedReason: snapshot.evidence.reportedReason ?? previous?.evidence.reportedReason ?? null },
             timestamp: previous?.timestamp ?? timestamp,
           });
+        } else if (previous && !previous.evidence.reportedReason && snapshot.evidence.reportedReason) {
+          previous.evidence.reportedReason = snapshot.evidence.reportedReason;
         }
         for (const rawBlock of contentBlocks(message)) {
           const block = asRecord(rawBlock);
@@ -955,17 +1009,18 @@ async function analyzeClaude(
         if (humanContent) {
           seenHumanMessages.add(messageId);
           state.userTurns += 1;
+          streamTurns += 1;
         }
       }
     });
   }
   state.effort = effort.current?.value ?? null;
   let reasoningMissing = false;
-  for (const { executionKind, model, reasoningExposed, timestamp, usage } of assistantUsage.values()) {
+  for (const { evidence, executionKind, model, reasoningExposed, timestamp, usage } of [...assistantUsage.values()].sort((a,b) => (a.timestamp ?? "").localeCompare(b.timestamp ?? ""))) {
     if (tokenCount(usage) === 0) continue;
     if (usage.outputTokens > 0 && !reasoningExposed) reasoningMissing = true;
     sumTokens(totals, usage);
-    addModelUsage(state, rateCard, model, usage, usage.inputTokens, timestamp, row.updated_at, executionKind);
+    addModelUsage(state, rateCard, model, usage, usage.inputTokens, timestamp, row.updated_at, executionKind, evidence);
   }
   if (reasoningMissing) {
     state.warnings.push(
@@ -999,8 +1054,8 @@ function finalizeSession(
     (sum, value) => sum + value,
     0,
   );
-  const contextUtilizationPeak =
-    state.maxContextWindow > 0 ? state.maxInputTokensPerCall / state.maxContextWindow : null;
+  const limitsCache = state.limitsProvider ? state.limitsCache.finalize() : undefined;
+  const contextUtilizationPeak = limitsCache?.context.peakFill ?? null;
   const executionKind =
     state.executionKindsSeen.size > 1
       ? "mixed"
@@ -1028,6 +1083,7 @@ function finalizeSession(
     userTurns: state.userTurns,
   };
   return {
+    ...(limitsCache ? { limitsCache } : {}),
     cost,
     costBasis:
       row.agent_type === "cursor"
@@ -1387,12 +1443,13 @@ async function analyzeTranscriptCandidate(
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
+  limits?: LimitsCollector,
 ): Promise<SessionAnalytics> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   return candidate.provider === "codex"
-    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters)
-    : await analyzeClaude(row, candidate.path, rateCard, warnings);
+    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, limits)
+    : await analyzeClaude(row, candidate.path, rateCard, warnings, limits);
 }
 
 function cursorPaths(data: JsonRecord): string[] {
@@ -1977,7 +2034,7 @@ function aggregate(
 
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
-): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[] }> {
+): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[]; limitsCache: LimitsCacheAnalytics }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
@@ -2049,6 +2106,8 @@ async function analyzeSelectedRepositories(
       ? [options.codexRoot, options.codexArchiveRoot].filter((root): root is string => Boolean(root))
       : discoveredRoots.codex;
     const claudeRoots = options.claudeRoot ? [options.claudeRoot] : discoveredRoots.claude;
+    const limits = await LimitsCollector.create({ claude: claudeRoots, codex: codexRoots, home: homedir(),
+      dataDirectory: options.dataDirectory, includeDesktop: !options.claudeRoot });
     const [codexIndexes, claudeIndexes] = await Promise.all([
       Promise.all(codexRoots.map((root) => indexProviderTranscripts(root, null, "codex"))),
       Promise.all(claudeRoots.map((root) => indexProviderTranscripts(root, null, "claude"))),
@@ -2095,8 +2154,8 @@ async function analyzeSelectedRepositories(
       }
       try {
         const session = provider === "codex"
-          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, selected.path, rateCard, selected.warnings);
+          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, limits)
+          : await analyzeClaude(row, selected.path, rateCard, selected.warnings, limits);
         claimed.add(`${provider}:${row.provider_session_id}`);
         return session;
       } catch (error) {
@@ -2117,14 +2176,14 @@ async function analyzeSelectedRepositories(
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
         return candidate.provider === "codex"
-          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]);
+          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, limits)
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], limits);
       } catch { return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters); } catch { return null; }
+      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, limits); } catch { return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {
@@ -2166,6 +2225,7 @@ async function analyzeSelectedRepositories(
     const repositoriesForOutput = selectedRepositories;
     return {
       rateCard,
+      limitsCache: limits.finalize(sessions, new Date().toISOString(), explicitRepositoryFilter),
       repositories: repositoriesForOutput.map((repository) => {
         const result = aggregate(repository, sessionsByRepository.get(repository.id) ?? [], rateCard);
         result.warnings.push(
@@ -2237,7 +2297,7 @@ export async function analyzeMachineSessions(
   options: AnalyzeOptions = {},
 ): Promise<MachineAnalytics> {
   const result = await analyzeSelectedRepositories(options);
-  return aggregateMachine(result.repositories, result.rateCard);
+  return { ...aggregateMachine(result.repositories, result.rateCard), limitsCache: result.limitsCache };
 }
 
 /** Backward-compatible single-repository entry point for callers that intentionally narrow scope. */
@@ -2257,5 +2317,5 @@ export async function analyzeRepositorySessions(
   const result = await analyzeSelectedRepositories(options);
   const repository = result.repositories[0];
   if (!repository) throw new Error("No evidenced repository matched the requested filter.");
-  return repository;
+  return { ...repository, limitsCache: result.limitsCache };
 }

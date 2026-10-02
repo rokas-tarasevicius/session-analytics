@@ -41,10 +41,10 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 
 ### Limits, cache, and context economics
 
-- [ ] Rate-limit headroom over time from Codex rate-limit snapshots and Claude quota records: time to limit, sessions that hit limits, and usage-limit errors.
-- [ ] Cache-break events with their cause (provider-reported cache-miss reason, idle gap longer than the TTL, model switch, tool-set change) and the cost of re-caching.
-- [ ] Context fill curve, peak fill, compaction before and after sizes, and turns between compactions.
-- [ ] Subscription leverage per profile: API-equivalent value against plan price.
+- [x] Rate-limit headroom over time from Codex snapshots and Claude quotas: guarded time to limit, sessions with observed limit errors, profile usage caches and Desktop account history.
+- [x] Cache-break provider reasons and separately labeled idle-TTL/model-switch/compaction heuristics; observed re-cache write cost and no-cache input counterfactual.
+- [x] Context fill curves, paired per-request peaks, recorded compaction before/after sizes, and turns between compactions.
+- [x] Subscription leverage per profile against explicitly configured monthly USD prices, with coverage guards.
 - [ ] Counterfactual pricing: the same tokens at another model's rates.
 
 ## M2: Outcomes

@@ -13,6 +13,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - Tool names, and skill identifiers that match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
+- Pseudonymous profile keys, ordinal or explicitly configured display labels, allowlisted quota/plan state, and user-configured monthly USD plan amounts.
 - Fixed-text parser warnings, which may include counts and model IDs.
 - The rate card's effective date, model IDs, and public source URLs.
 
@@ -73,6 +74,7 @@ Returned by `/api/analytics` and `report --json`.
 | `summary` | Machine totals; see [Summary](#summary) | P0 |
 | `topTools[]` | `{ name, value }`, effective tool calls by tool name, descending | P0 |
 | `warnings[]` | Fixed-text coverage notes (unpriced models, missing or unmatched transcripts, unreadable roots) | P0 |
+| `limitsCache` | Optional quota/profile and subscription namespace, also present on the single-repository result; see [Limits and cache](#limits-and-cache) | P0/P1 |
 
 ### Repository rollup (`RepositoryRollup`)
 
@@ -144,6 +146,7 @@ Repository summaries and the machine summary share these fields.
 | `skills` | `{ skillId: count }`, skill invocations | P0 |
 | `skillEvidence` | `explicit` (Claude), `inferred` (Codex lower bound), or `unavailable` (Cursor) | P0 |
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
+| `limitsCache` | Optional request cache/context namespace for Claude and Codex; see [Limits and cache](#limits-and-cache). Absent for unsupported evidence | P0/P1 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
 | `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
@@ -166,9 +169,9 @@ Repository summaries and the machine summary share these fields.
 | `delegatedAgents` | Distinct delegated agents observed (Claude) | P0 |
 | `durationMilliseconds` | Session start to last event | P0 |
 | `eventSpanMilliseconds` | First event to last event | P0 |
-| `maxContextWindow` | Largest context window the provider reported | P0 |
+| `maxContextWindow` | Largest observed Codex window or reviewed Claude model capacity | P0 |
 | `maxInputTokensPerCall` | Largest input of a single request | P0 |
-| `contextUtilizationPeak` | `maxInputTokensPerCall / maxContextWindow`, or `null` when no window is reported | P0 |
+| `contextUtilizationPeak` | Maximum paired request-input/window ratio over eligible deduplicated requests, or `null`; Claude's reviewed capacities are estimates | P0 |
 
 ### Token usage (`TokenUsage`)
 
@@ -208,6 +211,97 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 | `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
 | `calls` | Requests attributed to this model | P0 |
 | `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
+
+### Limits and cache
+
+Types are explicitly defined in [`src/metrics/limits-cache-types.ts`](../src/metrics/limits-cache-types.ts); formulas and guards are in [limits-cache.md](limits-cache.md). All provider records are projected field by field. Source/config paths, account/organization IDs, request IDs, unknown plan/limit names, diagnostic text, compaction summaries, raw credits metadata and raw config objects never leave the parser. No P2/P3 processing is added.
+
+#### Snapshot `limitsCache`
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `profiles[]` | Observed provider profiles or separate Desktop accounts | P0/P1 |
+| `profiles[].key` | `profile-` plus 20 SHA-256 hex characters of provider-qualified canonical profile identity or Desktop organization; unkeyed, stable and pseudonymous, not anonymous against known-input recomputation | P1 |
+| `profiles[].provider` | `claude` or `codex` | P0 |
+| `profiles[].ordinal` | One-based discovery ordinal within provider | P0 |
+| `profiles[].label` | Ordinal label, or explicitly configured bounded public display label; never inferred from directory names | P1 |
+| `profiles[].scope` | `profile` or `desktop-account`; profiles are not assumed to have distinct subscriptions | P0 |
+| `profiles[].planType`, `planObservedAt` | Allowlisted Codex plan enum (`free`, `go`, `plus`, `pro`, `team`, `business`, `enterprise`, `edu`, `unknown`) and observation time; nullable, never mapped to a guessed price | P0 |
+| `profiles[].credits` | Nullable allowlisted credit observation | P0 |
+| `profiles[].credits.observedAt` | Observation timestamp | P0 |
+| `profiles[].credits.hasCredits`, `unlimited` | Nullable booleans | P0 |
+| `profiles[].credits.balance` | Nullable finite numeric balance in provider units, not a USD conversion | P0 |
+| `profiles[].windows[]` | Separate rate-limit windows; never added across accounts/profiles | P0/P1 |
+| `profiles[].windows[].key` | Hashed limit identifier plus window kind/duration, or fixed Claude window enum | P1 |
+| `profiles[].windows[].label`, `windowMinutes` | Fixed display label and nullable observed window duration | P0 |
+| `profiles[].windows[].observations`, `duplicatesDiscarded` | Retained observation count and encountered timestamp collisions | P0 |
+| `profiles[].windows[].historyLimited`, `timelineSampled` | Explicit retention/sampling indicators | P0 |
+| `profiles[].windows[].timeline[]`, `latest` | Bounded timeline and most recent sample, as defined below | P0 |
+| `profiles[].windows[].stale` | Latest sample expired, future-dated, or past reset | P0 |
+| `profiles[].windows[].headroomPercent`, `timeToLimitMinutes` | Nullable headroom and guarded projection from latest observation | P0 |
+| `profiles[].windows[].observedMinutes`, `above90Minutes`, `shareAbove90` | Measured exposure denominator, ≥90% duration and nullable guarded share | P0 |
+| `profiles[].limitHits[].timestamp`, `kind` | Bounded event details; ISO time and `http-429`, `usage-limit-exceeded`, or `quota-rejected` | P0 |
+| `profiles[].limitHitCount`, `sessionsWithLimitErrors` | Exact observed event count and sessions with explicit request-limit errors; no raw session IDs | P0 |
+| `subscriptions[].profileKey`, `month` | Profile pseudonym and UTC `YYYY-MM` | P1/P0 |
+| `subscriptions[].apiEquivalentUsd`, `monthlyPriceUsd`, `leverage` | Observed dated API value, nullable user-configured full monthly USD price and nullable guarded ratio | P0 |
+| `subscriptions[].pricedTokens`, `observedTokens`, `pricingCoverage` | Input-plus-output pricing denominator/numerator and nullable coverage | P0 |
+| `subscriptions[].activeDays`, `partialMonth`, `scope` | Observed active days, current-month flag and `all-repositories`/`selected-repository` scope | P0 |
+| `warnings[]` | Fixed optional-source/configuration warnings, without paths or raw errors | P0 |
+| `policy.freshnessMinutes`, `maximumObservationGapMinutes`, `minimumObservedMinutes`, `minimumRequests`, `minimumInputTokens` | Published freshness, exposure and activity guards | P0 |
+| `policy.contextTableReviewedAt` | Review date for Claude fallback model capacities | P0 |
+
+Every `timeline[]` / `latest` sample contains only:
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `timestamp`, `resetsAt` | Normalized ISO observation time and nullable reset | P0 |
+| `usedPercent` | Nullable finite utilization in [0, 100] | P0 |
+| `status` | Nullable `allowed`, `allowed_warning`, or `rejected` | P0 |
+| `source` | `codex-transcript`, `claude-quota`, `claude-cache`, or `claude-desktop` | P0 |
+| `usingOverage` | Nullable recorded boolean | P0 |
+
+#### Session `limitsCache`
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `profileKey` | Nullable profile pseudonym joining snapshot profiles | P1 |
+| `cache` | Totals below, plus guarded `hitRatio` and nullable input `pricingCoverage` | P0 |
+| `context` | Context totals below, plus the curve and guarded threshold shares | P0 |
+| `buckets[].day`, `model`, `executionKind` | Nullable UTC request day, model ID, and execution enum; repository/profile come from the containing session | P0 |
+| `buckets[].observedTokens`, `pricedTokens`, `apiEquivalentUsd` | Input-plus-output totals and ordinary priced request value, for monthly comparisons | P0 |
+| `buckets[].cache`, `context` | Exact additive totals below (peak uses maximum) | P0 |
+| `cacheBreaks[].timestamp`, `model`, `executionKind` | Nullable time and allowlisted request dimensions | P0 |
+| `cacheBreaks[].reportedReason` | Nullable `previous_message_not_found`, `messages_changed`, `tools_changed`, `system_changed`, `model_changed` | P0 |
+| `cacheBreaks[].heuristics[]` | `idle-ttl`, `model-switch`, `compaction` flags | P0 |
+| `cacheBreaks[].writeTokens`, `writeUsd` | Observed write tokens and nullable priced write value on that request | P0 |
+| `cacheBreaksSampled` | Event details sampled; aggregate counts remain exact | P0 |
+| `compactions[].timestamp`, `executionKind`, `trigger` | Nullable time, execution enum, and `auto`/`manual`/`unknown` | P0 |
+| `compactions[].preTokens`, `postTokens`, `turnsSincePrevious` | Nullable numeric pre/post sizes and observed human-turn interval within that stream | P0 |
+| `compactionCount`, `compactionsSampled` | Total supported boundaries and explicit detail-sampling flag | P0 |
+
+Cache totals in `cache` and `buckets[].cache`:
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `requests`, `inputTokens`, `cacheReadTokens`, `cacheWriteTokens` | Deduplicated request/input class counts | P0 |
+| `pricedRequests`, `pricedInputTokens` | Requests/input eligible for no-cache comparison with a known rate and known request input | P0 |
+| `actualInputUsd`, `noCacheInputUsd`, `netSavingsUsd` | Observed input value, counterfactual value and difference; difference may be negative | P0 |
+| `cacheWriteUsd`, `recacheWriteUsd` | Observed write value, and its subset on requests with break flags | P0 |
+| `breakRequests`, `pricedBreakRequests`, `reportedBreaks`, `heuristicBreaks` | Unique flagged requests, their priced denominator, and potentially overlapping reported/heuristic counts | P0 |
+| `unknownTtlWriteRequests` | Write requests lacking explicit TTL breakdown | P0 |
+
+Context totals in `context` and `buckets[].context`:
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `requests`, `eligibleRequests` | Deduplicated requests and requests with paired input/window evidence | P0 |
+| `reportedWindowRequests`, `reviewedWindowRequests` | Recorded Codex versus reviewed Claude-capacity coverage | P0 |
+| `above40`, `above60`, `above80`, `peakFill` | Strict threshold counts and nullable maximum paired fill ratio | P0 |
+| `context.shareAbove40`, `shareAbove60`, `shareAbove80` | Session-only nullable shares, with minimum activity guard | P0 |
+| `context.curveSampled` | Session-only curve sampling indicator | P0 |
+| `context.curve[].request`, `timestamp`, `executionKind`, `inputTokens`, `windowTokens`, `fill` | Request ordinal (not raw ID), nullable time, execution enum, input/window counts and paired ratio | P0 |
+
+New sentinel tests in `test/limits-cache.test.ts` place content in diagnostics, quotas, unknown limit/plan IDs, credits metadata, Desktop organization IDs, compaction summaries and configuration. They verify serialized snapshots and terminal output contain only the fields above. Existing API privacy tests cover the same isolated-worker projection.
 
 ### Health endpoint
 

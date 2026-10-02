@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, rm } from "node:fs/promises";
 import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -73,6 +73,9 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   let child: ChildProcess | null = null;
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    await appendFile(join(fixture.codexRoot, "2026/07/20", "rollout-2026-07-20T10-00-00-11111111-1111-4111-8111-111111111111.jsonl"),
+      JSON.stringify({ type: "event_msg", timestamp: "2026-07-20T10:10:00Z", payload: { type: "token_count", info: null,
+        rate_limits: { limit_id: "secret-limit-payload", plan_type: "secret-limit-payload", primary: { used_percent: 80, window_minutes: 300, resets_at: 1784548800, payload: "secret-limit-payload" }, credits: { balance: "secret-limit-payload" } } } }) + "\n");
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
@@ -81,6 +84,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,
       SESSION_ANALYTICS_CURSOR_DATABASE: fixture.cursorDatabasePath,
       SESSION_ANALYTICS_CONDUCTOR_DATABASE: fixture.databasePath,
+      SESSION_ANALYTICS_DATA_DIR: join(temporaryDirectory, "analytics-data"),
     };
     child = spawn(process.execPath, [serverPath, "--port", String(port)], {
       cwd: repositoryRoot,
@@ -124,6 +128,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(serialized, /"skillEvidence":"inferred"/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
+    assert.doesNotMatch(serialized, /secret-limit-payload/);
+    assert.match(serialized, /"usedPercent":80/);
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);
@@ -132,6 +138,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const pageText = await page.text();
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
+    assert.match(pageText, /data-view-button="limits-cache"/);
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
     const application = await fetch(`${origin}/app.js`);
@@ -143,6 +150,12 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(applicationText, /Math\.log1p\(value\)[\s\S]*\* 7/);
     assert.match(applicationText, /session-analytics-theme"\) \|\| "light"/);
     const stylesheet = await fetch(`${origin}/styles.css`);
+    for (const asset of ["/views/limits-cache.js", "/views/limits-cache.css"]) {
+      const assetResponse = await fetch(`${origin}${asset}`);
+      assert.equal(assetResponse.status, 200);
+      assert.match(assetResponse.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+      assert.ok((await assetResponse.text()).length > 100);
+    }
     const stylesheetText = await stylesheet.text();
     assert.match(stylesheetText, /--heat-7:\s*#1f5b49/);
     assert.doesNotMatch(stylesheetText, /--heat-[1-7]:\s*#(?:9a7736|c85b45|c69a5d|d66b55)/);

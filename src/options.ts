@@ -2,6 +2,7 @@ import type { AnalyzeOptions } from "./types.ts";
 
 /** Analysis options shared by the dashboard and the report: flag, then `SESSION_ANALYTICS_*` variable. */
 const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
+  ["dataDirectory", "--data-dir", "DATA_DIR"],
   ["claudeRoot", "--claude-root", "CLAUDE_ROOT"],
   ["codexArchiveRoot", "--codex-archive-root", "CODEX_ARCHIVE_ROOT"],
   ["codexRoot", "--codex-root", "CODEX_ROOT"],

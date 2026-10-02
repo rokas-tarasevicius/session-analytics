@@ -57,7 +57,8 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Tokens by class.** Input, uncached input, cache reads, cache writes split by 5-minute and 1-hour TTL, output, and reasoning output where the provider records it.
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
-- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
+- **Limits & cache.** Account-wide headroom and limit events by pseudonymous profile, request-level cache savings and break flags, context pressure and compaction sizes, and optional monthly plan comparisons. Ratios include coverage; stale quota is unavailable. [Definitions and configuration](docs/limits-cache.md).
+- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Limits & cache, Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
 - **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
 
@@ -144,6 +145,7 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
+| `--data-dir PATH` | both | Directory containing optional `config.json` profile labels and monthly USD plan prices; see [configuration](docs/limits-cache.md#optional-labels-and-monthly-plans). |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.

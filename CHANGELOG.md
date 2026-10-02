@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Limits & cache dashboard tab and report: account-wide quota observations by pseudonymous profile, cache savings and break evidence, context pressure and compaction details, and optional configured monthly subscription comparisons. Includes coverage guards, source/estimate labels and synthetic demo evidence.
+- Read-only `--data-dir` / `SESSION_ANALYTICS_DATA_DIR` configuration for explicit profile labels and monthly USD plan prices.
+
+### Fixed
+
+- Context utilization peak now pairs each deduplicated request's input with its own window, avoiding understatement when a session changes context-window size; Claude adds explicitly labeled reviewed model-capacity estimates.
+- Replayed Claude compaction boundaries and streamed limit-error messages no longer inflate the new cache-break or limit-event counters; repeated canonical boundaries also deduplicate the existing compaction count.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

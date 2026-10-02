@@ -1,3 +1,5 @@
+import type { LimitsCacheAnalytics, SessionLimitsCache } from "./metrics/limits-cache-types.ts";
+
 export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
@@ -83,6 +85,7 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  limitsCache?: SessionLimitsCache;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -120,6 +123,7 @@ export interface NamedMetric {
 }
 
 export interface RepositoryAnalytics {
+  limitsCache?: LimitsCacheAnalytics;
   generatedAt: string;
   rateCard: {
     currency: "USD";
@@ -158,6 +162,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  limitsCache?: LimitsCacheAnalytics;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];
   repositories: RepositoryRollup[];
@@ -203,6 +208,7 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  dataDirectory?: string;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;
