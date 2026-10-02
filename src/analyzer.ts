@@ -7,6 +7,7 @@ import { basename, dirname, join, parse, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { McpEvidenceCollector } from "./mcp/evidence.ts";
 
 import type {
   AnalyzeOptions,
@@ -598,6 +599,7 @@ async function analyzeCodex(
   claimedCounters: Set<string> = new Set<string>(),
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  const mcpEvidence = new McpEvidenceCollector();
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
@@ -616,6 +618,7 @@ async function analyzeCodex(
   };
 
   await visitJsonLines(path, (record, line) => {
+    mcpEvidence.codex(record);
     if (record["__parse_error"] === true) {
       parseErrors += 1;
       return;
@@ -791,7 +794,9 @@ async function analyzeCodex(
   state.warnings.push(
     "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes.",
   );
-  return finalizeSession(row, state, finalTokens, 1);
+  const result = finalizeSession(row, state, finalTokens, 1);
+  result.mcpEvidence = mcpEvidence.finish();
+  return result;
 }
 
 function claudeUsage(raw: JsonRecord): TokenUsage {
@@ -844,6 +849,7 @@ async function analyzeClaude(
   inheritedWarnings: string[],
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  const mcpEvidence = new McpEvidenceCollector();
   state.effort = null;
   state.executionKind = "top-level";
   state.executionKindsSeen.add("top-level");
@@ -876,6 +882,7 @@ async function analyzeClaude(
       path === mainPath ? "top-level" : "subagent";
     state.executionKindsSeen.add(executionKind);
     await visitJsonLines(path, (record, line) => {
+      mcpEvidence.claude(record);
       if (record["__parse_error"] === true) {
         parseErrors += 1;
         return;
@@ -973,7 +980,9 @@ async function analyzeClaude(
     );
   }
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
-  return finalizeSession(row, state, totals, paths.length);
+  const result = finalizeSession(row, state, totals, paths.length);
+  result.mcpEvidence = mcpEvidence.finish();
+  return result;
 }
 
 function finalizeSession(
@@ -1977,7 +1986,7 @@ function aggregate(
 
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
-): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[] }> {
+): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[]; mcpContext?: MachineAnalytics["mcpContext"] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
@@ -2147,6 +2156,17 @@ async function analyzeSelectedRepositories(
       left.name.localeCompare(right.name),
     );
     const selectedRepositories = selectRepositories(allRepositories, options);
+    // Resolve the launch CWD with the same repository assignment as sessions.
+    // An unevidenced Git repository remains an empty repository scope, never a machine fallback.
+    let mcpContext: MachineAnalytics["mcpContext"];
+    if (options.mcpCwd) {
+      const inRepository = await gitRootForPath(options.mcpCwd) ||
+        availableRepositories.some(({ root_path }) => root_path && pathInside(options.mcpCwd!, root_path)) ||
+        workspaceRepositories.has(resolve(options.mcpCwd));
+      const current = explicitRepositoryFilter ? selectedRepositories[0] : inRepository
+        ? await repositoryForPath(options.mcpCwd, availableRepositories, workspaceRepositories, discovered) : null;
+      mcpContext = { repositoryId: current?.id ?? null };
+    }
     const selectedIds = new Set(selectedRepositories.map(({ id }) => id));
     const allSessions = [
       ...analyzedRows.filter((session): session is SessionAnalytics => session !== null),
@@ -2165,6 +2185,7 @@ async function analyzeSelectedRepositories(
     }
     const repositoriesForOutput = selectedRepositories;
     return {
+      ...(mcpContext ? { mcpContext } : {}),
       rateCard,
       repositories: repositoriesForOutput.map((repository) => {
         const result = aggregate(repository, sessionsByRepository.get(repository.id) ?? [], rateCard);
@@ -2237,7 +2258,9 @@ export async function analyzeMachineSessions(
   options: AnalyzeOptions = {},
 ): Promise<MachineAnalytics> {
   const result = await analyzeSelectedRepositories(options);
-  return aggregateMachine(result.repositories, result.rateCard);
+  const snapshot = aggregateMachine(result.repositories, result.rateCard);
+  if (result.mcpContext) snapshot.mcpContext = result.mcpContext;
+  return snapshot;
 }
 
 /** Backward-compatible single-repository entry point for callers that intentionally narrow scope. */

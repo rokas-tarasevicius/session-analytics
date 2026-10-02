@@ -1,14 +1,15 @@
 # Architecture
 
-`session-analytics` is a single Node.js 24 package with no runtime dependencies. It uses Node's native TypeScript type stripping, `node:sqlite` for read-only database access, and `node:http` for the dashboard. Every launch performs a fresh scan; there is no persistent index yet (planned in [M0](roadmap.md#m0-correctness)).
+`session-analytics` is a single Node.js 24 package with no runtime dependencies. It uses Node's native TypeScript type stripping, `node:sqlite` for read-only database access, and `node:http` for the dashboard. Each analysis performs a fresh scan; MCP reuses snapshots for an in-memory TTL. There is no persistent index yet (planned in [M0](roadmap.md#m0-correctness)).
 
 ## Modules
 
 | Path | Role |
 | --- | --- |
-| `bin/session-analytics.ts` | Command dispatcher: `dashboard` (default), `report`, `--help`, `--version`. Adds `--open` to the dashboard unless `--no-open` is given. |
+| `bin/session-analytics.ts` | Command dispatcher: `dashboard` (default), `report`, `mcp`, `--help`, `--version`. Adds `--open` to the dashboard unless `--no-open` is given. |
 | `src/server.ts` | Dashboard server: argument and environment parsing, loopback HTTP server, static files, `/api/health`, `/api/analytics`, browser opener. |
 | `src/cli.ts` | Terminal report and `--json` snapshot. |
+| `src/mcp/` | Stdio protocol, strict tool schemas, bounded snapshot worker, TTL cache, query metrics, structured evidence collector and names-only extension inventory. See [MCP](mcp.md). |
 | `src/analysis-process.ts` | Runs one analysis in a child process and returns the parsed result. |
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
@@ -38,6 +39,8 @@ flowchart TB
 The server and the report never parse transcripts themselves. Each snapshot is computed in a fresh child process started with `--max-old-space-size=256`, and Cursor's composer database is parsed in its own child with a 192 MB cap. This keeps a machine-wide scan from growing the long-running server's memory, releases everything when the child exits, and means only serialized, already-allowlisted results cross the process boundary. A child's standard error is discarded; a failure surfaces as a fixed message.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
+
+The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 256 MB heap cap, then caches the allowlisted snapshot and names-only inventory for a completion-based TTL. Concurrent calls share the worker. Stdio EOF aborts it; scans have a 180-second deadline. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Structured tool flags and numeric Codex limit samples are collected during the normal transcript pass in `src/mcp/evidence.ts`; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
 
 ## Pipeline
 

@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Metrics-only `session-analytics mcp` stdio server with seven repository-aware tools, current MCP 2026-07-28 and legacy handshake support, strict input schemas, bounded requests, cancellation, and a shared in-memory snapshot TTL.
+- Structured tool-result error counts and recorded Codex quota windows in the additive `mcpEvidence` session namespace; MCP answers include coverage, sample guards and separate API-equivalent/provider-reported values.
+- Names-only extension inventory, Claude Code/Codex/Cursor installation instructions, and an isolated `node scripts/demo.ts mcp` demo with synthetic inventories and quota evidence.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

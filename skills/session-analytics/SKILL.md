@@ -25,6 +25,12 @@ Use repository or evidence-path flags only when the user explicitly narrows the 
 
 ## Phase 2: know where the evidence is
 
+### Direct metrics through MCP
+
+When the user asks a metric question and the `session-analytics` MCP server is connected, use its tools directly: `usage_summary`, `budget_status`, `repo_profile`, `tool_stats`, `recent_sessions`, `unused_extensions`, and `compare_agents`. Continue to use the dashboard launch above when the user asks to open or show the dashboard. Installation is documented in `docs/mcp.md`; the server command is `session-analytics mcp`.
+
+MCP defaults to the server's launch repository when known. Use `scope: "machine"` only for a machine-wide question; discover repository keys through `usage_summary` and pass `repositoryId` when narrowing. Tools never accept filesystem paths. Ordinary windows select sessions by start time in UTC; budget periods use dated API value. Report snapshot age, price coverage and observed denominators, and preserve `null` for unavailable or insufficient samples. API-equivalent value is not an invoice. Headroom is a recent recorded observation, not a live entitlement. Names without observed use do not justify uninstalling extensions. Do not open transcripts to fill evidence gaps.
+
 The command reads standard local stores automatically:
 
 - Claude Code: `~/.claude/projects/`, every additional `~/.claude-*/projects/` profile, and `$CLAUDE_CONFIG_DIR/projects/`.

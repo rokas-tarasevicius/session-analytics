@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { seedMcpDemo } from "./mcp-demo.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -31,7 +32,8 @@ const DAYS = 60;
 
 const argv = process.argv.slice(2);
 const reportMode = argv[0] === "report";
-const options = reportMode ? argv.slice(1) : argv;
+const mcpMode = argv[0] === "mcp";
+const options = reportMode || mcpMode ? argv.slice(1) : argv;
 const has = (flag: string): boolean => options.includes(flag);
 function valueOf(flag: string): string | undefined {
   const index = options.indexOf(flag);
@@ -46,7 +48,7 @@ for (let index = 0; index < options.length; index += 1) {
 if (has("--json") && !reportMode) fail("--json is only valid with the report command.");
 if (has("--help")) {
   process.stdout.write(
-    "Usage: node scripts/demo.ts [report [--json]] [--no-open] [--port PORT] [--keep]\n" +
+    "Usage: node scripts/demo.ts [report [--json] | mcp] [--no-open] [--port PORT] [--keep]\n" +
       "Generates synthetic sessions in a temporary directory and analyzes only that data.\n",
   );
   process.exit(0);
@@ -292,7 +294,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
     push({ type: "assistant", requestId, ...(effort ? { effort } : {}), message: message(content, output) });
     state.clock += integer(3, 40) * 1000;
     for (const tool of tools) {
-      push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: tool.id, content: "[synthetic tool result]" }] } });
+      push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: tool.id, is_error: Number.parseInt(tool.id.slice(-2), 16) % 17 === 0, content: "[synthetic tool result]" }] } });
       state.clock += integer(1, 30) * 1000;
     }
     state.context += integer(600, 3_200);
@@ -548,7 +550,7 @@ async function portIsFree(candidate: number): Promise<boolean> {
   });
 }
 
-if (!reportMode && !(await portIsFree(port))) {
+if (!reportMode && !mcpMode && !(await portIsFree(port))) {
   // Never fall through to "reuse the running dashboard": it may be showing real history.
   fail(`Port ${port} is already in use. Stop that process or pass --port with a free port.`);
 }
@@ -562,6 +564,7 @@ const cleanup = (): void => {
 let sources: ReturnType<typeof generate>;
 try {
   sources = generate(root);
+  if (mcpMode) seedMcpDemo(root);
 } catch (error) {
   cleanup();
   throw error;
@@ -569,7 +572,7 @@ try {
 
 const environment: NodeJS.ProcessEnv = {};
 for (const [key, value] of Object.entries(process.env)) {
-  if (/^(CLAUDE_CONFIG_DIR|CODEX_HOME|SESSION_ANALYTICS_|MACHINE_|CONDUCTOR_)/.test(key)) continue;
+  if (/^(CLAUDE_CONFIG_DIR|CLAUDE_PROJECT_DIR|CODEX_HOME|SESSION_ANALYTICS_|MACHINE_|CONDUCTOR_)/.test(key)) continue;
   environment[key] = value;
 }
 environment["HOME"] = sources.home;
@@ -583,6 +586,7 @@ const sourceFlags = [
 ];
 const childArguments = reportMode
   ? [bin, "report", ...sourceFlags, ...(has("--json") ? ["--json"] : [])]
+  : mcpMode ? [bin, "mcp", ...sourceFlags, "--mcp-cwd", join(root, "repos/acme-web")]
   : [bin, "dashboard", ...sourceFlags, "--port", String(port), ...(has("--no-open") ? ["--no-open"] : [])];
 
 const child = spawn(process.execPath, childArguments, { env: environment, stdio: "inherit" });

@@ -58,7 +58,7 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
 - **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
-- **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
+- **Five surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, a [metrics-only MCP server](docs/mcp.md), and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
 - **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
 
 <table>
@@ -225,6 +225,8 @@ Analysis runs in a child process with a capped heap, and Cursor's database is pa
 
 ## Use it from an agent
 
+For direct metric queries, run `session-analytics mcp`. Its seven read-only tools cover usage summaries, budget status, repository profiles, tool statistics, recent sessions, extensions without observed use, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes coverage and interpretation notes; no transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](docs/mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
+
 The repository ships an agent skill at [`skills/session-analytics`](skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
 
 ```bash
@@ -246,7 +248,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 - **M0, correctness (in progress):** multi-profile discovery, streamed-usage dedupe, thinking tokens, and current Codex and Cursor formats shipped in 0.5.0. Still to come: remaining Codex and Cursor formats, Conductor result records as fallback evidence, reconciliation against provider-reported totals, and a persistent content-free index with incremental ingest.
 - **M1, reliability and economics:** tool error rates and latency, loop and churn flags, MCP server health, permission friction, rate-limit headroom, cache-break causes, and context fill.
 - **M2, outcomes and interaction:** evidence-ranked links from sessions to commits and pull requests, cost per merged change, autonomy and interruption measures, and concurrency.
-- **M3, agent-facing:** a metrics-only MCP server so agents can check budget, tool reliability, and hotspots without seeing transcript text, plus opt-in, off-by-default review features.
+- **M3, agent-facing (in progress):** the metrics-only MCP server ships with seven repository-aware tools. Hotspots, deeper reliability signals, hooks and opt-in review features remain planned.
 - **M4, breadth and export:** more agents and OpenTelemetry GenAI export.
 
 Features that need content (local rules over commands, or an LLM review of selected sessions) will always be opt-in, off by default, and labeled. See [docs/roadmap.md](docs/roadmap.md) for the checklists.

@@ -74,12 +74,18 @@ M2 links agent sessions to the code they produced, retroactively from existing l
 
 An MCP server that answers with metrics, never transcript text, so an agent cannot be steered by content from another session.
 
-- [ ] `budget_status`: this session's spend and rate-limit headroom.
+- [x] Dependency-free stdio MCP with strict schemas, repository defaults, bounded requests and a snapshot TTL; current and legacy protocol support.
+- [x] `usage_summary`: repository/provider/model/execution-kind totals with price coverage.
+- [x] `budget_status`: today/this-week dated API value, guarded burn rate, and fresh recorded Codex headroom. Current-session attribution and live quotas remain unavailable.
+- [x] `repo_profile`: typical session value/turns/duration, tool/skill mix, cache hits and compactions with sample guards.
+- [x] `tool_stats`: call counts and structured outcome flags with coverage; broader reliability remains M1.
+- [x] `recent_sessions`: hashed keys, providers/models, duration and value.
+- [x] `compare_agents`: the three providers in one repository, without quality rankings.
 - [ ] `tool_reliability`: failure history for a tool or command class in this repository.
 - [ ] `repo_hotspots`
 - [ ] `typical_cost`: by session archetype in this repository.
 - [ ] `mcp_health`
-- [ ] `unused_extensions`
+- [x] `unused_extensions`: names-only conventional local inventory versus observed use, explicitly partial.
 - [x] An agent skill that opens the dashboard or reads the JSON snapshot ([skills/session-analytics](../skills/session-analytics/SKILL.md)).
 - [ ] Optional hooks: pre-tool warnings from historical failure statistics, and a cross-provider budget guard.
 

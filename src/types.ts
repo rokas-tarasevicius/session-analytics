@@ -1,3 +1,6 @@
+import type { McpContext, McpSessionEvidence } from "./mcp/types.ts";
+export type * from "./mcp/types.ts";
+
 export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
@@ -83,6 +86,7 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  mcpEvidence?: McpSessionEvidence;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -158,6 +162,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  mcpContext?: McpContext;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];
   repositories: RepositoryRollup[];
@@ -203,6 +208,8 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  /** Internal launch context, never accepted as an MCP tool argument or returned as a path. */
+  mcpCwd?: string;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;
