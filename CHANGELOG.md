@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Reliability view and terminal report: Claude/Codex tool outcomes, normalized classes, low-cardinality error classes, merged p50/p95 latency with coverage, MCP server health, hooks, permission/approval/sandbox observations, and repository/agent comparisons. Unknown outcomes remain visible; small-sample rates are suppressed.
+- Opt-in local reliability content rules (`--reliability-content-rules`): command classification, bounded error-text rules, six HMAC-based loop/churn flags, verification share/skips, and first-edit steps/timing. A persistent 0600 per-machine secret stays in the data directory; arguments, paths and hashes never leave the parser.
+- Synthetic reliability demo episodes, privacy/worker/API regression tests, and documented field-level semantics and interpretation limits. Default analysis leaves content rules off and creates no hashing key.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

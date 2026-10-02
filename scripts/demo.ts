@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { claudeReliabilityDemo, codexReliabilityDemo } from "./demo-reliability.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -312,6 +313,7 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
   const messages = heavy(34, 0.85, 420);
   const projectDirectory = join(root, claudeProjectDirectory(cwd));
   const main = claudeTranscript({ cwd, messages, model, repository, sessionId, start, subagent: false });
+  if (messages % 4 === 0) main.records.push(...claudeReliabilityDemo(main.end, cwd, sessionId));
   writeJsonl(join(projectDirectory, `${sessionId}.jsonl`), main.records);
   const subagents = main.spawned + (chance(0.18) ? 1 : 0);
   for (let index = 0; index < subagents; index += 1) {
@@ -380,16 +382,24 @@ function writeCodexSession(
       const callId = `call_${hex(24)}`;
       const kind = weighted([["exec_command", 52], ["apply_patch", 26], ["update_plan", 8], ["write_stdin", 6], ["skill", 3], ["none", 5]] as const);
       if (kind === "apply_patch") {
-        push("response_item", { type: "custom_tool_call", name: "apply_patch", call_id: callId, input: "*** Begin Patch\n[synthetic]\n*** End Patch", status: "completed" });
+        push("response_item", { type: "custom_tool_call", name: "apply_patch", call_id: callId, input: `*** Begin Patch\n*** Update File: ${repository.files[call % repository.files.length]}\n@@\n-synthetic before\n+synthetic after\n*** End Patch`, status: "completed" });
       } else if (kind === "skill") {
         const skill = pick(codexSkills);
         push("response_item", { type: "function_call", name: "exec_command", call_id: callId, arguments: JSON.stringify({ cmd: `sed -n '1,200p' .agents/skills/${skill}/SKILL.md` }) });
       } else if (kind !== "none") {
-        push("response_item", { type: "function_call", name: kind, call_id: callId, arguments: JSON.stringify({ cmd: "[synthetic]" }) });
+        const command = ["git diff --stat", "npm test", "rg example src", "cat package.json"][call % 4];
+        push("response_item", { type: "function_call", name: kind, call_id: callId, arguments: JSON.stringify({ cmd: command }) });
       }
       if (kind !== "none") {
         clock += integer(1, 20) * 1000;
-        push("response_item", { type: "function_call_output", call_id: callId, output: "[synthetic tool output]" });
+        const failed = kind === "exec_command" && call % 17 === 0;
+        push("response_item", { type: "function_call_output", call_id: callId,
+          output: kind === "write_stdin" ? "[synthetic running process]" : JSON.stringify({
+            status: failed ? "failed" : "completed", duration_ms: 100 + (call % 8) * 250,
+            ...(["exec_command", "skill"].includes(kind) ? { exit_code: failed ? 1 : 0 } : {}),
+            output: "[synthetic tool output]",
+          }),
+        });
       }
       context += integer(800, 4_000);
       if (context > 210_000) {
@@ -402,6 +412,7 @@ function writeCodexSession(
     push("event_msg", { type: "agent_message", message: "[synthetic demo response]" });
     push("event_msg", { type: "task_complete", last_agent_message: "[synthetic]" });
   }
+  if (!parentThreadId && records.length % 3 === 0) records.push(...codexReliabilityDemo(clock));
   // Older sessions have usually been archived; recent ones stay in the dated tree.
   const archived = now - start > 14 * DAY && chance(0.45);
   const stamp = iso(start).slice(0, 19).replace(/:/g, "-");
@@ -573,8 +584,10 @@ for (const [key, value] of Object.entries(process.env)) {
   environment[key] = value;
 }
 environment["HOME"] = sources.home;
+environment["SESSION_ANALYTICS_DATA_DIR"] = join(root, "derived");
 
 const sourceFlags = [
+  "--reliability-content-rules",
   "--claude-root", sources.claudeRoot,
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,

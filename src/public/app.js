@@ -1,3 +1,5 @@
+import { renderReliability } from "./reliability-view.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -578,6 +580,7 @@ function clearInactiveAnalyticsViews(activeName) {
 
 function renderActiveAnalyticsView(view) {
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
+  if (name === "reliability") renderReliability(document.querySelector('[data-view-panel="reliability"]'), view.sessions);
   if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
   if (name === "costs") renderCosts(view);
@@ -843,6 +846,6 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
   });
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
-const storedView = localStorage.getItem("session-analytics-view");
+const storedView = new URLSearchParams(location.search).get("view") || localStorage.getItem("session-analytics-view");
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
 setTheme(localStorage.getItem("session-analytics-theme") || "light"); void load(false);

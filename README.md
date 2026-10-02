@@ -57,7 +57,8 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Tokens by class.** Input, uncached input, cache reads, cache writes split by 5-minute and 1-hour TTL, output, and reasoning output where the provider records it.
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
-- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
+- **Reliability with evidence.** Claude/Codex tool outcomes, error classes, latency coverage, MCP servers, hooks and permission modes. Compare repositories and agents in the Reliability tab or terminal report. Opt-in local rules add command classes, verification and loop/churn flags; flags describe activity and do not prove failure or quality.
+- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Reliability (outcomes, latency and behavior), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
 - **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
 
@@ -117,6 +118,8 @@ session-analytics report
 
 Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, the 15 highest-value sessions by hashed key, and coverage warnings.
 
+The reliability section shows structured outcomes by default. To also classify shell commands and failed-result text locally and detect repeat/churn episodes, run `session-analytics report --reliability-content-rules` (the same option works for the dashboard). These P2 rules are off by default, send nothing to a model, and output only counters and class labels. Their matching key lives in `SESSION_ANALYTICS_DATA_DIR` (or `--data-dir`); path and argument hashes never appear in a snapshot. See the [reliability metric definitions](docs/metrics.md#reliability-m1) for coverage and thresholds. `npm run demo` enables these rules on synthetic data only.
+
 ### JSON snapshot
 
 ```bash
@@ -144,6 +147,9 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
+| `--reliability-content-rules` | both | Opt into local P2 command/error rules and HMAC-based behavior detectors. Also `SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES=1`. |
+| `--no-reliability-content-rules` | both | Disable those rules even when enabled by the environment. |
+| `--data-dir PATH` | both | Directory for the 0600 reliability key; overrides `SESSION_ANALYTICS_DATA_DIR`. Default: macOS Application Support, or Linux XDG data directory. |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.

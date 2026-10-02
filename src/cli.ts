@@ -1,10 +1,11 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
+import { reliabilityReport } from "./metrics/reliability-report.ts";
 
 const valueFlags = new Set(analysisValueFlags);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
+const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -41,6 +42,9 @@ Options:
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
   --rate-card PATH       Override the reviewed rate card
+  --reliability-content-rules Enable local content rules for errors, shell classes and behavior (P2)
+  --no-reliability-content-rules Disable those rules, including when enabled by environment
+  --data-dir PATH        Local data directory for the private reliability hashing key
   --version              Print the version
   --help                 Show this help
 `);
@@ -117,6 +121,7 @@ if (process.argv.includes("--json")) {
         `${model.padEnd(20).slice(0, 20)}  Session ${session.sessionKey}\n`,
     );
   }
+  process.stdout.write(reliabilityReport(analytics.sessions));
   if (analytics.warnings.length > 0) {
     process.stdout.write("\nWarnings\n");
     for (const warning of analytics.warnings) process.stdout.write(`- ${warning}\n`);

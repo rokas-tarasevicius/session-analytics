@@ -7,6 +7,10 @@ import { basename, dirname, join, parse, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { ReliabilityCollector, type ReliabilityContext } from "./metrics/reliability.ts";
+import { combineReliability, observeClaude, observeCodex } from "./metrics/reliability-providers.ts";
+import { loadReliabilitySecret } from "./metrics/reliability-secret.ts";
+import type { SessionReliability } from "./metrics/reliability-types.ts";
 
 import type {
   AnalyzeOptions,
@@ -596,8 +600,11 @@ async function analyzeCodex(
   inheritedWarnings: string[],
   counterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCounters: Set<string> = new Set<string>(),
+  reliabilityContext: ReliabilityContext = { contentRules: false, secret: null },
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  const reliability = new ReliabilityCollector(reliabilityContext);
+  let reliabilityCwd = row.workspace_path;
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
@@ -618,8 +625,13 @@ async function analyzeCodex(
   await visitJsonLines(path, (record, line) => {
     if (record["__parse_error"] === true) {
       parseErrors += 1;
+      reliability.truncated = true;
       return;
     }
+    if (record["type"] === "session_meta" || record["type"] === "turn_context") {
+      reliabilityCwd = stringValue(asRecord(record["payload"])?.["cwd"]) ?? reliabilityCwd;
+    }
+    observeCodex(reliability, record, line, reliabilityCwd);
     const timestamp = stringValue(record["timestamp"]);
     trackTimestamp(state, timestamp);
     const type = stringValue(record["type"]);
@@ -791,7 +803,9 @@ async function analyzeCodex(
   state.warnings.push(
     "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes.",
   );
-  return finalizeSession(row, state, finalTokens, 1);
+  const result = finalizeSession(row, state, finalTokens, 1);
+  result.reliability = combineReliability([reliability.finish()], row.status === "working");
+  return result;
 }
 
 function claudeUsage(raw: JsonRecord): TokenUsage {
@@ -842,6 +856,7 @@ async function analyzeClaude(
   mainPath: string,
   rateCard: RateCard,
   inheritedWarnings: string[],
+  reliabilityContext: ReliabilityContext = { contentRules: false, secret: null },
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
   state.effort = null;
@@ -870,16 +885,20 @@ async function analyzeClaude(
   const seenToolCalls = new Set<string>();
   let parseErrors = 0;
   const totals = zeroTokens();
+  const reliabilityStreams: SessionReliability[] = [];
 
   for (const path of paths) {
+    const reliability = new ReliabilityCollector(reliabilityContext);
     const executionKind: SessionAnalytics["executionKind"] =
       path === mainPath ? "top-level" : "subagent";
     state.executionKindsSeen.add(executionKind);
     await visitJsonLines(path, (record, line) => {
       if (record["__parse_error"] === true) {
         parseErrors += 1;
+        reliability.truncated = true;
         return;
       }
+      observeClaude(reliability, record, line, row.workspace_path);
       const timestamp = stringValue(record["timestamp"]);
       trackTimestamp(state, timestamp);
       const type = stringValue(record["type"]) ?? "";
@@ -958,6 +977,7 @@ async function analyzeClaude(
         }
       }
     });
+    reliabilityStreams.push(reliability.finish());
   }
   state.effort = effort.current?.value ?? null;
   let reasoningMissing = false;
@@ -973,7 +993,9 @@ async function analyzeClaude(
     );
   }
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
-  return finalizeSession(row, state, totals, paths.length);
+  const result = finalizeSession(row, state, totals, paths.length);
+  result.reliability = combineReliability(reliabilityStreams, row.status === "working");
+  return result;
 }
 
 function finalizeSession(
@@ -1387,12 +1409,13 @@ async function analyzeTranscriptCandidate(
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
+  reliabilityContext: ReliabilityContext = { contentRules: false, secret: null },
 ): Promise<SessionAnalytics> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   return candidate.provider === "codex"
-    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters)
-    : await analyzeClaude(row, candidate.path, rateCard, warnings);
+    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext)
+    : await analyzeClaude(row, candidate.path, rateCard, warnings, reliabilityContext);
 }
 
 function cursorPaths(data: JsonRecord): string[] {
@@ -1981,6 +2004,10 @@ async function analyzeSelectedRepositories(
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
+  const reliabilityContext: ReliabilityContext = {
+    contentRules: options.reliabilityContentRules === true,
+    secret: options.reliabilityContentRules === true ? await loadReliabilitySecret(options.dataDir) : null,
+  };
   let database: DatabaseSync | null = null;
   try {
     await stat(databasePath);
@@ -2095,8 +2122,8 @@ async function analyzeSelectedRepositories(
       }
       try {
         const session = provider === "codex"
-          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, selected.path, rateCard, selected.warnings);
+          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext)
+          : await analyzeClaude(row, selected.path, rateCard, selected.warnings, reliabilityContext);
         claimed.add(`${provider}:${row.provider_session_id}`);
         return session;
       } catch (error) {
@@ -2117,14 +2144,14 @@ async function analyzeSelectedRepositories(
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
         return candidate.provider === "codex"
-          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]);
+          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, reliabilityContext)
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], reliabilityContext);
       } catch { return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters); } catch { return null; }
+      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, reliabilityContext); } catch { return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {

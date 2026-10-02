@@ -1,3 +1,6 @@
+import type { SessionReliability } from "./metrics/reliability-types.ts";
+export type { SessionReliability, ToolClass, ToolOutcome, ErrorClass, ReliabilityStats } from "./metrics/reliability-types.ts";
+
 export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
@@ -83,6 +86,7 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  reliability?: SessionReliability;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -203,6 +207,8 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  reliabilityContentRules?: boolean;
+  dataDir?: string;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;

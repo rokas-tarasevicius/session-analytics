@@ -54,6 +54,10 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 - Git evidence in transcripts (branches, commit and pull-request records) is not used yet; see [M2](roadmap.md#m2-outcomes).
 - Views do not yet show which profile a session came from.
 
+### Claude reliability evidence
+
+The streaming reliability adapter also joins `tool_use.id` to user `tool_result.tool_use_id` and reads `is_error`, `toolDenialKind`, and single-result `toolUseResult` interruption/timeout, explicit duration, success/status and exit-code interpretation fields. `stop_hook_summary` supplies hook counts, blocks and individual hook durations; attachments supply failed MCP server names; permission modes and API error enums are allowlisted. Text-derived error classes, shell command classes and argument/path matching require the P2 option. Results and arguments never enter the public projection. Main and subagent streams are independent for sequence rules; see [reliability metrics](metrics.md#reliability-m1).
+
 ## Claude Desktop local agents
 
 **Where:** `~/Library/Application Support/Claude/local-agent-mode-sessions` (macOS), when it exists. Included in Claude discovery; `--claude-root` replaces it.
@@ -103,7 +107,11 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 - Codex's `state_5.sqlite` is not read.
 - `token_usage_record` events and the paginated rollout format are not parsed yet.
-- Rate-limit snapshots, tool exit codes, and durations are recorded by Codex but not used yet; see [M1](roadmap.md#m1-reliability-and-economics).
+- Rate-limit snapshots are recorded by Codex but are not used by the reliability lane; see [M1](roadmap.md#m1-reliability-and-economics).
+
+### Codex reliability evidence
+
+`item_completed` items of type `CommandExecution`, `McpToolCall` and `FileChange` contribute outcome evidence. Command argv arrays, `parsed_cmd` enums, `{secs,nanos}` durations, exit codes, MCP status and `result.isError` are supported. Function/custom call outputs may contain structured receipts or text blocks; text receipt rules require P2. `turn_context.approval_policy` and `sandbox_policy.type` are allowlisted observation counts. Active turns suppress verification-skip claims. Wrapper completion is never attributed to inner calls; typed inner calls remain separate evidence. Call IDs join matching shapes; formats with unrelated identifiers remain a documented limitation. See [reliability metrics](metrics.md#reliability-m1).
 
 ## Cursor
 

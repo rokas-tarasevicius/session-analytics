@@ -14,6 +14,9 @@
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
+| `src/metrics/reliability*.ts` | Streaming Claude/Codex adapters, bounded call/result reconciliation, classification and HMAC rules, private key lifecycle, public types and report formatting. |
+| `src/public/reliability-data.js` | Pure mergeable counters/histograms shared by the analysis process, report and browser; declaration file checks its TypeScript callers. |
+| `src/public/reliability-view.js`, `reliability.css` | Additive Reliability panel and scoped styles using the existing theme. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
 | `data/rate-cards.json` | Versioned model rates with an effective date and a source URL per model. |
@@ -38,6 +41,8 @@ flowchart TB
 The server and the report never parse transcripts themselves. Each snapshot is computed in a fresh child process started with `--max-old-space-size=256`, and Cursor's composer database is parsed in its own child with a 192 MB cap. This keeps a machine-wide scan from growing the long-running server's memory, releases everything when the child exits, and means only serialized, already-allowlisted results cross the process boundary. A child's standard error is discarded; a failure surfaces as a fixed message.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
+
+Reliability observes each record during the existing Claude/Codex pass, without an extra transcript scan. One collector per execution stream retains call IDs for reconciliation, bounded enums/numbers, and optional internal HMACs. Claude subagent streams are finalized separately before their public projections merge, preventing false loops across independent agents. Only `SessionReliability` crosses the worker boundary. Its sparse latency histograms can be merged after repository/time/agent filtering, avoiding statistically invalid averages of session percentiles. Default scans do not write reliability state; P2 scans persist only a random private matching key outside provider stores.
 
 ## Pipeline
 

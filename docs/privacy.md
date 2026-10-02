@@ -36,7 +36,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 
-Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere.
+Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere. Opt-in reliability matching retains only HMACs and bounded counters until the execution stream finishes, then discards the HMACs. Neither the key nor any path/argument digest enters the public snapshot.
 
 ## Privacy tiers
 
@@ -45,11 +45,13 @@ Every field belongs to a tier. The tiers also govern planned features (see [road
 | Tier | Contents | Status |
 | --- | --- | --- |
 | **P0** | Counts, token counters, costs, timestamps, durations, model IDs, tool and skill names, enumerated labels | Returned today |
-| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys and repository metadata only) |
-| **P2** | Results of local rules over commands or diffs, where only rule IDs and counts leave the parser | Not implemented; will be opt-in |
+| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names, MCP server names; internal keyed hashes of paths/arguments | Keys, repository metadata and MCP server names returned; reliability digests stay internal |
+| **P2** | Results of local rules over commands, tool arguments and failed results, where only class IDs and counts leave the parser | Reliability rules are opt-in, off by default |
 | **P3** | Text shown to you or sent to an LLM, such as an opt-in session review | Not implemented; will be opt-in per run, stored separately, and labeled |
 
-P2 and P3 features will always be off by default.
+P2 and P3 features are off by default. `--reliability-content-rules` (or `SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES=1`) enables the reliability rules for a scan. `--no-reliability-content-rules` explicitly disables them. Structured outcomes, durations, hook/permission enums and MCP names do not require this option.
+
+When enabled, reliability matching creates a random 32-byte HMAC-SHA256 secret in `reliability-hmac.key` with mode **0600**. The data directory is `--data-dir`, then `SESSION_ANALYTICS_DATA_DIR`, then `~/Library/Application Support/session-analytics` on macOS or `$XDG_DATA_HOME/session-analytics` (default `~/.local/share/session-analytics`) on other platforms. Only this key is persisted; no reliability event index is written. Creation is atomic across concurrent scans; existing keys are never overwritten. Symlinked, malformed, wrong-owner or permissive key files are refused. If key access fails, hashing and its flags become unavailable without exposing a path or error string. Default scans never create this key. Provider stores remain read-only.
 
 ## Field manifest
 
@@ -144,6 +146,7 @@ Repository summaries and the machine summary share these fields.
 | `skills` | `{ skillId: count }`, skill invocations | P0 |
 | `skillEvidence` | `explicit` (Claude), `inferred` (Codex lower bound), or `unavailable` (Cursor) | P0 |
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
+| `reliability` | Optional versioned reliability projection; absent for unsupported evidence; see below | P0/P1/P2 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
 | `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
@@ -169,6 +172,44 @@ Repository summaries and the machine summary share these fields.
 | `maxContextWindow` | Largest context window the provider reported | P0 |
 | `maxInputTokensPerCall` | Largest input of a single request | P0 |
 | `contextUtilizationPeak` | `maxInputTokensPerCall / maxContextWindow`, or `null` when no window is reported | P0 |
+
+### Reliability (`SessionReliability`)
+
+Public types live in [`src/metrics/reliability-types.ts`](../src/metrics/reliability-types.ts), referenced and re-exported by `src/types.ts`. All fields below are under `sessions[].reliability`. MCP server/tool names are bounded to 128 identifier characters; invalid names become `unknown`. No raw provider object is copied into this namespace.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `version` | Reliability schema version, currently `1` | P0 |
+| `contentRules` | `enabled` or `disabled` | P0 |
+| `hashing` | `enabled`, `disabled`, or `unavailable`; never key material | P0 |
+| `tools[].name` | Bounded structured tool name | P0 |
+| `tools[].toolClass` | Fixed cross-provider class; shell command inference requires P2 | P0 / P2 when inferred |
+| `tools[].calls`, `mcp[].calls` | Observed calls in this group | P0 |
+| `tools[].outcomes`, `mcp[].outcomes` | Fixed `success`, `error`, `denied`, `interrupted`, `timeout`, `unknown` counters | P0 / P2 when derived from receipt text |
+| `tools[].errors`, `mcp[].errors` | Fixed error-class IDs and counts (full enum in metrics.md); no error text | P0 / P2 when derived from text |
+| `tools[].latency.samples`, `mcp[].latency.samples`, `hooks.latency.samples` | Observed durations contributing to the histogram | P0 / P2 for parsed receipt timing |
+| `tools[].latency.buckets`, `mcp[].latency.buckets`, `hooks.latency.buckets` | Sparse numeric `[upperBoundMs, count]` pairs; no timestamps or call IDs | P0 / P2 for parsed receipt timing |
+| `tools[].latency.p50Ms`, `tools[].latency.p95Ms`, `mcp[].latency.p50Ms`, `mcp[].latency.p95Ms`, `hooks.latency.p50Ms`, `hooks.latency.p95Ms` | Approximate merged quantiles, or null without samples | P0 / P2 for parsed receipt timing |
+| `mcp[].server` | Bounded server name from structured tool/attachment evidence | P1 |
+| `mcp[].connectionFailures` | Reported failed connections, separate from call errors | P0 |
+| `coverage.argumentCalls`, `coverage.fileCalls` | Counts of calls with usable argument/file HMACs; never the HMACs themselves | P2 |
+| `coverage.unmatchedResults` | Receipts without a matching call | P0 |
+| `coverage.truncated` | Parsing/size safeguards made the evidence partial | P0 |
+| `flags` | Null when disabled/unavailable; otherwise the counters below | P2 |
+| `flags.exact_repeat`, `flags.repeated_failure`, `flags.failed_edit_cascade`, `flags.edit_thrash`, `flags.reread_churn`, `flags.search_loop` | Local detector episode counts; no matching arguments, paths, digests, IDs or excerpts | P2 |
+| `verification.checks`, `verification.passed`, `verification.failed` | Recognized test/build calls and outcomes | P0 / P2 for command classification |
+| `verification.editCalls` | Successful or unresolved edit/write calls | P0 |
+| `verification.share` | Guarded check / (check + edit) ratio, or null | P2 |
+| `verification.skip` | Observed tail has edits after the last check, or null without sufficient evidence | P2 |
+| `verification.stepsToFirstEdit`, `verification.msToFirstEdit` | Main-stream calls and milliseconds before the first possible edit, or null | P0 |
+| `hooks.runs`, `hooks.blocks` | Hook runs and summaries blocking continuation | P0 |
+| `permissions.denials` | Denied tool calls | P0 / P2 if inferred from failed text |
+| `permissions.modes` | Counts of `default`, `auto`, `bypassPermissions`, `plan`, `acceptEdits`, `dontAsk`, `unknown` observations | P0 |
+| `permissions.approvalPolicies` | Counts of `untrusted`, `on-failure`, `on-request`, `never`, `unknown` observations | P0 |
+| `permissions.sandboxes` | Counts of `read-only`, `workspace-write`, `danger-full-access`, `external-sandbox`, `unknown` observations | P0 |
+| `apiErrors` | Structured `api_rate_limit`, `api_server_error`, `unknown` counts | P0 |
+
+The dashboard and report derive class/repository/agent comparisons, coverage denominators, episode totals and guarded rates from these fields. The public JSON contains no per-call events and no additional reliability root rollup. Tests in `test/reliability.test.ts` and `test/server.test.ts` cover sentinels through the parser, child worker, API and report, including error text, diffs, command arguments, hooks and MCP results.
 
 ### Token usage (`TokenUsage`)
 

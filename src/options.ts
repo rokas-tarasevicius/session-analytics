@@ -2,6 +2,7 @@ import type { AnalyzeOptions } from "./types.ts";
 
 /** Analysis options shared by the dashboard and the report: flag, then `SESSION_ANALYTICS_*` variable. */
 const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
+  ["dataDir", "--data-dir", "DATA_DIR"],
   ["claudeRoot", "--claude-root", "CLAUDE_ROOT"],
   ["codexArchiveRoot", "--codex-archive-root", "CODEX_ARCHIVE_ROOT"],
   ["codexRoot", "--codex-root", "CODEX_ROOT"],
@@ -15,6 +16,7 @@ const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
 ];
 
 export const analysisValueFlags = analysisSettings.map(([, flag]) => flag);
+export const analysisBooleanFlags = ["--reliability-content-rules", "--no-reliability-content-rules"];
 
 export function argument(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -33,6 +35,8 @@ export function setting(
 
 export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): AnalyzeOptions {
   const options: AnalyzeOptions = { includeHidden: !argv.includes("--exclude-hidden") };
+  options.reliabilityContentRules = argv.includes("--no-reliability-content-rules") ? false
+    : argv.includes("--reliability-content-rules") || environment["SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES"] === "1";
   for (const [property, flag, variable] of analysisSettings) {
     const value = setting(argv, environment, flag, variable);
     if (value) options[property] = value as never;

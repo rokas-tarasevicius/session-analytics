@@ -1,0 +1,17 @@
+/* Scoped additions: use the shared theme, leave other lanes' views alone. */
+[data-view-panel="reliability"] .panel { margin-block: 18px; }
+.reliability-notes { margin-block: 16px 24px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.reliability-notes p { margin-block: 7px; }
+.reliability-provider { display: flex; align-items: center; gap: 10px; }
+.reliability-table-scroll { max-width: 100%; overflow-x: auto; }
+.reliability-table-scroll table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.reliability-table-scroll th, .reliability-table-scroll td { padding: 13px 12px; text-align: left; vertical-align: top; }
+.reliability-table-scroll tbody th { font-weight: 500; overflow-wrap: anywhere; max-width: 260px; }
+.reliability-table-scroll td { font-variant-numeric: tabular-nums; }
+.reliability-table-scroll thead th { white-space: normal; min-width: 90px; }
+.reliability-details summary { cursor: pointer; padding-block: 8px; }
+.reliability-flags { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-block: 24px; }
+.reliability-flags dt { font-size: 13px; color: var(--muted); }
+.reliability-flags dd { font-size: 26px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.reliability-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 760px) { .reliability-flags { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

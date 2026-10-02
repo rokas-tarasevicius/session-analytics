@@ -29,14 +29,18 @@ Status: `[x]` shipped, `[ ]` not yet shipped. Milestones are not dated.
 
 Local histories already record tool errors, exit codes, timeouts, durations, MCP call status, hook timing, permission modes, and denials. M1 turns them into content-free measures.
 
-- [ ] Tool error rate by tool, normalized tool class, MCP server, and skill, with low-cardinality error classes (for example not found, edit anchor mismatch, permission denied by user or policy, hook blocked, timeout, command not found, test failed, rate limited, server error, MCP error, interrupted). Environment faults are kept separate from agent faults.
-- [ ] Tool latency (p50 and p95) and timeouts.
-- [ ] Loop and churn flags from keyed hashes (with a per-machine secret) of tool name and arguments plus exit codes: repeated failing calls, failed-edit cascades, edit thrash on one file, re-read churn, and search loops.
-- [ ] Verification share and verification skips (a final edit not followed by a test or build), and failing-to-passing test transitions.
-- [ ] Steps and time to first edit.
-- [ ] MCP server table: calls, error rate, latency, connection failures, configured-but-unused servers, and schema token cost.
-- [ ] Hook runs, blocks, and p95 duration.
-- [ ] Permission friction: prompts per 100 tool calls, denials, and the most-approved command classes as allowlist candidates.
+- [x] Tool outcomes/error rates by tool, normalized class and MCP server, with low-cardinality error classes and denominator guards. Environment, policy and interruption evidence stays distinguishable; causal blame is not inferred. Reliability tab, report, and repository/agent comparisons.
+- [ ] Tool reliability attributed to explicit skills (separate from tool-name attribution).
+- [x] Tool latency (mergeable approximate p50/p95 with timing coverage) and timeouts.
+- [x] **Opt-in P2:** Loop and churn episodes from internal keyed hashes: exact repeats, repeated failing calls, failed-edit cascades, edit thrash, re-read churn, and search loops. Persistent 0600 machine key; no digests in outputs.
+- [x] **Opt-in P2:** Verification share and observed-tail skips (a final edit not followed by a test/build attempt), with incomplete/active evidence marked unavailable.
+- [ ] Failing-to-passing test transitions.
+- [x] Steps and time to first possible edit, with main-stream coverage.
+- [x] MCP server table: calls, error rate, latency, connection failure reports and servers seen.
+- [ ] MCP configured-but-unused servers and schema token cost.
+- [x] Hook runs, blocking summaries, and p95 duration with timing coverage.
+- [x] Permission denials, permission-mode observations, and Codex approval-policy/sandbox mix.
+- [ ] Permission prompts per 100 calls and most-approved command classes as allowlist candidates.
 - [ ] Failure-loop cost: tokens and value spent inside flagged windows.
 
 ### Limits, cache, and context economics

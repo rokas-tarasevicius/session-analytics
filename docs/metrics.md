@@ -70,7 +70,60 @@ Skill names are a reviewed derived field rather than raw tool input. Accept only
 - malformed records skipped;
 - unsupported provider, schema, or model price.
 
-## Useful derived indicators
+## Reliability (M1)
+
+`sessions[].reliability` is an optional, versioned namespace for Claude and Codex. Cursor and unsupported/invalid sessions omit it. Its absence is **unavailable**, not evidence of successful calls. The Reliability tab and terminal report aggregate the same session projections; repository, agent and time filters recompute counts and percentiles. Accounting and the existing effective/transport tool counters are unchanged.
+
+### Evidence and outcomes
+
+Each observed call has one of `success`, `error`, `denied`, `interrupted`, `timeout`, or `unknown`. Missing, running or opaque results stay unknown. Claude calls join `tool_use.id` to `tool_result.tool_use_id`; streamed blocks and repeated results count once. A Claude result with no `is_error` is successful by that provider's result schema, except an asynchronous/background launch, which does not establish completion. `toolDenialKind`, `interrupted`, `timedOutAfterMs`, explicit exit codes, and known `returnCodeInterpretation` statuses override a generic success. A top-level receipt accompanying multiple result blocks is not attributed to every call.
+
+Codex reads `CommandExecution` (`exit_code`, `status`, `duration`), `McpToolCall` (`status`, `result.isError`, `error`, `duration`), `FileChange` and direct function/custom call receipts. Call/item IDs join shapes when identical; replayed completions count once. Typed durations accept `{secs, nanos}`; explicit numeric `duration`, `duration_ms`, `durationMs`, `totalDurationMs` are milliseconds, and `durationSeconds` is seconds. No latency is inferred from record timestamp gaps. Results before their calls are reconciled; unmatched results are counted separately without inventing a tool name or call.
+
+Code-mode wrappers remain separate `other` calls. Their completion never implies that the enclosed tools succeeded. Typed inner tool items, when present, are measured independently. Reliability call counts therefore differ from the existing expanded `metrics.toolCalls`. Unlinked formats with distinct call/item IDs cannot safely be deduplicated by arbitrary transcript text; this is a coverage limitation, not grounds to guess a join.
+
+Outcome precedence on conflicting/replayed evidence is timeout, denial, interruption, error, success, unknown. **Error rate** is `(error + timeout) / (success + error + timeout)`. Denials and interruptions are displayed separately, not assigned as agent faults. Every rate displays its numerator and eligible denominator; fewer than **5** eligible observations gives `N/A`/`null`. Outcome coverage is `(calls - unknown) / calls`, always shown as counts. A tiny sample is not a ranking.
+
+`tools[]` groups by `(name, toolClass)`. `mcp[]` groups by structured server name (including Claude `mcp__server__tool` names). A server seen only in `failedMcpServers` attachments gets zero calls and positive `connectionFailures`; connection failures are reports, deduplicated by attachment UUID, not inferred unique outage incidents. They are excluded from the tool error-rate denominator. Configured-but-unused server inventory and schema token cost are not inferred.
+
+### Local content rules (P2, opt-in)
+
+`--reliability-content-rules` or `SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES=1` enables deterministic rules over tool arguments and failed result text. They are **off by default**. `--no-reliability-content-rules` overrides the environment. The UI and report display enabled-session coverage; there is no browser toggle that silently enables parsing. No LLM, network access, raw content, raw path, or matching digest is involved in the output.
+
+The cross-provider ontology is `read`, `search`, `edit`, `write`, `shell`, `test_build`, `vcs`, `web`, `mcp`, `delegate`, `plan`, `other`. Structured tool names and Codex `parsed_cmd` read/search/list classifications work by default. With P2 enabled, shell commands are classified locally using argv0 and known test/build invocations (`npm test`, `npm run check`, `pytest`, `go test`, etc.). Current Codex argv arrays such as `[shell, "-lc", command]` are handled. Simple `cd … && check` sequences and environment assignments are recognized. Mixed command classes, substitutions, pipelines, unknown programs and ambiguous shell forms stay `shell`; scripts are never executed or opened. An unfamiliar test runner may therefore be unrecognized. Classes are activity labels, not proof of the command's intent or effect.
+
+Error classes are `not_found`, `edit_anchor_mismatch`, `permission_denied_user`, `permission_denied_policy`, `hook_blocked`, `timeout`, `command_not_found`, `nonzero_exit`, `test_failed`, `interrupted`, `api_rate_limit`, `api_server_error`, `mcp_error`, `unknown`. Text matching runs only on already-failed results; a successful grep/read of error text is not an error. `Exit code N` and `Process exited with code N` receipt lines retain only the numeric result for classification. Known duration receipt lines retain only milliseconds. Exit 127 is command-not-found; nonzero test/build calls are test-failed. Structured API error events are separate `apiErrors` counts, never fabricated tool calls. These classes distinguish observable failure modes without asserting root cause or assigning blame.
+
+### Latency and coverage
+
+`latency` contains `samples`, sparse `[upperBoundMs, count]` histogram `buckets`, `p50Ms`, and `p95Ms`. Positive durations round up to logarithmic buckets with factor **1.1**, then whole milliseconds (at most 10% + 1 ms error). Zero is a valid observed duration. Nonfinite, negative or implausible durations over seven days are discarded. Quantiles are nearest-rank upper bounds, labeled **≈**. Aggregation merges buckets and recomputes quantiles; it never averages session p95s. Missing timing stays null, with `samples / calls` beside each latency. Hook timing shows `samples / runs` instead.
+
+`coverage.argumentCalls` and `coverage.fileCalls` count calls with usable internal argument/file HMAC evidence. They are not counts of unique files. `unmatchedResults` counts receipts without a matching call. `truncated` means malformed input or a bounded-parser safeguard was reached: at most 50,000 calls plus pending results and 200,000 deduplication event keys per execution stream. Incomplete sessions retain partial counts but suppress behavior/verification claims. Hashing is bounded to 1 MiB, 10,000 values and depth 16 per call; at most 1,000 file references per call are considered. Missing hash evidence never falls back to plain SHA-256.
+
+### Behavior episodes
+
+With P2 enabled, argument object keys are sorted before HMAC-SHA256; string values, command quoting and whitespace inside strings are preserved. Paths are resolved lexically against the recorded working directory and HMACed with a separate domain. No filesystem contents or symlink targets are read for this matching. Digests exist only during one execution stream and are never returned. Rules count **episodes**, not every overlapping window:
+
+| Flag | Trigger | Reset / boundary |
+| --- | --- | --- |
+| `exact_repeat` | Third consecutive call with identical tool and normalized arguments | Different/missing fingerprint; one count for a longer run |
+| `repeated_failure` | Third consecutive error/timeout with identical tool and arguments | Successful, denied, interrupted, unknown, or different call |
+| `failed_edit_cascade` | Third consecutive failed edit/write to the same first referenced file | Different file or intervening non-failed-edit call |
+| `edit_thrash` | Third successful edit/write to one file within 10 calls | A passing test/build, or count falls below 3 as the window advances |
+| `reread_churn` | Third read of the same file within 10 calls | Successful edit to that file, passing check, or count falls below 3 |
+| `search_loop` | Tenth read/search since the last edit/write or test/build | Any edit/write/check attempt; one episode for a longer streak |
+
+Claude main and subagent files are independent streams. A parent's passing test cannot reset another agent's churn window, and unrelated calls cannot combine into a loop. Counts sum into the composite session. `flags` is null when rules are disabled, the private key is unavailable, or parsing is incomplete. A zero with sparse argument/path evidence is a lower bound; use the hash-coverage counts. Polling, exploration and deliberate incremental editing can all trigger flags. **Flags are prompts for inspection, not verdicts.**
+
+### Verification, hooks and permissions
+
+`verification.checks` counts recognized test/build calls; `passed` and `failed` count success and error/timeout outcomes. `editCalls` counts successful or unresolved edit/write calls (possible edits); known failed or denied edits are excluded. `share` is checks divided by checks + editCalls, with a minimum denominator of 5, P2 enabled and complete parsing. It is a share of recognized edit/check activity, not a success rate or percentage of code tested.
+
+`skip` is true when the observed transcript tail contains edits after its last completed test/build attempt; false when a completed attempt follows the final edit. Even a failed check is an attempted verification. No edits, disabled rules, incomplete parsing, working sessions, uncompleted Codex turns, unknown results, or opaque tools produce null. Composite Claude sessions require eligibility in every stream with edits; a skip in any eligible stream marks the session. This describes the **observed tail**, not proof that a session permanently ended or that tests covered a change. `stepsToFirstEdit` counts preceding main-stream calls; `msToFirstEdit` uses first-event to first-edit timestamps, or null without timestamps/edits. Comparisons show a mean and its session count. No absolute speed or productivity verdict follows from these values.
+
+`hooks.runs` comes from stop-hook summaries' `hookCount` (or the number of hookInfos); `blocks` counts summaries with `preventedContinuation`, not individual blocked hooks. Only reported hookInfo durations contribute latency. `permissions.denials` counts denied calls. `modes`, `approvalPolicies` and `sandboxes` are allowlisted **observation counts**, not time shares or approval prompt counts. Unrecognized labels become `unknown`. Permission approvals carry little signal, and interrupts rise with expert steering; neither is inherently failure. Plan rejection semantics and approval-prompt rates need separate evidence.
+
+## Useful derived indicators (other areas)
 
 These can be added without reading content, provided they are labeled as indicators:
 

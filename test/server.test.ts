@@ -81,6 +81,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,
       SESSION_ANALYTICS_CURSOR_DATABASE: fixture.cursorDatabasePath,
       SESSION_ANALYTICS_CONDUCTOR_DATABASE: fixture.databasePath,
+      SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES: "1",
+      SESSION_ANALYTICS_DATA_DIR: join(temporaryDirectory, "derived"),
     };
     child = spawn(process.execPath, [serverPath, "--port", String(port)], {
       cwd: repositoryRoot,
@@ -122,6 +124,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(serialized, /"skills":\{"review":1\}/);
     assert.match(serialized, /"skillEvidence":"explicit"/);
     assert.match(serialized, /"skillEvidence":"inferred"/);
+    assert.match(serialized, /"reliability":\{"version":1,"contentRules":"enabled"/);
+    assert.doesNotMatch(serialized, /argHash|fileHash|reliability-hmac/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
 
@@ -132,12 +136,18 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const pageText = await page.text();
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
+    assert.match(pageText, /data-view-button="reliability"/);
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
     const application = await fetch(`${origin}/app.js`);
     const applicationText = await application.text();
     assert.match(applicationText, /dataset\.providerFilter/);
     assert.match(applicationText, /renderDistributions/);
+    for (const path of ["reliability-data.js", "reliability-view.js", "reliability.css"]) {
+      const asset = await fetch(`${origin}/${path}`);
+      assert.equal(asset.status, 200);
+      assert.match(asset.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+    }
     assert.match(applicationText, /renderNamedDistribution/);
     assert.match(applicationText, /activityTooltip[\s\S]*pointerenter/);
     assert.match(applicationText, /Math\.log1p\(value\)[\s\S]*\* 7/);
