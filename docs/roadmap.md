@@ -98,6 +98,9 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 
 ## Architecture direction
 
+- [x] Document [research-grounded metric candidates and an aggregate-only evidence audit](proposals/metrics-research.md), plus a [proposed normalized event model and provider ontology](proposals/schema-v2.md). This completes the design artifact, not the metric implementations above.
+- [ ] Validate detector precision, false-flag burden and coverage on independently labeled, held-out trajectories before promoting experimental flags to coaching or automated interventions.
+
 The analyzer will move from "scan everything on launch and keep a snapshot in memory" to "ingest incrementally into a persistent, content-free index":
 
 ```text

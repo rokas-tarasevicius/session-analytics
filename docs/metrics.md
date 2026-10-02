@@ -72,6 +72,8 @@ Skill names are a reviewed derived field rather than raw tool input. Accept only
 
 ## Useful derived indicators
 
+The [trajectory metrics research proposal](proposals/metrics-research.md) defines 20 candidate measures with formulas, concrete source fields, observed local coverage, confounders, privacy tiers, validation plans and UI wording. Its companion [normalized event proposal](proposals/schema-v2.md) specifies joins and missing-data semantics. These are research designs, not additional current metrics or a change to the definitions above. Their thresholds are experimental; activity and sequence flags do not establish outcomes.
+
 These can be added without reading content, provided they are labeled as indicators:
 
 - priced usage value per user turn, task completion, model call, effective tool call, or active hour;

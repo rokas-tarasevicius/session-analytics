@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Research proposals for 20 content-free trajectory metrics and a normalized event schema, grounded in 2025–2026 primary sources and a bounded aggregate-only local evidence audit. Includes provider tool/error mappings, privacy tiers, coverage requirements and validation plans; no runtime metrics or output fields change.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

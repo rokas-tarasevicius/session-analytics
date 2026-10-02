@@ -241,6 +241,8 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 
 ## Roadmap
 
+The [metrics research proposal](docs/proposals/metrics-research.md) surveys 2025–2026 trajectory research and audits local signal coverage. It defines candidate detectors and a [normalized event schema](docs/proposals/schema-v2.md), including their privacy and validation requirements. These documents describe future work, not shipped features.
+
 `0.5.0` is the first standalone release. The next milestones, in order:
 
 - **M0, correctness (in progress):** multi-profile discovery, streamed-usage dedupe, thinking tokens, and current Codex and Cursor formats shipped in 0.5.0. Still to come: remaining Codex and Cursor formats, Conductor result records as fallback evidence, reconciliation against provider-reported totals, and a persistent content-free index with incremental ingest.

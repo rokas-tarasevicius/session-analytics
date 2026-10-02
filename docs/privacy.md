@@ -53,6 +53,8 @@ P2 and P3 features will always be off by default.
 
 ## Field manifest
 
+**Research proposals:** [schema-v2.md](proposals/schema-v2.md) contains a separate, proposed event-field manifest, and [metrics-research.md](proposals/metrics-research.md) describes its intended measurements. Neither adds fields to the public snapshot listed below. The accompanying research audit retains aggregate counts/distributions and reviewed tool names only; it does not publish raw local records, paths or identifiers. Future implementation still requires the field-by-field projection, sentinel tests and P2/P3 opt-ins described here.
+
 This manifest lists every field in the public snapshot. It is generated from the types in [`src/types.ts`](../src/types.ts); a change to those types must update this table in the same pull request. Metric semantics are defined in [metrics.md](metrics.md).
 
 ### Snapshot root (`MachineAnalytics`)
