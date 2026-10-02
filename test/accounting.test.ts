@@ -24,6 +24,7 @@ async function withFixture(
 
 function analyzeFixture(fixture: SessionAnalyticsFixture, overrides: { cursorDatabasePath?: string } = {}) {
   return analyzeRepositorySessions({
+    dataDir: fixture.dataDir,
     claudeRoot: fixture.claudeRoot,
     codexArchiveRoot: fixture.codexArchiveRoot,
     codexRoot: fixture.codexRoot,

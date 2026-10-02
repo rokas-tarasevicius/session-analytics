@@ -49,7 +49,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 **Known gaps:**
 
-- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). History it has deleted cannot be analyzed.
+- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). The local index preserves sessions ingested before cleanup, marked `transcript.sourceDeleted`. History deleted before the first ingest cannot be recovered; rebuild and `--no-index` cannot reconstruct it.
 - `stats-cache.json` and other provider-reported totals are not yet used for reconciliation.
 - Git evidence in transcripts (branches, commit and pull-request records) is not used yet; see [M2](roadmap.md#m2-outcomes).
 - Views do not yet show which profile a session came from.

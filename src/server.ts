@@ -9,12 +9,13 @@ import { analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
 import type { MachineAnalytics } from "./types.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
+import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, "--port"]);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-index", "--no-open", "--open", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -37,6 +38,7 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it.
+Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
 `);
   process.exit(0);
 }
@@ -82,6 +84,8 @@ async function sendFile(response: ServerResponse, path: string): Promise<void> {
 }
 
 function safeError(error: unknown): string {
+  const indexError = indexErrorMessage(indexErrorCode(error));
+  if (indexError) return indexError;
   const message = error instanceof Error ? error.message : "";
   if (message.includes("rate card")) return "The configured rate card is invalid or unavailable.";
   if (message.includes("repository")) return "The requested repository could not be selected.";

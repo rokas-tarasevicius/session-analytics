@@ -2,9 +2,11 @@ import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
+import type { MachineAnalytics } from "./types.ts";
+import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 
 const valueFlags = new Set(analysisValueFlags);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--no-index", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -41,6 +43,8 @@ Options:
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
   --rate-card PATH       Override the reviewed rate card
+  --data-dir PATH        Override the private local index directory
+  --no-index             Full scan without reading or writing the index
   --version              Print the version
   --help                 Show this help
 `);
@@ -68,7 +72,12 @@ function dollars(value: number): string {
 
 const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
 
-const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
+let analytics: MachineAnalytics;
+try { analytics = await analyzeMachineSessionsIsolated(analyzeOptions); }
+catch (error) {
+  process.stderr.write(`${indexErrorMessage(indexErrorCode(error)) ?? "Local analytics evidence is unavailable or could not be parsed."}\n`);
+  process.exit(1);
+}
 
 if (process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);

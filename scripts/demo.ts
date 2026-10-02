@@ -575,6 +575,7 @@ for (const [key, value] of Object.entries(process.env)) {
 environment["HOME"] = sources.home;
 
 const sourceFlags = [
+  "--data-dir", join(root, "index"),
   "--claude-root", sources.claudeRoot,
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,

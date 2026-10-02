@@ -25,6 +25,31 @@ Every provider profile on the machine is in scope: `~/.claude/projects`, sibling
 
 Provider transcript stores are canonical evidence that a session can be analyzed. Stale Conductor rows without matching evidence are excluded. A legacy row without a provider ID is recovered only after a unique provider, working-directory, and start-time match. This prevents database stubs from inflating session counts or creating repetitive coverage notes.
 
+An existing content-free index extends that evidence with previously validated sessions whose sources were removed. These are marked `transcript.sourceDeleted: true`, counted in ordinary totals, and retain their last observed facts, pricing, and parser semantics. The mark describes source availability, not session outcome, recency, or quality. An unreadable source is not proof of deletion: prior facts can be shown with a fixed availability warning. `--no-index` excludes all retained history and performs the present-evidence full scan. Rebuild cannot recover sources already removed.
+
+Repository and machine warnings count source-deleted sessions beside the totals. `workingSnapshots` and a retained session's status describe its last observed snapshot, not proof that it is still running now.
+
+The index does not change current-evidence metric definitions. Parity tests require indexed and full-scan snapshots to match exactly except generation time when sources, rate card, and retention are unchanged. File/group fingerprints invalidate changed Claude composites. Codex counter ownership is recomputed across the evidence union from cached per-file facts; a changed owner invalidates both affected sessions. Retained and pruned owners reserve already-attributed counter states so they do not migrate into surviving receivers' totals. Retained facts cannot be repriced exactly from model aggregates because long-context rates apply per request; a fixed warning states that their prices remain those from their last successful ingest.
+
+`index prune --before DATE` excludes sessions whose last event (falling back to updated/start time) is strictly before UTC midnight of `DATE`. Provider offsets are normalized to UTC; an unknown activity date is not evidence of age and is kept. It is a session-retention cutoff, not a per-event time filter. A persistent floor prevents old source files from immediately repopulating the index; rebuild resets it. Removed subagent-only files invalidate a still-present Claude composite, which is recomputed from present sources; the index is not a per-file archive.
+
+### Index operational counters
+
+These P0 diagnostics are emitted by `index status --json`, not mixed into the analytics snapshot:
+
+| Field | Definition and interpretation |
+| --- | --- |
+| `state`, `schemaVersion` | Readability/compatibility state and current on-disk schema; missing is normal before first ingest. |
+| `sessions`, `sourceDeletedSessions` | Stored session rows and their source-deleted subset, across source scopes. Different scopes can contain the same session; these are not machine session totals. |
+| `evidenceFiles`, `scopes`, `databaseBytes` | Stored fingerprint rows, scopes containing sessions, and main-database bytes (excluding sidecars/quarantines). |
+| `lastScan.completedAt` | Time of the most recently committed ingest; `lastScan` is `null` before one completes. |
+| `lastScan.fingerprintedFiles` | Unique Claude/Codex files inspected, including subagents. |
+| `lastScan.parsedSessions`, `lastScan.reusedSessions` | Claude/Codex sessions recomputed or reused. Cursor always refreshes and is outside this denominator. A changed dependent may be reparsed even if its own file is unchanged. |
+| `lastScan.retainedSessions` | Prior facts included after source absence/unavailability. |
+| `lastScan.deferredSessions` | Groups changed during the scan; their previous good facts remain in the index for retry. Parse/reuse counters describe work attempted, including these groups. |
+| `lastScan.ledgerReads`, `lastScan.ledgerHits`, `lastScan.ledgerAppends` | Codex ledger files read, cached files reused, and the subset of reads resumed after a complete-prefix hash check. Appends still reparse the changed session aggregate. |
+| `lastScan.elapsedMilliseconds` | Ingest wall time excluding child startup; benchmark wall times include that startup. These are operational timings, not agent-work productivity measures. |
+
 ## Current measures
 
 ### Spend and usage

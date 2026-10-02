@@ -2,6 +2,7 @@ export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
 export type SkillEvidence = "explicit" | "inferred" | "unavailable";
+export type { IndexStatus, IndexScanStats } from "./store/database.ts";
 
 export interface LongContextRate {
   inputMultiplier: number;
@@ -80,6 +81,8 @@ export interface TranscriptHealth {
   snapshotWhileWorking: boolean;
   status: "invalid" | "missing" | "ok" | "unsupported";
   warnings: string[];
+  /** Last indexed facts retained after the provider removed their source. Absent on live/full-scan evidence. */
+  sourceDeleted?: boolean;
 }
 
 export interface SessionAnalytics {
@@ -203,6 +206,8 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  dataDir?: string;
+  noIndex?: boolean;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;

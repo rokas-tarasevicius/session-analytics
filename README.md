@@ -54,12 +54,13 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 ## Features
 
 - **One command, whole machine.** Discovers every Claude Code profile (`~/.claude`, `~/.claude-*`, `CLAUDE_CONFIG_DIR`), active and archived Codex rollouts (`~/.codex`, `~/.codex-*`, `CODEX_HOME`), Cursor's local composer history, and Claude Desktop local-agent sessions. Profiles that point at the same directory are read once.
+- **Incremental history.** A private content-free SQLite index reuses unchanged Claude/Codex session facts, checks cross-file counter ownership, and preserves previously indexed sessions after provider cleanup. Use `--no-index` for a fresh scan of present sources.
 - **Tokens by class.** Input, uncached input, cache reads, cache writes split by 5-minute and 1-hour TTL, output, and reasoning output where the provider records it.
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
 - **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
-- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
+- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to provider stores. Only the private derived index is written.
 
 <table>
   <tr>
@@ -126,6 +127,23 @@ jq '.repositories[] | {name: .repository.name, usd: .summary.estimatedSpendUsd}'
 
 The snapshot has the same shape as the dashboard's `/api/analytics` response. Every field is described in the [field manifest](docs/privacy.md#field-manifest).
 
+### Local index
+
+The first launch builds the index; later launches and dashboard refreshes fingerprint evidence and reuse unchanged session facts. Claude main and subagent files form one invalidation group. Codex ownership is recomputed from cached counter evidence so a changed rollout can invalidate another session without re-parsing unrelated files. Cursor's mutable databases and repository assignments are refreshed on every scan.
+
+```bash
+session-analytics index status             # counts, schema, and last-ingest statistics
+session-analytics index status --json
+session-analytics index path               # local management path, never in analytics output
+session-analytics index prune --before 2026-01-01
+session-analytics index rebuild            # discard old facts, then rescan configured sources
+session-analytics report --no-index        # bypass the index, including retained history
+```
+
+The default data directory is `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (or `~/.local/share/session-analytics/`) on Linux. Override it with `--data-dir PATH` or `SESSION_ANALYTICS_DATA_DIR`. The directory is mode `0700`; the database, SQLite sidecars, and per-machine key are `0600`. The index stores derived facts and keyed fingerprints, never transcript text or raw paths/IDs. See [on-disk privacy](docs/privacy.md#local-index).
+
+Previously indexed sessions survive provider cleanup and carry `transcript.sourceDeleted: true`; their facts and prices remain those of their last successful ingest. Prune removes sessions whose last observed event is **strictly before UTC midnight** on the given date and keeps a retention floor for future indexed scans. It does not delete provider files. Rebuild resets that floor and discards retained history that no longer has source evidence. An unreadable index fails with a fixed error; rebuild recovers it, while `--no-index` bypasses it. A corrupt database is quarantined privately during recovery; quarantine files are not part of the active index.
+
 ### Options
 
 | Option | Applies to | Description |
@@ -144,6 +162,8 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
+| `--data-dir PATH` | both, index | Private index directory; overrides `SESSION_ANALYTICS_DATA_DIR`. |
+| `--no-index` | both | Read present provider evidence without accessing the index; also `SESSION_ANALYTICS_NO_INDEX=1`. |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
@@ -243,7 +263,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 
 `0.5.0` is the first standalone release. The next milestones, in order:
 
-- **M0, correctness (in progress):** multi-profile discovery, streamed-usage dedupe, thinking tokens, and current Codex and Cursor formats shipped in 0.5.0. Still to come: remaining Codex and Cursor formats, Conductor result records as fallback evidence, reconciliation against provider-reported totals, and a persistent content-free index with incremental ingest.
+- **M0, correctness (in progress):** multi-profile discovery, streamed-usage dedupe, thinking tokens, and current Codex and Cursor formats shipped in 0.5.0. The persistent content-free index now adds incremental ingest and retention. Still to come: remaining Codex and Cursor formats, Conductor result records as fallback evidence, and reconciliation against provider-reported totals.
 - **M1, reliability and economics:** tool error rates and latency, loop and churn flags, MCP server health, permission friction, rate-limit headroom, cache-break causes, and context fill.
 - **M2, outcomes and interaction:** evidence-ranked links from sessions to commits and pull requests, cost per merged change, autonomy and interruption measures, and concurrency.
 - **M3, agent-facing:** a metrics-only MCP server so agents can check budget, tool reliability, and hotspots without seeing transcript text, plus opt-in, off-by-default review features.
@@ -283,7 +303,7 @@ It is an API list-price equivalent, not an invoice. Subscriptions, discounts, cr
 <details>
 <summary><strong>Does it modify my agent history?</strong></summary>
 
-No. JSONL files are streamed read-only and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
+No. JSONL files are streamed read-only and provider SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories. A separate private SQLite index stores only derived facts and keyed fingerprints; use `--no-index` to bypass it.
 </details>
 
 <details>

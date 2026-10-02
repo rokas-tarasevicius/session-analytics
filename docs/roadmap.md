@@ -21,7 +21,9 @@ Status: `[x]` shipped, `[ ]` not yet shipped. Milestones are not dated.
 - [x] Regression tests for streamed Claude usage, current Codex rollouts, profile discovery, and Cursor headers.
 - [ ] Golden-fixture parity tests for each supported provider format version.
 - [ ] Reconciliation report: compare computed totals with provider-reported totals where they exist.
-- [ ] Persistent content-free index with incremental ingest (per-file path, size, modification time, and offset watermarks), so launches stop rescanning unchanged history.
+- [x] Persistent content-free SQLite index with incremental ingest (keyed source identity, device/inode, size, nanosecond modification/change times, keyed head/tail fingerprints), session reuse, verified Codex ledger append checkpoints, migrations, WAL, and private permissions.
+- [x] Retain previously indexed source-deleted sessions, reserve shared counter ownership, and provide `index status|path|rebuild|prune` and `--no-index`; fixture/demo parity tests.
+- [ ] Incremental Cursor database adapters and resumable session parser checkpoints (the current index refreshes Cursor and reparses changed composite sessions conservatively).
 
 ## M1: Reliability and economics
 
@@ -98,7 +100,7 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 
 ## Architecture direction
 
-The analyzer will move from "scan everything on launch and keep a snapshot in memory" to "ingest incrementally into a persistent, content-free index":
+The analyzer now ingests Claude/Codex incrementally into a persistent, content-free index in `src/store/`. Further extraction will move source parsing and metric computation into dedicated modules:
 
 ```text
 adapters/    one per source; parse raw stores into normalized events
@@ -111,7 +113,7 @@ pricing/     versioned rate cards
 surfaces/    cli, dashboard, mcp, skill, export
 ```
 
-- The index will live outside any repository: `~/Library/Application Support/<name>/` on macOS and `$XDG_DATA_HOME/<name>/` on Linux, holding the derived index and configuration.
+- The index lives outside repositories by default: `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (fallback `~/.local/share/session-analytics/`) on Linux. `SESSION_ANALYTICS_DATA_DIR` or `--data-dir` overrides it. Only derived facts and keyed fingerprints are stored.
 - An optional raw-transcript archive, so history can outlive provider retention, is content and therefore **opt-in and off by default**.
 - The JSON output will carry a `schemaVersion`, and MCP tool names and custom telemetry attributes will stay brand-neutral.
 - The runtime stays dependency-free. Distribution is `git clone` today; an npm package or a single binary may follow.

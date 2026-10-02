@@ -8,6 +8,9 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
+import { IndexScan } from "./store/index.ts";
+import { codexCounterFingerprint, readCodexLedger } from "./store/codex-ledger.ts";
+
 import type {
   AnalyzeOptions,
   CostBreakdown,
@@ -448,23 +451,6 @@ function codexUsage(raw: JsonRecord | null): TokenUsage {
   };
 }
 
-function codexCounterFingerprint(
-  total: JsonRecord | null,
-  last: JsonRecord | null,
-): string | null {
-  if (!total || !last) return null;
-  return [
-    nonNegativeNumberValue(total["input_tokens"]),
-    nonNegativeNumberValue(total["cached_input_tokens"]),
-    nonNegativeNumberValue(total["output_tokens"]),
-    nonNegativeNumberValue(total["reasoning_output_tokens"]),
-    nonNegativeNumberValue(last["input_tokens"]),
-    nonNegativeNumberValue(last["cached_input_tokens"]),
-    nonNegativeNumberValue(last["output_tokens"]),
-    nonNegativeNumberValue(last["reasoning_output_tokens"]),
-  ].join(":");
-}
-
 function tokenDelta(current: TokenUsage, previous: TokenUsage): TokenUsage {
   const delta = zeroTokens();
   for (const key of tokenKeys) {
@@ -539,53 +525,27 @@ function codexCounterOwnerPrecedes(
   return candidate.path < current.path;
 }
 
-async function buildCodexCounterLedger(paths: string[]): Promise<Map<string, CodexCounterOwner>> {
+async function buildCodexCounterLedger(
+  paths: string[], index: IndexScan | null = null,
+  retainedOwners: Map<string, { path: string; timestamp: string; modelFallback: string | null }> = new Map(),
+): Promise<Map<string, CodexCounterOwner>> {
   const owners = new Map<string, CodexCounterOwner>();
-  const modelsByPath = new Map<string, Set<string>>();
   for (const path of paths) {
-    let lastLocalActivityTimestamp: string | null = null;
-    const models = new Set<string>();
-    modelsByPath.set(path, models);
-    await visitJsonLines(path, (record) => {
-      const payload = asRecord(record["payload"]);
-      const timestamp = stringValue(record["timestamp"]);
-      if (record["type"] === "turn_context") {
-        const model = stringValue(payload?.["model"]);
-        if (model) models.add(model);
-      }
-      const tokenEvent = record["type"] === "event_msg" && payload?.["type"] === "token_count";
-      if (!tokenEvent) {
-        if (record["type"] !== "session_meta" && record["type"] !== "turn_context" && timestamp) {
-          lastLocalActivityTimestamp = timestamp;
-        }
-        return;
-      }
-      const info = asRecord(payload["info"]);
-      const fingerprint = codexCounterFingerprint(
-        asRecord(info?.["total_token_usage"]),
-        asRecord(info?.["last_token_usage"]),
-      );
-      if (!fingerprint || !timestamp) return;
-      const eventTime = Date.parse(timestamp);
-      const activityTime = Date.parse(lastLocalActivityTimestamp ?? "");
-      const candidate: CodexCounterOwner = {
-        activityDeltaMilliseconds:
-          Number.isFinite(eventTime) && Number.isFinite(activityTime) && eventTime >= activityTime
-            ? eventTime - activityTime
-            : Number.POSITIVE_INFINITY,
-        modelFallback: null,
-        path,
-        timestamp,
+    const evidence = index ? await index.codexLedger(path) : (await readCodexLedger(path)).evidence;
+    const modelFallback = evidence.models.length === 1 ? evidence.models[0] ?? null : null;
+    for (const observation of evidence.observations) {
+      const candidate = {
+        activityDeltaMilliseconds: observation.activityDeltaMilliseconds ?? Infinity,
+        modelFallback, path, timestamp: observation.timestamp,
       };
-      if (codexCounterOwnerPrecedes(candidate, owners.get(fingerprint))) {
-        owners.set(fingerprint, candidate);
-      }
-    });
+      if (codexCounterOwnerPrecedes(candidate, owners.get(observation.fingerprint))) owners.set(observation.fingerprint, candidate);
+    }
   }
-  for (const owner of owners.values()) {
-    const models = modelsByPath.get(owner.path);
-    owner.modelFallback = models?.size === 1 ? [...models][0] ?? null : null;
+  for (const [fingerprint, owner] of retainedOwners) owners.set(fingerprint, { ...owner, activityDeltaMilliseconds: -1 });
+  for (const [fingerprint, owner] of owners) {
+    if (index?.isPrunedCounter(fingerprint)) owners.set(fingerprint, { ...owner, path: "pruned", timestamp: "", activityDeltaMilliseconds: -1 });
   }
+  index?.setCounterDependencies(owners);
   return owners;
 }
 
@@ -596,7 +556,15 @@ async function analyzeCodex(
   inheritedWarnings: string[],
   counterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCounters: Set<string> = new Set<string>(),
+  index: IndexScan | null = null,
+  attributedCounters: Set<string> | null = null,
 ): Promise<SessionAnalytics> {
+  if (index) {
+    const attributed = new Set<string>();
+    return index.session(row, [path], inheritedWarnings,
+      () => analyzeCodex(row, path, rateCard, inheritedWarnings, counterLedger, claimedCounters, null, attributed),
+      claimedCounters, counterLedger, attributed);
+  }
   const state = createMutableSession();
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
@@ -743,6 +711,7 @@ async function analyzeCodex(
         continue;
       }
       claimedCounters.add(event.fingerprint);
+      attributedCounters?.add(event.fingerprint);
       observed = event.last;
     } else {
       missingLastUsage += 1;
@@ -842,7 +811,10 @@ async function analyzeClaude(
   mainPath: string,
   rateCard: RateCard,
   inheritedWarnings: string[],
+  index: IndexScan | null = null,
 ): Promise<SessionAnalytics> {
+  if (index) return index.session(row, await claudeEvidencePaths(mainPath), inheritedWarnings,
+    () => analyzeClaude(row, mainPath, rateCard, inheritedWarnings));
   const state = createMutableSession();
   state.effort = null;
   state.executionKind = "top-level";
@@ -1387,12 +1359,13 @@ async function analyzeTranscriptCandidate(
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
+  index: IndexScan | null = null,
 ): Promise<SessionAnalytics> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   return candidate.provider === "codex"
-    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters)
-    : await analyzeClaude(row, candidate.path, rateCard, warnings);
+    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, index)
+    : await analyzeClaude(row, candidate.path, rateCard, warnings, index);
 }
 
 function cursorPaths(data: JsonRecord): string[] {
@@ -1832,6 +1805,7 @@ function chooseRepository(
 function selectRepositories(
   repositories: RepositoryRow[],
   options: AnalyzeOptions,
+  index: IndexScan | null = null,
 ): RepositoryRow[] {
   if (options.repositoryId) {
     const repository = repositories.find(({ id }) => id === options.repositoryId);
@@ -1842,11 +1816,15 @@ function selectRepositories(
     return [chooseRepository(repositories, options.repositoryName, options.repositoryRemote ?? "")];
   }
   if (options.repositoryRemote) {
-    return [chooseRepository(repositories, undefined, options.repositoryRemote)];
+    const matches = repositories.filter((repository) =>
+      normalizeRemote(repository.remote_url ?? "") === normalizeRemote(options.repositoryRemote as string) ||
+      index?.matchesRemote(repository.id, options.repositoryRemote as string));
+    if (matches.length !== 1) throw new Error("No unique evidenced repository has the requested remote.");
+    return matches;
   }
   if (options.repositoryRoot) {
     const canonicalRoot = resolve(options.repositoryRoot);
-    const matches = repositories.filter(({ root_path }) => resolve(root_path) === canonicalRoot);
+    const matches = repositories.filter(({ id, root_path }) => (root_path && resolve(root_path) === canonicalRoot) || index?.matchesRoot(id, canonicalRoot));
     if (matches.length !== 1 || !matches[0]) {
       throw new Error(
         matches.length === 0
@@ -1934,6 +1912,8 @@ function aggregate(
     );
   }
   const unpricedSessions = sessions.filter(({ costComplete }) => !costComplete).length;
+  const retainedSessions = sessions.filter(({ transcript }) => transcript.sourceDeleted).length;
+  if (retainedSessions > 0) warnings.push(`${retainedSessions} sessions include source-deleted history; facts and prices are from their last successful ingest.`);
   if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include models without a rate card.`);
   return {
     generatedAt: new Date().toISOString(),
@@ -1982,6 +1962,7 @@ async function analyzeSelectedRepositories(
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
   let database: DatabaseSync | null = null;
+  let index: IndexScan | null = null;
   try {
     await stat(databasePath);
     database = new DatabaseSync(databasePath, { readOnly: true });
@@ -1996,6 +1977,7 @@ async function analyzeSelectedRepositories(
       options.repositoryId || options.repositoryName || options.repositoryRemote || options.repositoryRoot,
     );
     const includeHidden = options.includeHidden ?? !explicitRepositoryFilter;
+    index = await IndexScan.open(options, rateCard, includeHidden);
     const availableRepositories = database
       ? database
           .prepare(
@@ -2033,8 +2015,9 @@ async function analyzeSelectedRepositories(
     // Keep Cursor's hydrated composer objects serialized until the much larger
     // Codex and Claude transcript pass has finished. Retaining both object
     // graphs at once needlessly pushes machine-wide scans over V8's heap limit.
+    const cursorDatabasePath = options.cursorDatabasePath ?? join(homedir(), "Library/Application Support/Cursor/User/globalStorage/state.vscdb");
     const cursorSerialized = await cursorSessionsSerialized(
-      options.cursorDatabasePath ?? join(homedir(), "Library/Application Support/Cursor/User/globalStorage/state.vscdb"),
+      cursorDatabasePath,
       availableRepositories,
       workspaceRepositories,
     );
@@ -2060,7 +2043,8 @@ async function analyzeSelectedRepositories(
       transcriptCandidates(claudeIndex.paths, "claude"),
     ]);
     const codexCounterLedger = await buildCodexCounterLedger(
-      codexCandidates.map(({ path }) => path),
+      codexCandidates.map(({ path }) => path), index,
+      index?.retainedCounterOwners(new Set(codexCandidates.map(({ id }) => index!.identity("codex", id))), [...codexIndex.paths.values()].flat()),
     );
     const claimedCodexCounters = new Set<string>();
     const candidates = [...codexCandidates, ...claudeCandidates];
@@ -2080,9 +2064,9 @@ async function analyzeSelectedRepositories(
         ]);
       }
       const provider = row.agent_type as SessionProvider;
-      const index = provider === "codex" ? codexIndex.paths : claudeIndex.paths;
+      const transcriptPaths = provider === "codex" ? codexIndex.paths : claudeIndex.paths;
       const selected = await selectTranscript(
-        index.get(row.provider_session_id as string) ?? [],
+        transcriptPaths.get(row.provider_session_id as string) ?? [],
         provider,
         row.provider_session_id as string,
         row.workspace_path,
@@ -2095,8 +2079,8 @@ async function analyzeSelectedRepositories(
       }
       try {
         const session = provider === "codex"
-          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, selected.path, rateCard, selected.warnings);
+          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, index)
+          : await analyzeClaude(row, selected.path, rateCard, selected.warnings, index);
         claimed.add(`${provider}:${row.provider_session_id}`);
         return session;
       } catch (error) {
@@ -2117,14 +2101,14 @@ async function analyzeSelectedRepositories(
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
         return candidate.provider === "codex"
-          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]);
+          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, index)
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], index);
       } catch { return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters); } catch { return null; }
+      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, index); } catch { return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {
@@ -2143,17 +2127,47 @@ async function analyzeSelectedRepositories(
     } catch {
       throw new Error("Cursor analysis returned an invalid result.");
     }
+    // Persist only Cursor's public facts; keep its mutable databases on the fresh-read path.
+    for (const session of cursorResult.sessions) {
+      const repository = [...availableRepositories, ...discovered.values()].find(({ id }) => id === session.repositoryId);
+      index?.recordCursor(session, repository?.root_path ?? "", repository?.remote_url ?? "");
+    }
+    let cursorComplete = !cursorResult.warning;
+    if (index && !cursorComplete) {
+      // node:sqlite can report a missing database as ERR_SQLITE_ERROR rather than ENOENT.
+      try { await stat(cursorDatabasePath); }
+      catch (error) { cursorComplete = asRecord(error)?.["code"] === "ENOENT"; }
+    }
+    const retainedSessions = index?.retained(
+      [...codexIndex.paths.values(), ...claudeIndex.paths.values()].flat(),
+      ![codexIndex.warning, claudeIndex.warning].some((warning) => warning?.includes("could not be read")),
+      cursorComplete,
+    ) ?? [];
+    for (const session of retainedSessions) {
+      const currentRepository = [...availableRepositories, ...discovered.values()].find((repository) =>
+        repository.id === session.repositoryId || Boolean(repository.root_path && index?.matchesRoot(session.repositoryId, repository.root_path)));
+      if (currentRepository) {
+        session.repositoryId = currentRepository.id;
+        session.repositoryName = currentRepository.name;
+      }
+      if (![...availableRepositories, ...discovered.values()].some(({ id }) => id === session.repositoryId)) {
+        discovered.set(`retained:${session.repositoryId}`, {
+          id: session.repositoryId, name: session.repositoryName, root_path: "", remote_url: null, default_branch: "",
+        });
+      }
+    }
     const allRepositories = [...availableRepositories, ...discovered.values()].sort((left, right) =>
       left.name.localeCompare(right.name),
     );
-    const selectedRepositories = selectRepositories(allRepositories, options);
+    const selectedRepositories = selectRepositories(allRepositories, options, index);
     const selectedIds = new Set(selectedRepositories.map(({ id }) => id));
     const allSessions = [
       ...analyzedRows.filter((session): session is SessionAnalytics => session !== null),
       ...recovered.filter((session): session is SessionAnalytics => session !== null),
       ...discoveredSessions.filter((session): session is SessionAnalytics => session !== null),
       ...cursorResult.sessions,
-    ];
+      ...retainedSessions,
+    ].filter((session) => !index || index.inRetention(session));
     const sessions = explicitRepositoryFilter
       ? allSessions.filter(({ repositoryId }) => selectedIds.has(repositoryId))
       : allSessions;
@@ -2164,6 +2178,7 @@ async function analyzeSelectedRepositories(
       sessionsByRepository.set(session.repositoryId, repositorySessions);
     }
     const repositoriesForOutput = selectedRepositories;
+    const stableIndex = await index?.commit();
     return {
       rateCard,
       repositories: repositoriesForOutput.map((repository) => {
@@ -2173,12 +2188,14 @@ async function analyzeSelectedRepositories(
             (warning): warning is string => Boolean(warning),
           ),
         );
+        if (stableIndex === false) result.warnings.push("Evidence changed during analysis; unstable index groups were deferred until the next scan.");
         result.warnings = [...new Set(result.warnings)];
         return result;
       }),
     };
   } finally {
     database?.close();
+    index?.close();
   }
 }
 
@@ -2225,7 +2242,7 @@ function aggregateMachine(
       ...new Set([
         ...combined.warnings,
         ...repositories.flatMap(({ warnings }) =>
-          warnings.filter((warning) => warning.startsWith("A provider transcript root")),
+          warnings.filter((warning) => warning.startsWith("A provider transcript root") || warning.startsWith("Evidence changed during analysis")),
         ),
       ]),
     ],

@@ -76,6 +76,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
+      SESSION_ANALYTICS_DATA_DIR: fixture.dataDir,
       SESSION_ANALYTICS_CLAUDE_ROOT: fixture.claudeRoot,
       SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: fixture.codexArchiveRoot,
       SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,

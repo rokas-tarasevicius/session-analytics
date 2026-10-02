@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Private, content-free SQLite index for incremental Claude/Codex ingest, keyed file fingerprints, cached Codex counter ownership, and verified append-only ledger continuation. Unchanged session facts are reused; changes invalidate affected owners and Claude composite sessions.
+- Retain previously indexed sessions after provider cleanup, marked `transcript.sourceDeleted`, while reserving Codex counters to prevent surviving broadcast receivers from charging the same requests again.
+- `index status|path|rebuild|prune --before YYYY-MM-DD`, `--data-dir` / `SESSION_ANALYTICS_DATA_DIR`, and `--no-index` / `SESSION_ANALYTICS_NO_INDEX=1`. Versioned migrations, WAL transactions, concurrent writer coordination, integrity checks, and explicit corruption recovery.
+- Indexed/full-scan parity and storage regression tests, plus a numeric-only cold/warm benchmark script.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

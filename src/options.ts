@@ -2,6 +2,7 @@ import type { AnalyzeOptions } from "./types.ts";
 
 /** Analysis options shared by the dashboard and the report: flag, then `SESSION_ANALYTICS_*` variable. */
 const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
+  ["dataDir", "--data-dir", "DATA_DIR"],
   ["claudeRoot", "--claude-root", "CLAUDE_ROOT"],
   ["codexArchiveRoot", "--codex-archive-root", "CODEX_ARCHIVE_ROOT"],
   ["codexRoot", "--codex-root", "CODEX_ROOT"],
@@ -33,6 +34,7 @@ export function setting(
 
 export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): AnalyzeOptions {
   const options: AnalyzeOptions = { includeHidden: !argv.includes("--exclude-hidden") };
+  if (argv.includes("--no-index") || environment["SESSION_ANALYTICS_NO_INDEX"] === "1") options.noIndex = true;
   for (const [property, flag, variable] of analysisSettings) {
     const value = setting(argv, environment, flag, variable);
     if (value) options[property] = value as never;

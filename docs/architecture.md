@@ -1,6 +1,6 @@
 # Architecture
 
-`session-analytics` is a single Node.js 24 package with no runtime dependencies. It uses Node's native TypeScript type stripping, `node:sqlite` for read-only database access, and `node:http` for the dashboard. Every launch performs a fresh scan; there is no persistent index yet (planned in [M0](roadmap.md#m0-correctness)).
+`session-analytics` is a single Node.js 24 package with no runtime dependencies. It uses native TypeScript type stripping, `node:sqlite` for read-only provider access and a private derived index, and `node:http` for the dashboard. Launches and refreshes reuse unchanged Claude/Codex session facts. `--no-index` keeps the original full-scan behavior.
 
 ## Modules
 
@@ -13,12 +13,20 @@
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/store/index.ts` | Scoped incremental ingest, session reuse, dependency invalidation, source-deleted retention, and atomic persistence. |
+| `src/store/database.ts` | Private data-directory resolution, permissions, SQLite writer lease, WAL, migrations, status, prune, and rebuild. |
+| `src/store/fingerprint.ts` | Device/inode, size, nanosecond times, keyed edge fingerprints, and full-prefix verification. |
+| `src/store/codex-ledger.ts` | Content-free per-file counter observations and verified append-only continuation. |
+| `src/store/projection.ts` | Explicit disk allowlist for session facts, used when writing and reading cached sessions. |
+| `src/store/cli.ts` | `index status|path|rebuild|prune` management commands. |
+| `src/store/errors.ts` | Fixed index failure codes/messages allowed across the worker boundary. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
 | `data/rate-cards.json` | Versioned model rates with an effective date and a source URL per model. |
 | `skills/session-analytics/` | Agent skill that launches the dashboard or report. |
 | `scripts/demo.ts` | Synthetic dataset generator that runs the tool against that data only. |
+| `scripts/benchmark-index.ts` | Numeric-only cold/warm timing, plus full-scan parity for a retained demo dataset. |
 | `test/` | Node test runner suites and the shared fixture builder. |
 
 ## Process model
@@ -35,7 +43,7 @@ flowchart TB
   worker -- "snapshot JSON on stdout" --> cli
 ```
 
-The server and the report never parse transcripts themselves. Each snapshot is computed in a fresh child process started with `--max-old-space-size=256`, and Cursor's composer database is parsed in its own child with a 192 MB cap. This keeps a machine-wide scan from growing the long-running server's memory, releases everything when the child exits, and means only serialized, already-allowlisted results cross the process boundary. A child's standard error is discarded; a failure surfaces as a fixed message.
+The server and the report never parse transcripts themselves. Each snapshot is computed in a fresh child process started with `--max-old-space-size=256`, and Cursor's composer database is parsed in its own child with a 192 MB cap. This keeps a machine-wide scan from growing the long-running server's memory, releases everything when the child exits, and means only serialized, already-allowlisted results cross the process boundary. A child's standard error is discarded; a failure surfaces as a fixed message. Index failures use a bounded error-code envelope so callers can distinguish busy, unavailable, incompatible, and integrity failures without forwarding error text or stacks.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
 
@@ -47,11 +55,11 @@ The Cursor pass runs and serializes before the Claude and Codex pass starts, so 
 4. **Discover provider roots.** Claude Code and Codex roots are collected across profiles (see [providers.md](providers.md)), then deduplicated by resolved real path. An explicit root option replaces discovery for that provider.
 5. **Index transcripts.** Each root is walked for transcript files, keyed by the session UUID in the file name. Claude sub-agent files and audit logs are excluded from the index; they are read later as part of their parent session.
 6. **Validate identity.** For each indexed session, the first records are read to find the provider's own session ID and working directory. A file is a candidate only when the recorded ID matches the file name and a working directory is present.
-7. **Build the Codex counter ledger.** Every Codex candidate is pre-scanned to decide which file owns each cumulative token snapshot (see [Deduplication](#deduplication)).
+7. **Build the Codex counter ledger.** Merge per-file counter observations from the index, reading changed candidates, to decide which file owns each cumulative snapshot (see [Deduplication](#deduplication)). Without the index, every candidate is pre-scanned.
 8. **Match orchestrator records.** Conductor sessions are matched to candidates by provider session ID and validated working directory. Legacy rows without a provider ID are recovered only when exactly one candidate shares the provider and working directory and started within 15 minutes. Rows without validated evidence are dropped rather than counted as empty sessions.
 9. **Assign repositories.** Every remaining candidate is assigned to a repository from its working directory (see [Repository assignment](#repository-assignment)).
-10. **Parse and price.** Provider parsers stream each file line by line and accumulate counters. Each request is priced as it is added, so long-context modifiers use that request's input size.
-11. **Aggregate.** Sessions roll up into repository summaries, then into the machine snapshot. Any repository filter is applied here.
+10. **Parse, price, or reuse.** A session can be reused only when its evidence group, metadata, parser revision, rate card, and ownership dependencies match. Otherwise provider parsers stream its files and price requests individually, preserving long-context modifiers.
+11. **Retain and aggregate.** Previously indexed sessions with deleted sources join present sessions with an explicit source-deleted mark. The retention floor applies before aggregation; repository filters apply to the full evidenced union.
 12. **Project.** `finalizeSession` and the aggregators build the public objects field by field. The result is written as JSON to the parent process.
 
 ## Repository assignment
@@ -98,6 +106,36 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 - Sends a strict Content Security Policy (`default-src 'self'`, no inline script or style, `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and same-origin opener and resource policies. No CORS headers are sent.
 - If the port is taken, it checks `/api/health` for its own service ID and reuses that dashboard; otherwise it exits with an error.
 
+## Persistent index
+
+The default data directory is the macOS Application Support directory or the Linux XDG data directory described in [README](../README.md#local-index). `index.sqlite`, its WAL/SHM sidecars, `writer.sqlite` (a small coordination database), and `index.key` are mode `0600` inside a mode `0700` directory. Links, hard-linked files, and foreign-owned files are rejected. No source store is modified. `--no-index` returns before opening any index file.
+
+The schema uses `PRAGMA user_version` and ordered transactional migrations. Version 1 creates metadata, evidence, and session facts; version 2 adds deletion state, retention indexing, scan statistics, and keyed counter reservations. Future versions are refused rather than downgraded. WAL uses `synchronous=FULL`, a 5-second busy timeout, foreign keys, disabled trusted schema, and secure deletion. A separate SQLite writer transaction coordinates ingest, prune, and rebuild, including recovery of a corrupt main database. SQLite releases it when its process exits. Status can read the last committed generation while an ingest runs.
+
+### Reuse and invalidation
+
+- Evidence is keyed by HMAC-SHA-256 of its absolute local path with the machine key. Fingerprints contain device/inode, byte length, nanosecond mtime **and ctime**, plus keyed hashes of the first and last 4 KiB. Content and raw paths never enter SQLite. Ctime catches middle-of-file rewrites even when size and mtime are restored. This detects ordinary filesystem changes, not an adversary controlling the filesystem and its metadata.
+- Source scope includes explicit provider roots (or the machine/profile discovery policy), the Cursor/Conductor configuration, and hidden-record policy. Repository filters are projections over this scope. Switching an explicit source root never imports retained facts from a different scope.
+- Session signatures include the complete evidence group, relevant metadata, reviewed rate card, analyzer/ledger revision, and Codex ownership decisions for that file. Headers are still validated and repository assignment is still computed from current local evidence. A Git/worktree mapping or Conductor metadata change therefore changes the signature.
+- Each Claude main transcript and its entire current `subagents/` tree form one group. Adding, changing, replacing, truncating, or removing a member invalidates the composite. The parser then deduplicates message IDs and keeps the final streamed usage exactly as in a full scan.
+- Codex stores each file's best observation of each numeric counter fingerprint, activity gap, timestamp, model set, and append continuation state. Rebuilding the machine ledger from these facts preserves the existing activity/timestamp/path ownership rule. A new owner invalidates the old owner's session, even if its file is unchanged. Timestamp-free counters disable Codex session reuse for that scan because order-sensitive claim ownership cannot be proved.
+- Append continuation is limited to the Codex **ledger pass**: the same device/inode, increased length, a newline-terminated old file, and a matching keyed hash of the **entire old prefix** are required. A size increase and matching edge samples alone are insufficient. Partial lines, rewrites, replacements, and truncation trigger a full ledger read. Changed session aggregates are recomputed because later records can revise deduplication, streaming maxima, and attribution.
+- Cursor is refreshed through the existing isolated reader on every scan; mutable SQLite tables, WALs, workspace metadata, and repository assignment make a single database-file fingerprint insufficient. Its projected session facts are stored for retention, but a new Cursor incremental adapter remains a follow-up.
+
+### Atomicity and retention
+
+Facts, fingerprints, deletion marks, and scan statistics commit in one main-database transaction. An exception rolls it back. Files are checked again before commit. A group whose source changed during the scan keeps its previous good facts, loses its reusable ledger entry, and is counted as deferred; stable groups can still commit. The current response remains a best-effort live snapshot and carries a fixed warning. The next scan re-evaluates those files and their ownership dependents.
+
+When a previously validated main source disappears, its last public session projection is retained with `transcript.sourceDeleted: true`. A moved rollout with the same provider identity updates its source keys rather than creating a duplicate. Present-but-invalid identity evidence is excluded; an unreadable source tree keeps prior facts with an availability warning instead of declaring deletion. Retained-only repositories keep keyed root/remote matches for CLI filtering without storing paths. Cursor composers absent from a successful database read are retained similarly.
+
+Deleted Codex owners reserve their attributed counter states, so a surviving broadcast receiver cannot charge them again. Prune removes sessions last active strictly before its UTC date and persists a retention floor; keyed membership of retired counters remains solely to prevent rebilling after pruning. Raw provider files are untouched. Rebuild clears facts, counters, and the retention floor; deleted history cannot be reconstructed. Corrupt databases are moved to private `.rebuild-*` quarantine files; healthy rebuilds clear and vacuum the existing database. Quarantines are never opened by analysis or included in status/prune and may be removed manually after recovery.
+
+Retained facts use the parser and price card from their last successful ingest. They are not silently repriced using current model aggregates, which would lose per-request long-context behavior. A fixed warning states this. The index does not archive raw files or separately freeze removed subagent contributions when a main file remains; a changed partial Claude group is recomputed from present evidence.
+
+### Verification
+
+`test/index-store.test.ts` checks cold/warm/full parity, cross-file ownership changes, streamed/composite invalidation, prefix verification, rotation/truncation, deletion, pruning, migrations, corruption, concurrency, rollback, permissions, and sentinel absence in SQLite and output. To measure the demo: run `node scripts/demo.ts report --keep`, then `node scripts/benchmark-index.ts --demo-root <printed-synthetic-directory>`. `--machine` instead performs one cold ingest and one incremental launch against local defaults, emits only counts/timings, and removes its temporary index on exit.
+
 ## Dashboard client
 
 `src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
@@ -111,4 +149,4 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 
 ## Planned changes
 
-The roadmap moves the analyzer toward per-source adapters, a normalized event model, and a persistent content-free SQLite index with incremental ingest, so launches no longer rescan unchanged files. See [roadmap.md](roadmap.md).
+The roadmap moves parsing toward per-source adapters, a normalized event model, and more granular continuation checkpoints on top of the persistent index. See [roadmap.md](roadmap.md).
