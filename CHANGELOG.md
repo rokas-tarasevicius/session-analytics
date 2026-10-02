@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Outcomes view and report: evidence-ranked session links to commits and pull requests, deduplicated PR totals, line counters with coverage, guarded API-equivalent value per merged PR and changed lines per dollar, and explicitly heuristic unlinked edit value.
+- Opt-in `--outcomes-git` for bounded local branch/window correlation and `--outcomes-github` for authenticated GitHub state and time-to-merge lookup of PRs already evidenced locally. Both default off; raw branches, SHAs, PR numbers, URLs, titles, and messages remain private.
+- Synthetic outcome evidence in the demo, plus parser, aggregation, enrichment, API, CLI, and privacy regression tests.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

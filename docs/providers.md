@@ -51,7 +51,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 - Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). History it has deleted cannot be analyzed.
 - `stats-cache.json` and other provider-reported totals are not yet used for reconciliation.
-- Git evidence in transcripts (branches, commit and pull-request records) is not used yet; see [M2](roadmap.md#m2-outcomes).
+- Outcome evidence is limited to structured `toolUseResult.gitOperation` results (`commit.{sha,kind,branch}`, `push.branch`, `pr.{number,url,action}`), `pr-link` coordinates, `gitBranch`, `structuredPatch[].lines`, and `cost-state.totalLinesAdded/Removed`. Commands and free-form output are never searched for commits or PRs. Successful tool results deduplicate by stream and tool-use ID; PRs deduplicate by canonical coordinates. See [outcomes](metrics.md#outcomes).
 - Views do not yet show which profile a session came from.
 
 ## Claude Desktop local agents
@@ -105,6 +105,8 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 - `token_usage_record` events and the paginated rollout format are not parsed yet.
 - Rate-limit snapshots, tool exit codes, and durations are recorded by Codex but not used yet; see [M1](roadmap.md#m1-reliability-and-economics).
 
+**Outcomes:** `session_meta.git.commit_hash` and `branch` are weak starting context, never produced commits. Completed `FileChange` items use `changes.*.unified_diff` for line counts, deduplicated by item ID; failed/declined/unknown statuses are excluded. Paths and diff text are discarded. Missing or malformed diffs leave partial/unavailable coverage. Commands and assistant claims do not establish commit or PR evidence.
+
 ## Cursor
 
 **Where:** `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (macOS) and the sibling `workspaceStorage` directory. Override with `--cursor-database PATH`; the `workspaceStorage` directory is located relative to that file, so on Linux you can point it at `~/.config/Cursor/User/globalStorage/state.vscdb` (not yet covered by tests).
@@ -138,6 +140,8 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 - Cursor sessions run through Conductor's Cursor integration are not read yet.
 - Composers whose files and workspace cannot be mapped are grouped under an unassigned local directory.
 
+**Outcomes:** composer `totalLinesAdded` / `totalLinesRemoved` are provider-reported session totals. Both must be valid nonnegative integers; zero is distinguishable from unavailable. These records provide no commit/PR association, and Cursor's reported usage value remains excluded from API-equivalent outcome ratios.
+
 ## Conductor (optional enrichment)
 
 **Where:** `~/Library/Application Support/com.conductor.app/conductor.db` (macOS). Override with `--database PATH`. A missing database is normal and changes nothing about provider discovery.
@@ -153,6 +157,8 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | `sessions` | `id`, `status`, `agent_type`, `title`, `created_at`, `updated_at`, `claude_session_id` (the provider session ID), `model`, `is_hidden`, `workspace_id` |
 
 Session titles, workspace names, branches, root paths, and remotes are loaded for correlation inside the analysis process and are never returned.
+
+**Outcome context:** optional `workspaces.pr_title` is read only as a presence bit; `archive_commit`, `branch`, `derived_status`, and workspace ID provide weak context links. Only `merged` and `closed` workspace status labels can enter the context link state; they never count as an observed PR merge/close. Optional columns are detected with `PRAGMA table_info`, so older schemas still work. No PR identity is guessed from a title or a branch.
 
 **What it adds:**
 

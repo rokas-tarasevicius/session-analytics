@@ -88,6 +88,56 @@ These can be added without reading content, provided they are labeled as indicat
 
 Ratios with tiny denominators need a minimum-activity guard. Ratios with no denominator are not applicable, never 0% or 100%. A session with one task-complete marker is not necessarily more efficient than a session whose provider does not emit that marker.
 
+## Outcomes
+
+Optional `outcomes` namespaces on sessions, repository rollups, single-repository results, and the machine snapshot expose evidence, never a success verdict. Supported parsed sessions receive a projection; unavailable transcripts do not. Browser filters recompute the same aggregation code as the analyzer. Date filters select sessions by start date and include their whole observed histories; GitHub state is current at scan time.
+
+### Evidence and line measurements
+
+Each link carries `ref`, `kind` (`branch`, `commit`, `pull-request`), `role` (`outcome`, `context`), `identity` (`artifact`, `observation`), `confidence`, allowlisted `sources[]`, `created`, `state`, and nullable `timeToMergeMilliseconds`. `created` requires an explicit PR-create observation. `state` is `unknown`, `open`, `closed`, or `merged`; non-PR links keep unknown state. Merge duration is GitHub PR creation-to-merge, not session duration; unavailable, malformed, or reversed dates yield null.
+
+| Confidence | Evidence | Interpretation |
+| --- | --- | --- |
+| Strong | Claude structured successful commit result; identified PR operation or PR-link | Explicit artifact association, not proof of authorship, quality, success, or value delivered. |
+| Medium | Local commit on an evidenced branch within the session window; PR operation without identity | Correlation or operation evidence. Concurrent agents/humans can match a window. Anonymous operations cannot establish distinct PR counts. |
+| Weak | Claude branch, Codex starting commit/branch, Conductor workspace PR-title presence/branch/archive commit | Context only; excluded from produced commit, PR, and merge metrics even if the workspace status says merged. |
+
+Sources are `claude-git-operation`, `claude-pr-link`, `claude-branch`, `codex-session-git`, `conductor-workspace`, `local-git`, and `github`. GitHub adds state to existing associations; starting commits are excluded from Git matches. No command, message, title, or free-form stdout is searched for commits or PRs.
+
+Claude accepts nested `toolUseResult.gitOperation.commit` (kind committed/amended, or absent legacy kind), `.push`, and `.pr` (created/edited/merged/closed). Error, interrupted, and timed-out results are excluded. Results deduplicate by stream/tool-use ID, with UUID fallback; results without either are skipped. A PR operation with only a number resolves only when that number has exactly one locally evidenced repository coordinate in the session. Ambiguous numbers remain anonymous observations. PR references deduplicate across sessions; local merged observations take precedence over closed/open, and optional GitHub supplies current state.
+
+`editsObserved` means a successful structured edit, completed FileChange, or positive provider line total. `editOperations` counts deduplicated Claude edit results and Codex FileChange items; Cursor totals have no operation count. Tool invocations alone do not prove edits. `operations.commits/pushes/prsCreated/prsEdited/prsMerged/prsClosed` count structured operation observations, not unique artifacts; enrichment does not increase these counters.
+
+`linesAdded/linesRemoved` are nullable. `lineSource` identifies Claude structured patches or cumulative cost-state, Codex FileChange, Cursor composer, mixed, or unavailable. Claude counts `+`/`-` markers inside patch hunks. Cost-state takes nonnegative high-water marks rather than summing repeated snapshots. Top-level cumulative totals take precedence for the composite session, avoiding duplicate addition of sub-agent edits; otherwise each stream uses its totals or patches and the streams sum. Codex counts only complete unified-diff hunks, not file headers, once per item ID (line-number fallback); failed/declined/unrecognized explicit statuses are excluded. Cursor requires both nonnegative line totals. Missing/binary/malformed diffs never become measured zero.
+
+`lineCoverage` is complete for available counters/complete observed edit diffs, partial when some observed edits lack lines, and unavailable when nothing is measurable. Complete means complete for retained observations, not all edits ever performed. Repeated edits count repeatedly; these are changed lines, not unique or surviving lines. Mechanical marker counting is P0, not semantic content classification.
+
+### Aggregates and guarded ratios
+
+| Fields | Definition |
+| --- | --- |
+| `sessions`, `observedSessions` | Selected sessions and sessions with outcome projections. Inspection coverage does not mean the provider records every outcome. |
+| `editSessions`, `commitSessions`, `prSessions`, `mergedPrSessions` | Sessions with edits, produced commit evidence, outcome PR evidence, and an associated merge observation respectively. A merged identified PR applies to every selected session linked to it. Anonymous merge observations count only in session/operation metrics. These are independent funnel stages, not conversion rates. |
+| `contextOnlySessions` | Sessions with at least one link and all links marked context. |
+| `lineMeasuredSessions`, `linesAdded`, `linesRemoved` | Sessions with both line counters (including partial), and summed observed lines. Zero totals with zero measured sessions mean unavailable. |
+| `apiSessions`, `apiPricedSessions`, `apiEquivalentValueUsd` | Inspected API-equivalent sessions; those with complete pricing and token coverage exactly 1; sum of known-rate value, which is a lower bound if pricing is incomplete. |
+| `unlinkedEditSessions`, `unlinkedApiEquivalentUsd` | API sessions with edits and no produced commit evidence, and their known-rate value. This linkage heuristic is not abandonment, failure, or evidence the work was never committed. |
+| `pullRequests.linked/created/merged` | Distinct identified PR outcome references. Groups can share a PR; per-agent/repository distinct counts are not additive. |
+| `pullRequests.unidentifiedCreatedOperations/unidentifiedMergedOperations` | Separate anonymous PR observations, excluded from unique artifact totals. |
+| `commitSessionRate` | Commit sessions / inspected sessions; at least 5 inspected sessions required. |
+| `apiEquivalentPerMergedPr` | Divide each API session's value equally among all its identified PRs, including open PRs. Sum shares associated with merged PRs, divide by distinct merged PRs linked to API sessions. At least 3 PRs required; withhold if any contributing session lacks complete pricing. This is attributed observed session value, not full PR production cost. |
+| `linesPerApiDollar` | Added + removed lines / API-equivalent value, for sessions with complete line coverage, complete pricing, and positive value. At least 5 eligible sessions and $1 required. Cursor and zero-value sessions are excluded. |
+
+Each ratio returns `value` (number or null), `numerator`, `denominator`, `minimumDenominator`, `minimumSessions`, `eligibleSessions`, `candidateSessions`, and `status` (available, unavailable, insufficient-activity, incomplete-pricing). Only available ratios have a numeric value. Zero numerator is legitimate once guards pass; no denominator is N/A, never 0%. Candidates are selected sessions for commit share, API sessions associated with identified merged PRs for PR value, and API sessions with at least partial lines for line value. Eligible sessions satisfy the corresponding coverage conditions. API-equivalent value is not an invoice.
+
+### Opt-in enrichment
+
+`--outcomes-git` / `SESSION_ANALYTICS_OUTCOMES_GIT=1` enables read-only local Git correlation on fully qualified evidenced branches and exact first-to-last event windows (maximum 7 days). No implicit HEAD fallback, shell, fetch, worktree mutation, or commit-message output. Maximums: 8 branches/session, 100 Git queries/scan, 200 commits/query, 3 seconds/command. Timestamp traversal can miss nonmonotonic history; matches remain medium confidence. `agentCoauthoredCommits` counts distinct matched commits whose Co-authored-by trailer starts with Claude, Codex, or Cursor: an opt-in P2 rule, not authorship proof. `agentCoauthorTrailers` counts the recognized trailers on those commits, deduplicated by commit across branch queries (one commit may carry multiple agent trailers). Trailer text/emails are discarded.
+
+`--outcomes-github` / `SESSION_ANALYTICS_OUTCOMES_GITHUB=1` checks `gh auth status`, then runs `gh pr view <number> --repo https://github.com/<owner>/<repo> --json state,createdAt,mergedAt` only for strict locally evidenced GitHub coordinates. Existing authentication and those PR coordinates go to GitHub. No transcript content, titles, bodies, searching, remote inference, or automatic login. At most 20 distinct requests/scan, cached across sessions, 4 seconds/command. Explicit repository filters constrain enrichment.
+
+Both default off; `--no-outcomes-*` overrides environment, and repeated CLI flags use the last occurrence. Shared limits: 30 seconds elapsed after the first request and 512 KiB output/command. `enrichment.git/github` is off, not-applicable, matched, no-match (successful Git query without a match), unavailable (tool/auth/query/response missing), or limited (budget/result cap). Mixed successes/failures conservatively report unavailable while retaining successful links. Cursor has no branch/PR enrichment inputs and keeps off status. `truncated` marks collector caps: 128 links, 8 branches, or 100,000 dedupe/tool entries per session. Capped metrics are lower bounds. Errors never expose raw local text.
+
 ## Metrics requiring independent evidence
 
 Do not derive these from transcripts alone:

@@ -33,10 +33,10 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
 - **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded, so local paths in exceptions cannot reach the dashboard.
-- **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
+- **Offline by default.** No network requests by default and no telemetry. Explicit `--outcomes-github` enables authenticated `gh` queries for PR coordinates already evidenced locally; no transcript content is sent. The dashboard remains on `127.0.0.1` with a Content Security Policy allowing only same-origin resources. See [SECURITY.md](../SECURITY.md).
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 
-Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere.
+Transcript content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere. Outcome collectors retain bounded private branch names and validated PR coordinates until optional enrichment completes; only counters, enums, pseudonymous refs, and merge durations leave the projection. Git/GitHub output stays in the analysis worker and is discarded after projection.
 
 ## Privacy tiers
 
@@ -45,8 +45,8 @@ Every field belongs to a tier. The tiers also govern planned features (see [road
 | Tier | Contents | Status |
 | --- | --- | --- |
 | **P0** | Counts, token counters, costs, timestamps, durations, model IDs, tool and skill names, enumerated labels | Returned today |
-| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys and repository metadata only) |
-| **P2** | Results of local rules over commands or diffs, where only rule IDs and counts leave the parser | Not implemented; will be opt-in |
+| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs/display names, hashed outcome/context refs; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names | Returned today (keys, repository metadata, and hashed refs; never raw SHAs or PR coordinates) |
+| **P2** | Results of local rules over content, where only rule IDs and counts leave the parser | Opt-in Git co-author trailer classification returns an agent-associated commit count; off by default |
 | **P3** | Text shown to you or sent to an LLM, such as an opt-in session review | Not implemented; will be opt-in per run, stored separately, and labeled |
 
 P2 and P3 features will always be off by default.
@@ -73,6 +73,7 @@ Returned by `/api/analytics` and `report --json`.
 | `summary` | Machine totals; see [Summary](#summary) | P0 |
 | `topTools[]` | `{ name, value }`, effective tool calls by tool name, descending | P0 |
 | `warnings[]` | Fixed-text coverage notes (unpriced models, missing or unmatched transcripts, unreadable roots) | P0 |
+| `outcomes` | Optional outcome summary; fields defined below | P0 |
 
 ### Repository rollup (`RepositoryRollup`)
 
@@ -85,6 +86,7 @@ Returned by `/api/analytics` and `report --json`.
 | `summary` | Repository totals; see [Summary](#summary) | P0 |
 | `topTools[]` | Effective tool calls by name for this repository | P0 |
 | `warnings[]` | Fixed-text coverage notes for this repository | P0 |
+| `outcomes` | Optional outcome summary; also present on single-repository results | P0 |
 
 ### Summary
 
@@ -144,6 +146,7 @@ Repository summaries and the machine summary share these fields.
 | `skills` | `{ skillId: count }`, skill invocations | P0 |
 | `skillEvidence` | `explicit` (Claude), `inferred` (Codex lower bound), or `unavailable` (Cursor) | P0 |
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
+| `outcomes` | Optional session outcome evidence; fields defined below | P0/P1/P2 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
 | `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
@@ -208,6 +211,66 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 | `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
 | `calls` | Requests attributed to this model | P0 |
 | `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
+
+### Session outcomes (`SessionOutcomes`)
+
+All fields below are inside `session.outcomes`. Names and semantics are declared in `src/metrics/outcome-types.ts`, re-exported by `src/types.ts`. [Metric definitions](metrics.md#outcomes) specify denominators, confidence, and limits.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `editsObserved` | Successful edit evidence or positive line totals observed | P0 |
+| `editOperations` | Deduplicated Claude edit results / completed Codex FileChange events | P0 |
+| `linesAdded`, `linesRemoved` | Observed counts, or null when unavailable | P0 |
+| `lineCoverage` | complete, partial, unavailable; complete refers only to retained observations | P0 |
+| `lineSource` | claude-cost-state, claude-structured-patch, codex-file-change, cursor-composer, mixed, unavailable | P0 |
+| `operations.commits`, `operations.pushes` | Deduplicated successful structured Git operation counts | P0 |
+| `operations.prsCreated`, `operations.prsEdited`, `operations.prsMerged`, `operations.prsClosed` | Structured PR operation counts, not unique artifacts | P0 |
+| `links[].ref` | Kind prefix plus 24 hex characters of SHA-256 over a qualified artifact/observation identity | P1 |
+| `links[].kind` | branch, commit, pull-request | P0 |
+| `links[].role` | outcome or context | P0 |
+| `links[].identity` | artifact or observation (no reliable artifact identity) | P0 |
+| `links[].confidence` | strong, medium, weak | P0 |
+| `links[].sources[]` | claude-git-operation, claude-pr-link, claude-branch, codex-session-git, conductor-workspace, local-git, github | P0 |
+| `links[].created` | Explicit PR creation observed | P0 |
+| `links[].state` | unknown, open, closed, merged; context state never proves an outcome | P0 |
+| `links[].timeToMergeMilliseconds` | GitHub PR creation-to-merge duration, or null | P0 |
+| `agentCoauthoredCommits` | Matched commits with an agent-name co-author trailer; 0 unless local Git enrichment is enabled | P2 (opt-in) |
+| `agentCoauthorTrailers` | Recognized agent co-author trailers on matched commits, deduplicated by commit across branch queries | P2 (opt-in) |
+| `enrichment.git`, `enrichment.github` | off, not-applicable, matched, no-match, unavailable, limited | P0 |
+| `truncated` | Collector reached an evidence cap; counts may be lower bounds | P0 |
+
+Outcome refs are stable, unkeyed pseudonyms, not anonymity guarantees. Commit and branch identities are qualified by repository key; PR identities use canonical repository/number; anonymous observations use provider-qualified session/tool IDs; workspace context uses workspace ID. No new path/argument hashes are exposed. An observer already holding candidate identities can recompute these hashes. Raw SHAs, branches, PR numbers, slugs, URLs, titles, and workspaces remain private even with enrichment. There is deliberately no raw-PR display mode.
+
+Line-marker counting inspects only structured diff syntax and emits P0 counts; no semantic code/text rules run by default. Optional Git co-author classification is P2. Enabling GitHub sends only existing authentication and validated PR coordinates to github.com, never a transcript or file path. Both enrichments are explicitly off by default and have negative CLI overrides.
+
+### Outcome summary (`OutcomeSummary`)
+
+The root and repository `outcomes` share this schema. All fields are P0; totals with missing/partial coverage are not claims about all work.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `sessions`, `observedSessions` | Selected and inspected sessions | P0 |
+| `editSessions`, `commitSessions`, `prSessions`, `mergedPrSessions` | Independent session evidence stages | P0 |
+| `contextOnlySessions` | Sessions whose links are all weak context | P0 |
+| `lineMeasuredSessions`, `linesAdded`, `linesRemoved` | Measured-session coverage and summed observed line counters | P0 |
+| `apiSessions`, `apiPricedSessions`, `apiEquivalentValueUsd` | API-basis session coverage and known-rate value | P0 |
+| `unlinkedEditSessions`, `unlinkedApiEquivalentUsd` | API sessions/value with edits and no produced commit evidence; heuristic | P0 |
+| `pullRequests.linked`, `pullRequests.created`, `pullRequests.merged` | Distinct identified PR counts | P0 |
+| `pullRequests.unidentifiedCreatedOperations`, `pullRequests.unidentifiedMergedOperations` | Anonymous PR observations excluded from distinct totals | P0 |
+| `operations.commits`, `operations.pushes`, `operations.prsCreated`, `operations.prsEdited`, `operations.prsMerged`, `operations.prsClosed` | Sum of session operation counts | P0 |
+| `commitSessionRate` | Guarded commit-evidence session share | P0 |
+| `apiEquivalentPerMergedPr` | Guarded allocated API session value per identified merged PR | P0 |
+| `linesPerApiDollar` | Guarded changed lines per API-equivalent dollar | P0 |
+
+Each of the three ratios has the following fields:
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `value` | Numeric ratio only when available; otherwise null | P0 |
+| `numerator`, `denominator` | Observed operands, including when a guard withholds the ratio | P0 |
+| `minimumDenominator`, `minimumSessions` | Activity thresholds applied to that ratio | P0 |
+| `eligibleSessions`, `candidateSessions` | Coverage counts for the ratio's measurement cohort | P0 |
+| `status` | available, unavailable, insufficient-activity, incomplete-pricing | P0 |
 
 ### Health endpoint
 

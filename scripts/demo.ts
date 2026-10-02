@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { demoClaudeOutcomes, demoCodexFileChange, demoCodexGit } from "./demo-outcomes.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -312,6 +313,7 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
   const messages = heavy(34, 0.85, 420);
   const projectDirectory = join(root, claudeProjectDirectory(cwd));
   const main = claudeTranscript({ cwd, messages, model, repository, sessionId, start, subagent: false });
+  main.records.push(...demoClaudeOutcomes(sessionId, repository.name, cwd, iso(main.end)));
   writeJsonl(join(projectDirectory, `${sessionId}.jsonl`), main.records);
   const subagents = main.spawned + (chance(0.18) ? 1 : 0);
   for (let index = 0; index < subagents; index += 1) {
@@ -357,7 +359,7 @@ function writeCodexSession(
     records.push({ timestamp: iso(clock), type, payload });
   };
   const source = parentThreadId ? { subagent: { thread_spawn: { parent_thread_id: parentThreadId, depth: 1 } } } : pick(["cli", "vscode", "exec"]);
-  push("session_meta", { id, cwd, source, originator: "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock) });
+  push("session_meta", { id, cwd, source, originator: "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock), git: demoCodexGit(id) });
   push("turn_context", { cwd, model, effort, approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } });
   const total: CodexCounter = { cached_input_tokens: 0, input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 };
   let context = integer(9_000, 18_000);
@@ -381,6 +383,7 @@ function writeCodexSession(
       const kind = weighted([["exec_command", 52], ["apply_patch", 26], ["update_plan", 8], ["write_stdin", 6], ["skill", 3], ["none", 5]] as const);
       if (kind === "apply_patch") {
         push("response_item", { type: "custom_tool_call", name: "apply_patch", call_id: callId, input: "*** Begin Patch\n[synthetic]\n*** End Patch", status: "completed" });
+        push("event_msg", demoCodexFileChange(callId));
       } else if (kind === "skill") {
         const skill = pick(codexSkills);
         push("response_item", { type: "function_call", name: "exec_command", call_id: callId, arguments: JSON.stringify({ cmd: `sed -n '1,200p' .agents/skills/${skill}/SKILL.md` }) });
@@ -458,6 +461,8 @@ function writeCursorDatabase(path: string, sessions: Array<{ repository: Reposit
         createdAt: start,
         lastUpdatedAt: clock,
         status: "completed",
+        totalLinesAdded: bubbles * 7,
+        totalLinesRemoved: bubbles * 2,
         originalModelLines: { [join(repository.root, pick(repository.files))]: [] },
         usageData: { [pick(["composer-1", "claude-4.5-sonnet", "gpt-5"])]: { amount: Math.ceil(bubbles / 2), costInCents } },
       }),

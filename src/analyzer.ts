@@ -7,6 +7,9 @@ import { basename, dirname, join, parse, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { OutcomeCollector } from "./metrics/outcomes.ts";
+import { OutcomeEnricher } from "./metrics/outcomes-enrichment.ts";
+import { summarizeOutcomes } from "./metrics/outcomes-summary.js";
 
 import type {
   AnalyzeOptions,
@@ -101,6 +104,7 @@ interface TranscriptCandidate {
 }
 
 interface MutableSession {
+  outcomes?: SessionAnalytics["outcomes"];
   assistantMessages: number;
   compactions: number;
   delegatedAgents: Set<string>;
@@ -596,8 +600,10 @@ async function analyzeCodex(
   inheritedWarnings: string[],
   counterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCounters: Set<string> = new Set<string>(),
+  outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(),
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  const outcomes = new OutcomeCollector(row);
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
@@ -621,6 +627,7 @@ async function analyzeCodex(
       return;
     }
     const timestamp = stringValue(record["timestamp"]);
+    outcomes.observeCodex(record, line);
     trackTimestamp(state, timestamp);
     const type = stringValue(record["type"]);
     const payload = asRecord(record["payload"]);
@@ -791,6 +798,7 @@ async function analyzeCodex(
   state.warnings.push(
     "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes.",
   );
+  state.outcomes = await outcomes.finish(outcomeEnricher, state.firstEventAt, state.lastEventAt);
   return finalizeSession(row, state, finalTokens, 1);
 }
 
@@ -842,8 +850,10 @@ async function analyzeClaude(
   mainPath: string,
   rateCard: RateCard,
   inheritedWarnings: string[],
+  outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(),
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  const outcomes = new OutcomeCollector(row);
   state.effort = null;
   state.executionKind = "top-level";
   state.executionKindsSeen.add("top-level");
@@ -881,6 +891,7 @@ async function analyzeClaude(
         return;
       }
       const timestamp = stringValue(record["timestamp"]);
+      outcomes.observeClaude(record, path === mainPath ? "main" : path);
       trackTimestamp(state, timestamp);
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
@@ -973,6 +984,7 @@ async function analyzeClaude(
     );
   }
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
+  state.outcomes = await outcomes.finish(outcomeEnricher, state.firstEventAt, state.lastEventAt);
   return finalizeSession(row, state, totals, paths.length);
 }
 
@@ -1029,6 +1041,7 @@ function finalizeSession(
   };
   return {
     cost,
+    ...(state.outcomes ? { outcomes: state.outcomes } : {}),
     costBasis:
       row.agent_type === "cursor"
         ? cost.totalUsd > 0
@@ -1387,12 +1400,13 @@ async function analyzeTranscriptCandidate(
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
+  outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(),
 ): Promise<SessionAnalytics> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   return candidate.provider === "codex"
-    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters)
-    : await analyzeClaude(row, candidate.path, rateCard, warnings);
+    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, outcomeEnricher)
+    : await analyzeClaude(row, candidate.path, rateCard, warnings, outcomeEnricher);
 }
 
 function cursorPaths(data: JsonRecord): string[] {
@@ -1535,6 +1549,9 @@ function analyzeCursorComposer(
     }
   }
   const reportedCost = addCursorReportedCost(state, data);
+  const outcomes = new OutcomeCollector(row);
+  outcomes.observeCursor(data);
+  state.outcomes = outcomes.project();
   const session = finalizeSession(row, state, tokens, 1);
   session.metrics.modelCalls = modelCalls;
   if (reportedCost > 0) {
@@ -1776,6 +1793,11 @@ async function mapConcurrent<T, R>(
 
 function sessionRows(database: DatabaseSync, repositoryIds: string[], includeHidden: boolean) {
   if (repositoryIds.length === 0) return [];
+  // Optional workspace columns vary by Conductor version. Older schemas remain supported.
+  const workspaceColumns = new Set((database.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>).map(({ name }) => name));
+  const archiveCommit = workspaceColumns.has("archive_commit") ? "w.archive_commit" : "NULL";
+  const prPresent = workspaceColumns.has("pr_title") ? "CASE WHEN length(trim(w.pr_title)) > 0 THEN 1 ELSE 0 END" : "0";
+  const workspaceStatus = workspaceColumns.has("derived_status") ? "w.derived_status" : "NULL";
   const placeholders = repositoryIds.map(() => "?").join(", ");
   const rows = database
     .prepare(`
@@ -1792,6 +1814,10 @@ function sessionRows(database: DatabaseSync, repositoryIds: string[], includeHid
         w.workspace_name,
         w.workspace_path,
         w.branch,
+        w.id AS outcome_workspace_id,
+        ${archiveCommit} AS outcome_archive_commit,
+        ${prPresent} AS outcome_pr_present,
+        ${workspaceStatus} AS outcome_workspace_status,
         r.id AS repository_id,
         r.name AS repository_name,
         r.root_path,
@@ -1937,6 +1963,7 @@ function aggregate(
   if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include models without a rate card.`);
   return {
     generatedAt: new Date().toISOString(),
+    outcomes: summarizeOutcomes(sessions),
     rateCard: {
       currency: rateCard.currency,
       effectiveDate: rateCard.effectiveDate,
@@ -1981,6 +2008,7 @@ async function analyzeSelectedRepositories(
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
+  const outcomeEnricher = new OutcomeEnricher(options);
   let database: DatabaseSync | null = null;
   try {
     await stat(databasePath);
@@ -2095,8 +2123,8 @@ async function analyzeSelectedRepositories(
       }
       try {
         const session = provider === "codex"
-          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, selected.path, rateCard, selected.warnings);
+          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, outcomeEnricher)
+          : await analyzeClaude(row, selected.path, rateCard, selected.warnings, outcomeEnricher);
         claimed.add(`${provider}:${row.provider_session_id}`);
         return session;
       } catch (error) {
@@ -2117,14 +2145,14 @@ async function analyzeSelectedRepositories(
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
         return candidate.provider === "codex"
-          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]);
+          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, outcomeEnricher)
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], outcomeEnricher);
       } catch { return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters); } catch { return null; }
+      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, outcomeEnricher); } catch { return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {
@@ -2200,9 +2228,11 @@ function aggregateMachine(
   );
   return {
     generatedAt: combined.generatedAt,
+    outcomes: combined.outcomes,
     rateCard: combined.rateCard,
     repositories: repositories.map(
-      ({ repository, spendByDay, spendByModel, summary, topTools, warnings }) => ({
+      ({ repository, spendByDay, spendByModel, summary, topTools, warnings, outcomes }) => ({
+        outcomes,
         repository,
         spendByDay,
         spendByModel,

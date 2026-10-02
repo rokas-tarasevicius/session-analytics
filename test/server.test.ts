@@ -10,7 +10,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { createOutcomeFixture, outcomeSentinels } from "./outcomes-fixtures.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -72,7 +72,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "conductor-session-server-"));
   let child: ChildProcess | null = null;
   try {
-    const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    const fixture = await createOutcomeFixture(temporaryDirectory);
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
@@ -124,6 +124,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(serialized, /"skillEvidence":"inferred"/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
+    assert.equal(JSON.parse(serialized).outcomes.pullRequests.merged, 1);
+    for (const sentinel of outcomeSentinels) assert.ok(!serialized.includes(sentinel));
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);
@@ -132,6 +134,12 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const pageText = await page.text();
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
+    assert.match(pageText, /data-view-button="outcomes"/);
+    for (const path of ["/outcomes.js", "/outcomes-summary.js", "/outcomes.css"]) {
+      const asset = await fetch(`${origin}${path}`);
+      assert.equal(asset.status, 200);
+      assert.match(asset.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+    }
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
     const application = await fetch(`${origin}/app.js`);

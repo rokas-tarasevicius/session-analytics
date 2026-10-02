@@ -1,3 +1,5 @@
+import { renderOutcomes } from "./outcomes.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -563,6 +565,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
 
 function clearInactiveAnalyticsViews(activeName) {
   const containers = {
+    outcomes: [document.querySelector("#outcomes-content")],
     activity: [elements.activityProviderFilters, elements.activityHeatmap, elements.activityRepositories],
     costs: [elements.providerCostComponents, elements.repositoryCostComponents],
     distributions: [elements.distributionRepositoryOptions, elements.distributionKey, elements.distributionDuration, elements.distributionCost, elements.distributionTools, elements.distributionCompactions],
@@ -581,6 +584,7 @@ function renderActiveAnalyticsView(view) {
   if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
   if (name === "costs") renderCosts(view);
+  if (name === "outcomes") renderOutcomes(document.querySelector("#outcomes-content"), view.sessions);
   if (name === "models") renderModels(view);
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
@@ -843,6 +847,6 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
   });
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
-const storedView = localStorage.getItem("session-analytics-view");
+const storedView = new URLSearchParams(window.location.search).get("view") || localStorage.getItem("session-analytics-view");
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
 setTheme(localStorage.getItem("session-analytics-theme") || "light"); void load(false);

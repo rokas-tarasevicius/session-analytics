@@ -15,6 +15,7 @@ const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
 ];
 
 export const analysisValueFlags = analysisSettings.map(([, flag]) => flag);
+export const analysisBooleanFlags = ["--outcomes-git", "--no-outcomes-git", "--outcomes-github", "--no-outcomes-github"];
 
 export function argument(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -33,6 +34,14 @@ export function setting(
 
 export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): AnalyzeOptions {
   const options: AnalyzeOptions = { includeHidden: !argv.includes("--exclude-hidden") };
+  for (const [property, suffix] of [["outcomesGit", "git"], ["outcomesGithub", "github"]] as const) {
+    let enabled = environment[`SESSION_ANALYTICS_OUTCOMES_${suffix.toUpperCase()}`] === "1";
+    for (const flag of argv) {
+      if (flag === `--outcomes-${suffix}`) enabled = true;
+      if (flag === `--no-outcomes-${suffix}`) enabled = false;
+    }
+    options[property] = enabled;
+  }
   for (const [property, flag, variable] of analysisSettings) {
     const value = setting(argv, environment, flag, variable);
     if (value) options[property] = value as never;

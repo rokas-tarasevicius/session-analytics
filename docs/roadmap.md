@@ -53,10 +53,12 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 
 M2 links agent sessions to the code they produced, retroactively from existing logs, without hooks installed in advance and without uploading content.
 
-- [ ] Session, commit, and pull-request links ranked by evidence strength: a commit SHA in a tool result, a pull-request URL, an orchestrator workspace's pull request, a branch, hashed file overlap, then a time window. Every link carries a confidence label.
-- [ ] Enrichment from local Git and the GitHub CLI: merged, reverted, time to merge, line survival at 14 and 30 days, and follow-up fix commits.
-- [ ] Cost per merged pull request, cost per surviving line, and abandoned or reverted spend.
-- [ ] Lines added and removed per session.
+- [x] Evidence-ranked session links from structured commit/PR operations and PR-link records, with weak branch/starting-checkout/workspace context kept separate from produced outcomes. Dashboard, report, and JSON include confidence and coverage.
+- [x] Opt-in bounded local Git branch/window correlation, agent co-author trailer counts, and authenticated GitHub state/time-to-merge lookup for already evidenced PRs.
+- [x] Guarded API-equivalent value per merged PR, changed lines per dollar, and edits-without-commit value labeled as a linkage heuristic, with deduplicated PRs and explicit pricing denominators.
+- [x] Lines added and removed from Claude patches/cumulative totals, Codex completed FileChange diffs, and Cursor composer totals; missing and partial coverage remain visible.
+- [ ] Hashed file-overlap correlation, reverted changes, line survival at 14 and 30 days, and follow-up fix commits.
+- [ ] Cost per surviving line and independently evidenced abandoned or reverted spend.
 - [ ] Hotspots: files with the most failed edits, churn, and sessions over time. File paths are shown locally only and never leave the parser in shared outputs.
 
 ### Human and agent interaction

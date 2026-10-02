@@ -1,3 +1,6 @@
+import type { OutcomeSummary, SessionOutcomes } from "./metrics/outcome-types.ts";
+export type { OutcomeConfidence, OutcomeSource, OutcomeLink, OutcomeOperations, OutcomeEnrichmentStatus, OutcomeRatio, OutcomeSummary, SessionOutcomes } from "./metrics/outcome-types.ts";
+
 export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
@@ -83,6 +86,7 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  outcomes?: SessionOutcomes;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -120,6 +124,7 @@ export interface NamedMetric {
 }
 
 export interface RepositoryAnalytics {
+  outcomes?: OutcomeSummary;
   generatedAt: string;
   rateCard: {
     currency: "USD";
@@ -158,6 +163,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  outcomes?: OutcomeSummary;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];
   repositories: RepositoryRollup[];
@@ -174,6 +180,7 @@ export interface MachineAnalytics {
 }
 
 export interface RepositoryRollup {
+  outcomes?: OutcomeSummary;
   repository: RepositoryAnalytics["repository"];
   spendByDay: NamedMetric[];
   spendByModel: ModelUsage[];
@@ -183,6 +190,10 @@ export interface RepositoryRollup {
 }
 
 export interface SessionDatabaseRow {
+  outcome_archive_commit?: string | null;
+  outcome_pr_present?: number;
+  outcome_workspace_id?: string;
+  outcome_workspace_status?: string | null;
   agent_type: string;
   branch: string | null;
   conductor_session_id: string;
@@ -203,6 +214,8 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  outcomesGit?: boolean;
+  outcomesGithub?: boolean;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;

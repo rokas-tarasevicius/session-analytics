@@ -13,6 +13,10 @@
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/metrics/outcomes.ts`, `outcome-types.ts` | Streaming outcome evidence collector and explicit content-free types/projection. |
+| `src/metrics/outcomes-enrichment.ts` | Per-scan opt-in read-only Git and authenticated GitHub enrichment, with shared budgets and a PR cache. |
+| `src/metrics/outcomes-summary.js`, `outcomes-report.ts` | Shared pure outcome aggregation for the analyzer/browser and terminal presentation. |
+| `src/public/outcomes.js`, `outcomes.css` | Isolated Outcomes view and theme-variable-based layout. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
@@ -101,6 +105,8 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 ## Dashboard client
 
 `src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
+
+Outcome collectors observe records during the existing streaming pass; no second transcript scan is added. Branches, full SHAs, and validated GitHub coordinates are private enrichment inputs. Only explicit links/counters leave `project()`. Opt-in enrichment completes inside the analysis worker before serialization. The Outcomes tab and backend import the same aggregation module, served through the fixed static-file map. Optional Conductor fields use schema detection. Outcomes are optional additive namespaces at the session, repository, and machine levels.
 
 ## Design constraints
 

@@ -59,7 +59,8 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
 - **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
-- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
+- **Outcome evidence.** The Outcomes tab connects sessions to recorded edits, commits, and PRs with confidence labels, line-count coverage, and guarded value-per-outcome comparisons. Starting branches and commits remain context; activity never proves quality or success.
+- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access by default, no telemetry, and read-only access to every store. Optional GitHub outcome enrichment is explicitly enabled.
 
 <table>
   <tr>
@@ -144,9 +145,16 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
+| `--outcomes-git` | both | Opt in to bounded read-only local Git correlation on evidenced branches during session windows. No fetching. |
+| `--outcomes-github` | both | Opt in to authenticated `gh` queries for state and time to merge of GitHub PRs already evidenced locally. Sends those PR coordinates to GitHub. |
+| `--no-outcomes-git`, `--no-outcomes-github` | both | Disable the corresponding enrichment, including when enabled by environment. |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+
+Outcome enrichment is off by default. Set `SESSION_ANALYTICS_OUTCOMES_GIT=1` or `SESSION_ANALYTICS_OUTCOMES_GITHUB=1` to opt in through configuration; other environment values do not enable it. Missing tools, authentication, branches, or deleted history are shown as unavailable. The [outcome metric definitions](docs/metrics.md#outcomes) explain confidence, coverage, deduplication, attribution, and scan limits. The snapshot always uses pseudonymous references, including when enrichment is enabled.
+
+To open the demo directly in the Outcomes tab, visit `http://127.0.0.1:4175/?view=outcomes` after starting `npm run demo`.
 
 ## Supported agents and evidence
 
@@ -187,7 +195,7 @@ Per-source details, matching rules, and known gaps are in [docs/providers.md](do
 
 They never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages.
 
-The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, makes no network requests, and has no telemetry. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
+The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, loads only bundled resources, and has no telemetry. Analysis stays offline unless you explicitly enable GitHub outcome enrichment. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
 
 ## How it works
 
@@ -245,7 +253,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 
 - **M0, correctness (in progress):** multi-profile discovery, streamed-usage dedupe, thinking tokens, and current Codex and Cursor formats shipped in 0.5.0. Still to come: remaining Codex and Cursor formats, Conductor result records as fallback evidence, reconciliation against provider-reported totals, and a persistent content-free index with incremental ingest.
 - **M1, reliability and economics:** tool error rates and latency, loop and churn flags, MCP server health, permission friction, rate-limit headroom, cache-break causes, and context fill.
-- **M2, outcomes and interaction:** evidence-ranked links from sessions to commits and pull requests, cost per merged change, autonomy and interruption measures, and concurrency.
+- **M2, outcomes and interaction (in progress):** evidence-ranked session links, lines, guarded value per merged PR, and optional Git/GitHub enrichment are implemented. Survival, reverts, autonomy, interruption measures, and concurrency remain planned.
 - **M3, agent-facing:** a metrics-only MCP server so agents can check budget, tool reliability, and hotspots without seeing transcript text, plus opt-in, off-by-default review features.
 - **M4, breadth and export:** more agents and OpenTelemetry GenAI export.
 
@@ -271,7 +279,7 @@ Several good tools work with the same local history. They make different trade-o
 <details>
 <summary><strong>Does anything leave my machine?</strong></summary>
 
-No. The tool makes no network requests and has no telemetry. Its only outward action is asking your operating system to open the loopback dashboard URL in a browser, which `--no-open` disables. Fonts and provider marks are bundled.
+By default, no network requests are made and there is no telemetry. `--outcomes-github` explicitly enables authenticated GitHub requests for repository/PR coordinates already found in local history, returning only PR state and merge timing. No transcript content is sent. The tool also asks your operating system to open the loopback dashboard unless `--no-open` is set. Fonts and provider marks are bundled.
 </details>
 
 <details>

@@ -1,0 +1,25 @@
+/* Outcomes owns its layout; all colors and typography follow the active theme. */
+#outcomes-content { display: grid; gap: 1rem; padding-top: 1rem; }
+#outcomes-content .panel { min-height: 0; }
+#outcomes-content .outcome-controls { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+#outcomes-content .outcome-funnel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 1rem; }
+#outcomes-content .outcome-stage { display: grid; gap: .6rem; padding: 1rem; min-height: 156px; border: 0; background: var(--surface); text-align: left; }
+#outcomes-content .outcome-stage[aria-pressed="true"] { background: var(--surface-2); box-shadow: inset 0 -3px var(--cyan); }
+#outcomes-content .outcome-stage strong { font: 550 clamp(1.8rem, 3.5vw, 3rem)/1 var(--font-display); letter-spacing: -.05em; }
+#outcomes-content .outcome-stage span, #outcomes-content .outcome-stage small { color: var(--muted); font: .75rem var(--font-utility); }
+#outcomes-content meter { width: 100%; height: 10px; accent-color: var(--cyan); }
+#outcomes-content meter::-webkit-meter-bar { background: var(--surface-2); border: 0; border-radius: 0; }
+#outcomes-content meter::-webkit-meter-optimum-value { background: var(--cyan); }
+#outcomes-content .outcome-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; margin-bottom: 1rem; }
+#outcomes-content .outcome-legend strong { color: var(--cyan); }
+#outcomes-content details { margin-bottom: .65rem; max-width: 28rem; }
+#outcomes-content summary { cursor: pointer; min-height: 28px; line-height: 1.5; }
+#outcomes-content details .chart-note { margin: .4rem 0; }
+#outcomes-content #outcome-session-evidence { scroll-margin-top: 130px; }
+#outcomes-content #outcome-session-evidence > label { display: block; margin-bottom: 1rem; }
+@media (max-width: 760px) {
+  #outcomes-content .outcome-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #outcomes-content .outcome-legend { grid-template-columns: 1fr; }
+  #outcomes-content .outcome-controls { align-items: stretch; flex-direction: column; }
+  #outcomes-content .session-pagination { flex-wrap: wrap; gap: .5rem; }
+}

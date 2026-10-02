@@ -1,10 +1,11 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
+import { outcomeReport } from "./metrics/outcomes-report.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 
 const valueFlags = new Set(analysisValueFlags);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
+const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -41,6 +42,10 @@ Options:
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
   --rate-card PATH       Override the reviewed rate card
+  --outcomes-git         Opt in to bounded local Git outcome correlation
+  --outcomes-github      Opt in to GitHub PR state queries through authenticated gh
+  --no-outcomes-git      Disable Git enrichment (overrides environment)
+  --no-outcomes-github   Disable GitHub enrichment (overrides environment)
   --version              Print the version
   --help                 Show this help
 `);
@@ -107,6 +112,7 @@ if (process.argv.includes("--json")) {
       `tools: ${compactNumber(analytics.summary.toolCalls)}; ` +
       `compactions: ${analytics.summary.compactions}\n`,
   );
+  process.stdout.write(outcomeReport(analytics.sessions));
   process.stdout.write("\nTop sessions by priced usage value\n");
   for (const session of [...analytics.sessions]
     .sort((left, right) => right.cost.totalUsd - left.cost.totalUsd)

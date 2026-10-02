@@ -7,6 +7,7 @@
     <title>Session Analytics</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/outcomes.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -63,6 +64,7 @@
         <button type="button" data-view-button="distributions">Distributions</button>
         <button type="button" data-view-button="activity">Activity</button>
         <button type="button" data-view-button="costs">Costs</button>
+        <button type="button" data-view-button="outcomes">Outcomes</button>
         <button type="button" data-view-button="models">Models</button>
         <button type="button" data-view-button="tools">Tools</button>
         <button type="button" data-view-button="skills">Skills</button>
@@ -177,6 +179,11 @@
           <article class="panel"><header><div><p class="kicker">SELECTED REPOSITORY</p><h2 id="skills-detail-title">—</h2></div></header><div class="bar-list" id="skills-detail"></div></article>
           <article class="panel"><header><div><p class="kicker">PROVIDER COVERAGE</p><h2>Skill detection</h2></div></header><div class="coverage-list"><div><strong>Claude</strong><span>Explicit Skill tool</span><em data-status="ok">Reliable</em></div><div><strong>Codex</strong><span>Canonical SKILL.md reads</span><em data-status="warning">Lower bound</em></div><div><strong>Cursor</strong><span>No stable local signal</span><em>N/A</em></div></div><p class="chart-note">Skill names are allowlisted derived identifiers. Tool arguments and file paths are never returned.</p></article>
         </div>
+      </section>
+
+      <section class="analytics-view" data-view-panel="outcomes" hidden aria-labelledby="outcomes-title">
+        <header class="view-header"><div><p class="kicker">FROM ACTIVITY TO EVIDENCE</p><h2 id="outcomes-title">Outcomes</h2><p>Trace recorded edits, commits, and pull requests. Evidence of an artifact does not prove quality or value delivered.</p></div></header>
+        <div id="outcomes-content"></div>
       </section>
 
       <footer><p>Read-only local analysis. No prompts, messages, reasoning, tool payloads, transcript paths, credentials, or remote telemetry.</p><div id="rate-card-links"></div></footer>
