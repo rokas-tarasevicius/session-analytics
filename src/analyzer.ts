@@ -25,7 +25,7 @@ import type {
 } from "./types.ts";
 
 const toolRoot = new URL(".", import.meta.url);
-const defaultRateCardPath = new URL("../references/rate-cards.json", toolRoot);
+const defaultRateCardPath = new URL("../data/rate-cards.json", toolRoot);
 const zeroTokens = (): TokenUsage => ({
   cacheWrite1hInputTokens: 0,
   cacheWrite5mInputTokens: 0,

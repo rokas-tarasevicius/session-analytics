@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { analyzeMachineSessions, analyzeRepositorySessions } from "./analyzer.ts";
-import { createSessionAnalyticsFixture } from "./test-support.ts";
+import { analyzeMachineSessions, analyzeRepositorySessions } from "../src/analyzer.ts";
+import { createSessionAnalyticsFixture } from "./fixtures.ts";
 
 test("analyzes Codex, Claude, and Cursor sessions without returning transcript content", async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "machine-session-analytics-"));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-"));
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const result = await analyzeRepositorySessions({
@@ -197,7 +197,7 @@ test("scans every visible Conductor repository and preserves zero-session reposi
 });
 
 test("retains end-to-end pricing for Claude Opus 4.8", async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "machine-session-opus-4-8-"));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-opus-4-8-"));
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory, "claude-opus-4-8");
     const result = await analyzeRepositorySessions({
@@ -259,7 +259,7 @@ test("keeps unknown provider models unpriced instead of applying a database-mode
 });
 
 test("discovers provider sessions when optional Conductor metadata is absent", async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "machine-session-no-metadata-"));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-no-metadata-"));
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const result = await analyzeMachineSessions({
@@ -295,7 +295,7 @@ test("discovers provider sessions when optional Conductor metadata is absent", a
 });
 
 test("never charges an unobserved process-wide counter baseline to a session or a day", async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "machine-session-counter-baseline-"));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-counter-baseline-"));
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     // Codex broadcasts one process-wide cumulative counter into every session

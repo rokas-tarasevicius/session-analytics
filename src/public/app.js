@@ -208,7 +208,7 @@ function switchView(name) {
     else button.removeAttribute("aria-current");
   }
   for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== name;
-  localStorage.setItem("session-atlas-view", name);
+  localStorage.setItem("session-analytics-view", name);
   if (snapshot) renderView();
 }
 
@@ -827,7 +827,7 @@ async function load(refresh = false) {
   finally { elements.refresh.disabled = false; }
 }
 
-function setTheme(theme) { document.documentElement.dataset.theme = theme; elements.themeLabel.textContent = theme === "dark" ? "Light" : "Dark"; localStorage.setItem("session-atlas-theme", theme); }
+function setTheme(theme) { document.documentElement.dataset.theme = theme; elements.themeLabel.textContent = theme === "dark" ? "Light" : "Dark"; localStorage.setItem("session-analytics-theme", theme); }
 elements.refresh.addEventListener("click", () => load(true));
 elements.repositoryFilter.addEventListener("change", renderView);
 elements.windowPreset.addEventListener("change", applyWindowPreset);
@@ -843,6 +843,6 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
   });
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
-const storedView = localStorage.getItem("session-atlas-view");
+const storedView = localStorage.getItem("session-analytics-view");
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
-setTheme(localStorage.getItem("session-atlas-theme") || "light"); void load(false);
+setTheme(localStorage.getItem("session-analytics-theme") || "light"); void load(false);

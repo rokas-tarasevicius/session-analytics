@@ -10,11 +10,11 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { createSessionAnalyticsFixture } from "./test-support.ts";
+import { createSessionAnalyticsFixture } from "./fixtures.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
-const repositoryRoot = join(testRoot, "../../../../..");
-const serverPath = join(testRoot, "server.ts");
+const repositoryRoot = join(testRoot, "..");
+const serverPath = join(testRoot, "../src/server.ts");
 
 async function availablePort(): Promise<number> {
   const probe = createServer();
@@ -98,7 +98,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       stderr += chunk;
     });
     await waitFor(
-      () => stdout.includes("Machine session analytics ready:"),
+      () => stdout.includes("Session Analytics ready:"),
       () => `Server did not start. stdout=${stdout} stderr=${stderr}`,
     );
 
@@ -106,7 +106,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const health = await fetch(`${origin}/api/health`);
     assert.equal(health.status, 200);
     const healthBody = (await health.json()) as Record<string, unknown>;
-    assert.equal(healthBody.service, "machine-session-analytics");
+    assert.equal(healthBody.service, "session-analytics");
     assert.equal(healthBody.status, "ok");
     assert.ok(["building", "not-started", "ready"].includes(String(healthBody.snapshot)));
     assert.match(health.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
@@ -130,7 +130,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const page = await fetch(origin);
     assert.equal(page.status, 200);
     const pageText = await page.text();
-    assert.match(pageText, /SESSION <b>ATLAS<\/b>/);
+    assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
@@ -141,7 +141,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(applicationText, /renderNamedDistribution/);
     assert.match(applicationText, /activityTooltip[\s\S]*pointerenter/);
     assert.match(applicationText, /Math\.log1p\(value\)[\s\S]*\* 7/);
-    assert.match(applicationText, /session-atlas-theme"\) \|\| "light"/);
+    assert.match(applicationText, /session-analytics-theme"\) \|\| "light"/);
     const stylesheet = await fetch(`${origin}/styles.css`);
     const stylesheetText = await stylesheet.text();
     assert.match(stylesheetText, /--heat-7:\s*#1f5b49/);
@@ -163,7 +163,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     reused.stderr?.on("data", (chunk: string) => { reusedStderr += chunk; });
     const [reuseExitCode] = await once(reused, "exit");
     assert.equal(reuseExitCode, 0, reusedStderr);
-    assert.match(reusedStdout, /Machine session analytics already running:/);
+    assert.match(reusedStdout, /Session Analytics already running:/);
   } finally {
     if (child) await stopServer(child);
     await rm(temporaryDirectory, { force: true, recursive: true });

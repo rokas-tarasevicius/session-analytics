@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
+import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
@@ -29,7 +30,7 @@ const valueFlags = new Set([
   "--repo-remote",
   "--repo-root",
 ]);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--open", "--version"]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -46,9 +47,9 @@ for (let index = 2; index < process.argv.length; index += 1) {
   }
 }
 if (process.argv.includes("--help")) {
-  process.stdout.write(`Machine Session Analytics server ${version}
+  process.stdout.write(`${brand.name} dashboard ${version}
 
-Usage: node scripts/server.ts [--open] [--port PORT] [analysis options]
+Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it.
@@ -188,7 +189,7 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/api/health") {
       sendJson(response, 200, {
-        service: "machine-session-analytics",
+        service: serviceId,
         snapshot: snapshotReady ? "ready" : analyticsPending ? "building" : "not-started",
         status: "ok",
       });
@@ -243,7 +244,7 @@ async function compatibleDashboardIsRunning(): Promise<boolean> {
     });
     if (!response.ok) return false;
     const body = await response.json() as { service?: unknown; status?: unknown };
-    return body.service === "machine-session-analytics" && body.status === "ok";
+    return body.service === serviceId && body.status === "ok";
   } catch {
     return false;
   }
@@ -252,21 +253,21 @@ async function compatibleDashboardIsRunning(): Promise<boolean> {
 server.on("error", (error: NodeJS.ErrnoException) => {
   void (async () => {
     if (error.code === "EADDRINUSE" && await compatibleDashboardIsRunning()) {
-      process.stdout.write(`Machine session analytics already running: ${dashboardUrl}\n`);
+      process.stdout.write(`${brand.name} already running: ${dashboardUrl}\n`);
       if (process.argv.includes("--open")) await openDashboard();
       process.exit(0);
     }
     if (error.code === "EADDRINUSE") {
       process.stderr.write(`Port ${port} is already in use by another local service.\n`);
     } else {
-      process.stderr.write(`Machine session analytics could not start: ${safeError(error)}\n`);
+      process.stderr.write(`${brand.name} could not start: ${safeError(error)}\n`);
     }
     process.exit(1);
   })();
 });
 
 server.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`Machine session analytics ready: ${dashboardUrl}\n`);
+  process.stdout.write(`${brand.name} ready: ${dashboardUrl}\n`);
   process.stdout.write("Read-only local analysis; transcript message and reasoning content is not returned.\n");
   const warmup = analytics(false);
   void warmup

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Session Analytics"
+  short_description: "Content-free metrics for local coding-agent sessions across repositories."
+  default_prompt: "Use $session-analytics to immediately run its single launch command, scan all local Claude Code, Codex, and Cursor evidence, and open the read-only localhost dashboard."

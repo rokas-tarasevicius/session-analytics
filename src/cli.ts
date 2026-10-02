@@ -1,5 +1,6 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import type { AnalyzeOptions } from "./types.ts";
+import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 
 function argument(name: string): string | undefined {
@@ -37,9 +38,9 @@ for (let index = 2; index < process.argv.length; index += 1) {
 }
 
 if (process.argv.includes("--help")) {
-  process.stdout.write(`Machine Session Analytics ${version}
+  process.stdout.write(`${brand.name} ${version}
 
-Usage: node scripts/cli.ts [options]
+Usage: ${brand.command} report [options]
 
 By default, unions all local Codex, Claude, and Cursor session evidence across the machine. Conductor metadata is optional enrichment and hidden metadata records are included.
 
@@ -56,7 +57,7 @@ Options:
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
   --rate-card PATH       Override the reviewed rate card
-  --version              Print the skill version
+  --version              Print the version
   --help                 Show this help
 `);
   process.exit(0);
@@ -106,7 +107,7 @@ const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
 if (process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);
 } else {
-  process.stdout.write("Machine session analytics · all locally evidenced repositories\n");
+  process.stdout.write(`${brand.name} · all locally evidenced repositories\n`);
   process.stdout.write(`Generated: ${analytics.generatedAt}\n`);
   process.stdout.write(
     `Repositories: ${analytics.summary.repositoriesWithSessions}/${analytics.summary.repositories} with sessions\n`,
