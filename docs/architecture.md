@@ -6,13 +6,15 @@
 
 | Path | Role |
 | --- | --- |
-| `bin/session-analytics.ts` | Command dispatcher: `dashboard` (default), `report`, `--help`, `--version`. Adds `--open` to the dashboard unless `--no-open` is given. |
+| `bin/session-analytics.ts` | Command dispatcher: `dashboard` (default), `report`, `rates`, `--help`, `--version`. Adds `--open` to the dashboard unless `--no-open` is given. |
 | `src/server.ts` | Dashboard server: argument and environment parsing, loopback HTTP server, static files, `/api/health`, `/api/analytics`, browser opener. |
 | `src/cli.ts` | Terminal report and `--json` snapshot. |
 | `src/analysis-process.ts` | Runs one analysis in a child process and returns the parsed result. |
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/pricing/` | Fixed public-feed fetchers, normalization, validation, immutable cache, request-time history and provenance, rates CLI. |
+| `src/public/pricing.js` | Isolated Pricing tab renderer using selected sessions. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
@@ -41,7 +43,7 @@ The Cursor pass runs and serializes before the Claude and Codex pass starts, so 
 
 ## Pipeline
 
-1. **Load the rate card.** `data/rate-cards.json`, or `--rate-card`, is validated: USD currency, an ISO effective date, non-negative rates, a provider of `claude` or `codex`, and a source for every model.
+1. **Load local price evidence.** Validate `data/rate-cards.json` plus cached API snapshots; `--rate-card` and `reviewed-only` pin the current reviewed card. Loaders never fetch or write. Request-time resolution selects archived evidence under the configured source order and reviewed exception policy. Only the public rate-card projection crosses the worker boundary; raw payloads, cache paths and internal history do not. See [pricing](pricing.md).
 2. **Open optional metadata.** If the Conductor database exists, it is opened read-only and its repositories, workspaces, and sessions are loaded. A missing database is normal.
 3. **Cursor pass.** In the Cursor child, every `composerData:*` record is read with its `bubbleId:*` records, composer headers map composers to workspaces, and each composer becomes a session assigned to a repository.
 4. **Discover provider roots.** Claude Code and Codex roots are collected across profiles (see [providers.md](providers.md)), then deduplicated by resolved real path. An explicit root option replaces discovery for that provider.
@@ -94,6 +96,7 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 - Rejects requests whose `Host` is not `127.0.0.1` or `localhost`, or whose `Origin` (when present) is not a loopback origin, with `403`.
 - Accepts `GET` only; anything else gets `405`.
 - Serves static files from a fixed map of URL paths, so request paths never reach the file system.
+- After the first successful scan, refreshes stale public pricing feeds once in the background unless offline or pinned to a reviewed card. This does not mutate the in-memory analytics snapshot; the next explicit refresh loads new cache evidence. There is no price-update HTTP endpoint.
 - Caches one snapshot promise. `/api/analytics?refresh=1` starts a new scan; concurrent requests share the scan in progress.
 - Sends a strict Content Security Policy (`default-src 'self'`, no inline script or style, `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and same-origin opener and resource policies. No CORS headers are sent.
 - If the port is taken, it checks `/api/health` for its own service ID and reuses that dashboard; otherwise it exits with an error.

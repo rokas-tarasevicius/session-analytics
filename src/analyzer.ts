@@ -15,7 +15,6 @@ import type {
   ModelUsage,
   MachineAnalytics,
   NamedMetric,
-  RateCard,
   RepositoryAnalytics,
   SessionAnalytics,
   SessionDatabaseRow,
@@ -24,8 +23,9 @@ import type {
   TokenUsage,
 } from "./types.ts";
 
+import { loadPricingCatalog, mergeProvenance, publicRateCard, rateForContext, resolveRate, type PricingCatalog } from "./pricing/catalog.ts";
+
 const toolRoot = new URL(".", import.meta.url);
-const defaultRateCardPath = new URL("../data/rate-cards.json", toolRoot);
 const zeroTokens = (): TokenUsage => ({
   cacheWrite1hInputTokens: 0,
   cacheWrite5mInputTokens: 0,
@@ -192,51 +192,12 @@ function durationMilliseconds(start: string | null, end: string | null): number 
     : 0;
 }
 
-async function loadRateCard(path: string | URL = defaultRateCardPath): Promise<RateCard> {
-  const parsed = JSON.parse(await readFile(path, "utf8")) as Partial<RateCard>;
-  const models = asRecord(parsed.models);
-  if (
-    parsed.currency !== "USD" ||
-    !parsed.effectiveDate ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(parsed.effectiveDate) ||
-    Number.isNaN(new Date(`${parsed.effectiveDate}T00:00:00Z`).valueOf()) ||
-    !models
-  ) {
-    throw new Error("The session analytics rate card is invalid.");
-  }
-  for (const [model, rawRate] of Object.entries(models)) {
-    const rate = rawRate as ModelRate;
-    if (
-      !["claude", "codex"].includes(rate.provider) ||
-      !Number.isFinite(rate.inputPerMillion) || rate.inputPerMillion < 0 ||
-      !Number.isFinite(rate.outputPerMillion) || rate.outputPerMillion < 0 ||
-      [
-        rate.cachedInputPerMillion,
-        rate.cacheReadPerMillion,
-        rate.cacheWrite5mPerMillion,
-        rate.cacheWrite1hPerMillion,
-        rate.cacheWriteMultiplier,
-      ].some((value) => value !== undefined && (!Number.isFinite(value) || value < 0)) ||
-      (rate.longContext !== undefined &&
-        (!Number.isFinite(rate.longContext.inputMultiplier) ||
-          rate.longContext.inputMultiplier <= 0 ||
-          !Number.isFinite(rate.longContext.outputMultiplier) ||
-          rate.longContext.outputMultiplier <= 0 ||
-          !Number.isFinite(rate.longContext.thresholdInputTokens) ||
-          rate.longContext.thresholdInputTokens < 0)) ||
-      !rate.source
-    ) {
-      throw new Error(`The rate card entry for ${model} is invalid.`);
-    }
-  }
-  return parsed as RateCard;
-}
-
 function calculateCost(
   rate: ModelRate,
   usage: TokenUsage,
   inputForRequest: number,
 ): CostBreakdown {
+  rate = rateForContext(rate, inputForRequest);
   const inputMultiplier =
     rate.longContext && inputForRequest > rate.longContext.thresholdInputTokens
       ? rate.longContext.inputMultiplier
@@ -290,7 +251,7 @@ function calculateCost(
 
 function addModelUsage(
   session: MutableSession,
-  rateCard: RateCard,
+  rateCard: PricingCatalog,
   model: string,
   usage: TokenUsage,
   inputForRequest: number,
@@ -305,18 +266,23 @@ function addModelUsage(
       ...zeroCost(),
       calls: 0,
       model,
-      priced: Boolean(rateCard.models[model]),
+      priced: true,
+      pricing: [],
+      pricingCoverage: { pricedTokens: 0, eligibleTokens: 0 },
     };
     session.models.set(model, aggregate);
   }
   aggregate.calls += 1;
   sumTokens(aggregate, usage);
-  const rate = rateCard.models[model];
-  if (!rate) {
+  aggregate.pricingCoverage!.eligibleTokens += tokenCount(usage);
+  const selected = resolveRate(rateCard, model, timestamp);
+  if (!selected) {
     aggregate.priced = false;
     return;
   }
-  const cost = calculateCost(rate, usage, inputForRequest);
+  mergeProvenance(aggregate, [selected.provenance]);
+  aggregate.pricingCoverage!.pricedTokens += tokenCount(usage);
+  const cost = calculateCost(selected.rate, usage, inputForRequest);
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
@@ -592,7 +558,7 @@ async function buildCodexCounterLedger(paths: string[]): Promise<Map<string, Cod
 async function analyzeCodex(
   row: SessionDatabaseRow,
   path: string,
-  rateCard: RateCard,
+  rateCard: PricingCatalog,
   inheritedWarnings: string[],
   counterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCounters: Set<string> = new Set<string>(),
@@ -840,7 +806,7 @@ async function claudeEvidencePaths(mainPath: string): Promise<string[]> {
 async function analyzeClaude(
   row: SessionDatabaseRow,
   mainPath: string,
-  rateCard: RateCard,
+  rateCard: PricingCatalog,
   inheritedWarnings: string[],
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
@@ -988,8 +954,8 @@ function finalizeSession(
   let priceEligibleTokens = 0;
   for (const model of models) {
     sumCost(cost, model);
-    priceEligibleTokens += tokenCount(model);
-    if (model.priced) pricedTokens += tokenCount(model);
+    priceEligibleTokens += model.pricingCoverage?.eligibleTokens ?? tokenCount(model);
+    pricedTokens += model.pricingCoverage?.pricedTokens ?? (model.priced ? tokenCount(model) : 0);
   }
   const pricedTokenCoverage = priceEligibleTokens === 0 ? null : pricedTokens / priceEligibleTokens;
   const eventSpanMilliseconds = durationMilliseconds(state.firstEventAt, state.lastEventAt);
@@ -1383,7 +1349,7 @@ function syntheticSessionRow(
 async function analyzeTranscriptCandidate(
   candidate: TranscriptCandidate,
   repository: RepositoryRow,
-  rateCard: RateCard,
+  rateCard: PricingCatalog,
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
@@ -1474,6 +1440,7 @@ function addCursorReportedCost(
       model,
       priced: true,
       totalUsd: value,
+      pricing: [],
       upperEstimateUsd: value,
     };
     state.models.set(model, aggregate);
@@ -1867,6 +1834,12 @@ function mergeModelUsage(target: Map<string, ModelUsage>, source: ModelUsage): v
   }
   aggregate.calls += source.calls;
   aggregate.priced = aggregate.priced && source.priced;
+  mergeProvenance(aggregate, source.pricing ?? []);
+  if (source.pricingCoverage) {
+    aggregate.pricingCoverage ??= { pricedTokens: 0, eligibleTokens: 0 };
+    aggregate.pricingCoverage.pricedTokens += source.pricingCoverage.pricedTokens;
+    aggregate.pricingCoverage.eligibleTokens += source.pricingCoverage.eligibleTokens;
+  }
   sumTokens(aggregate, source);
   sumCost(aggregate, source);
 }
@@ -1874,7 +1847,7 @@ function mergeModelUsage(target: Map<string, ModelUsage>, source: ModelUsage): v
 function aggregate(
   repository: RepositoryRow,
   sessions: SessionAnalytics[],
-  rateCard: RateCard,
+  rateCard: PricingCatalog,
 ): RepositoryAnalytics {
   const totalTokens = zeroTokens();
   const spendByDay: Record<string, number> = {};
@@ -1937,11 +1910,7 @@ function aggregate(
   if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include models without a rate card.`);
   return {
     generatedAt: new Date().toISOString(),
-    rateCard: {
-      currency: rateCard.currency,
-      effectiveDate: rateCard.effectiveDate,
-      models: Object.entries(rateCard.models).map(([model, { source }]) => ({ model, source })),
-    },
+    rateCard: publicRateCard(rateCard),
     repository: {
       id: repository.id,
       name: repository.name,
@@ -1977,10 +1946,10 @@ function aggregate(
 
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
-): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[] }> {
+): Promise<{ rateCard: PricingCatalog; repositories: RepositoryAnalytics[] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
-  const rateCard = await loadRateCard(options.rateCardPath);
+  const rateCard = await loadPricingCatalog(options);
   let database: DatabaseSync | null = null;
   try {
     await stat(databasePath);
@@ -2184,7 +2153,7 @@ async function analyzeSelectedRepositories(
 
 function aggregateMachine(
   repositories: RepositoryAnalytics[],
-  rateCard: RateCard,
+  rateCard: PricingCatalog,
 ): MachineAnalytics {
   const sessions = repositories.flatMap(({ sessions: repositorySessions }) => repositorySessions);
   const combined = aggregate(

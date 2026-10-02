@@ -20,13 +20,108 @@ export interface ModelRate {
   cacheWriteObservable?: boolean;
   outputPerMillion: number;
   longContext?: LongContextRate;
+  contextTiers?: ContextPriceTier[];
+  assumptions?: PricingAssumption[];
   source: string;
+}
+
+/** Absolute USD/million prices above a per-request input boundary. */
+export interface ContextPriceTier {
+  aboveInputTokens: number;
+  inputPerMillion: number;
+  outputPerMillion: number;
+  cacheReadPerMillion?: number;
+  cacheWrite5mPerMillion?: number;
+  cacheWrite1hPerMillion?: number;
+}
+
+export type PricingSource = "models.dev" | "litellm";
+export type PricingPolicy = "reviewed-first" | "api-first" | "reviewed-only";
+export type PricingAssumption = "anthropic-cache-1h-2x" | "codex-cache-write-upper-1.25x";
+
+export interface RateProvenance {
+  source: PricingSource | "reviewed";
+  kind: "api" | "reviewed" | "fallback";
+  snapshotDate: string;
+  payloadSha256: string;
+  rateModel: string;
+  match: "exact" | "alias";
+  temporal: "at-or-before" | "oldest" | "undated";
+  assumptions: PricingAssumption[];
+}
+
+export interface PricingSourceStatus {
+  source: PricingSource;
+  url: string;
+  fetchedAt: string | null;
+  payloadSha256: string | null;
+  ageDays: number | null;
+  stale: boolean;
+  models: number;
+  rejectedModels: number;
+}
+
+export interface PricingStatus {
+  offline: boolean;
+  policy: PricingPolicy;
+  refreshAfterDays: number;
+  newestSnapshotAt: string | null;
+  ageDays: number | null;
+  stale: boolean;
+  snapshots: number;
+  sources: PricingSourceStatus[];
+  warnings: Array<"cache-unavailable" | "invalid-snapshot" | "large-price-change" | "rejected-models">;
+}
+
+export interface PricingCoverage {
+  modelsSeen: number;
+  modelsPriced: number;
+  ratio: number | null;
+  bySource: Array<{ source: PricingSource | "reviewed"; models: number }>;
+  unpricedModels: string[];
+}
+
+export interface PriceChange {
+  source: PricingSource;
+  model: string;
+  change: "added" | "removed" | "changed";
+  large: boolean;
+  before: ModelRate | null;
+  after: ModelRate | null;
+}
+
+export interface PricingUpdateResult {
+  status: "updated" | "partial" | "failed" | "offline" | "reviewed-only";
+  sources: Array<{ source: PricingSource; status: "updated" | "failed"; models: number; rejectedModels: number }>;
+  changes: PriceChange[];
+}
+
+export interface PricingRatesView {
+  currency: "USD";
+  status: PricingStatus;
+  models: Array<{ model: string; rate: ModelRate; provenance: RateProvenance }>;
+}
+
+export interface PricingDiffView {
+  comparisons: Array<{ source: PricingSource; before: string | null; after: string | null }>;
+  changes: PriceChange[];
+}
+
+export interface PricingStatusView { status: PricingStatus; coverage: PricingCoverage }
+
+export interface PricingOptions {
+  dataDir?: string;
+  offline?: boolean;
+  pricingPolicy?: PricingPolicy;
+  pricingSources?: PricingSource[];
+  pricingMaxAgeDays?: number;
 }
 
 export interface RateCard {
   currency: "USD";
   effectiveDate: string;
   models: Record<string, ModelRate>;
+  reviewedOverrides?: string[];
 }
 
 export interface TokenUsage {
@@ -54,6 +149,10 @@ export interface ModelUsage extends TokenUsage, CostBreakdown {
   model: string;
   calls: number;
   priced: boolean;
+  /** All rate snapshots used for this model; empty for unpriced/provider-reported usage. */
+  pricing?: RateProvenance[];
+  /** API-priceable token denominator; absent for provider-reported usage. */
+  pricingCoverage?: { pricedTokens: number; eligibleTokens: number };
 }
 
 export interface SessionMetrics {
@@ -124,7 +223,8 @@ export interface RepositoryAnalytics {
   rateCard: {
     currency: "USD";
     effectiveDate: string;
-    models: Array<{ model: string; source: string }>;
+    models: Array<{ model: string; source: string; provenance?: RateProvenance }>;
+    pricing?: PricingStatus;
   };
   repository: {
     id: string;
@@ -202,7 +302,7 @@ export interface SessionDatabaseRow {
   workspace_path: string;
 }
 
-export interface AnalyzeOptions {
+export interface AnalyzeOptions extends PricingOptions {
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;

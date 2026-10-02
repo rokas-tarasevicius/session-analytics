@@ -76,6 +76,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
+      SESSION_ANALYTICS_OFFLINE: "1",
+      SESSION_ANALYTICS_DATA_DIR: join(temporaryDirectory, "pricing-data"),
       SESSION_ANALYTICS_CLAUDE_ROOT: fixture.claudeRoot,
       SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: fixture.codexArchiveRoot,
       SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,
@@ -132,11 +134,17 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const pageText = await page.text();
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
+    assert.match(pageText, /data-view-button="pricing"/);
+    assert.match(pageText, /id="pricing-panel"/);
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
     const application = await fetch(`${origin}/app.js`);
     const applicationText = await application.text();
     assert.match(applicationText, /dataset\.providerFilter/);
+    const pricing = await fetch(`${origin}/pricing.js`);
+    assert.equal(pricing.status, 200);
+    assert.match(await pricing.text(), /renderPricingPanel/);
+    assert.equal((await fetch(`${origin}/pricing.css`)).status, 200);
     assert.match(applicationText, /renderDistributions/);
     assert.match(applicationText, /renderNamedDistribution/);
     assert.match(applicationText, /activityTooltip[\s\S]*pointerenter/);

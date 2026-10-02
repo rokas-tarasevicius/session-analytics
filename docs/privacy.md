@@ -2,7 +2,7 @@
 
 `session-analytics` reads coding-agent transcripts that already exist on your machine. Those transcripts contain everything you and your agents have written: prompts, responses, reasoning, commands, file paths, diffs, and tool output. This document defines exactly what the tool may return from them, how that boundary is enforced, and what it does not protect against.
 
-The contract applies to every output surface: the dashboard and its `/api/analytics` endpoint, the terminal report, the JSON snapshot (`report --json`), and the agent skill, which only runs those commands.
+The contract applies to every output surface: the dashboard and its `/api/analytics` endpoint, the terminal report, the JSON snapshot (`report --json`), the `rates` commands, and the agent skill, which only runs those commands.
 
 ## The contract
 
@@ -14,7 +14,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
 - Fixed-text parser warnings, which may include counts and model IDs.
-- The rate card's effective date, model IDs, and public source URLs.
+- The rate card's effective date, model IDs, public source URLs, snapshot timestamps, payload hashes, rate values and enumerated pricing provenance.
 
 **Never returned:**
 
@@ -33,10 +33,10 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
 - **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded, so local paths in exceptions cannot reach the dashboard.
-- **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
+- **No session upload.** No telemetry. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). They target fixed models.dev and GitHub raw endpoints, without credentials, cookies, bodies or redirects. `--offline` / `SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests. Public services see the client IP and request time. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 
-Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere.
+Transcript content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere. The pricing cache persists only normalized public price metadata and reviewed cards, never local model inventories or provider history. Analysis reads this cache; explicit updates and startup background refreshes write it. The original raw feed body is not persisted. Cache paths, feed descriptions, arbitrary extra fields and raw fetch/file errors are not returned.
 
 ## Privacy tiers
 
@@ -64,8 +64,10 @@ Returned by `/api/analytics` and `report --json`.
 | `generatedAt` | ISO time the snapshot was computed | P0 |
 | `rateCard.currency` | Always `USD` | P0 |
 | `rateCard.effectiveDate` | Effective date of the rate card used | P0 |
-| `rateCard.models[].model` | Model ID that has a reviewed rate | P0 |
-| `rateCard.models[].source` | Public URL of the rate's primary source | P0 |
+| `rateCard.models[].model` | Model ID with a currently resolved rate | P0 |
+| `rateCard.models[].source` | Public URL of the selected rate source | P0 |
+| `rateCard.models[].provenance` | Current rate evidence; see Pricing provenance below | P0 |
+| `rateCard.pricing` | Cache freshness/configuration; see Pricing status below | P0 |
 | `repositories[]` | One rollup per repository; see [Repository rollup](#repository-rollup-repositoryrollup) | P0/P1 |
 | `sessions[]` | Every analyzed session; see [Session](#session-sessionanalytics) | P0/P1 |
 | `spendByDay[]` | `{ name: "YYYY-MM-DD", value: USD }`, priced usage by UTC day | P0 |
@@ -207,7 +209,65 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 | --- | --- | --- |
 | `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
 | `calls` | Requests attributed to this model | P0 |
-| `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
+| `priced` | `true` when all observed requests for this model have a selected rate (always `true` for Cursor provider-reported values) | P0 |
+| `pricing[]` | Distinct rate provenance used across this model's requests; empty when no request was API-priced; see below | P0 |
+| `pricingCoverage.pricedTokens`, `pricingCoverage.eligibleTokens` | Priced and eligible observed token counts for API usage, retaining partial coverage within a model; absent for provider-reported usage | P0 |
+
+### Pricing provenance (`RateProvenance`)
+
+Present on current rate-card entries and on model usage in sessions, repositories and machine totals. No local paths or raw source records are included.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `source` | `models.dev`, `litellm`, or `reviewed` | P0 |
+| `kind` | `api`, `reviewed`, or bundled `fallback` | P0 |
+| `snapshotDate` | UTC fetch time or reviewed effective date at midnight | P0 |
+| `payloadSha256` | SHA-256 of public feed/reviewed-card input bytes; not a local session identifier | P0 |
+| `rateModel` | ID of the matching rate entry | P0 |
+| `match` | `exact` or `alias` | P0 |
+| `temporal` | `at-or-before`, `oldest` (request predates evidence), or `undated` | P0 |
+| `assumptions[]` | `anthropic-cache-1h-2x` or `codex-cache-write-upper-1.25x` | P0 |
+
+### Pricing status (`rateCard.pricing`, `rates show/status`)
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `offline` | Whether public price fetching is disabled | P0 |
+| `policy` | `reviewed-first`, `api-first`, or `reviewed-only` | P0 |
+| `refreshAfterDays` | Configured stale threshold | P0 |
+| `newestSnapshotAt`, `ageDays` | Latest API observation time and age; null without a cache | P0 |
+| `stale` | Whether any enabled source is missing/old; false for pinned reviewed-only mode | P0 |
+| `snapshots` | Number of retained, usable API observations in this configuration | P0 |
+| `sources[].source`, `sources[].url` | Enabled source enum and fixed public endpoint | P0 |
+| `sources[].fetchedAt`, `sources[].payloadSha256` | Latest source observation and full payload hash, or null | P0 |
+| `sources[].ageDays`, `sources[].stale` | Per-source age (null when unavailable) and staleness | P0 |
+| `sources[].models`, `sources[].rejectedModels` | Valid and rejected model-entry counts in the latest observation | P0 |
+| `warnings[]` | `cache-unavailable`, `invalid-snapshot`, `large-price-change`, `rejected-models` | P0 |
+
+### Rates CLI output
+
+All fields below are **P0**. `rates status` returns `status` as above plus `coverage`. `rates show` returns `currency: USD`, `status` and `models[]`. `rates diff` returns `comparisons[]` and `changes[]`. `rates update` returns an enumerated result status, per-source results, and changes. The cache directory and local scan options are internal-only.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `coverage.modelsSeen`, `coverage.modelsPriced` | Distinct observed API-model IDs and those matched by current rates | P0 |
+| `coverage.ratio` | Priced/seen fraction; null when the denominator is zero | P0 |
+| `coverage.bySource[].source`, `coverage.bySource[].models` | Source enum and count of local IDs priced by that source | P0 |
+| `coverage.unpricedModels[]` | Observed model IDs without a matching current rate | P0 |
+| `models[].model`, `models[].provenance` | Requested/current model ID and rate evidence | P0 |
+| `models[].rate.provider`, `models[].rate.source` | Rate's provider enum and public source URL | P0 |
+| `models[].rate.inputPerMillion`, `outputPerMillion`, `cachedInputPerMillion`, `cacheReadPerMillion`, `cacheWrite5mPerMillion`, `cacheWrite1hPerMillion` | Allowlisted USD/million numeric rates | P0 |
+| `models[].rate.cacheWriteMultiplier`, `cacheWriteObservable` | Reviewed/derived upper-estimate configuration | P0 |
+| `models[].rate.longContext.inputMultiplier`, `outputMultiplier`, `thresholdInputTokens` | Reviewed per-request premium configuration | P0 |
+| `models[].rate.contextTiers[].aboveInputTokens`, `inputPerMillion`, `outputPerMillion`, `cacheReadPerMillion`, `cacheWrite5mPerMillion`, `cacheWrite1hPerMillion` | Absolute tier rates and strict per-request threshold | P0 |
+| `models[].rate.assumptions[]` | Same bounded assumption codes as provenance | P0 |
+| `comparisons[].source`, `before`, `after` | Source and previous/latest timestamps; null when unavailable | P0 |
+| `changes[].source`, `model`, `change`, `large` | Source, model ID, `added`/`removed`/`changed`, and large-change flag | P0 |
+| `changes[].before`, `after` | Full normalized rates as above; null for a missing side | P0 |
+| update `status` | `updated`, `partial`, `failed`, `offline`, `reviewed-only` | P0 |
+| update `sources[].source`, `status`, `models`, `rejectedModels` | Source enum, `updated`/`failed`, accepted/rejected counts | P0 |
+
+`test/pricing.test.ts` plants sentinel content in feed descriptions/links/extra fields and inspects actual HTTP requests from a loopback fixture server. `test/pricing-accounting.test.ts` carries transcript sentinels through history selection, API projection, aggregation, report and rates status. Only fixed source URLs and explicitly projected fields survive. Corrupt payloads/errors do not enter output.
 
 ### Health endpoint
 

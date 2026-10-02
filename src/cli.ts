@@ -1,10 +1,10 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
+import { analysisValueFlags, analyzeOptionsFrom, pricingHelp } from "./options.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 
 const valueFlags = new Set(analysisValueFlags);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version", "--offline"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -41,6 +41,7 @@ Options:
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
   --rate-card PATH       Override the reviewed rate card
+${pricingHelp}
   --version              Print the version
   --help                 Show this help
 `);
@@ -66,9 +67,15 @@ function dollars(value: number): string {
   }).format(value);
 }
 
-const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
+let analyzeOptions;
+try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
+catch { process.stderr.write("Invalid pricing configuration.\n"); process.exit(2); }
 
 const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
+
+if (analytics.rateCard.pricing?.stale && !analytics.rateCard.pricing.offline) {
+  process.stderr.write(`Pricing cache is stale or missing. Run ${brand.command} rates update to refresh public prices.\n`);
+}
 
 if (process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);

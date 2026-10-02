@@ -1,0 +1,8 @@
+/* Pricing panel only; inherit the host dashboard's palette, type and components. */
+#pricing-panel { display: grid; gap: 1rem; padding-top: 1rem; }
+#pricing-panel .metric-grid { margin: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); }
+#pricing-panel .metric-card a { display: inline-block; margin-top: .7rem; font-size: .75rem; }
+#pricing-panel .detail-panel { margin-top: 0; }
+#pricing-panel .table-wrap { margin-top: 1rem; }
+#pricing-panel caption { padding: .8rem; color: var(--muted); text-align: left; }
+#pricing-panel td { white-space: normal; overflow-wrap: anywhere; }

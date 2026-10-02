@@ -41,6 +41,8 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 
 ### Limits, cache, and context economics
 
+- [x] Public pricing feeds (models.dev and LiteLLM), immutable request-time snapshots, reviewed exceptions, offline mode, rates CLI, and source provenance with a dashboard Pricing tab.
+
 - [ ] Rate-limit headroom over time from Codex rate-limit snapshots and Claude quota records: time to limit, sessions that hit limits, and usage-limit errors.
 - [ ] Cache-break events with their cause (provider-reported cache-miss reason, idle gap longer than the TTL, model switch, tool-set change) and the cost of re-caching.
 - [ ] Context fill curve, peak fill, compaction before and after sizes, and turns between compactions.

@@ -27,7 +27,9 @@ The content of local provider history: prompts, responses, reasoning, tool argum
 
 ### Design
 
-- **Local only.** No network requests and no telemetry. Fonts and provider marks are bundled; nothing is loaded from a CDN.
+- **Content stays local.** No telemetry. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). `--offline` / `SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests. Fonts and provider marks are bundled; nothing is loaded from a CDN.
+- **Bounded pricing fetches.** Only two fixed HTTPS endpoints are used: models.dev and GitHub raw for LiteLLM. No authentication, cookies, query parameters, request bodies, or redirects. Responses are capped at 32 MiB with a 15-second deadline per source; unknown fields are discarded and invalid prices rejected. Public services still observe the requesting IP and time. Source payloads are untrusted data, never instructions or executable code.
+- **Pricing cache.** Normalized public rates and reviewed cards are saved atomically in the per-user data directory. Files have checksums and restrictive creation modes. Corrupt snapshots are ignored with a fixed warning; prior snapshots remain available. This cache contains no transcript content or local model inventory.
 - **Loopback bind.** The dashboard listens on `127.0.0.1` only.
 - **Host and Origin checks.** Requests whose `Host` header is not `127.0.0.1` or `localhost` (with an optional port) are rejected with `403`, which blocks DNS-rebinding attacks. Requests carrying an `Origin` header that is not a loopback origin are rejected, which blocks cross-site requests from other web pages.
 - **Read-only HTTP.** Only `GET` is accepted. There is no endpoint that writes, executes, or accepts uploaded data.
@@ -44,7 +46,7 @@ The content of local provider history: prompts, responses, reasoning, tool argum
 - Any transcript content, path, raw identifier, credential, or raw error appearing in the dashboard, API, report, JSON snapshot, or skill output.
 - Binding to a non-loopback interface, or bypassing the `Host` or `Origin` checks.
 - Reading files outside the static file map through the HTTP server.
-- Any write to provider stores or network request made by the tool.
+- Any write to provider stores, transmission of local data to a pricing source, public request while offline, or outbound request outside the documented fixed pricing feeds.
 - Denial of service through crafted transcript files that crash or hang the server process (rather than the isolated analysis process).
 
 ### Out of scope

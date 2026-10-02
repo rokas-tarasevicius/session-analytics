@@ -15,6 +15,7 @@ Content-free analytics for local coding-agent sessions.
 Usage:
   ${brand.command} [dashboard] [options]  Scan local sessions and open the localhost dashboard
   ${brand.command} report [options]       Print a terminal report (add --json for a snapshot)
+  ${brand.command} rates <command>        Update, show, diff, or inspect cached pricing
   ${brand.command} <command> --help       Show options for a command
   ${brand.command} --version              Print the version
 `);
@@ -23,6 +24,9 @@ Usage:
 } else if (command === "report") {
   forward(rest);
   await import("../src/cli.ts");
+} else if (command === "rates") {
+  const { runRates } = await import("../src/pricing/cli.ts");
+  process.exitCode = await runRates(rest);
 } else {
   const args = command === "dashboard" ? rest : process.argv.slice(2);
   const informational = args.includes("--help") || args.includes("--version");

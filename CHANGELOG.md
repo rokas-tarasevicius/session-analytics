@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Cached public pricing from models.dev and LiteLLM, with immutable dated snapshots, payload hashes, request-time price selection, conservative model aliases, validation and large-change warnings.
+- `rates update|show [model]|diff|status [--json]`, `--offline`, configurable source order, merge policy, cache directory and refresh age.
+- Pricing provenance on model usage and a Pricing dashboard tab with source freshness, coverage and historical evidence. The synthetic demo includes offline pricing history.
+
+### Changed
+
+- Reviewed model exceptions take precedence over API prices by default; the bundled card remains the offline fallback. `--rate-card` pins a card and disables automatic price refresh.
+- Dashboard startup refreshes stale public prices after its first local scan; reports only print a hint. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). Offline mode disables these requests.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

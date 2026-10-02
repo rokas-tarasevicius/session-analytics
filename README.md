@@ -48,18 +48,18 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 `session-analytics` is built around three commitments:
 
 1. **Content-free by contract.** The parser reads transcripts locally and returns only allowlisted counters, names, model IDs, timestamps, and hashed keys. The contract is written down in [docs/privacy.md](docs/privacy.md), every public field is listed there, and tests plant sentinel strings in fixtures and fail if any of them reaches an output.
-2. **Accounting you can reproduce.** Costs come from a versioned rate card in this repository with a source URL for every model. Streamed and broadcast token records are deduplicated, unknown models stay visibly unpriced, and each figure says whether it is exact, estimated, or unavailable for that provider.
+2. **Accounting you can reproduce.** Costs come from immutable snapshots of public pricing feeds, with reviewed exceptions and the versioned repository rate card as an offline fallback. Every priced model carries its source, snapshot date, and payload hash. Streamed and broadcast token records are deduplicated, unknown models stay visibly unpriced, and each figure says whether it is exact, estimated, or unavailable for that provider.
 3. **Repository first, across agents.** Every session is assigned to a Git repository from its recorded working directory, so Claude Code, Codex, and Cursor work on the same codebase lands in one row. Linked worktrees fold into their main repository, and the [Conductor](https://conductor.build) app's workspace database is used as optional enrichment when present.
 
 ## Features
 
 - **One command, whole machine.** Discovers every Claude Code profile (`~/.claude`, `~/.claude-*`, `CLAUDE_CONFIG_DIR`), active and archived Codex rollouts (`~/.codex`, `~/.codex-*`, `CODEX_HOME`), Cursor's local composer history, and Claude Desktop local-agent sessions. Profiles that point at the same directory are read once.
 - **Tokens by class.** Input, uncached input, cache reads, cache writes split by 5-minute and 1-hour TTL, output, and reasoning output where the provider records it.
-- **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
+- **Cost with provenance.** API list-price equivalents from cached models.dev and LiteLLM price lists, with reviewed exceptions in [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
-- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
+- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Pricing, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
-- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
+- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no telemetry, and read-only access to provider stores. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). `--offline` disables public pricing requests.
 
 <table>
   <tr>
@@ -126,6 +126,20 @@ jq '.repositories[] | {name: .repository.name, usd: .summary.estimatedSpendUsd}'
 
 The snapshot has the same shape as the dashboard's `/api/analytics` response. Every field is described in the [field manifest](docs/privacy.md#field-manifest).
 
+### Pricing sources and history
+
+```bash
+session-analytics rates update               # fetch and archive public price lists
+session-analytics rates show gpt-5.4 --json   # inspect rates and provenance
+session-analytics rates diff                 # changes between the last two source snapshots
+session-analytics rates status --offline     # age, sources, and local model coverage
+session-analytics --offline                  # dashboard using only local cached/reviewed prices
+```
+
+Analysis never waits for the network. The dashboard uses the local cache immediately and refreshes stale sources in the background after its first scan; **Refresh snapshot** applies the new evidence. A report only prints an update hint on stderr (including with `--json`). The default stale threshold is seven days. `--offline` or `SESSION_ANALYTICS_OFFLINE=1` prevents public requests in every command.
+
+Each request uses the latest available source snapshot at or before its timestamp. Requests older than the cache use the oldest available snapshot and carry an explicit label; this is an estimate, not reconstructed historical pricing. Snapshots are retained, so a later price observation does not overwrite earlier evidence. The dashboard's **Pricing** tab shows freshness, coverage, and the provenance used by selected sessions. [Pricing reference](docs/pricing.md) explains precedence, aliases, cache storage, and limitations.
+
 ### Options
 
 | Option | Applies to | Description |
@@ -143,7 +157,12 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--codex-archive-root PATH` | both | Read this Codex `archived_sessions` directory. Passing either Codex option replaces Codex discovery, so pass both to include archives. |
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
-| `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
+| `--rate-card PATH` | all | Pin an alternative reviewed rate card; bypass cached API prices and automatic pricing refresh. |
+| `--offline` | all | Disable public pricing requests; retain access to cached prices. |
+| `--data-dir PATH` | all | Override the per-user data directory; snapshots live in its `pricing/` subdirectory. |
+| `--pricing-policy MODE` | all | `reviewed-first` (default), `api-first`, or `reviewed-only`. |
+| `--pricing-sources LIST` | all | Ordered public sources; default `models.dev,litellm`. |
+| `--pricing-max-age-days DAYS` | all | Stale threshold, default `7`; `0` checks on every dashboard startup. |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
@@ -187,7 +206,7 @@ Per-source details, matching rules, and known gaps are in [docs/providers.md](do
 
 They never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages.
 
-The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, makes no network requests, and has no telemetry. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
+The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, has no telemetry, and serves all browser assets locally. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). `--offline` disables public pricing requests. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
 
 ## How it works
 
@@ -215,7 +234,7 @@ Analysis runs in a child process with a capped heap, and Cursor's database is pa
 ## Accounting notes
 
 - **API-equivalent is not an invoice.** Dollar figures price observed tokens at public API list prices. They do not model subscription plans, discounts, batch or priority tiers, regional pricing, taxes, or credits. Under a subscription, read them as the value of the usage, not as money spent.
-- **The rate card is versioned.** [`data/rate-cards.json`](data/rate-cards.json) has an effective date and a primary source URL for every model, and the dashboard footer links each one. A model without an entry stays unpriced and lowers the pricing coverage figure instead of being guessed. Use `--rate-card` to price against your own reviewed card.
+- **Price evidence is versioned.** API snapshots record fetch time, public source URL and payload SHA-256; [`data/rate-cards.json`](data/rate-cards.json) keeps reviewed exceptions and fallback rates. Unknown or ambiguous models remain unpriced. Preserve the pricing directory and reviewed card to reproduce results, or use `--rate-card` to pin a reviewed card.
 - **Coverage is shown, not hidden.** Pricing coverage is the share of observed tokens that have a known rate. Sessions without validated provider evidence are excluded rather than counted as zero.
 - **Codex cache writes are not recorded**, so Codex has an ordinary estimate and an upper estimate that charges the cache-write premium on all uncached input.
 - **Processed input repeats context.** Input totals count cached context every time a request processes it. They measure consumption, not unique text.
@@ -264,14 +283,14 @@ Several good tools work with the same local history. They make different trade-o
 | [CodexBar](https://github.com/steipete/CodexBar) | Menu bar app for provider usage limits and reset windows | You want to watch plan limits while you work. |
 | Claude Code `/usage` and `/insights` | Built-in usage and session insight views | You use only Claude Code and want answers inside the tool. |
 
-`session-analytics` is narrower. It never reads content into its outputs, so it has no transcript search or replay. It prices from a reviewed, versioned rate card rather than a live price feed, discloses per-provider fidelity, groups everything by Git repository across agents and orchestrator workspaces, and is heading toward tool reliability, outcome linkage, and a metrics-only MCP server.
+`session-analytics` is narrower. It never reads content into its outputs, so it has no transcript search or replay. It prices from cached public-feed snapshots with reviewed exceptions, discloses per-provider fidelity, groups everything by Git repository across agents and orchestrator workspaces, and is heading toward tool reliability, outcome linkage, and a metrics-only MCP server.
 
 ## FAQ
 
 <details>
 <summary><strong>Does anything leave my machine?</strong></summary>
 
-No. The tool makes no network requests and has no telemetry. Its only outward action is asking your operating system to open the loopback dashboard URL in a browser, which `--no-open` disables. Fonts and provider marks are bundled.
+No session data is uploaded, and there is no telemetry. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). Use `--offline` or `SESSION_ANALYTICS_OFFLINE=1` to disable public pricing requests. Fonts and provider marks are bundled; `--no-open` disables opening the localhost dashboard in a browser.
 </details>
 
 <details>

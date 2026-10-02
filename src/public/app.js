@@ -1,3 +1,5 @@
+import { renderPricingPanel } from "./pricing.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -582,6 +584,7 @@ function renderActiveAnalyticsView(view) {
   if (name === "activity") renderActivity(view);
   if (name === "costs") renderCosts(view);
   if (name === "models") renderModels(view);
+  if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.sessions);
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
     renderNamedDistribution({ view, field: "tools", keyContainer: elements.toolsKey, tableContainer: elements.toolsByRepository, detailContainer: elements.toolsDetail, detailTitle: elements.toolsDetailTitle, providerScope: "tools" });
@@ -742,7 +745,8 @@ function renderWarnings(warnings) {
 
 function renderRateCards(rateCard) {
   clear(elements.rateCardLinks);
-  for (const item of rateCard.models) { const link = node("a", `${item.model} rate ↗`); link.href = item.source; link.target = "_blank"; link.rel = "noreferrer"; elements.rateCardLinks.append(link); }
+  const sources = new Map(rateCard.models.map((item) => [item.source, item.provenance?.source ?? "reviewed"]));
+  for (const [url, source] of sources) { const link = node("a", `${source} rates ↗`); link.href = url; link.target = "_blank"; link.rel = "noreferrer"; elements.rateCardLinks.append(link); }
 }
 
 function populateRepositories() {

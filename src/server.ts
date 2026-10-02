@@ -5,7 +5,8 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
+import { analysisValueFlags, analyzeOptionsFrom, pricingHelp, setting } from "./options.ts";
+import { refreshPricingIfStale } from "./pricing/update.ts";
 import type { MachineAnalytics } from "./types.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
@@ -14,7 +15,7 @@ const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, "--port"]);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--offline"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -37,6 +38,7 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it.
+${pricingHelp}
 `);
   process.exit(0);
 }
@@ -105,7 +107,9 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
 const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
+  ["/pricing.js", join(publicRoot, "pricing.js")],
   ["/styles.css", join(publicRoot, "styles.css")],
+  ["/pricing.css", join(publicRoot, "pricing.css")],
   ["/fonts/space-grotesk-latin.woff2", join(publicRoot, "fonts", "space-grotesk-latin.woff2")],
   ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],
   ["/brands/codex.svg", join(publicRoot, "brands", "codex.svg")],
@@ -114,7 +118,9 @@ const staticFiles = new Map<string, string>([
   ["/favicon.svg", join(publicRoot, "favicon.svg")],
 ]);
 
-const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
+let analyzeOptions: import("./types.ts").AnalyzeOptions;
+try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
+catch { process.stderr.write("Invalid pricing configuration.\n"); process.exit(2); }
 
 let analyticsPromise: Promise<MachineAnalytics> | null = null;
 let analyticsPending = false;
@@ -238,8 +244,12 @@ server.listen(port, "127.0.0.1", () => {
       process.stdout.write(
         `Analyzed ${result.summary.analyzedSessions}/${result.summary.sessions} sessions across ` +
           `${result.summary.repositories} repositories; ` +
-          `priced usage value $${result.summary.estimatedSpendUsd.toFixed(2)} (not an invoice).\n`,
+        `priced usage value $${result.summary.estimatedSpendUsd.toFixed(2)} (not an invoice).\n`,
       );
+      // Startup-only refresh, after the first local scan. No analysis/API request waits on pricing I/O.
+      void refreshPricingIfStale(analyzeOptions).then((update) => {
+        if (update) process.stdout.write(`Background pricing update: ${update.status}. Refresh the dashboard snapshot to use new prices.\n`);
+      }).catch(() => process.stderr.write("Background pricing update unavailable; cached rates remain in use.\n"));
     })
     .catch((error) => {
       process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);

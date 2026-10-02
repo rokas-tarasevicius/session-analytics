@@ -7,6 +7,7 @@
     <title>Session Analytics</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/pricing.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -64,6 +65,7 @@
         <button type="button" data-view-button="activity">Activity</button>
         <button type="button" data-view-button="costs">Costs</button>
         <button type="button" data-view-button="models">Models</button>
+        <button type="button" data-view-button="pricing">Pricing</button>
         <button type="button" data-view-button="tools">Tools</button>
         <button type="button" data-view-button="skills">Skills</button>
       </nav>
@@ -179,7 +181,12 @@
         </div>
       </section>
 
-      <footer><p>Read-only local analysis. No prompts, messages, reasoning, tool payloads, transcript paths, credentials, or remote telemetry.</p><div id="rate-card-links"></div></footer>
+      <section class="analytics-view" data-view-panel="pricing" hidden aria-labelledby="pricing-title">
+        <header class="view-header"><div><p class="kicker">PRICE EVIDENCE</p><h2 id="pricing-title">Pricing</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
+        <div id="pricing-panel"></div>
+      </section>
+
+      <footer><p>Read-only local analysis. Public pricing GETs carry no local data; --offline disables them. No prompts, messages, reasoning, tool payloads, transcript paths, credentials, or telemetry.</p><div id="rate-card-links"></div></footer>
     </main>
   </body>
 </html>

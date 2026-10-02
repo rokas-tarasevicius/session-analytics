@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { seedDemoPricing } from "./demo-pricing.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -562,6 +563,7 @@ const cleanup = (): void => {
 let sources: ReturnType<typeof generate>;
 try {
   sources = generate(root);
+  await seedDemoPricing(join(root, "analytics-data"));
 } catch (error) {
   cleanup();
   throw error;
@@ -573,6 +575,8 @@ for (const [key, value] of Object.entries(process.env)) {
   environment[key] = value;
 }
 environment["HOME"] = sources.home;
+environment["SESSION_ANALYTICS_DATA_DIR"] = join(root, "analytics-data");
+environment["SESSION_ANALYTICS_OFFLINE"] = "1";
 
 const sourceFlags = [
   "--claude-root", sources.claudeRoot,
