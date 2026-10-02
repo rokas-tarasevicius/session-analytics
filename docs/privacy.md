@@ -55,6 +55,8 @@ P2 and P3 features will always be off by default.
 
 This manifest lists every field in the public snapshot. It is generated from the types in [`src/types.ts`](../src/types.ts); a change to those types must update this table in the same pull request. Metric semantics are defined in [metrics.md](metrics.md).
 
+The [product strategy proposal](proposals/product-strategy.md) adds **no public fields** and changes no privacy tier or runtime behavior. Its [feature portfolio](proposals/feature-portfolio.md) assigns proposed processing tiers, and its [metric contracts](proposals/metric-contracts.md) require a separate types/manifest/sentinel update before implementation. Future names in those proposals are not part of this manifest. Repository names, precise timestamps and current unkeyed hashes remain identifying metadata; proposed team/export controls are not protections available today.
+
 ### Snapshot root (`MachineAnalytics`)
 
 Returned by `/api/analytics` and `report --json`.

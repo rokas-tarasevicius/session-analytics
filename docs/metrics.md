@@ -2,6 +2,8 @@
 
 This reference defines the privacy boundary, current metrics, and candidate extensions for the local session analytics dashboard. Update it together with parser tests whenever a metric changes meaning.
 
+The [product proposal's metric contracts](proposals/metric-contracts.md) define candidate formulas, denominators, missing-data rules and synthetic worked examples for future work. They do not change the current schema or calculations. The [evidence audit](proposals/evidence-audit.md#e09-correctness-and-semantics-prerequisites) records implementation prerequisites, including session-start cohorts versus event windows, zero-denominator consistency, and request-aligned context fill; these findings remain unfixed by the documentation-only proposal.
+
 ## Evidence boundary
 
 The analyzer may read provider transcripts locally, but its returned data is restricted to:

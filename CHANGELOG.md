@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Product strategy research with five personas, a scored 84-feature portfolio, bounded content-free local evidence audit, primary-source competitor comparison, dashboard wireframes, proposed metric contracts, and a staged packaging/open-source launch plan. Documentation only; no new runtime metrics or public fields.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

@@ -4,6 +4,15 @@ This roadmap is ordered: correctness first, then reliability and economics, then
 
 Status: `[x]` shipped, `[ ]` not yet shipped. Milestones are not dated.
 
+## Product strategy research
+
+The [product strategy proposal](proposals/product-strategy.md) provides evidence-backed prioritization and conditional two-week, six-week and quarter planning horizons. These do not replace the milestone status below or promise release dates. In this subsection, completion means the research artifact is delivered, not that its proposed features are shipped.
+
+- [x] Document five personas/jobs, 84 individually scored feature ideas, primary-source competitive research, bounded local evidence, dashboard navigation/wireframes, metric contracts, and packaging/open-source launch gates.
+- [ ] Validate the proposed repository investigation workflow with consenting pilot users and synthetic tasks; collect no automatic telemetry or real histories.
+- [ ] Resolve the documented comparison/denominator/context prerequisites and agree shared schema semantics before promoting new ratios or period comparisons.
+- [ ] Pass compiled npm installed-artifact gates before advertising registry installation; evaluate Homebrew and executable packaging separately.
+
 ## M0: Correctness
 
 **In progress.** 0.5.0 is the first standalone release and ships the first part of this milestone. No new feature work starts before the numbers are right.

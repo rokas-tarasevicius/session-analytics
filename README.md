@@ -251,9 +251,13 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 
 Features that need content (local rules over commands, or an LLM review of selected sessions) will always be opt-in, off by default, and labeled. See [docs/roadmap.md](docs/roadmap.md) for the checklists.
 
+The [product strategy proposal](docs/proposals/product-strategy.md) documents the target users, a ranked 84-feature portfolio, verified local evidence, dashboard navigation, and staged open-source launch plan. It is research and proposed sequencing, not a list of shipped features.
+
 ## How it compares
 
 Several good tools work with the same local history. They make different trade-offs, and you may want more than one.
+
+The table below is a short orientation. The [dated competitive research](docs/proposals/competitive-landscape.md) covers broader documented overlap, primary sources, and verification limits; competitors were not installed or benchmarked for that review.
 
 | Project | Focus | Choose it when |
 | --- | --- | --- |
