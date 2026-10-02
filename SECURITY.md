@@ -23,11 +23,11 @@ This is a single-maintainer project. Expect an acknowledgement within 7 days and
 
 ### What the tool protects
 
-The content of local provider history: prompts, responses, reasoning, tool arguments and results, commands, file paths, repository roots and remotes, and raw identifiers. The [privacy contract](docs/privacy.md) defines what may leave the parser; everything else must not reach any output.
+Analytics protects the content of local provider history: prompts, responses, reasoning, tool arguments and results, commands, file paths, repository roots and remotes, and raw identifiers. The [privacy contract](docs/privacy.md) defines what may leave the parser. A separate, explicitly authorized P3 review may send bounded redacted prose through the user's own agent CLI; it is off by default and never triggered by the dashboard or an analytics scan.
 
 ### Design
 
-- **Local only.** No network requests and no telemetry. Fonts and provider marks are bundled; nothing is loaded from a CDN.
+- **Local analytics.** No analytics network requests and no telemetry. Fonts and provider marks are bundled; nothing is loaded from a CDN. Only `review --send-content` authorizes the separate network-capable agent workflow.
 - **Loopback bind.** The dashboard listens on `127.0.0.1` only.
 - **Host and Origin checks.** Requests whose `Host` header is not `127.0.0.1` or `localhost` (with an optional port) are rejected with `403`, which blocks DNS-rebinding attacks. Requests carrying an `Origin` header that is not a loopback origin are rejected, which blocks cross-site requests from other web pages.
 - **Read-only HTTP.** Only `GET` is accepted. There is no endpoint that writes, executes, or accepts uploaded data.
@@ -37,6 +37,7 @@ The content of local provider history: prompts, responses, reasoning, tool argum
 - **Read-only stores.** JSONL transcripts are streamed read-only and SQLite databases (Cursor, Conductor) are opened with `readOnly: true`. Nothing is written to provider directories.
 - **Generic errors.** Failures surface as fixed messages; local exception text, paths, and the analysis worker's standard error are not returned.
 - **Process isolation.** Each scan runs in a child process with a capped heap, and only serialized, allowlisted results cross back to the server.
+- **Explicit content boundary.** Review defaults to counts/sizes only. There is no review HTTP route or environment-variable opt-in. A send passes bounded redacted prose on stdin to `claude -p` or `codex exec`, with tool restrictions, an empty temporary working directory, time/output caps and no requested session persistence. Raw agent output is discarded; only enumerated assessment labels return. Redaction is best effort, not anonymization; provider retention/billing and CLI-managed behavior are outside this package's control. See [review limits](docs/insights.md#opt-in-review-p3).
 - **Small supply chain.** Zero runtime dependencies. Development dependencies are TypeScript and Node type definitions, kept current by Dependabot.
 
 ### In scope
@@ -44,7 +45,7 @@ The content of local provider history: prompts, responses, reasoning, tool argum
 - Any transcript content, path, raw identifier, credential, or raw error appearing in the dashboard, API, report, JSON snapshot, or skill output.
 - Binding to a non-loopback interface, or bypassing the `Host` or `Origin` checks.
 - Reading files outside the static file map through the HTTP server.
-- Any write to provider stores or network request made by the tool.
+- Any analytics write to provider stores or network request, or any review transmission without explicit per-run `--send-content` authorization.
 - Denial of service through crafted transcript files that crash or hang the server process (rather than the isolated analysis process).
 
 ### Out of scope

@@ -6,7 +6,7 @@
 
 | Path | Role |
 | --- | --- |
-| `bin/session-analytics.ts` | Command dispatcher: `dashboard` (default), `report`, `--help`, `--version`. Adds `--open` to the dashboard unless `--no-open` is given. |
+| `bin/session-analytics.ts` | Command dispatcher: `dashboard` (default), `report`, `insights`, `review`, `--help`, `--version`. Adds `--open` to the dashboard unless `--no-open` is given. |
 | `src/server.ts` | Dashboard server: argument and environment parsing, loopback HTTP server, static files, `/api/health`, `/api/analytics`, browser opener. |
 | `src/cli.ts` | Terminal report and `--json` snapshot. |
 | `src/analysis-process.ts` | Runs one analysis in a child process and returns the parsed result. |
@@ -14,6 +14,8 @@
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
+| `src/insights/` | Deterministic rule engine, strict configuration/name inventory projection, cache-gap counters, CLI/filter service and separate opt-in review worker. |
+| `src/public/views/insights.*`, `insights-state.js` | Scoped Insights UI/styles and browser-only dismiss/snooze persistence. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
 | `data/rate-cards.json` | Versioned model rates with an effective date and a source URL per model. |
@@ -108,6 +110,12 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 - **Erasable TypeScript.** The code runs directly under Node's type stripping, so it avoids enums, namespaces, and parameter properties (`erasableSyntaxOnly` in `tsconfig.json`).
 - **Streaming parsers.** Transcripts are read line by line. Identity checks stop at the first records that carry an ID and working directory, and concurrency is kept low because a single Codex `session_meta` record can be several megabytes.
 - **Fail closed on content.** When a record is malformed it is counted as a warning, not echoed.
+
+## Insights and review boundaries
+
+The Insights API evaluates `src/insights/engine.ts` over the cached content-free snapshot; repository/date filters never rescan history. `config.ts` projects only bounded installed skill/MCP names and numeric thresholds from local settings, reads the reviewed rate card, and never returns settings contents. The CLI shares this engine. Claude parsers add a small numeric `insightSignals.cacheGaps` namespace after streamed-message deduplication; per-file/model boundaries prevent unrelated parallel traces from creating idle gaps.
+
+The opt-in review uses a **separate** 256 MB worker. An internal analyzer observer correlates the selected public session key with its validated source path inside that worker. Neither the callback nor raw source paths are serialized into analytics. The worker temporarily selects/redacts bounded prose, returns metadata only by default, and requires a per-run `--send-content` boolean to invoke the user's agent CLI. It returns only a projected enum assessment, discarding arbitrary provider stdout/stderr. The dashboard has no review route and remains read-only. See [insights.md](insights.md) for caps and interpretation limits.
 
 ## Planned changes
 

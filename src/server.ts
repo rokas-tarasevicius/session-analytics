@@ -9,6 +9,9 @@ import { analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
 import type { MachineAnalytics } from "./types.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
+import { loadInsightContext } from "./insights/config.ts";
+import { insightsForSnapshot } from "./insights/service.ts";
+import type { InsightContext } from "./insights/types.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
@@ -83,6 +86,7 @@ async function sendFile(response: ServerResponse, path: string): Promise<void> {
 
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
+  if (message.includes("insights")) return "Insights are unavailable. Check the configured thresholds, inventory and filters.";
   if (message.includes("rate card")) return "The configured rate card is invalid or unavailable.";
   if (message.includes("repository")) return "The requested repository could not be selected.";
   return "Local analytics evidence is unavailable or could not be parsed.";
@@ -106,6 +110,9 @@ const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
   ["/styles.css", join(publicRoot, "styles.css")],
+  ["/views/insights.js", join(publicRoot, "views", "insights.js")],
+  ["/views/insights-state.js", join(publicRoot, "views", "insights-state.js")],
+  ["/views/insights.css", join(publicRoot, "views", "insights.css")],
   ["/fonts/space-grotesk-latin.woff2", join(publicRoot, "fonts", "space-grotesk-latin.woff2")],
   ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],
   ["/brands/codex.svg", join(publicRoot, "brands", "codex.svg")],
@@ -118,6 +125,7 @@ const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
 
 let analyticsPromise: Promise<MachineAnalytics> | null = null;
 let analyticsPending = false;
+let insightContext: { generatedAt: string; promise: Promise<InsightContext> } | null = null;
 let snapshotReady = false;
 function analytics(refresh = false): Promise<MachineAnalytics> {
   if (analyticsPending && analyticsPromise) return analyticsPromise;
@@ -158,6 +166,27 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, await analytics(url.searchParams.get("refresh") === "1"));
       return;
     }
+    if (url.pathname === "/api/insights") {
+      if ([...url.searchParams.keys()].some((key) => !["repo-id", "from", "through"].includes(key))) {
+        sendJson(response, 400, { error: "Invalid insights filters." });
+        return;
+      }
+      const snapshot = await analytics();
+      if (!insightContext || insightContext.generatedAt !== snapshot.generatedAt) {
+        insightContext = { generatedAt: snapshot.generatedAt, promise: loadInsightContext(analyzeOptions) };
+      }
+      const context = await insightContext.promise;
+      try {
+        sendJson(response, 200, insightsForSnapshot(snapshot, context, {
+          repositoryId: url.searchParams.get("repo-id") || undefined,
+          from: url.searchParams.get("from") || undefined,
+          through: url.searchParams.get("through") || undefined,
+        }));
+      } catch {
+        sendJson(response, 400, { error: "Invalid insights filters." });
+      }
+      return;
+    }
     const path = staticFiles.get(url.pathname);
     if (path) {
       await sendFile(response, path);
@@ -166,6 +195,7 @@ const server = createServer(async (request, response) => {
     sendJson(response, 404, { error: "Not found." });
   } catch (error) {
     if (url.pathname === "/api/analytics") analyticsPromise = null;
+    if (url.pathname === "/api/insights") insightContext = null;
     sendJson(response, 502, { error: safeError(error) });
   }
 });

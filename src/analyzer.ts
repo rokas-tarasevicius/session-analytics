@@ -7,6 +7,7 @@ import { basename, dirname, join, parse, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { cacheGapSignals } from "./insights/cache-gaps.ts";
 
 import type {
   AnalyzeOptions,
@@ -192,7 +193,7 @@ function durationMilliseconds(start: string | null, end: string | null): number 
     : 0;
 }
 
-async function loadRateCard(path: string | URL = defaultRateCardPath): Promise<RateCard> {
+export async function loadRateCard(path: string | URL = defaultRateCardPath): Promise<RateCard> {
   const parsed = JSON.parse(await readFile(path, "utf8")) as Partial<RateCard>;
   const models = asRecord(parsed.models);
   if (
@@ -232,7 +233,7 @@ async function loadRateCard(path: string | URL = defaultRateCardPath): Promise<R
   return parsed as RateCard;
 }
 
-function calculateCost(
+export function calculateCost(
   rate: ModelRate,
   usage: TokenUsage,
   inputForRequest: number,
@@ -298,6 +299,7 @@ function addModelUsage(
   fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
 ): void {
+  session.maxInputTokensPerCall = Math.max(session.maxInputTokensPerCall, inputForRequest);
   let aggregate = session.models.get(model);
   if (!aggregate) {
     aggregate = {
@@ -854,6 +856,8 @@ async function analyzeClaude(
   // only the final snapshot - the one with the most output - is the message's
   // usage. Pricing the first snapshot undercounts output and reasoning.
   const assistantUsage = new Map<string, {
+    stream: string;
+    explicitTtl: boolean;
     executionKind: SessionAnalytics["executionKind"];
     model: string;
     reasoningExposed: boolean;
@@ -906,7 +910,14 @@ async function analyzeClaude(
         }
         const usageRecord = asRecord(message["usage"]);
         const usage = usageRecord ? claudeUsage(usageRecord) : zeroTokens();
+        const ttlCounters = ["ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"].map((key) => {
+          const value = asRecord(usageRecord?.["cache_creation"])?.[key];
+          return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+        });
         const snapshot = {
+          stream: path,
+          explicitTtl: ttlCounters.some((value) => value !== null) &&
+            (usage.cacheWriteInputTokens === 0 || ttlCounters.some((value) => value !== null && value > 0)),
           executionKind,
           model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
           reasoningExposed: Boolean(asRecord(usageRecord?.["output_tokens_details"])),
@@ -973,7 +984,9 @@ async function analyzeClaude(
     );
   }
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
-  return finalizeSession(row, state, totals, paths.length);
+  const session = finalizeSession(row, state, totals, paths.length);
+  session.insightSignals = { cacheGaps: cacheGapSignals(assistantUsage.values(), rateCard) };
+  return session;
 }
 
 function finalizeSession(
@@ -1975,8 +1988,12 @@ function aggregate(
   };
 }
 
+/** Internal review hook. Paths stay in the review worker and never enter a snapshot. */
+export type EvidenceObserver = (session: SessionAnalytics, path: string) => void;
+
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
+  observeEvidence?: EvidenceObserver,
 ): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
@@ -2098,6 +2115,7 @@ async function analyzeSelectedRepositories(
           ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
           : await analyzeClaude(row, selected.path, rateCard, selected.warnings);
         claimed.add(`${provider}:${row.provider_session_id}`);
+        observeEvidence?.(session, selected.path);
         return session;
       } catch (error) {
         void error;
@@ -2116,15 +2134,21 @@ async function analyzeSelectedRepositories(
       if (matches.length !== 1 || !matches[0]) return null;
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
-        return candidate.provider === "codex"
+        const session = candidate.provider === "codex"
           ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters)
           : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]);
+        observeEvidence?.(session, candidate.path);
+        return session;
       } catch { return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      try { return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters); } catch { return null; }
+      try {
+        const session = await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters);
+        observeEvidence?.(session, candidate.path);
+        return session;
+      } catch { return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {
@@ -2235,8 +2259,9 @@ function aggregateMachine(
 /** Analyze every locally evidenced repository unless an explicit repository filter is supplied. */
 export async function analyzeMachineSessions(
   options: AnalyzeOptions = {},
+  observeEvidence?: EvidenceObserver,
 ): Promise<MachineAnalytics> {
-  const result = await analyzeSelectedRepositories(options);
+  const result = await analyzeSelectedRepositories(options, observeEvidence);
   return aggregateMachine(result.repositories, result.rateCard);
 }
 

@@ -15,6 +15,8 @@ Content-free analytics for local coding-agent sessions.
 Usage:
   ${brand.command} [dashboard] [options]  Scan local sessions and open the localhost dashboard
   ${brand.command} report [options]       Print a terminal report (add --json for a snapshot)
+  ${brand.command} insights [options]     Explain measured signals (add --json for cards)
+  ${brand.command} review [options]       Preview an opt-in bounded session review
   ${brand.command} <command> --help       Show options for a command
   ${brand.command} --version              Print the version
 `);
@@ -23,6 +25,10 @@ Usage:
 } else if (command === "report") {
   forward(rest);
   await import("../src/cli.ts");
+} else if (command === "insights" || command === "review") {
+  forward(rest);
+  if (command === "insights") await import("../src/insights/cli.ts");
+  else await import("../src/insights/review-cli.ts");
 } else {
   const args = command === "dashboard" ? rest : process.argv.slice(2);
   const informational = args.includes("--help") || args.includes("--version");

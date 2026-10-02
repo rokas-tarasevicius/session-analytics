@@ -1,4 +1,8 @@
+import { renderInsights } from "/views/insights.js";
+
 const $ = (selector) => document.querySelector(selector);
+const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+const writePreference = (key, value) => { try { localStorage.setItem(key, value); } catch { /* Storage is optional. */ } };
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
   activityRepositories: $("#activity-repositories"),
@@ -208,7 +212,7 @@ function switchView(name) {
     else button.removeAttribute("aria-current");
   }
   for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== name;
-  localStorage.setItem("session-analytics-view", name);
+  writePreference("session-analytics-view", name);
   if (snapshot) renderView();
 }
 
@@ -582,6 +586,11 @@ function renderActiveAnalyticsView(view) {
   if (name === "activity") renderActivity(view);
   if (name === "costs") renderCosts(view);
   if (name === "models") renderModels(view);
+  if (name === "insights") void renderInsights(document.querySelector("#insights-root"), {
+    repositoryId: elements.repositoryFilter.value === "all" ? null : elements.repositoryFilter.value,
+    from: elements.windowStart.value, through: elements.windowEnd.value,
+    generatedAt: snapshot.generatedAt, repositories: snapshot.repositories,
+  });
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
     renderNamedDistribution({ view, field: "tools", keyContainer: elements.toolsKey, tableContainer: elements.toolsByRepository, detailContainer: elements.toolsDetail, detailTitle: elements.toolsDetailTitle, providerScope: "tools" });
@@ -827,7 +836,7 @@ async function load(refresh = false) {
   finally { elements.refresh.disabled = false; }
 }
 
-function setTheme(theme) { document.documentElement.dataset.theme = theme; elements.themeLabel.textContent = theme === "dark" ? "Light" : "Dark"; localStorage.setItem("session-analytics-theme", theme); }
+function setTheme(theme) { document.documentElement.dataset.theme = theme; elements.themeLabel.textContent = theme === "dark" ? "Light" : "Dark"; writePreference("session-analytics-theme", theme); }
 elements.refresh.addEventListener("click", () => load(true));
 elements.repositoryFilter.addEventListener("change", renderView);
 elements.windowPreset.addEventListener("change", applyWindowPreset);
@@ -843,6 +852,7 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
   });
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
-const storedView = localStorage.getItem("session-analytics-view");
-switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
-setTheme(localStorage.getItem("session-analytics-theme") || "light"); void load(false);
+const storedView = readPreference("session-analytics-view");
+const initialView = location.hash === "#insights" ? "insights" : storedView;
+switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === initialView) ? initialView : "summary");
+setTheme(readPreference("session-analytics-theme") || "light"); void load(false);

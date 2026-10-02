@@ -125,6 +125,22 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
 
+    const insightResponse = await fetch(`${origin}/api/insights`);
+    assert.equal(insightResponse.status, 200);
+    const insightText = await insightResponse.text();
+    const insights = JSON.parse(insightText) as { schemaVersion: number; coverage: Array<{ totalSessions: number }> };
+    assert.equal(insights.schemaVersion, 1); assert.equal(insights.coverage.length, 10);
+    assert.equal(insights.coverage[0]?.totalSessions, 5);
+    assert.doesNotMatch(insightText, /secret-command|secret-path|secret-skill-args|content-is-not-returned|rollout-/);
+    assert.equal((await fetch(`${origin}/api/insights?from=2026-02-30`)).status, 400);
+    assert.equal((await fetch(`${origin}/api/insights?repo-id=unknown`)).status, 400);
+    assert.equal((await fetch(`${origin}/api/insights?send-content=1`)).status, 400);
+    assert.equal((await fetch(`${origin}/api/insights`, { method: "POST" })).status, 405);
+    assert.equal((await fetch(`${origin}/api/review`)).status, 404);
+    const emptyInsights = await (await fetch(`${origin}/api/insights?from=2099-01-01`)).json() as { cards: unknown[]; coverage: Array<{ totalSessions: number }> };
+    assert.equal(emptyInsights.cards.length, 0); assert.equal(emptyInsights.coverage[0]?.totalSessions, 0);
+    for (const path of ["/views/insights.js", "/views/insights-state.js", "/views/insights.css"]) assert.equal((await fetch(`${origin}${path}`)).status, 200);
+
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);
     const page = await fetch(origin);

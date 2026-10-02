@@ -8,7 +8,7 @@
 <h3>Content-free analytics for the coding-agent sessions already on your machine.</h3>
 
 <p>Claude Code, Codex, and Cursor usage: tokens, API-equivalent cost, tools, and skills, grouped by Git repository.<br />
-Local only. Read-only. No prompts, messages, or file paths ever leave the parser.</p>
+Local only. Read-only analytics. No prompts, messages, or file paths in analytics outputs.</p>
 
 [![CI](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -58,8 +58,9 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
 - **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
+- **Measured insights.** A dedicated Insights tab and `insights [--json]` command explain ten local signals with denominators, confidence, estimated impact and suggested actions. Repository/date filters recompute the evidence. Dismiss or snooze cards locally. Estimates can overlap and do not prove waste, quality or savings.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
-- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
+- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access during analytics, no telemetry, and read-only access to every store. A separate content review is off by default and requires an explicit per-run flag.
 
 <table>
   <tr>
@@ -126,6 +127,22 @@ jq '.repositories[] | {name: .repository.name, usd: .summary.estimatedSpendUsd}'
 
 The snapshot has the same shape as the dashboard's `/api/analytics` response. Every field is described in the [field manifest](docs/privacy.md#field-manifest).
 
+### Insights and optional content review
+
+```bash
+session-analytics insights
+session-analytics insights --json --from 2026-09-01 --through 2026-09-30
+session-analytics insights --insights-config ./insights.json
+session-analytics review --session <hashed-session-key> --via claude  # metadata-only dry-run
+session-analytics review --session <hashed-session-key> --via codex --send-content
+```
+
+Insights cover peer outliers, cache reuse, model-price scenarios, compaction, delegation, large request contexts, installed skills/MCP servers without observed use, writes after idle gaps, and neutral start-time patterns. Missing evidence and insufficient activity are visible in rule coverage, never presented as 0%. [Thresholds and formulas](docs/insights.md) are documented and configurable with `--insights-config` or `SESSION_ANALYTICS_INSIGHTS_CONFIG`.
+
+**Content review is P3, opt-in and off by default.** The dry-run prints only rule IDs, sizes and redaction counts. `--send-content` permits bounded, redacted human/assistant excerpts to be sent through your own `claude -p` or `codex exec`; it has no environment-variable equivalent. Redaction is best effort, and remaining prose may still be sensitive. Your agent provider's retention and billing apply. Tools, reasoning and tool-result blocks are excluded; no content is sent from the dashboard. See [review behavior and limits](docs/insights.md#opt-in-review-p3).
+
+Try synthetic insights with `npm run demo -- insights`, or open the demo dashboard's Insights tab.
+
 ### Options
 
 | Option | Applies to | Description |
@@ -144,6 +161,7 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
+| `--insights-config PATH` | insights, review, dashboard | Thresholds, disabled rules, comparison models and optional explicit extension inventory; see [configuration](docs/insights.md#configuration). |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
@@ -185,7 +203,7 @@ Per-source details, matching rules, and known gaps are in [docs/providers.md](do
 - repository display names and pseudonymous keys (a truncated SHA-256 session key, and a repository ID);
 - fixed-text parser warnings and the rate card's model list with source URLs.
 
-They never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages.
+Analytics outputs never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages. The separate P3 review command sends redacted excerpts to your own agent only when `--send-content` is explicitly present; its console output remains a metadata preview and allowlisted assessment labels.
 
 The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, makes no network requests, and has no telemetry. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
 
@@ -271,7 +289,7 @@ Several good tools work with the same local history. They make different trade-o
 <details>
 <summary><strong>Does anything leave my machine?</strong></summary>
 
-No. The tool makes no network requests and has no telemetry. Its only outward action is asking your operating system to open the loopback dashboard URL in a browser, which `--no-open` disables. Fonts and provider marks are bundled.
+Analytics and the dashboard make no network requests and have no telemetry. Opening the loopback dashboard can be disabled with `--no-open`; fonts and provider marks are bundled. The separate `review` command is a metadata-only dry-run by default. Only an explicit `review --send-content` sends bounded redacted prose through your own agent CLI; see [the P3 review limits](docs/insights.md#opt-in-review-p3).
 </details>
 
 <details>

@@ -7,6 +7,7 @@
     <title>Session Analytics</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/views/insights.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -66,7 +67,17 @@
         <button type="button" data-view-button="models">Models</button>
         <button type="button" data-view-button="tools">Tools</button>
         <button type="button" data-view-button="skills">Skills</button>
+        <button type="button" data-view-button="insights">Insights</button>
       </nav>
+
+      <section class="analytics-view" data-view-panel="insights" aria-label="Measured insights" hidden>
+        <div class="insights-intro">
+          <div><p class="kicker">Evidence into action</p><h1>Insights</h1>
+          <p>Signals worth a closer look, with the evidence and limits beside them.</p></div>
+          <p class="insights-contract">Content-free · local rules<br />API-equivalent value is not an invoice.</p>
+        </div>
+        <div id="insights-root" aria-busy="false"></div>
+      </section>
 
       <div class="analytics-view" data-view-panel="summary">
 

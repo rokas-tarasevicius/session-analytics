@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Ten content-free coaching rules, with evidence denominators, configurable activity guards, confidence, suggested actions and explicit interpretation limits. `session-analytics insights [--json]` and the Insights dashboard tab share the rules; repository/date filters recompute baselines. Cards support local dismiss, seven-day snooze and restore.
+- Within-provider same-token price scenarios, repository peer outliers, cache reuse and idle-gap write associations, compaction/context flags, delegation comparisons, configured extensions without observed use, and neutral time-of-day patterns. Unknown impact remains unavailable; overlapping estimates are never summed.
+- Opt-in P3 review scaffolding: `review --session KEY --via claude|codex` previews bounded excerpt sizes and redaction counts. Only `--send-content` invokes the user's CLI; raw agent output is projected to assessment enums. Default analytics remain content-free and local.
+
+### Fixed
+
+- Populate Claude's maximum request input from deduplicated usage, including requests without a known price. This enables context insight coverage without changing token or cost totals.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

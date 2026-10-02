@@ -2,7 +2,7 @@
 
 `session-analytics` reads coding-agent transcripts that already exist on your machine. Those transcripts contain everything you and your agents have written: prompts, responses, reasoning, commands, file paths, diffs, and tool output. This document defines exactly what the tool may return from them, how that boundary is enforced, and what it does not protect against.
 
-The contract applies to every output surface: the dashboard and its `/api/analytics` endpoint, the terminal report, the JSON snapshot (`report --json`), and the agent skill, which only runs those commands.
+The content-free contract applies to the dashboard, `/api/analytics`, `/api/insights`, terminal reports, JSON snapshots (`report --json`, `insights --json`), and the agent skill. The separate P3 review workflow has an explicit per-run content-transmission exception described below; it is never invoked by an analytics scan or the dashboard.
 
 ## The contract
 
@@ -33,10 +33,10 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
 - **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded, so local paths in exceptions cannot reach the dashboard.
-- **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
+- **No analytics exfiltration path.** Analytics makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. Only the separate P3 review command with `--send-content` invokes a network-capable agent CLI. See [SECURITY.md](../SECURITY.md) for the full threat model.
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 
-Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere.
+In analytics, content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere. The opt-in review worker temporarily retains a bounded set of excerpts in memory; it does not write those excerpts, prompts or responses to disk.
 
 ## Privacy tiers
 
@@ -45,11 +45,17 @@ Every field belongs to a tier. The tiers also govern planned features (see [road
 | Tier | Contents | Status |
 | --- | --- | --- |
 | **P0** | Counts, token counters, costs, timestamps, durations, model IDs, tool and skill names, enumerated labels | Returned today |
-| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys and repository metadata only) |
+| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs/display names, insight IDs and MCP server names; later keyed hashes of paths/arguments, file extensions, command classes and commit SHAs | Returned today (keys, repository metadata and configured MCP names) |
 | **P2** | Results of local rules over commands or diffs, where only rule IDs and counts leave the parser | Not implemented; will be opt-in |
-| **P3** | Text shown to you or sent to an LLM, such as an opt-in session review | Not implemented; will be opt-in per run, stored separately, and labeled |
+| **P3** | Bounded, redacted human/assistant prose sent through the user's own CLI for an optional session review | Explicit `review --send-content` per run only; off by default; never stored by this package or returned by an API |
 
 P2 and P3 features will always be off by default.
+
+### P3 review exception
+
+`review --session KEY --via claude|codex` defaults to a metadata-only dry-run: rule IDs, sizes and redaction counts, no displayed prose and no CLI invocation. Only an explicit `--send-content` flag permits that run to send a bounded prompt through the selected CLI on `PATH`. There is no environment-variable equivalent, persistent opt-in, review HTTP endpoint or dashboard send control. Authentication, retention and billing belong to the user's agent provider.
+
+The capped review worker resolves the hashed key through validated analyzer evidence, chooses up to three windows, and omits reasoning and tool argument/result blocks. It redacts common credential, URL, email, path, ID and code forms and known local identifiers; **remaining prose is P3 and may still be identifying or sensitive**. Regex redaction does not guarantee anonymization. It is capped to 12 excerpts × 1,000 characters and a 60 KB prompt. Paths and raw source IDs never cross the worker output boundary. Only allowlisted assessment enums are returned; arbitrary agent stdout/stderr is discarded. Default analytics remain content-free. [Full behavior and limitations](insights.md#opt-in-review-p3).
 
 ## Field manifest
 
@@ -144,6 +150,7 @@ Repository summaries and the machine summary share these fields.
 | `skills` | `{ skillId: count }`, skill invocations | P0 |
 | `skillEvidence` | `explicit` (Claude), `inferred` (Codex lower bound), or `unavailable` (Cursor) | P0 |
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
+| `insightSignals.cacheGaps` | Optional Claude-only counters; see [Cache-gap signals](#cache-gap-signals) | P0 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
 | `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
@@ -209,13 +216,81 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 | `calls` | Requests attributed to this model | P0 |
 | `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
 
+### Cache-gap signals
+
+`session.insightSignals.cacheGaps` is absent for unsupported providers. Every value is a number, never transcript content.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `observableCalls` | Deduplicated Claude requests with explicit TTL fields and valid timestamps | P0 |
+| `timedTransitions` | Adjacent same-model requests in the same file with valid times and current explicit TTL | P0 |
+| `fiveMinuteExpiries` | 5m write events after a >5m gap; candidate association, not proven expiry | P0 |
+| `oneHourExpiries` | 1h write events after a >1h gap; may overlap 5m events | P0 |
+| `rewriteTokens` | TTL-specific cache-write tokens after qualifying gaps | P0 |
+| `pricedRewriteTokens` | Subset of those tokens with a reviewed price | P0 |
+| `estimatedPremiumUsd` | Estimated write-versus-read difference on priced tokens; not actual savings | P0 |
+
+### Insights report (`InsightsReport`)
+
+Returned by `insights --json` and `GET /api/insights`; public types are re-exported from `src/types.ts` and defined under `src/insights/`. Configuration file paths and settings contents are never returned.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `schemaVersion` | Version 1 of this separate report contract | P0 |
+| `generatedAt` | Source snapshot time | P0 |
+| `rateCardEffectiveDate` | Rate card date used for comparisons | P0 |
+| `thresholds` | Explicit numeric configuration: `minRepoSessions`, `minModelCalls`, `minInputTokens`, `outlierMultiplier`, `minOutlierUsd`, `minDifferenceUsd`, `cacheReadShare`, `cacheWriteShare`, `compactionsPer100Calls`, `minCompactions`, `subagentShare`, `subagentDelta`, `longContextInputTokens`, `longContextShare`, `extensionMinSessions`, `extensionMinToolCalls`, `idleGapMinEvents`, `timeMinSessions`, `timeBucketShare`, `utcOffsetMinutes` | P0 |
+| `cards[].id` | `insight-` plus 20 hex SHA-256 characters from rule, scope and names; stable browser decision key, not a secret-keyed hash | P1 |
+| `cards[].rule` | One of the ten fixed rule IDs in [insights.md](insights.md#rules-and-formulas) | P0 |
+| `cards[].title` | Fixed rule title | P0 |
+| `cards[].scope.kind` | `machine`, `repo`, `session` | P0 |
+| `cards[].scope.repositoryId`, `cards[].scope.sessionKey` | Existing pseudonymous key or null | P1 |
+| `cards[].scope.provider` | Existing provider enum or null | P0 |
+| `cards[].evidence[].label` | Fixed description of a numeric measurement | P0 |
+| `cards[].evidence[].value` | Numeric scalar or ratio numerator | P0 |
+| `cards[].evidence[].unit` | `USD`, `tokens`, `count`, `ratio`, `multiple`, `hour` | P0 |
+| `cards[].evidence[].denominator` | Numeric denominator, or null for a scalar | P0 |
+| `cards[].evidence[].denominatorLabel` | Fixed denominator meaning, or null | P0 |
+| `cards[].estimatedImpact.value` | Numeric estimate or null when unquantified | P0 |
+| `cards[].estimatedImpact.unit` | `USD` or `tokens`; never summed across units | P0 |
+| `cards[].estimatedImpact.basis` | `scenario-difference`, `associated-usage`, `unavailable` | P0 |
+| `cards[].estimatedImpact.label` | Fixed description of estimate and limits | P0 |
+| `cards[].confidence` | `low`, `medium`, `high`; interpretive confidence | P0 |
+| `cards[].guardrail`, `cards[].suggestedAction` | Fixed explanatory text, no transcript or config text | P0 |
+| `cards[].names[]` | Compared model ID or bounded configured skill/MCP server name; no settings values | P0 for models/skills, P1 for MCP servers |
+| `cards[].coverage.eligibleSessions`, `cards[].coverage.totalSessions` | Eligible/selected session counts, peers for peer comparisons | P0 |
+| `coverage[].rule`, `coverage[].eligibleSessions`, `coverage[].totalSessions`, `coverage[].findings` | Rule ID, evidence coverage and emitted-card count | P0 |
+| `coverage[].status` | `disabled`, `unavailable`, `insufficient`, `no-findings`, `findings` | P0 |
+| `warnings[]` | Fixed messages about partial inventory and interpretation | P0 |
+
+### Review metadata (`ReviewPreview`) and assessment
+
+`review --json` returns `{ preview, result }`. The internal prompt is P3 and is never a field of this JSON. `result` is null for a dry-run or missing context. No excerpts or raw agent responses are displayed even after a send.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `preview.privacyTier` | Literal `P3`, identifies the optional workflow | P0 |
+| `preview.mode` | `dry-run` or `sent` | P0 |
+| `preview.sessionKey` | Selected hashed session key | P1 |
+| `preview.via` | `claude` or `codex` | P0 |
+| `preview.flaggedRules[]` | Fixed rule IDs relevant to this session/repository/provider | P0 |
+| `preview.spans`, `preview.excerpts` | Selected bounded window/prose counts | P0 |
+| `preview.contentBytes`, `preview.promptBytes` | UTF-8 JSON excerpt/full prompt sizes | P0 |
+| `preview.redactions.credentials`, `.identifiers`, `.paths`, `.urls`, `.emails`, `.codeBlocks` | Counts of redaction replacements in selected excerpts | P0 |
+| `preview.omittedBlocks` | Unsupported/non-prose blocks excluded while scanning the selected file | P0 |
+| `preview.truncated` | Oversized records, excerpt/window limits or truncated prose encountered | P0 |
+| `preview.note` | Fixed dry-run/send description and privacy limit | P0 |
+| `result.assessment` | `unknown`, `expected`, `worth-review` | P0 |
+| `result.confidence` | `low`, `medium`, `high` | P0 |
+| `result.suggestion` | `none`, `compare-similar-task`, `check-context`, `check-cache`, `check-delegation` | P0 |
+
 ### Health endpoint
 
 `GET /api/health` returns `{ service: "session-analytics", snapshot: "ready" | "building" | "not-started", status: "ok" }`. All fields are P0.
 
 ### Browser storage
 
-The dashboard stores two values in `localStorage`: the selected view (`session-analytics-view`) and the theme (`session-analytics-theme`). Nothing else is persisted.
+The dashboard stores the selected view (`session-analytics-view`), theme (`session-analytics-theme`), and insight decisions (`session-analytics-insights-v1`). Insight decisions map opaque P1 card IDs to `dismissed` or a snooze-expiry timestamp; no card evidence, names, prose or settings are persisted. They can be restored from the Insights tab and do not affect API/CLI results.
 
 ## What this does not protect against
 

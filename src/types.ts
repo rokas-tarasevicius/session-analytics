@@ -1,3 +1,8 @@
+import type { CacheGapSignals } from "./insights/types.ts";
+export type { Insight, InsightsReport, InsightThresholds, CacheGapSignals } from "./insights/types.ts";
+export type { ReviewPreview } from "./insights/review-context.ts";
+export type { ReviewAssessment } from "./insights/review-agent.ts";
+
 export type SessionProvider = "claude" | "codex" | "cursor";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
@@ -83,6 +88,7 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  insightSignals?: { cacheGaps?: CacheGapSignals };
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -203,6 +209,7 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  insightsConfigPath?: string;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;

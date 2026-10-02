@@ -30,7 +30,7 @@ const DAYS = 60;
 // Arguments
 
 const argv = process.argv.slice(2);
-const reportMode = argv[0] === "report";
+const reportMode = argv[0] === "report" || argv[0] === "insights";
 const options = reportMode ? argv.slice(1) : argv;
 const has = (flag: string): boolean => options.includes(flag);
 function valueOf(flag: string): string | undefined {
@@ -43,10 +43,10 @@ for (let index = 0; index < options.length; index += 1) {
   if (!known.has(flag)) fail(`Unknown demo argument: ${flag}`);
   if (flag === "--port") index += 1;
 }
-if (has("--json") && !reportMode) fail("--json is only valid with the report command.");
+if (has("--json") && !reportMode) fail("--json is only valid with report or insights.");
 if (has("--help")) {
   process.stdout.write(
-    "Usage: node scripts/demo.ts [report [--json]] [--no-open] [--port PORT] [--keep]\n" +
+    "Usage: node scripts/demo.ts [report|insights [--json]] [--no-open] [--port PORT] [--keep]\n" +
       "Generates synthetic sessions in a temporary directory and analyzes only that data.\n",
   );
   process.exit(0);
@@ -233,7 +233,8 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   const records: unknown[] = [];
   const state: ClaudeTurnState = { clock: options.start, compactions: 0, context: options.subagent ? integer(9_000, 16_000) : integer(18_000, 32_000) };
   const effort = model.includes("haiku") ? undefined : weighted(effortLevels);
-  const longCache = !options.subagent && chance(0.35);
+  const coldCache = repository.name === "data-pipeline" && !options.subagent;
+  const longCache = !coldCache && !options.subagent && chance(0.35);
   const base = { cwd, sessionId, version: "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
   let parent: string | null = null;
   let spawned = 0;
@@ -272,6 +273,13 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       tools.push({ id: `toolu_${hex(24)}`, name, input });
     }
     const usage = claudeUsage(model, state, output, longCache);
+    // A synthetic stop/start workload supplies honest low-reuse and idle-gap signals.
+    if (coldCache) {
+      state.clock += 6 * 60_000;
+      usage.cache_creation_input_tokens += usage.cache_read_input_tokens;
+      usage.cache_creation.ephemeral_5m_input_tokens = usage.cache_creation_input_tokens;
+      usage.cache_read_input_tokens = 0;
+    }
     const content = [
       { type: "text", text: "[synthetic demo response]" },
       ...tools.map(({ id, name, input }) => ({ type: "tool_use", id, name, input })),
@@ -486,6 +494,10 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
   const cursorDatabase = join(root, "cursor", "User", "globalStorage", "state.vscdb");
   const home = join(root, "home");
   for (const directory of [claudeRoot, codexRoot, codexArchiveRoot, home]) mkdirSync(directory, { recursive: true });
+  writeFileSync(join(root, "claude", "settings.json"), JSON.stringify({
+    skills: { "code-review": true, "release-checklist": true },
+    mcpServers: { github: { command: "synthetic-demo-only" }, "archive-search": { command: "synthetic-demo-only" } },
+  }));
 
   const repositories: Repository[] = repositorySpecs.map((spec) => {
     const repository: Repository = { ...spec, directories: [...spec.directories], files: [...spec.files], root: join(root, "repos", spec.name) };
@@ -582,7 +594,7 @@ const sourceFlags = [
   "--database", join(root, "conductor-not-present.db"),
 ];
 const childArguments = reportMode
-  ? [bin, "report", ...sourceFlags, ...(has("--json") ? ["--json"] : [])]
+  ? [bin, argv[0]!, ...sourceFlags, ...(has("--json") ? ["--json"] : [])]
   : [bin, "dashboard", ...sourceFlags, "--port", String(port), ...(has("--no-open") ? ["--no-open"] : [])];
 
 const child = spawn(process.execPath, childArguments, { env: environment, stdio: "inherit" });
