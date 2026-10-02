@@ -118,6 +118,8 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath|Codex fixture session|codex-fixture/);
     assert.doesNotMatch(serialized, /Codex fixture|Claude fixture|example\/conductor\.git/);
+    assert.doesNotMatch(serialized, /"repository-1"|conductor-codex|conductor-claude/);
+    assert.match(result.repository.id, /^conductor-[0-9a-f]{20}$/);
     assert.doesNotMatch(serialized, /11111111-1111-4111-8111-111111111111/);
     assert.doesNotMatch(serialized, /22222222-2222-4222-8222-222222222222/);
   } finally {

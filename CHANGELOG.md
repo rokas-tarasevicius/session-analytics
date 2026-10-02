@@ -1,6 +1,38 @@
 # Changelog
 
-All notable changes to this package are documented here.
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
+
+## [0.5.0] - 2026-10-02
+
+First standalone release.
+
+### Added
+
+- `session-analytics` command with `dashboard` (default) and `report` subcommands; `--no-open` starts the dashboard without launching a browser.
+- Discovery of every local Claude Code and Codex profile: `~/.claude-*` and `~/.codex-*` siblings, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and `~/.config/claude`, deduplicated through symbolic links. Explicit root options still replace discovery.
+- Claude thinking tokens, reported separately as reasoning output, and the recorded reasoning effort per session.
+- Cursor workspace and subagent mapping through the `composerHeaders` table used by current Cursor builds.
+- Reviewed rate-card entries for `claude-opus-5-5`, `claude-sonnet-5-5`, `gpt-6-sol`, and `gpt-6.1-sol`; the rate card is effective 2026-10-02.
+- Regression tests for streamed Claude usage, current Codex rollouts, profile discovery, and Cursor headers.
+- Strict TypeScript checking, `package.json` scripts, a single brand module, and a cross-platform browser opener.
+
+### Fixed
+
+- Claude output tokens were undercounted because the first streamed snapshot of each message was priced instead of the final one. On one real machine this removed 19-47% of output tokens per profile.
+- Claude sessions in any profile other than `~/.claude` were never read.
+- Codex user turns, assistant messages, and compactions read near zero for current rollouts, which record them as `item_completed` items and top-level `compacted` records.
+- Claude Desktop local-agent sessions no longer add a missing-root warning on machines without Claude Desktop.
+
+### Changed
+
+- Moved from the GBrain skillpack layout to `src/`, `test/`, `data/`, `docs/`, and `skills/`. The agent skill now runs the `session-analytics` command.
+- Repositories registered in Conductor are identified by a pseudonymous `conductor-<hash>` key instead of Conductor's raw record ID.
+- Both `dashboard` and `report` read the same options; environment overrides use the `SESSION_ANALYTICS_*` prefix (for example `SESSION_ANALYTICS_CLAUDE_ROOT`); the `MACHINE_*` and `CONDUCTOR_*` aliases were removed. `CONDUCTOR_PORT` is still honored.
+- The dashboard is titled Session Analytics; saved view and theme preferences use new storage keys.
+
+### Removed
+
+- GBrain skillpack manifest, bootstrap runbook, judge evaluations, and routing fixtures.
 
 ## [0.4.4] - 2026-08-05
 

@@ -76,11 +76,11 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
-      CONDUCTOR_CLAUDE_PROJECTS_ROOT: fixture.claudeRoot,
-      CONDUCTOR_CODEX_ARCHIVED_SESSIONS_ROOT: fixture.codexArchiveRoot,
-      CONDUCTOR_CODEX_SESSIONS_ROOT: fixture.codexRoot,
-      CONDUCTOR_CURSOR_DATABASE: fixture.cursorDatabasePath,
-      CONDUCTOR_ANALYTICS_DATABASE: fixture.databasePath,
+      SESSION_ANALYTICS_CLAUDE_ROOT: fixture.claudeRoot,
+      SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: fixture.codexArchiveRoot,
+      SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,
+      SESSION_ANALYTICS_CURSOR_DATABASE: fixture.cursorDatabasePath,
+      SESSION_ANALYTICS_CONDUCTOR_DATABASE: fixture.databasePath,
     };
     child = spawn(process.execPath, [serverPath, "--port", String(port)], {
       cwd: repositoryRoot,

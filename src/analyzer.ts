@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { opendir, readFile, stat } from "node:fs/promises";
+import { opendir, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -603,6 +603,17 @@ async function analyzeCodex(
   const seenCalls = new Set<string>();
   let currentModel = row.database_model ?? "<unknown>";
   let parseErrors = 0;
+  // Codex has recorded the same lifecycle events in several shapes over time:
+  // legacy `event_msg` notifications, `item_completed` items, and top-level
+  // `compacted` records. A file can carry more than one shape for the same
+  // event, so each count takes the largest shape rather than their sum.
+  const legacy = { agentMessages: 0, compactions: 0, userMessages: 0 };
+  const compactedRecords = { count: 0 };
+  const items = {
+    agentMessages: new Set<string>(),
+    compactions: new Set<string>(),
+    userMessages: new Set<string>(),
+  };
 
   await visitJsonLines(path, (record, line) => {
     if (record["__parse_error"] === true) {
@@ -628,12 +639,24 @@ async function analyzeCodex(
       state.effort = stringValue(payload?.["effort"]) ?? state.effort;
       return;
     }
+    if (type === "compacted") {
+      compactedRecords.count += 1;
+      return;
+    }
     if (type === "event_msg") {
-      if (payloadType === "user_message") state.userTurns += 1;
-      if (payloadType === "agent_message") state.assistantMessages += 1;
+      if (payloadType === "user_message") legacy.userMessages += 1;
+      if (payloadType === "agent_message") legacy.agentMessages += 1;
       if (payloadType === "task_started") state.taskStarts += 1;
       if (payloadType === "task_complete") state.taskCompletions += 1;
-      if (payloadType === "context_compacted") state.compactions += 1;
+      if (payloadType === "context_compacted") legacy.compactions += 1;
+      if (payloadType === "item_completed") {
+        const item = asRecord(payload?.["item"]);
+        const itemId = stringValue(item?.["id"]) ?? `${line}`;
+        const itemType = stringValue(item?.["type"]);
+        if (itemType === "UserMessage") items.userMessages.add(itemId);
+        if (itemType === "AgentMessage") items.agentMessages.add(itemId);
+        if (itemType === "ContextCompaction") items.compactions.add(itemId);
+      }
       if (payloadType === "token_count") {
         const info = asRecord(payload?.["info"]);
         const total = asRecord(info?.["total_token_usage"]);
@@ -684,6 +707,9 @@ async function analyzeCodex(
     }
   });
 
+  state.userTurns = Math.max(legacy.userMessages, items.userMessages.size);
+  state.assistantMessages = Math.max(legacy.agentMessages, items.agentMessages.size);
+  state.compactions = Math.max(legacy.compactions, compactedRecords.count, items.compactions.size);
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
   const finalTokens = zeroTokens();
   let previous = zeroTokens();
@@ -773,6 +799,10 @@ function claudeUsage(raw: JsonRecord): TokenUsage {
   const cacheRead = nonNegativeNumberValue(raw["cache_read_input_tokens"]);
   const cacheWrite = nonNegativeNumberValue(raw["cache_creation_input_tokens"]);
   const output = nonNegativeNumberValue(raw["output_tokens"]);
+  const thinking = Math.min(
+    output,
+    nonNegativeNumberValue(asRecord(raw["output_tokens_details"])?.["thinking_tokens"]),
+  );
   const cacheCreation = asRecord(raw["cache_creation"]);
   let cacheWrite5m = nonNegativeNumberValue(cacheCreation?.["ephemeral_5m_input_tokens"]);
   const cacheWrite1h = nonNegativeNumberValue(cacheCreation?.["ephemeral_1h_input_tokens"]);
@@ -783,9 +813,9 @@ function claudeUsage(raw: JsonRecord): TokenUsage {
     cacheWriteInputTokens: cacheWrite,
     cachedInputTokens: cacheRead,
     inputTokens: input + cacheRead + cacheWrite,
-    nonReasoningOutputTokens: output,
+    nonReasoningOutputTokens: output - thinking,
     outputTokens: output,
-    reasoningOutputTokens: 0,
+    reasoningOutputTokens: thinking,
     uncachedInputTokens: input,
   };
 }
@@ -818,18 +848,32 @@ async function analyzeClaude(
   state.executionKind = "top-level";
   state.executionKindsSeen.add("top-level");
   state.warnings.push(...inheritedWarnings);
-  state.warnings.push(
-    "Claude usage does not expose reasoning output separately; it remains included in output.",
-  );
   const paths = await claudeEvidencePaths(mainPath);
-  const seenAssistantMessages = new Set<string>();
+  // Claude Code writes one record per streamed content block. Every record of
+  // a message repeats the same input and cache counters while output grows, so
+  // only the final snapshot - the one with the most output - is the message's
+  // usage. Pricing the first snapshot undercounts output and reasoning.
+  const assistantUsage = new Map<string, {
+    executionKind: SessionAnalytics["executionKind"];
+    model: string;
+    reasoningExposed: boolean;
+    timestamp: string | null;
+    usage: TokenUsage;
+  }>();
+  // Subagent files are read after the whole main transcript, so file order is
+  // not chronology. The session's effort is the latest top-level value, and a
+  // subagent's effort only when the main transcript never records one.
+  const effort: {
+    current: { executionKind: SessionAnalytics["executionKind"]; timestamp: string; value: string } | null;
+  } = { current: null };
   const seenHumanMessages = new Set<string>();
   const seenToolCalls = new Set<string>();
   let parseErrors = 0;
   const totals = zeroTokens();
 
   for (const path of paths) {
-    const executionKind = path === mainPath ? "top-level" : "subagent";
+    const executionKind: SessionAnalytics["executionKind"] =
+      path === mainPath ? "top-level" : "subagent";
     state.executionKindsSeen.add(executionKind);
     await visitJsonLines(path, (record, line) => {
       if (record["__parse_error"] === true) {
@@ -850,27 +894,41 @@ async function analyzeClaude(
       if (type === "assistant" && message) {
         const messageId =
           stringValue(message["id"]) ?? stringValue(record["uuid"]) ?? `${path}:${line}`;
-        if (!seenAssistantMessages.has(messageId)) {
-          seenAssistantMessages.add(messageId);
-          state.assistantMessages += 1;
-          const usageRecord = asRecord(message["usage"]);
-          if (usageRecord) {
-            const usage = claudeUsage(usageRecord);
-            if (tokenCount(usage) > 0) {
-              const model = stringValue(message["model"]) ?? row.database_model ?? "<unknown>";
-              sumTokens(totals, usage);
-              addModelUsage(
-                state,
-                rateCard,
-                model,
-                usage,
-                usage.inputTokens,
-                timestamp,
-                row.updated_at,
-                executionKind,
-              );
-            }
-          }
+        const recordedEffort = stringValue(record["effort"]);
+        if (recordedEffort) {
+          const candidate = { executionKind, timestamp: timestamp ?? "", value: recordedEffort };
+          const current = effort.current;
+          const outranks =
+            !current ||
+            (executionKind === "top-level" && current.executionKind !== "top-level") ||
+            (executionKind === current.executionKind && candidate.timestamp >= current.timestamp);
+          if (outranks) effort.current = candidate;
+        }
+        const usageRecord = asRecord(message["usage"]);
+        const usage = usageRecord ? claudeUsage(usageRecord) : zeroTokens();
+        const snapshot = {
+          executionKind,
+          model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
+          reasoningExposed: Boolean(asRecord(usageRecord?.["output_tokens_details"])),
+          timestamp,
+          usage,
+        };
+        const previous = assistantUsage.get(messageId);
+        if (!previous) state.assistantMessages += 1;
+        // Keep the snapshot with the most output. On a tie, an earlier snapshot
+        // keeps ownership unless it carried no usage or lacked the thinking
+        // breakdown that the later one reports.
+        const replaces =
+          !previous ||
+          usage.outputTokens > previous.usage.outputTokens ||
+          (usage.outputTokens === previous.usage.outputTokens &&
+            tokenCount(usage) > 0 &&
+            (tokenCount(previous.usage) === 0 || (snapshot.reasoningExposed && !previous.reasoningExposed)));
+        if (replaces) {
+          assistantUsage.set(messageId, {
+            ...snapshot,
+            timestamp: previous?.timestamp ?? timestamp,
+          });
         }
         for (const rawBlock of contentBlocks(message)) {
           const block = asRecord(rawBlock);
@@ -900,6 +958,19 @@ async function analyzeClaude(
         }
       }
     });
+  }
+  state.effort = effort.current?.value ?? null;
+  let reasoningMissing = false;
+  for (const { executionKind, model, reasoningExposed, timestamp, usage } of assistantUsage.values()) {
+    if (tokenCount(usage) === 0) continue;
+    if (usage.outputTokens > 0 && !reasoningExposed) reasoningMissing = true;
+    sumTokens(totals, usage);
+    addModelUsage(state, rateCard, model, usage, usage.inputTokens, timestamp, row.updated_at, executionKind);
+  }
+  if (reasoningMissing) {
+    state.warnings.push(
+      "Some Claude responses do not expose thinking tokens separately; they remain included in output.",
+    );
   }
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
   return finalizeSession(row, state, totals, paths.length);
@@ -1010,6 +1081,91 @@ function unavailableSession(
   const session = finalizeSession(row, state, zeroTokens(), 0);
   session.transcript.status = status;
   return session;
+}
+
+export interface ProviderRootEnvironment {
+  /** Claude Code's configuration directory override (`CLAUDE_CONFIG_DIR`). */
+  claudeConfigDirectory?: string | undefined;
+  /** Codex's home directory override (`CODEX_HOME`). */
+  codexHome?: string | undefined;
+  home: string;
+}
+
+async function directoryExists(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Profile directories for one provider: the default (`~/.claude`), sibling
+ * profiles that people create for separate accounts (`~/.claude-work`), and an
+ * explicit environment override. Sibling profiles are only returned when they
+ * exist; the default is always returned so a missing store stays visible.
+ */
+async function providerProfiles(
+  home: string,
+  defaultName: ".claude" | ".codex",
+  override: string | undefined,
+): Promise<string[]> {
+  const profiles = [join(home, defaultName)];
+  if (override) profiles.push(resolve(override));
+  try {
+    const entries = await readdir(home, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (entry.name.startsWith(`${defaultName}-`) && (entry.isDirectory() || entry.isSymbolicLink())) {
+        profiles.push(join(home, entry.name));
+      }
+    }
+  } catch {
+    // An unreadable home directory leaves the default and explicit profiles.
+  }
+  return profiles;
+}
+
+/** Keep the first occurrence of each root after resolving symbolic links. */
+async function uniqueRoots(roots: string[]): Promise<string[]> {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const root of roots) {
+    let canonical = resolve(root);
+    try {
+      canonical = await realpath(root);
+    } catch {
+      // A missing root keeps its resolved path so its absence is still reported.
+    }
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    unique.push(root);
+  }
+  return unique;
+}
+
+/** Every local Claude Code and Codex transcript root, across all profiles. */
+export async function discoverProviderRoots(
+  environment: ProviderRootEnvironment,
+): Promise<{ claude: string[]; codex: string[] }> {
+  const { home } = environment;
+  const claudeProfiles = await providerProfiles(home, ".claude", environment.claudeConfigDirectory);
+  const claude: string[] = [join(home, ".claude", "projects")];
+  for (const profile of [...claudeProfiles, join(home, ".config", "claude")]) {
+    const projects = join(profile, "projects");
+    if (await directoryExists(projects)) claude.push(projects);
+  }
+  const desktopAgents = join(home, "Library/Application Support/Claude/local-agent-mode-sessions");
+  if (await directoryExists(desktopAgents)) claude.push(desktopAgents);
+
+  const codexProfiles = await providerProfiles(home, ".codex", environment.codexHome);
+  const codex: string[] = [join(home, ".codex", "sessions"), join(home, ".codex", "archived_sessions")];
+  for (const profile of codexProfiles) {
+    for (const store of ["sessions", "archived_sessions"]) {
+      const root = join(profile, store);
+      if (await directoryExists(root)) codex.push(root);
+    }
+  }
+  return { claude: await uniqueRoots(claude), codex: await uniqueRoots(codex) };
 }
 
 async function* walkJsonl(root: string): AsyncGenerator<string> {
@@ -1392,11 +1548,17 @@ function analyzeCursorComposer(
   return session;
 }
 
+interface CursorHeaderEvidence {
+  subagents: Set<string>;
+  workspaces: Map<string, string>;
+}
+
 async function cursorHeaderWorkspaces(
   database: DatabaseSync,
   databasePath: string,
-): Promise<Map<string, string>> {
+): Promise<CursorHeaderEvidence> {
   const candidates = new Map<string, { path: string; score: number }>();
+  const subagents = new Set<string>();
   const workspaceStorage = join(dirname(dirname(databasePath)), "workspaceStorage");
   const workspacePath = async (workspaceId: string): Promise<string | null> => {
     try {
@@ -1468,7 +1630,28 @@ async function cursorHeaderWorkspaces(
   } catch {
     // Older Cursor stores do not expose global composer headers.
   }
-  return new Map([...candidates].map(([composerId, { path }]) => [composerId, path]));
+
+  try {
+    // Current Cursor builds moved global composer headers out of ItemTable and
+    // into a dedicated table keyed by composer and workspace storage IDs.
+    const rows = database
+      .prepare("SELECT composerId, workspaceId, lastUpdatedAt, isSubagent FROM composerHeaders")
+      .all() as Array<Record<string, unknown>>;
+    await mapConcurrent(rows, 8, async (header) => {
+      const composerId = stringValue(header["composerId"]);
+      const workspaceId = stringValue(header["workspaceId"]);
+      if (!composerId) return;
+      if (numberValue(header["isSubagent"]) === 1) subagents.add(composerId);
+      const path = workspaceId ? await workspacePath(workspaceId) : null;
+      if (path) assign(composerId, path, numberValue(header["lastUpdatedAt"]));
+    });
+  } catch {
+    // Cursor builds before the headers table keep headers in ItemTable.
+  }
+  return {
+    subagents,
+    workspaces: new Map([...candidates].map(([composerId, { path }]) => [composerId, path])),
+  };
 }
 
 export async function cursorSessions(
@@ -1513,7 +1696,7 @@ export async function cursorSessions(
         }
       }
       const paths = cursorPaths(data);
-      const headerPath = headerWorkspaces.get(id);
+      const headerPath = headerWorkspaces.workspaces.get(id);
       if (headerPath) paths.push(headerPath);
       let cwd = join(homedir(), ".cursor", "unassigned");
       for (const path of paths) {
@@ -1523,7 +1706,9 @@ export async function cursorSessions(
       }
       const repository = await repositoryForPath(cwd, repositories, workspaceRepositories, discovered);
       const executionKind =
-        data["isBestOfNSubcomposer"] === true || Boolean(data["subagentInfo"])
+        data["isBestOfNSubcomposer"] === true ||
+        Boolean(data["subagentInfo"]) ||
+        headerWorkspaces.subagents.has(id)
           ? "subagent"
           : "top-level";
       const session = analyzeCursorComposer(data, repository, cwd, executionKind, conversation);
@@ -1824,6 +2009,20 @@ async function analyzeSelectedRepositories(
     const rows = database
       ? sessionRows(database, availableRepositories.map(({ id }) => id), includeHidden)
       : [];
+    // Conductor repository IDs are raw application identifiers. Replace them
+    // with stable pseudonymous keys before anything reaches the projection.
+    const publicRepositoryIds = new Map(
+      availableRepositories.map(({ id }) => [
+        id,
+        `conductor-${createHash("sha256").update(`conductor:${id}`).digest("hex").slice(0, 20)}`,
+      ]),
+    );
+    for (const repository of availableRepositories) {
+      repository.id = publicRepositoryIds.get(repository.id) ?? repository.id;
+    }
+    for (const row of rows) {
+      row.repository_id = publicRepositoryIds.get(row.repository_id) ?? row.repository_id;
+    }
     const repositoryById = new Map(availableRepositories.map((repository) => [repository.id, repository]));
     const workspaceRepositories = new Map<string, RepositoryRow>();
     for (const row of rows) {
@@ -1839,14 +2038,17 @@ async function analyzeSelectedRepositories(
       availableRepositories,
       workspaceRepositories,
     );
-    const codexRoots = [options.codexRoot ?? join(homedir(), ".codex/sessions")];
-    if (options.codexArchiveRoot || !options.codexRoot) {
-      codexRoots.push(options.codexArchiveRoot ?? join(homedir(), ".codex/archived_sessions"));
-    }
-    const claudeRoots = [options.claudeRoot ?? join(homedir(), ".claude/projects")];
-    if (!options.claudeRoot) {
-      claudeRoots.push(join(homedir(), "Library/Application Support/Claude/local-agent-mode-sessions"));
-    }
+    // Explicit roots replace discovery for that provider, so a narrowed or
+    // synthetic scan never mixes in the machine's own history.
+    const discoveredRoots = await discoverProviderRoots({
+      claudeConfigDirectory: process.env["CLAUDE_CONFIG_DIR"],
+      codexHome: process.env["CODEX_HOME"],
+      home: homedir(),
+    });
+    const codexRoots = options.codexRoot || options.codexArchiveRoot
+      ? [options.codexRoot, options.codexArchiveRoot].filter((root): root is string => Boolean(root))
+      : discoveredRoots.codex;
+    const claudeRoots = options.claudeRoot ? [options.claudeRoot] : discoveredRoots.claude;
     const [codexIndexes, claudeIndexes] = await Promise.all([
       Promise.all(codexRoots.map((root) => indexProviderTranscripts(root, null, "codex"))),
       Promise.all(claudeRoots.map((root) => indexProviderTranscripts(root, null, "claude"))),

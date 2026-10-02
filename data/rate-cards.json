@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "effectiveDate": "2026-09-12",
+  "effectiveDate": "2026-10-02",
   "models": {
     "gpt-5.5": {
       "provider": "codex",
@@ -161,6 +161,52 @@
       "cacheWrite1hPerMillion": 2,
       "outputPerMillion": 5,
       "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-opus-5-5": {
+      "provider": "claude",
+      "inputPerMillion": 4,
+      "cacheReadPerMillion": 0.2,
+      "cacheWrite5mPerMillion": 5,
+      "cacheWrite1hPerMillion": 8,
+      "outputPerMillion": 20,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-sonnet-5-5": {
+      "provider": "claude",
+      "inputPerMillion": 2,
+      "cacheReadPerMillion": 0.2,
+      "cacheWrite5mPerMillion": 2.5,
+      "cacheWrite1hPerMillion": 4,
+      "outputPerMillion": 10,
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "gpt-6-sol": {
+      "provider": "codex",
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 10,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-sol"
+    },
+    "gpt-6.1-sol": {
+      "provider": "codex",
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 10,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
     }
   }
 }

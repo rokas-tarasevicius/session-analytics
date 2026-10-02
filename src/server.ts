@@ -5,31 +5,15 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
+import { analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
+import type { MachineAnalytics } from "./types.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1] : undefined;
-}
-
-const valueFlags = new Set([
-  "--claude-root",
-  "--codex-archive-root",
-  "--codex-root",
-  "--cursor-database",
-  "--database",
-  "--port",
-  "--rate-card",
-  "--repo-id",
-  "--repo-name",
-  "--repo-remote",
-  "--repo-root",
-]);
+const valueFlags = new Set([...analysisValueFlags, "--port"]);
 const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
@@ -127,35 +111,10 @@ const staticFiles = new Map<string, string>([
   ["/brands/codex.svg", join(publicRoot, "brands", "codex.svg")],
   ["/brands/claude.svg", join(publicRoot, "brands", "claude.svg")],
   ["/brands/cursor.svg", join(publicRoot, "brands", "cursor.svg")],
+  ["/favicon.svg", join(publicRoot, "favicon.svg")],
 ]);
 
-const repositoryName = argument("--repo-name") ?? process.env["MACHINE_SESSION_REPO_NAME"] ?? process.env["CONDUCTOR_SESSION_REPO_NAME"];
-const repositoryId = argument("--repo-id") ?? process.env["MACHINE_SESSION_REPO_ID"] ?? process.env["CONDUCTOR_SESSION_REPO_ID"];
-const repositoryRemote =
-  argument("--repo-remote") ?? process.env["MACHINE_SESSION_REPO_REMOTE"] ?? process.env["CONDUCTOR_SESSION_REPO_REMOTE"];
-const databasePath = argument("--database") ?? process.env["MACHINE_SESSION_METADATA_DATABASE"] ?? process.env["CONDUCTOR_ANALYTICS_DATABASE"];
-const codexRoot = argument("--codex-root") ?? process.env["MACHINE_CODEX_SESSIONS_ROOT"] ?? process.env["CONDUCTOR_CODEX_SESSIONS_ROOT"];
-const codexArchiveRoot =
-  argument("--codex-archive-root") ?? process.env["MACHINE_CODEX_ARCHIVED_SESSIONS_ROOT"] ?? process.env["CONDUCTOR_CODEX_ARCHIVED_SESSIONS_ROOT"];
-const claudeRoot = argument("--claude-root") ?? process.env["MACHINE_CLAUDE_PROJECTS_ROOT"] ?? process.env["CONDUCTOR_CLAUDE_PROJECTS_ROOT"];
-const cursorDatabasePath = argument("--cursor-database") ?? process.env["MACHINE_CURSOR_DATABASE"] ?? process.env["CONDUCTOR_CURSOR_DATABASE"];
-const rateCardPath = argument("--rate-card") ?? process.env["MACHINE_SESSION_RATE_CARD"] ?? process.env["CONDUCTOR_SESSION_RATE_CARD"];
-
-const analyzeOptions: AnalyzeOptions = {
-  includeHidden: !process.argv.includes("--exclude-hidden"),
-  ...(argument("--repo-root") || process.env["MACHINE_SESSION_REPO_ROOT"] || process.env["CONDUCTOR_SESSION_REPO_ROOT"]
-    ? { repositoryRoot: argument("--repo-root") ?? process.env["MACHINE_SESSION_REPO_ROOT"] ?? process.env["CONDUCTOR_SESSION_REPO_ROOT"] }
-    : {}),
-  ...(repositoryName ? { repositoryName } : {}),
-  ...(repositoryId ? { repositoryId } : {}),
-  ...(repositoryRemote ? { repositoryRemote } : {}),
-  ...(databasePath ? { databasePath } : {}),
-  ...(codexRoot ? { codexRoot } : {}),
-  ...(codexArchiveRoot ? { codexArchiveRoot } : {}),
-  ...(claudeRoot ? { claudeRoot } : {}),
-  ...(cursorDatabasePath ? { cursorDatabasePath } : {}),
-  ...(rateCardPath ? { rateCardPath } : {}),
-};
+const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
 
 let analyticsPromise: Promise<MachineAnalytics> | null = null;
 let analyticsPending = false;
@@ -214,9 +173,7 @@ const server = createServer(async (request, response) => {
 const conductorPort = process.env["CONDUCTOR_PORT"];
 const companionPort = conductorPort ? String(Number(conductorPort) + 4) : null;
 const requestedPort =
-  argument("--port") ??
-  process.env["MACHINE_SESSION_ANALYTICS_PORT"] ??
-  process.env["CONDUCTOR_SESSION_ANALYTICS_PORT"] ??
+  setting(process.argv, process.env, "--port", "PORT") ??
   companionPort ??
   "4174";
 const port = Number(requestedPort);
@@ -230,7 +187,13 @@ const dashboardUrl = `http://127.0.0.1:${port}`;
 
 async function openDashboard(): Promise<void> {
   await new Promise<void>((resolve) => {
-    execFile("open", [dashboardUrl], (error) => {
+    const [opener, ...openerArguments] =
+      process.platform === "darwin"
+        ? ["open"]
+        : process.platform === "win32"
+          ? ["cmd", "/c", "start", ""]
+          : ["xdg-open"];
+    execFile(opener ?? "open", [...openerArguments, dashboardUrl], (error) => {
       if (error) process.stderr.write(`Could not open the browser: ${error.message}\n`);
       resolve();
     });

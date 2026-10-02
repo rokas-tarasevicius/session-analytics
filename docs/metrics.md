@@ -21,6 +21,8 @@ The CLI JSON, API, and dashboard must not return prompts, messages, reasoning, s
 
 The default scope is the union of all local Codex, Claude, and Cursor session history. It is evidence-led rather than application-led or a blind filesystem crawl: provider working directories, Cursor workspace/file references, optional Conductor workspace mappings, and canonical Git roots determine repository assignment. Provider discovery must work without Conductor. When its database is available, Conductor adds repository/workspace correlations and registered zero-session repositories but does not define the machine boundary. Repository summaries and a single flattened session collection share stable repository IDs; sessions are not duplicated inside public repository objects.
 
+Every provider profile on the machine is in scope: `~/.claude/projects`, sibling profiles such as `~/.claude-work/projects`, `$CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, and Claude Desktop local-agent sessions; `~/.codex/{sessions,archived_sessions}`, sibling `~/.codex-*` profiles, and `$CODEX_HOME`. Roots that resolve to the same directory through symbolic links are read once. An explicit root option replaces discovery for that provider, so narrowed and synthetic scans never mix in the machine's own history.
+
 Provider transcript stores are canonical evidence that a session can be analyzed. Stale Conductor rows without matching evidence are excluded. A legacy row without a provider ID is recovered only after a unique provider, working-directory, and start-time match. This prevents database stubs from inflating session counts or creating repetitive coverage notes.
 
 ## Current measures
@@ -44,7 +46,7 @@ Codex input is request-context consumption, not unique transcript text: the same
 - assistant/model responses;
 - model calls inferred from distinct positive usage increments or response IDs;
 - task starts and completions when the provider emits them;
-- context compactions and summary boundaries;
+- context compactions and summary boundaries (Codex records the same lifecycle events as legacy `event_msg` notifications, `item_completed` items, and top-level `compacted` records; a file can carry several shapes for one event, so user turns, assistant messages, and compactions take the largest shape count rather than the sum);
 - effective tool calls by tool name;
 - skill invocations by normalized identifier, with evidence labeled explicit for Claude, inferred lower bound for Codex, and unavailable for Cursor;
 - transport/orchestrator tool calls before code-mode expansion;
@@ -107,12 +109,14 @@ The Claude Opus 5 entry uses Anthropic's standard global API rates. The analyzer
 
 The Claude Fable 5.1 entry prices cache hits at 0.025x base input, the published exception to Anthropic's standard 0.1x cache-read multiplier; its base input, cache-write, and output rates match Claude Fable 5.
 
-Cursor local composer history exposes modern `bubbleId` token counters and stable `toolFormerData` tool-call IDs. `usageData.costInCents` is a provider-reported local usage value and may be aggregated by session, repository, and model. Bubble token counters are session-level because the local bubble schema does not retain a model identifier that can be joined safely to provider-reported model cost. It is not assigned to a day because the local store does not retain per-call cost timestamps. Relative timing values are not Unix timestamps and must not affect session spans. Cursor API rate coverage remains not applicable.
+The Claude Opus 5.5 entry prices cache hits at 0.05x base input ($0.20 per million tokens), the published exception for that model; its 5-minute and 1-hour cache writes use the standard 1.25x and 2x multipliers. Claude 4.6 and later models carry no long-context modifier. The `gpt-6-sol` and `gpt-6.1-sol` entries apply OpenAI's published 2x input and cache, 1.5x output modifier above 272K input tokens per request.
+
+Current Cursor builds keep global composer headers in a `composerHeaders` table that maps each composer to its workspace storage ID and marks subagent composers; older builds keep them in `ItemTable`. Both are read. Cursor local composer history exposes modern `bubbleId` token counters and stable `toolFormerData` tool-call IDs. `usageData.costInCents` is a provider-reported local usage value and may be aggregated by session, repository, and model. Bubble token counters are session-level because the local bubble schema does not retain a model identifier that can be joined safely to provider-reported model cost. It is not assigned to a day because the local store does not retain per-call cost timestamps. Relative timing values are not Unix timestamps and must not affect session spans. Cursor API rate coverage remains not applicable.
 
 The `gpt-5.3-codex-spark` entry uses zero rates because the provider documents the model as a research preview available through a subscription workflow rather than a separately metered API model. Zero here means “no observable API-equivalent charge,” not a claim that the subscription is free.
 
 For OpenAI Codex transcripts, cached input is observable but cache writes are not separately identified in the cumulative usage counter. The ordinary estimate prices uncached input at the base rate. The upper estimate applies the configured cache-write premium to every uncached input token. The API-equivalent value should fall between those values when no other pricing modifier applies; neither value proves a subscription invoice or cash charge.
 
-For Claude transcripts, deduplicate assistant `message.id` values before summing usage. Use the cache-creation TTL breakdown when present. If only aggregate cache creation exists, label the assumed TTL rather than silently claiming an exact cache-write price.
+For Claude transcripts, deduplicate assistant `message.id` values before summing usage. Claude Code writes one record per streamed content block; every record of a message repeats the same input and cache counters while `output_tokens` grows, so keep the final snapshot (the one with the most output) for each message. Pricing the first snapshot undercounts output and thinking tokens. `usage.output_tokens_details.thinking_tokens` is reported as reasoning output and remains included in output pricing; record-level `effort` is the session's reasoning effort. Use the cache-creation TTL breakdown when present. If only aggregate cache creation exists, label the assumed TTL rather than silently claiming an exact cache-write price.
 
 Apply long-context modifiers per request, not to the repository aggregate. Separately priced hosted tools, containers, search calls, storage, and network services require their own observable counters before they can enter the estimate.

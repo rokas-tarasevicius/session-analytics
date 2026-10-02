@@ -1,25 +1,9 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import type { AnalyzeOptions } from "./types.ts";
+import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1] : undefined;
-}
-
-const valueFlags = new Set([
-  "--claude-root",
-  "--codex-archive-root",
-  "--codex-root",
-  "--cursor-database",
-  "--database",
-  "--rate-card",
-  "--repo-id",
-  "--repo-name",
-  "--repo-remote",
-  "--repo-root",
-]);
+const valueFlags = new Set(analysisValueFlags);
 const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
@@ -82,25 +66,7 @@ function dollars(value: number): string {
   }).format(value);
 }
 
-const optionalArguments: Array<[keyof AnalyzeOptions, string]> = [
-  ["claudeRoot", "--claude-root"],
-  ["codexArchiveRoot", "--codex-archive-root"],
-  ["codexRoot", "--codex-root"],
-  ["cursorDatabasePath", "--cursor-database"],
-  ["databasePath", "--database"],
-  ["rateCardPath", "--rate-card"],
-  ["repositoryId", "--repo-id"],
-  ["repositoryName", "--repo-name"],
-  ["repositoryRemote", "--repo-remote"],
-  ["repositoryRoot", "--repo-root"],
-];
-const analyzeOptions: AnalyzeOptions = {
-  includeHidden: !process.argv.includes("--exclude-hidden"),
-};
-for (const [property, flag] of optionalArguments) {
-  const value = argument(flag);
-  if (value) analyzeOptions[property] = value as never;
-}
+const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
 
 const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
 
