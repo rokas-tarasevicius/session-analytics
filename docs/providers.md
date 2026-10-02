@@ -49,7 +49,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 **Known gaps:**
 
-- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). History it has deleted cannot be analyzed.
+- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). Retained Conductor result records can recover summary evidence, but not the deleted message/tool history.
 - `stats-cache.json` and other provider-reported totals are not yet used for reconciliation.
 - Git evidence in transcripts (branches, commit and pull-request records) is not used yet; see [M2](roadmap.md#m2-outcomes).
 - Views do not yet show which profile a session came from.
@@ -134,11 +134,10 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 **Known gaps:**
 
-- Cursor agent CLI transcripts (`~/.cursor/projects/*/agent-transcripts`) are not read yet.
-- Cursor sessions run through Conductor's Cursor integration are not read yet.
+- Cursor SDK and agent transcript sources are covered separately below; their fidelity differs from this database.
 - Composers whose files and workspace cannot be mapped are grouped under an unassigned local directory.
 
-## Conductor (optional enrichment)
+## Conductor (optional enrichment and result fallback)
 
 **Where:** `~/Library/Application Support/com.conductor.app/conductor.db` (macOS). Override with `--database PATH`. A missing database is normal and changes nothing about provider discovery.
 
@@ -151,6 +150,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | `repos` | `id`, `name`, `root_path`, `remote_url`, `default_branch`, `hidden` |
 | `workspaces` | `id`, `repository_id`, `workspace_name`, `workspace_path`, `branch` |
 | `sessions` | `id`, `status`, `agent_type`, `title`, `created_at`, `updated_at`, `claude_session_id` (the provider session ID), `model`, `is_hidden`, `workspace_id` |
+| `session_messages` | `id`, `session_id`, `created_at` when present; terminal SDK `result` envelopes in `content` or `full_message` when present |
 
 Session titles, workspace names, branches, root paths, and remotes are loaded for correlation inside the analysis process and are never returned.
 
@@ -165,8 +165,73 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 
 **Known gaps:**
 
-- Conductor's per-session result records (turns, durations, reported cost) are not yet used as fallback evidence when a provider transcript has been deleted.
-- Agent types other than Claude Code and Codex are reported as unsupported.
+- A result-only session cannot recover missing tools, skills, user messages, request counts, execution kind, or request times. Result `num_turns` counts SDK loop turns, not human turns.
+- Missing/malformed messages, unrecognized agent types, or results whose provider ID conflicts with the registered row do not become evidence. Ordinary stored assistant/user messages are not parsed as fallback transcripts.
+
+**Result fallback:** canonical Claude/Codex/Cursor evidence wins. After identity matching and unique legacy recovery, a remaining row can use direct `type: result` envelopes. Records are deduplicated by result UUID (database message ID when absent), and duplicated provider identities do not create another session. Local validation found result envelopes in `content`; older stores may use `full_message`. Both are optional, and a missing `session_messages` table preserves native-provider behavior.
+
+Allowlisted result fields are `total_cost_usd`, `usage`, `modelUsage`, `num_turns`, `duration_ms`, `duration_api_ms`, `permission_denials.length`, `is_error`, and a bounded `terminal_reason`/`subtype` enum. `modelUsage` counters take precedence over `usage`; they are never added together. Top-level reported USD controls the session total. A model-allocation mismatch receives a fixed warning. Values are **Reported**, with `evidence.fidelity: summary`; no rates, component allocation, per-day costs, or outcome verdicts are invented. See the [result metric definitions](metrics.md#additional-provider-evidence).
+
+## Cursor SDK through Conductor
+
+**Where:** `~/Library/Application Support/com.conductor.app/cursor-sdk-store`, or `--cursor-sdk-root`. Format verified read-only against local store shapes; fixtures contain only synthetic records.
+
+**Identity:** `agents.ndjson` supplies `agentId`, `cwd`, and created/updated timestamps. Latest agent/run snapshots are retained; raw identities and SDK metadata never reach output.
+
+| Store | Fields retained for analytics |
+| --- | --- |
+| `runs.ndjson` | `agentId`, `runId` for correlation; `model.id`, `status`, `createdAt`, `updatedAt`, `startedAt`, `endedAt`; `usage.inputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `reasoningTokens` |
+| `run_events.ndjson` | `payload.type: sdk_message`, then `message.type: tool_call`, `agent_id`, `run_id`, `call_id`, `name`; no arguments/results |
+
+**Fidelity:** run-level **Reported** token counters; **Estimated** API-equivalent value for exact rate-card matches. Local checks confirmed total tokens equal input + cache read + cache write + output, with reasoning inside output. Tool lifecycle records count once per run/call ID. One started run counts as one observed run turn. Missing tool-event files preserve run summaries with tools labeled unavailable. Requests, assistant-message counts, per-request context sizes, and daily cost allocation are unavailable. Aggregate long-context uncertainty is carried in the upper estimate. No new model rates or aliases are guessed.
+
+## Cursor agent transcripts
+
+**Where:** `~/.cursor/projects/*/agent-transcripts/**/*.jsonl`, or `--cursor-transcript-root` pointing at `projects`. Format verified locally: `role`, `message.content`, and structured `tool_use` blocks. Files are identified by the session UUID filename; no embedded ID is claimed.
+
+**Fidelity:** **activity-only**. Count user text turns, assistant records, and distinct tool-use IDs/names. Models, tokens, pricing, compactions, and skills are **Unavailable**. File mtime supplies the displayed date with `evidence.timing: file-mtime`; it does not establish duration or session start. Activity heatmaps exclude these dates.
+
+Encoded project directory names are matched only against known repository/workspace paths. Ambiguous or unmatched names produce a pseudonymous unassigned group; paths are never reconstructed by guessing. For an identical Cursor session ID, composer database evidence wins over SDK evidence, which wins over activity-only transcripts. These sources are not added together.
+
+## GitHub Copilot CLI
+
+**Where:** `~/.copilot/session-state/*/events.jsonl`, or `--copilot-root`. GitHub documents the [local session-state layout](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference).
+
+**Verified schema:** the [SDK session event types](https://github.com/github/copilot-sdk/blob/19e9a4b9c620d1032110cb6739961c4c1a651278/nodejs/src/generated/session-events.ts) define the persisted envelope and `session.start` metadata. The recorded `data.sessionId` must match the containing directory; `data.context.cwd` and a valid start timestamp are required.
+
+**Fidelity:** **activity-only**. Deduplicate by event ID, assistant message ID, and tool call ID. Count `user.message`, `assistant.message`, `assistant.turn_start`/`turn_end`, `tool.execution_start`, and successful `session.compaction_complete` markers. Arguments, message bodies, summaries, errors, and branches are discarded. [GitHub's event reference](https://github.com/github/copilot-sdk/blob/19e9a4b9c620d1032110cb6739961c4c1a651278/docs/features/streaming-events.md) marks per-call `assistant.usage` as ephemeral. Tokens, model attribution, skills, and USD value remain **Unavailable** in this adapter; premium requests, multipliers, and AI credits are not dollars.
+
+**Planned:** calibrate persisted shutdown `modelMetrics` token semantics and resume boundaries against primary-source receipts before importing usage totals. This adapter intentionally does not price transient usage or assume every saved session has complete shutdown counters.
+
+## OpenCode
+
+**Where:** `$XDG_DATA_HOME/opencode/opencode.db`, defaulting to `~/.local/share/opencode/opencode.db`, or `--opencode-database`.
+
+**Verified schema:** OpenCode **v1.2.24**, [`session.sql.ts`](https://github.com/anomalyco/opencode/blob/v1.2.24/packages/opencode/src/session/session.sql.ts), [`message-v2.ts`](https://github.com/anomalyco/opencode/blob/v1.2.24/packages/opencode/src/session/message-v2.ts), and the [`finish-step` writer](https://github.com/anomalyco/opencode/blob/v1.2.24/packages/opencode/src/session/processor.ts).
+
+| Table | Fields used |
+| --- | --- |
+| `session` | `id`, `directory`, `parent_id`, `time_created`, `time_updated` |
+| `message` | `id`, `session_id`; JSON `data.role`, `modelID`, `time.created/completed`, `tokens.input/output/reasoning/cache.read/cache.write` |
+| `part` | `id`, `session_id`, `message_id`, `time_created`; JSON `data.type`, step `tokens`, tool `callID`/`tool` |
+
+**Fidelity:** reported request counters, API-equivalent pricing, observed user/assistant records and tools. Step-finish records preserve each request; assistant snapshots retain the last step and are used only when no step counters survive. [`getUsage`](https://github.com/anomalyco/opencode/blob/v1.2.24/packages/opencode/src/session/index.ts) normalizes disjoint input/cache classes. Reasoning stays inside output. No provider `cost` value is added to API estimates. `parent_id` identifies subagent execution. Unknown rates stay unpriced. SQL connections are read-only; malformed JSON is skipped without echoing it.
+
+**Planned:** older directory-based storage and later incompatible SQLite generations. Unsupported table layouts produce a fixed warning; the adapter does not infer schemas from arbitrary JSON keys.
+
+## Gemini CLI
+
+**Where:** `~/.gemini/tmp/*/chats/session-*.json` and `.jsonl`, or `--gemini-root` pointing at `tmp`.
+
+**Verified schema:** [chat record types](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/services/chatRecordingTypes.ts) and [recording/replay service](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/services/chatRecordingService.ts). Metadata requires `sessionId`, `projectHash`, and `startTime`; records use `id`, `type`, `timestamp`, `model`, `tokens`, and structured `toolCalls.id/name`. JSONL metadata updates/checkpoints, message replacements, rewinds, removals, and ordering are replayed into a content-free projection. Content and result patches cannot enter metrics. During format migration, JSONL wins over a JSON copy of the same session.
+
+Project assignment follows the [project registry and ownership markers](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/config/projectRegistry.ts): the sibling `projects.json` maps absolute roots to slugs, and `.project_root` records ownership. The provider project hash must match the proposed root. Known local repository roots can also resolve legacy hashed directories; unresolved projects remain pseudonymous and unassigned. The [storage implementation](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/config/storage.ts) establishes these locations.
+
+**Fidelity:** reported retained-message counters and observed tool/turn counts. Input includes cache reads; total output adds separately recorded thought tokens. `kind` distinguishes explicit main/subagent evidence. Removed history is not recoverable. The current rate card has no Gemini entries, so usage is visible but unpriced until a reviewed rate is supplied. Monolithic JSON larger than 32 MiB is skipped; JSONL is streamed. Skills and compaction counts are unavailable.
+
+## Source overrides and isolation
+
+Every added store has its own explicit option and `SESSION_ANALYTICS_*` variable, listed in [README](../README.md#options). Defaults discover all supported providers independently of Conductor. `--no-additional-providers` (or `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0`) disables the five additional default stores; explicit new-store paths still run. It does not disable the result fallback inside a selected Conductor database. Missing optional stores are normal. New adapters emit fixed warnings for inaccessible/unsupported stores, continue with other sources, never follow child-directory symlinks, and perform no network requests.
 
 ## Adding a provider
 

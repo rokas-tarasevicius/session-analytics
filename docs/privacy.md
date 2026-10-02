@@ -28,7 +28,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 
 ## How it is enforced
 
-- **Allowlist projection.** Parsers accumulate counters into an internal session state, and `finalizeSession` in `src/analyzer.ts` builds each public object field by field. Raw provider records are never spread into an output, so a new field in a provider's format cannot reach an output without a code change.
+- **Allowlist projection.** Parsers accumulate counters into an internal session state. `finalizeSession` in `src/analyzer.ts` and the projections in `src/providers/` build public objects field by field. Raw provider records are never spread into an output, so a new field in a provider's format cannot reach an output without a code change.
 - **Internal-only types.** `SessionDatabaseRow` and `AnalyzeOptions` in `src/types.ts` carry paths, titles, branches, and IDs for correlation. They are used inside the analysis process and are not part of any public type.
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
@@ -93,7 +93,7 @@ Repository summaries and the machine summary share these fields.
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `analyzedSessions` | Sessions whose evidence validated and parsed | P0 |
-| `apiEquivalentSpendUsd` | Sum of API list-price-equivalent session values (Claude Code and Codex) | P0 |
+| `apiEquivalentSpendUsd` | Sum of API list-price-equivalent session values across sources with reviewed rates | P0 |
 | `cacheReadRatio` | Cache-read tokens divided by uncached input plus cache reads plus cache writes; `0` with no input | P0 |
 | `compactions` | Sum of session compactions | P0 |
 | `estimatedSpendUsd` | Priced usage value: API-equivalent plus provider-reported | P0 |
@@ -101,7 +101,7 @@ Repository summaries and the machine summary share these fields.
 | `missingTranscripts` | Sessions whose transcript is missing | P0 |
 | `outputTokens` | Sum of output tokens | P0 |
 | `pricedTokenCoverage` | Token-weighted share of observed tokens with a known rate; `null` when not applicable | P0 |
-| `providerReportedSpendUsd` | Sum of provider-reported session values (Cursor) | P0 |
+| `providerReportedSpendUsd` | Sum of provider-reported session values (Cursor composer database and Conductor SDK results) | P0 |
 | `sessions` | Session count | P0 |
 | `subagentSessions` | Sessions with sub-agent or mixed execution | P0 |
 | `subagentSpendUsd` | Value attributed to sub-agent execution | P0 |
@@ -109,7 +109,7 @@ Repository summaries and the machine summary share these fields.
 | `topLevelSpendUsd` | Value attributed to top-level execution | P0 |
 | `toolCalls` | Sum of effective tool calls | P0 |
 | `totalInputTokens` | Sum of processed input tokens, including cache reads and writes | P0 |
-| `unpricedSessions` | Sessions with at least one unpriced model | P0 |
+| `unpricedSessions` | Sessions with observed tokens and incomplete API rate coverage; excludes activity-only and reported-value sources with N/A coverage | P0 |
 | `repositories` | Machine summary only: repositories in scope | P0 |
 | `repositoriesWithSessions` | Machine summary only: repositories with at least one session | P0 |
 | `workingSnapshots` | Machine summary only: sessions that were still running when scanned | P0 |
@@ -119,18 +119,18 @@ Repository summaries and the machine summary share these fields.
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `sessionKey` | First 12 hex characters of SHA-256 of `<provider>:<session ID>` (or of the Conductor session ID for Conductor-registered sessions). It is not keyed with a secret, so it is stable across runs; someone who already holds the raw ID can recompute it, but the key does not reveal the ID | P1 |
-| `provider` | `claude`, `codex`, or `cursor` | P0 |
+| `provider` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, or `gemini` | P0 |
 | `repositoryId` | Repository key, as in `repository.id` | P1 |
 | `repositoryName` | Repository display name, as in `repository.name` | P1 |
-| `status` | Session status label: Conductor's status when registered there, Cursor's composer status, otherwise `idle` | P0 |
-| `createdAt` | Session start time | P0 |
-| `updatedAt` | Conductor's or Cursor's last-updated time when available; otherwise the session start time | P0 |
+| `status` | Legacy session status, or a normalized new-source label (`unknown`, `working`, `idle`, `completed`, `failed`, `cancelled`, `archived`, `queued`) | P0 |
+| `createdAt` | Provider session start time; file modification time only when `evidence.timing` is `file-mtime` | P0 |
+| `updatedAt` | Recorded session update/end time when available; otherwise the session start time. File modification time for `file-mtime` evidence | P0 |
 | `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
 | `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
 | `effort` | Reasoning-effort label as recorded, or `null` | P0 |
 | `executionKind` | `top-level`, `subagent`, `mixed`, or `unknown` | P0 |
 | `costBasis` | `api-list-price-equivalent`, `provider-reported`, or `unavailable` | P0 |
-| `costComplete` | `true` when every observed token was priced or no tokens were observed | P0 |
+| `costComplete` | Legacy semantics unchanged. For added sources: all observed tokens priced, or every retained Conductor result has reported USD. Activity-only evidence is incomplete; this field never proves complete historical retention | P0 |
 | `pricedTokenCoverage` | Share of this session's tokens with a known rate, or `null` | P0 |
 | `cost` | Cost breakdown; see [Cost breakdown](#cost-breakdown-costbreakdown) | P0 |
 | `costByExecution.topLevelUsd` | Value attributed to top-level execution | P0 |
@@ -142,29 +142,45 @@ Repository summaries and the machine summary share these fields.
 | `tools` | `{ toolName: count }`, effective tool calls (code-mode calls expanded to the inner tool) | P0 |
 | `transportTools` | `{ toolName: count }`, tool calls as the provider transported them, before expansion | P0 |
 | `skills` | `{ skillId: count }`, skill invocations | P0 |
-| `skillEvidence` | `explicit` (Claude), `inferred` (Codex lower bound), or `unavailable` (Cursor) | P0 |
+| `skillEvidence` | `explicit` (native Claude), `inferred` (native Codex lower bound), or `unavailable` | P0 |
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
 | `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
+| `evidence` | Optional source fidelity and availability; absent on the original native-provider projections | P0 |
+| `evidence.source` | `conductor-result`, `cursor-sdk`, `cursor-transcript`, `copilot-events`, `opencode-db`, or `gemini-chat` | P0 |
+| `evidence.fidelity` | `message`, `summary`, or `activity-only`; describes the retained source, not task quality | P0 |
+| `evidence.tokens` | `reported` or `unavailable`; distinguishes observed counters (including recorded zero) from missing evidence | P0 |
+| `evidence.tools` | `observed` or `unavailable` | P0 |
+| `evidence.turns` | `observed` or `unavailable`; SDK runs count as observed run turns, Conductor loop-turn summaries do not become human turns | P0 |
+| `evidence.timing` | `provider` or `file-mtime`; file dates cannot establish start time, duration, or active hours | P0 |
+| `evidence.usageUnit` | `request`, `run`, `session`, or `unavailable`; identifies the granularity of token evidence | P0 |
+| `conductor` | Optional result-only SDK counters, populated only for Conductor fallback sessions | P0 |
+| `conductor.resultRecords` | Distinct retained terminal SDK result records after UUID/message-ID deduplication | P0 |
+| `conductor.reportedTurns` | Sum of available SDK `num_turns`, or `null` if absent; not human turns | P0 |
+| `conductor.durationMilliseconds` | Sum of available result `duration_ms`, or `null` if absent; SDK run duration, distinct from the session wall span | P0 |
+| `conductor.apiDurationMilliseconds` | Sum of available `duration_api_ms`, or `null` if absent | P0 |
+| `conductor.permissionDenials` | Sum of recorded denial-array lengths, or `null` if no arrays were recorded; no denial objects escape | P0 |
+| `conductor.errorResults` | Count of results with `is_error === true`; not a task-failure verdict | P0 |
+| `conductor.terminalReasons` | Counts keyed only by `success`, `error_during_execution`, `error_max_turns`, `error_max_budget_usd`, `error_max_structured_output_retries`, `completed`, `cancelled`, `interrupted`, or `unknown`; all other values map to `unknown` | P0 |
 
 ### Session metrics (`SessionMetrics`)
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
-| `userTurns` | Human turns (tool results are not turns) | P0 |
+| `userTurns` | Human turns (tool results are not turns); Cursor SDK counts started runs as observed run turns. Zero is a placeholder when `evidence.turns` is unavailable | P0 |
 | `assistantMessages` | Distinct assistant messages or agent messages | P0 |
-| `modelCalls` | Priced or unpriced model requests with positive usage | P0 |
+| `modelCalls` | Priced or unpriced model requests with positive usage; zero placeholders for summary/activity sources with unavailable request counts (see `evidence.usageUnit`) | P0 |
 | `toolCalls` | Effective tool calls | P0 |
 | `transportToolCalls` | Tool calls before code-mode expansion | P0 |
 | `compactions` | Context compaction boundaries | P0 |
 | `summaries` | Summary boundaries (Claude) | P0 |
-| `taskStarts` | Task-start markers (Codex) | P0 |
-| `taskCompletions` | Task-complete markers (Codex) | P0 |
+| `taskStarts` | Task-start markers (Codex), started SDK runs (Cursor), or assistant-turn starts (Copilot) | P0 |
+| `taskCompletions` | Task-complete markers (Codex), finished SDK runs (Cursor), or assistant-turn ends (Copilot); not proof of task success | P0 |
 | `queueOperations` | Queued-input operations (Claude) | P0 |
 | `delegatedAgents` | Distinct delegated agents observed (Claude) | P0 |
-| `durationMilliseconds` | Session start to last event | P0 |
+| `durationMilliseconds` | Legacy session start to last event; added sources use recorded start/end metadata. Zero is an unavailable placeholder for `file-mtime` evidence | P0 |
 | `eventSpanMilliseconds` | First event to last event | P0 |
 | `maxContextWindow` | Largest context window the provider reported | P0 |
 | `maxInputTokensPerCall` | Largest input of a single request | P0 |
@@ -179,7 +195,7 @@ Appears as `session.tokens` and inside every model usage entry.
 | `inputTokens` | Processed input: uncached input plus cache reads plus cache writes | P0 |
 | `uncachedInputTokens` | Input billed at the base input rate | P0 |
 | `cachedInputTokens` | Cache-read input | P0 |
-| `cacheWriteInputTokens` | Cache-write input (Claude) | P0 |
+| `cacheWriteInputTokens` | Cache-write input where the source records it | P0 |
 | `cacheWrite5mInputTokens` | Cache writes with a 5-minute TTL | P0 |
 | `cacheWrite1hInputTokens` | Cache writes with a 1-hour TTL | P0 |
 | `outputTokens` | Output, including reasoning | P0 |
@@ -196,8 +212,8 @@ Appears as `session.cost` and inside every model usage entry. All values are USD
 | `cachedInputUsd` | Cache-read value | P0 |
 | `cacheWriteUsd` | Cache-write value | P0 |
 | `outputUsd` | Output value | P0 |
-| `totalUsd` | Sum of the components (or the provider-reported value for Cursor) | P0 |
-| `upperEstimateUsd` | Total plus the cache-write premium on all uncached input where cache writes are not observable | P0 |
+| `totalUsd` | Sum of the components, or the reported total for Cursor composer/Conductor evidence (without an invented component allocation) | P0 |
+| `upperEstimateUsd` | Total plus configured uncertainty: unobservable cache writes, and for added adapters aggregate context premiums or unknown write TTL | P0 |
 
 ### Model usage (`ModelUsage`)
 
@@ -206,8 +222,8 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
-| `calls` | Requests attributed to this model | P0 |
-| `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
+| `calls` | Requests attributed to this model; zero when aggregate source evidence cannot establish request counts | P0 |
+| `priced` | `true` when the rate card has an exact entry, or a model-specific reported USD allocation is present | P0 |
 
 ### Health endpoint
 

@@ -83,6 +83,13 @@ h2 { margin: 0; font-size: clamp(1.1rem, 1.8vw, 1.45rem); font-weight: 560; lett
 .provider-toggle { display: inline-flex; min-height: 36px; align-items: center; gap: .45rem; padding: 0 .55rem; border: 1px solid var(--line); cursor: pointer; }
 .provider-toggle input { width: 14px; min-height: 14px; margin: 0; padding: 0; accent-color: var(--violet); }
 .provider-toggle:has(input:not(:checked)) { opacity: .45; }
+/* Additional providers use existing theme colors and text badges. */
+.trend-line.copilot, .chart-point.copilot .trend-dot { stroke: var(--cyan); }
+.trend-line.opencode, .chart-point.opencode .trend-dot { stroke: var(--coral); }
+.trend-line.gemini, .chart-point.gemini .trend-dot { stroke: var(--violet); }
+.bar-track i[data-provider="copilot"] { background: var(--cyan); }
+.bar-track i[data-provider="opencode"] { background: var(--coral); }
+.bar-track i[data-provider="gemini"] { background: var(--violet); }
 .provider-key img { width: 18px; height: 18px; object-fit: contain; }
 .chart-note { margin: .25rem 0 0; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .bar-list { display: grid; gap: 1rem; }

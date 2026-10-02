@@ -60,6 +60,7 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
 - **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
+- **More local evidence.** Copilot CLI activity, OpenCode and Gemini history, Cursor SDK runs and activity-only transcripts, and Conductor result summaries when transcripts are gone. The evidence coverage table distinguishes message, summary, and activity-only sources, with denominators and labeled file dates.
 
 <table>
   <tr>
@@ -142,11 +143,19 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | `--codex-root PATH` | both | Read this Codex `sessions` directory instead of discovering profiles. |
 | `--codex-archive-root PATH` | both | Read this Codex `archived_sessions` directory. Passing either Codex option replaces Codex discovery, so pass both to include archives. |
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
+| `--cursor-sdk-root PATH` | both | Conductor's Cursor SDK store directory. |
+| `--cursor-transcript-root PATH` | both | Cursor's `projects` directory containing `agent-transcripts`. |
+| `--copilot-root PATH` | both | Copilot CLI's `session-state` directory. |
+| `--opencode-database PATH` | both | OpenCode's `opencode.db`. |
+| `--gemini-root PATH` | both | Gemini CLI's `tmp` directory containing project `chats` directories. |
+| `--no-additional-providers` | both | Disable discovery of those five additional stores; explicit new-store paths still apply. Conductor result fallback follows `--database`. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+
+New-store variables are `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, and `SESSION_ANALYTICS_GEMINI_ROOT`. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable their default discovery. OpenCode also honors `XDG_DATA_HOME`. Each source override replaces only that source's default; isolated scans should supply all desired paths and disable additional discovery. The demo does this automatically.
 
 ## Supported agents and evidence
 
@@ -157,8 +166,13 @@ Both commands also read `SESSION_ANALYTICS_*` environment variables for the same
 | Codex | `~/.codex/sessions` and `archived_sessions`, every `~/.codex-*` profile, `$CODEX_HOME` | JSONL rollouts |
 | Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` and its `workspaceStorage` | SQLite, opened read-only |
 | Conductor (optional) | `~/Library/Application Support/com.conductor.app/conductor.db` | SQLite, opened read-only |
+| Cursor SDK through Conductor | `~/Library/Application Support/com.conductor.app/cursor-sdk-store` | NDJSON agents, runs, and tool events |
+| Cursor agent transcripts | `~/.cursor/projects/*/agent-transcripts` | JSONL; activity only, file-modification time |
+| GitHub Copilot CLI | `~/.copilot/session-state/*/events.jsonl` | Persisted activity events; tokens unavailable |
+| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db`, or `~/.local/share/opencode/opencode.db` | SQLite session/message/part tables |
+| Gemini CLI | `~/.gemini/tmp/*/chats/session-*.json{,l}` | Saved chats, with project registry/ownership-marker mapping |
 
-What each provider's local history supports:
+What the original native stores support (additional sources have their own fidelity labels below):
 
 | Measure | Claude Code | Codex | Cursor |
 | --- | --- | --- | --- |
@@ -175,6 +189,8 @@ What each provider's local history supports:
 | Reasoning effort | Recorded `effort` | `turn_context` effort | Unavailable |
 
 Per-source details, matching rules, and known gaps are in [docs/providers.md](docs/providers.md). Metric definitions are in [docs/metrics.md](docs/metrics.md).
+
+Cursor SDK runs are priced only for exact model IDs in the reviewed rate card. Conductor result summaries retain reported USD separately and never supplement an existing canonical session. Copilot and Cursor activity-only transcripts have no token or cost evidence. OpenCode uses retained step counters, with assistant snapshots as a fallback. Gemini counters include thinking in output; unknown models remain unpriced. Aggregate run summaries have no daily cost allocation, and file dates do not establish session starts or durations.
 
 ## Privacy model
 
@@ -220,7 +236,7 @@ Analysis runs in a child process with a capped heap, and Cursor's database is pa
 - **Codex cache writes are not recorded**, so Codex has an ordinary estimate and an upper estimate that charges the cache-write premium on all uncached input.
 - **Processed input repeats context.** Input totals count cached context every time a request processes it. They measure consumption, not unique text.
 - **Long-context premiums apply per request**, using the input size of that request, never the session or repository total.
-- **Cursor is reported, not repriced.** Cursor's value comes from its own local cost records. It is kept separate from API-equivalent figures and is not plotted by day because the local store has no per-call cost timestamps.
+- **Cost basis follows the evidence source.** Cursor's composer database and Conductor results retain provider-reported values. Cursor SDK run counters use reviewed API rates, with aggregate-context uncertainty labeled. Summary values are not allocated to days; activity-only evidence has no usage value.
 - **Sub-agent value is a lower bound.** It counts only usage with explicit sub-agent evidence.
 
 ## Use it from an agent

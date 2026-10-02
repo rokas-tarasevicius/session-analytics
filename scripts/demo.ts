@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { generateProviderDemo } from "./demo-providers.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -560,8 +561,10 @@ const cleanup = (): void => {
 };
 
 let sources: ReturnType<typeof generate>;
+let providerFlags: string[];
 try {
   sources = generate(root);
+  providerFlags = generateProviderDemo(root, repositorySpecs.map(({ name }) => ({ name, root: join(root, "repos", name) })), Date.now());
 } catch (error) {
   cleanup();
   throw error;
@@ -579,7 +582,7 @@ const sourceFlags = [
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,
   "--cursor-database", sources.cursorDatabase,
-  "--database", join(root, "conductor-not-present.db"),
+  ...providerFlags,
 ];
 const childArguments = reportMode
   ? [bin, "report", ...sourceFlags, ...(has("--json") ? ["--json"] : [])]

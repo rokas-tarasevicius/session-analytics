@@ -70,18 +70,20 @@ These rules apply to every change, including dashboard and documentation changes
 
 ## Adding a provider
 
-Provider support currently lives in `src/analyzer.ts`; the [roadmap](docs/roadmap.md#architecture-direction) moves it to one adapter per source. Until then, a new source needs:
+Provider adapters live in `src/providers/`; the host in `src/analyzer.ts` supplies shared repository assignment, pricing, and aggregation. A new source needs:
 
 1. **Discovery.** Default locations, profile handling if the tool supports several profiles, and an explicit override option added to `src/options.ts`, which gives both commands the flag and its `SESSION_ANALYTICS_*` environment variable. An explicit override must replace discovery so synthetic and narrowed scans never read real history.
 2. **Identity.** Read the provider's own session ID and working directory, and only accept a file whose recorded ID matches its name or key.
-3. **Parser.** Stream records and accumulate counters into the session state, then call `finalizeSession`. Decide and document the dedupe key for every counter (message IDs, call IDs, cumulative counters).
+3. **Parser.** Stream records and accumulate counters into an explicit allowlist projection. Decide and document the dedupe key for every counter (message IDs, call IDs, cumulative counters).
 4. **Cost basis.** Use the rate card when the provider records model IDs and token classes; otherwise use a provider-reported value on its own basis, or mark cost unavailable. Never guess a price.
 5. **Evidence labels.** Set `executionKind`, `skillEvidence`, and fidelity honestly. Missing data is `unavailable`, not zero.
-6. **Types and UI.** Extend `SessionProvider`, add a provider mark to `src/public/brands/` with an entry in its `NOTICE.md`, and add the provider to the dashboard filters.
+6. **Types and UI.** Extend `SessionProvider` and the dashboard provider registry. Prefer text labels for new providers; a vendor mark requires a license/provenance note in `src/public/brands/NOTICE.md`.
 7. **Fixtures and tests.** Add records in the provider's real shape to `test/fixtures.ts`, including sentinel content, and test counts, dedupe, cost, and the absence of content.
 8. **Docs.** Add a section to [docs/providers.md](docs/providers.md) and a column or row to the README's evidence table.
 
 Open a [provider support issue](https://github.com/rokas-tarasevicius/session-analytics/issues/new?template=provider_support.yml) first so the record format can be discussed with redacted samples.
+
+Provider implementations live in `src/providers/`. Implement `ProviderAdapter` (`discoverRoots`, `identify`, `analyze`), register the source in `src/providers/index.ts`, and inject pricing/repository assignment through the host. Keep raw IDs, paths, and source objects behind that boundary. Add explicit path options, primary-source schema references, synthetic sentinel fixtures, and fidelity/availability labels. Preserve native-provider outputs with parity fixtures when migrating a parser. Extend `scripts/demo-providers.ts` when adding a source so visual QA remains entirely synthetic.
 
 ## Rate-card changes
 

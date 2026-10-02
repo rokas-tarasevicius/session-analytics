@@ -76,6 +76,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
+      SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0",
       SESSION_ANALYTICS_CLAUDE_ROOT: fixture.claudeRoot,
       SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: fixture.codexArchiveRoot,
       SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,
@@ -137,6 +138,12 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const application = await fetch(`${origin}/app.js`);
     const applicationText = await application.text();
     assert.match(applicationText, /dataset\.providerFilter/);
+    const providerModule = await fetch(`${origin}/providers.js`);
+    assert.equal(providerModule.status, 200);
+    assert.match(providerModule.headers.get("content-type") ?? "", /javascript/);
+    assert.match(await providerModule.text(), /renderProviderEvidence/);
+    for (const provider of ["copilot", "opencode", "gemini"]) assert.ok(pageText.includes(`data-provider-filter="${provider}"`));
+    assert.match(pageText, /id="provider-evidence-rows"/);
     assert.match(applicationText, /renderDistributions/);
     assert.match(applicationText, /renderNamedDistribution/);
     assert.match(applicationText, /activityTooltip[\s\S]*pointerenter/);

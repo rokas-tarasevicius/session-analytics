@@ -1,4 +1,4 @@
-export type SessionProvider = "claude" | "codex" | "cursor";
+export type SessionProvider = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
 export type SkillEvidence = "explicit" | "inferred" | "unavailable";
@@ -83,6 +83,9 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  /** Present for added evidence sources; absence preserves the legacy provider contract. */
+  evidence?: ProviderEvidence;
+  conductor?: ConductorResultMetrics;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -203,6 +206,13 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
+  cursorSdkRoot?: string;
+  cursorTranscriptRoot?: string;
+  copilotRoot?: string;
+  opencodeDatabasePath?: string;
+  geminiRoot?: string;
+  /** Disable discovery of additional stores; explicit store options still apply. */
+  additionalProviders?: boolean;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;
@@ -214,4 +224,25 @@ export interface AnalyzeOptions {
   repositoryName?: string;
   repositoryRemote?: string;
   repositoryRoot?: string;
+}
+
+export interface ProviderEvidence {
+  source: "conductor-result" | "cursor-sdk" | "cursor-transcript" | "copilot-events" | "opencode-db" | "gemini-chat";
+  fidelity: "message" | "summary" | "activity-only";
+  tokens: "reported" | "unavailable";
+  tools: "observed" | "unavailable";
+  turns: "observed" | "unavailable";
+  timing: "provider" | "file-mtime";
+  usageUnit: "request" | "run" | "session" | "unavailable";
+}
+
+export type ConductorTerminalReason = "success" | "error_during_execution" | "error_max_turns" | "error_max_budget_usd" | "error_max_structured_output_retries" | "completed" | "cancelled" | "interrupted" | "unknown";
+export interface ConductorResultMetrics {
+  resultRecords: number;
+  reportedTurns: number | null;
+  durationMilliseconds: number | null;
+  apiDurationMilliseconds: number | null;
+  permissionDenials: number | null;
+  errorResults: number;
+  terminalReasons: Partial<Record<ConductorTerminalReason, number>>;
 }

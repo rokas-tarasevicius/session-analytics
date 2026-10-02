@@ -14,7 +14,7 @@ const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, "--port"]);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -105,6 +105,7 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
 const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
+  ["/providers.js", join(publicRoot, "providers.js")],
   ["/styles.css", join(publicRoot, "styles.css")],
   ["/fonts/space-grotesk-latin.woff2", join(publicRoot, "fonts", "space-grotesk-latin.woff2")],
   ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],

@@ -4,7 +4,7 @@ import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 
 const valueFlags = new Set(analysisValueFlags);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version", "--no-additional-providers"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -27,6 +27,7 @@ if (process.argv.includes("--help")) {
 Usage: ${brand.command} report [options]
 
 By default, unions all local Codex, Claude, and Cursor session evidence across the machine. Conductor metadata is optional enrichment and hidden metadata records are included.
+Also discovers Copilot CLI, OpenCode, Gemini CLI, Cursor SDK/transcript stores, and retained Conductor result summaries. Evidence fidelity is labeled.
 
 Options:
   --json                 Print the content-free snapshot as JSON
@@ -40,6 +41,12 @@ Options:
   --codex-archive-root PATH Override the archived Codex transcript root
   --claude-root PATH     Override the Claude transcript root
   --cursor-database PATH Override the Cursor local history database
+  --cursor-sdk-root PATH Override the Conductor Cursor SDK store
+  --cursor-transcript-root PATH Override Cursor's projects directory
+  --copilot-root PATH    Override Copilot's session-state directory
+  --opencode-database PATH Override the OpenCode SQLite database
+  --gemini-root PATH     Override Gemini's tmp directory
+  --no-additional-providers Disable new-source discovery (explicit paths still apply)
   --rate-card PATH       Override the reviewed rate card
   --version              Print the version
   --help                 Show this help
@@ -81,6 +88,10 @@ if (process.argv.includes("--json")) {
   process.stdout.write(
     `Sessions: ${analytics.summary.analyzedSessions}/${analytics.summary.sessions} analyzed\n`,
   );
+  const summarySessions = analytics.sessions.filter((session) => session.evidence?.fidelity === "summary").length;
+  const activitySessions = analytics.sessions.filter((session) => session.evidence?.fidelity === "activity-only").length;
+  const fileDates = analytics.sessions.filter((session) => session.evidence?.timing === "file-mtime").length;
+  if (summarySessions || activitySessions) process.stdout.write(`Evidence: ${summarySessions}/${analytics.summary.sessions} summary-only, ${activitySessions}/${analytics.summary.sessions} activity-only; ${fileDates} file-modification dates (start unknown). Unavailable metrics are N/A.\n`);
   process.stdout.write("\nRepository comparison\n");
   for (const repository of [...analytics.repositories].sort(
     (left, right) => right.summary.estimatedSpendUsd - left.summary.estimatedSpendUsd,
@@ -103,7 +114,7 @@ if (process.argv.includes("--json")) {
       `${compactNumber(analytics.summary.outputTokens)} output\n`,
   );
   process.stdout.write(
-    `Cache reads: ${(analytics.summary.cacheReadRatio * 100).toFixed(1)}%; ` +
+    `Cache reads: ${analytics.summary.totalInputTokens ? `${(analytics.summary.cacheReadRatio * 100).toFixed(1)}%` : "N/A"}; ` +
       `tools: ${compactNumber(analytics.summary.toolCalls)}; ` +
       `compactions: ${analytics.summary.compactions}\n`,
   );

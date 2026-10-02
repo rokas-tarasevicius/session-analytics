@@ -89,10 +89,13 @@
               <label class="provider-toggle"><input type="checkbox" data-provider-filter="codex" checked /><img src="/brands/codex.svg" alt="" />Codex</label>
               <label class="provider-toggle"><input type="checkbox" data-provider-filter="claude" checked /><img src="/brands/claude.svg" alt="" />Claude</label>
               <label class="provider-toggle"><input type="checkbox" data-provider-filter="cursor" checked /><img src="/brands/cursor.svg" alt="" />Cursor</label>
+              <label class="provider-toggle"><input type="checkbox" data-provider-filter="copilot" checked />Copilot CLI</label>
+              <label class="provider-toggle"><input type="checkbox" data-provider-filter="opencode" checked />OpenCode</label>
+              <label class="provider-toggle"><input type="checkbox" data-provider-filter="gemini" checked />Gemini CLI</label>
             </div>
           </header>
           <div class="line-chart" id="daily-spend"></div>
-          <p class="chart-note">Codex and Claude use reviewed API list-price equivalents. Cursor totals use its provider-reported local cost record, but Cursor is not plotted by day because the local store has no per-call cost timestamps. None of these values proves an amount charged.</p>
+          <p class="chart-note">Daily values require a reviewed model rate and request timestamps. Cursor SDK and Conductor result summaries remain in totals, without daily allocation. Activity-only evidence has no usage value. API-equivalent value is not an invoice.</p>
         </article>
         <article class="panel span-4">
           <header><div><p class="kicker">PROVIDER MIX</p><h2>Session share</h2></div></header>
@@ -120,6 +123,12 @@
         </article>
       </section>
 
+      <section class="comparison-section" id="provider-evidence" aria-labelledby="provider-evidence-title">
+        <header class="section-header"><div><p class="kicker">EVIDENCE COVERAGE</p><h2 id="provider-evidence-title">What the local history can tell you</h2></div></header>
+        <p class="chart-note">Coverage is sessions with evidence / selected sessions. Summary and activity-only sources cannot establish all metrics. Unavailable is N/A, never zero activity. Counts do not prove success or quality.</p>
+        <div class="table-wrap"><table><thead><tr><th>Provider</th><th>Source</th><th>Fidelity</th><th>Sessions</th><th>Token evidence</th><th>Tool evidence</th><th>Time basis</th></tr></thead><tbody id="provider-evidence-rows"></tbody></table></div>
+      </section>
+
       <section class="comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
         <header class="section-header"><div><p class="kicker">FLEET COMPARISON</p><h2 id="comparison-title">Every repository, one ledger</h2></div></header>
         <div class="table-wrap"><table><thead><tr><th>Repository</th><th>Sessions</th><th>Usage value</th><th>Input</th><th>Output</th><th>Tools</th><th>Cache</th><th>Coverage</th></tr></thead><tbody id="repository-rows"></tbody></table></div>
@@ -127,7 +136,7 @@
       </div>
 
       <section class="analytics-view" data-view-panel="distributions" hidden aria-labelledby="distributions-title">
-        <header class="view-header"><div><p class="kicker">COMPARE REPOSITORIES</p><h2 id="distributions-title">Distributions</h2><p>Each line is normalized to the share of sessions in its repository.</p></div></header>
+        <header class="view-header"><div><p class="kicker">COMPARE REPOSITORIES</p><h2 id="distributions-title">Distributions</h2><p>Each line is normalized to eligible sessions in its repository; unavailable metrics are excluded. Session duration needs a baseline for the same repository and task.</p></div></header>
         <fieldset class="compare-repositories"><legend>Repositories to compare · up to 6</legend><div id="distribution-repository-options"></div></fieldset>
         <div class="comparison-key" id="distribution-key"></div>
         <div class="view-grid">
@@ -139,7 +148,7 @@
       </section>
 
       <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
-        <header class="view-header"><div><p class="kicker">SESSION STARTS</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour.</p></div><div class="provider-key" id="activity-provider-filters"></div></header>
+        <header class="view-header"><div><p class="kicker">SESSION STARTS</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour.</p><p id="activity-evidence" class="chart-note"></p></div><div class="provider-key" id="activity-provider-filters"></div></header>
         <article class="panel activity-panel"><div class="activity-heatmap" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
         <div class="heatmap-tooltip" id="activity-tooltip" role="tooltip" hidden></div>
         <article class="panel activity-repositories"><header><div><p class="kicker">REPOSITORIES</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list cyan" id="activity-repositories"></div></article>

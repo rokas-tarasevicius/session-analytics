@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Provider adapters with a Claude Code migration protected by a complete synthetic-session parity fixture.
+- Conductor SDK result fallback for sessions whose canonical evidence is gone, with separate provider-reported value and explicit summary fidelity.
+- Cursor SDK run usage and tool events, Cursor activity-only transcripts, Copilot CLI activity events, OpenCode SQLite history, and Gemini JSON/JSONL chats. Each source has an explicit path override and privacy fixtures.
+- Provider filters for Copilot CLI, OpenCode, and Gemini CLI, plus a dashboard evidence coverage table. File-modification dates are labeled and excluded from the session-start heatmap.
+- Synthetic demo examples of every new evidence source; no runtime dependencies or rate-card changes.
+
+### Changed
+
+- Sessions with unavailable token evidence are no longer described as missing a model price. Unknown observed models still reduce pricing coverage.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

@@ -13,6 +13,10 @@
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/providers/adapter.ts` | Private adapter contract: discover roots, identify sessions, analyze into the public allowlist. |
+| `src/providers/claude.ts` | Existing Claude parser behind the adapter; shared state and pricing are injected by the analyzer. |
+| `src/providers/` | Additional-source registry, bounded readers and projection, Cursor SDK/transcripts, Copilot, OpenCode, Gemini, and Conductor result fallback. |
+| `src/public/providers.js` | Provider labels, daily series, and source-specific evidence coverage. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
@@ -41,14 +45,14 @@ The Cursor pass runs and serializes before the Claude and Codex pass starts, so 
 
 ## Pipeline
 
-1. **Load the rate card.** `data/rate-cards.json`, or `--rate-card`, is validated: USD currency, an ISO effective date, non-negative rates, a provider of `claude` or `codex`, and a source for every model.
+1. **Load the rate card.** `data/rate-cards.json`, or `--rate-card`, is validated: USD currency, an ISO effective date, non-negative rates, a supported provider, and a source for every model.
 2. **Open optional metadata.** If the Conductor database exists, it is opened read-only and its repositories, workspaces, and sessions are loaded. A missing database is normal.
 3. **Cursor pass.** In the Cursor child, every `composerData:*` record is read with its `bubbleId:*` records, composer headers map composers to workspaces, and each composer becomes a session assigned to a repository.
 4. **Discover provider roots.** Claude Code and Codex roots are collected across profiles (see [providers.md](providers.md)), then deduplicated by resolved real path. An explicit root option replaces discovery for that provider.
 5. **Index transcripts.** Each root is walked for transcript files, keyed by the session UUID in the file name. Claude sub-agent files and audit logs are excluded from the index; they are read later as part of their parent session.
 6. **Validate identity.** For each indexed session, the first records are read to find the provider's own session ID and working directory. A file is a candidate only when the recorded ID matches the file name and a working directory is present.
 7. **Build the Codex counter ledger.** Every Codex candidate is pre-scanned to decide which file owns each cumulative token snapshot (see [Deduplication](#deduplication)).
-8. **Match orchestrator records.** Conductor sessions are matched to candidates by provider session ID and validated working directory. Legacy rows without a provider ID are recovered only when exactly one candidate shares the provider and working directory and started within 15 minutes. Rows without validated evidence are dropped rather than counted as empty sessions.
+8. **Match orchestrator records.** Conductor sessions are matched to candidates by provider session ID and validated working directory. Legacy rows without a provider ID are recovered only when exactly one candidate shares the provider and working directory and started within 15 minutes. After canonical sources, unmatched rows can contribute retained SDK result summaries. Rows without either kind of evidence are dropped.
 9. **Assign repositories.** Every remaining candidate is assigned to a repository from its working directory (see [Repository assignment](#repository-assignment)).
 10. **Parse and price.** Provider parsers stream each file line by line and accumulate counters. Each request is priced as it is added, so long-context modifiers use that request's input size.
 11. **Aggregate.** Sessions roll up into repository summaries, then into the machine snapshot. Any repository filter is applied here.
@@ -111,4 +115,14 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 
 ## Planned changes
 
-The roadmap moves the analyzer toward per-source adapters, a normalized event model, and a persistent content-free SQLite index with incremental ingest, so launches no longer rescan unchanged files. See [roadmap.md](roadmap.md).
+The remaining native parsers can move behind the adapter boundary introduced below. A normalized event model and a persistent content-free SQLite index with incremental ingest remain planned, so launches no longer rescan unchanged files. See [roadmap.md](roadmap.md).
+
+## Provider adapter boundary
+
+`ProviderAdapter<Session, Context>` owns `discoverRoots`, `identify`, and `analyze`. Session identity, working directory, source path, and opaque project grouping keys are private worker data. Only `SessionAnalytics` crosses the public boundary. The host supplies repository assignment and the existing pricing function; adapters do not fetch rates, run provider CLIs, or write provider stores. Claude retains its mature mutable-state/finalizer implementation through injected callbacks; a saved five-session fixture checks the complete legacy projection after migration.
+
+Additional adapters run sequentially after the original stores. For the same Cursor ID, composer evidence wins over SDK runs, and SDK runs win over activity-only transcripts. Identity matching is exact; tools or tokens from copies are never added together. Conductor results run last and cannot supplement any canonical provider identity or uniquely recovered legacy session. Distinct SDK result UUIDs are counted once, including duplicate database envelopes; rows without provider IDs can use the result's own identity to suppress copies.
+
+New JSONL readers release streams on early identity exit and retain only projected data. Recursive discovery does not follow child symlinks and is limited to eight directory levels. Legacy monolithic Gemini JSON is limited to 32 MiB, with JSONL available for larger histories. Source failures produce fixed warnings, retain successfully read sessions, and do not echo exceptions. All SQLite connections use `readOnly: true` and close in `finally` blocks. A missing new store is normal; a present unsupported store emits a fixed warning.
+
+Gemini maps a provider project hash through known repository/workspace paths, `projects.json`, or `.project_root`; Cursor's encoded project directory is matched only to an unambiguous known path. Unresolved projects receive a pseudonymous unassigned group. The code never guesses a filesystem path by reversing an encoded folder name.

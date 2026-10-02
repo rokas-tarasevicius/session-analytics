@@ -16,10 +16,11 @@ Status: `[x]` shipped, `[ ]` not yet shipped. Milestones are not dated.
 - [x] Codex: count turns, messages, and compactions from `item_completed` items and top-level `compacted` records.
 - [ ] Codex: parse `token_usage_record` events and the paginated rollout format.
 - [x] Cursor: read workspace and sub-agent mappings from the `composerHeaders` table.
-- [ ] Cursor: read agent CLI transcripts and sessions run through Conductor's Cursor integration.
-- [ ] Conductor: use per-session result records as fallback evidence when a provider transcript has been deleted.
+- [x] Cursor: read agent CLI transcripts and sessions run through Conductor's Cursor integration, with source-specific fidelity.
+- [x] Conductor: use per-session result records as fallback evidence when a provider transcript has been deleted.
 - [x] Regression tests for streamed Claude usage, current Codex rollouts, profile discovery, and Cursor headers.
 - [ ] Golden-fixture parity tests for each supported provider format version.
+- [x] Provider adapter interface and exact synthetic legacy-session parity for the Claude migration.
 - [ ] Reconciliation report: compare computed totals with provider-reported totals where they exist.
 - [ ] Persistent content-free index with incremental ingest (per-file path, size, modification time, and offset watermarks), so launches stop rescanning unchanged history.
 
@@ -92,7 +93,9 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 
 ## M4: Breadth and export
 
-- [ ] More agents, driven by demand: GitHub Copilot CLI, OpenCode, Gemini CLI, Pi, Grok, Goose, and Cline.
+- [x] GitHub Copilot CLI persisted activity events, OpenCode SQLite history, and Gemini JSON/JSONL saved chats, verified against primary sources.
+- [ ] Copilot persisted shutdown usage calibration; additional OpenCode schema generations and older JSON-directory storage.
+- [ ] More agents, driven by demand: Pi, Grok, Goose, and Cline.
 - [ ] OpenTelemetry GenAI export (pinned to a specification commit while the specification is in development), so sessions can be sent to existing observability backends.
 - [ ] Team mode, later: content-free aggregates, pseudonymized repositories, k-anonymity thresholds, and a preview of exactly what leaves the machine before anything is shared.
 

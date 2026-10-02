@@ -1,3 +1,5 @@
+import { providerIds, providerLabels, providerColors, providerMark, renderProviderEvidence, dailySpendByProvider } from "./providers.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -44,9 +46,9 @@ let toolsDetailRepositoryId = null;
 let skillsDetailRepositoryId = null;
 const distributionRepositories = new Set();
 const viewProviderFilters = {
-  activity: new Set(["codex", "claude", "cursor"]),
-  skills: new Set(["codex", "claude", "cursor"]),
-  tools: new Set(["codex", "claude", "cursor"]),
+  activity: new Set(providerIds),
+  skills: new Set(providerIds),
+  tools: new Set(providerIds),
 };
 const seriesColors = ["#181a16", "#c85b45", "#2d6a5a", "#9a6329", "#49697a", "#786f93"];
 const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
@@ -113,7 +115,7 @@ function summarize(sessions) {
     summary.subagentSpendUsd += session.costByExecution?.subagentUsd || 0;
     summary.topLevelSpendUsd += session.costByExecution?.topLevelUsd || 0;
     summary.totalInputTokens += session.tokens.inputTokens; summary.outputTokens += session.tokens.outputTokens;
-    summary.unpricedSessions += session.costComplete ? 0 : 1;
+    summary.unpricedSessions += !session.costComplete && session.pricedTokenCoverage !== null ? 1 : 0;
     for (const key of Object.keys(totals)) totals[key] += session.tokens[key] || 0;
     const count = session.tokens.inputTokens + session.tokens.outputTokens;
     if (session.pricedTokenCoverage !== null) {
@@ -148,10 +150,14 @@ function spendDays(sessions) { return namedTotals(sessions, "spendByDay").sort((
 function coverageWarnings(sessions) {
   const missing = sessions.filter(({ transcript }) => transcript.status === "missing");
   const legacy = missing.filter(({ transcript }) => transcript.warnings.includes("Conductor has no provider session ID.")).length;
-  const unmatched = missing.length - legacy, unpriced = sessions.filter(({ costComplete }) => !costComplete).length;
+  const unmatched = missing.length - legacy, unpriced = sessions.filter(({ costComplete, pricedTokenCoverage }) => !costComplete && pricedTokenCoverage !== null).length;
   const warnings = [];
   if (legacy) warnings.push(`${legacy} legacy session${legacy === 1 ? "" : "s"} cannot be correlated because Conductor recorded no provider session ID.`);
   if (unmatched) warnings.push(`${unmatched} session${unmatched === 1 ? "" : "s"} have a provider ID but no validated local transcript.`);
+  const activityOnly = sessions.filter((s) => s.evidence?.tokens === "unavailable").length;
+  const summaries = sessions.filter((s) => s.evidence?.fidelity === "summary").length;
+  if (activityOnly) warnings.push(`${activityOnly}/${sessions.length} sessions have no token evidence; their usage value is unavailable, not zero.`);
+  if (summaries) warnings.push(`${summaries}/${sessions.length} sessions use summary evidence with no per-request daily cost attribution. See evidence coverage below.`);
   if (unpriced) warnings.push(`${unpriced} session${unpriced === 1 ? "" : "s"} include models without a rate card.`);
   return warnings;
 }
@@ -231,10 +237,10 @@ function sessionsForProviders(sessions, scope) {
 
 function renderViewProviderFilters(container, scope) {
   clear(container);
-  for (const provider of ["codex", "claude", "cursor"]) {
+  for (const provider of providerIds) {
     const label = node("label", null, "provider-toggle");
     const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider);
-    const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
+    const logo = providerMark(provider);
     input.addEventListener("change", () => {
       if (input.checked) viewProviderFilters[scope].add(provider);
       else viewProviderFilters[scope].delete(provider);
@@ -354,16 +360,18 @@ function renderDistributions() {
     const key = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", repositoryColor(item.id));
     key.append(swatch, document.createTextNode(`${item.name} · ${item.sessions.length}`)); elements.distributionKey.append(key);
   }
-  renderDistributionChart(elements.distributionDuration, series, ({ metrics }) => metrics.durationMilliseconds / 60_000, (value) => `${Math.round(value)}m`, true);
+  renderDistributionChart(elements.distributionDuration, series, ({ metrics, evidence }) => evidence?.timing === "file-mtime" ? null : metrics.durationMilliseconds / 60_000, (value) => `${Math.round(value)}m`, true);
   renderDistributionChart(elements.distributionCost, series, (session) => session.costBasis === "api-list-price-equivalent" ? session.cost.totalUsd : null, (value) => money(value), true);
-  renderDistributionChart(elements.distributionTools, series, ({ metrics }) => metrics.toolCalls, (value) => integer.format(value), true);
-  renderDistributionChart(elements.distributionCompactions, series, ({ metrics }) => metrics.compactions, (value) => integer.format(value));
+  renderDistributionChart(elements.distributionTools, series, ({ metrics, evidence }) => evidence?.tools === "unavailable" ? null : metrics.toolCalls, (value) => integer.format(value), true);
+  renderDistributionChart(elements.distributionCompactions, series, ({ metrics, evidence }) => evidence && ["conductor-result", "cursor-sdk", "cursor-transcript", "gemini-chat"].includes(evidence.source) ? null : metrics.compactions, (value) => integer.format(value));
 }
 
 function renderActivity(view) {
   renderViewProviderFilters(elements.activityProviderFilters, "activity");
   elements.activityTooltip.hidden = true;
-  const sessions = sessionsForProviders(view.sessions, "activity");
+  const eligible = sessionsForProviders(view.sessions, "activity");
+  const sessions = eligible.filter((s) => s.evidence?.timing !== "file-mtime");
+  $("#activity-evidence").textContent = `${sessions.length}/${eligible.length} sessions have provider start timestamps. File modification dates are excluded.`;
   const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
   for (const session of sessions) {
     const date = new Date(session.createdAt); if (Number.isNaN(date.valueOf())) continue;
@@ -469,7 +477,7 @@ function renderCosts(view) {
   const cost = costTotals(view.sessions);
   elements.costApiTotal.textContent = money(cost.total); elements.costUpperTotal.textContent = money(cost.upper);
   elements.costProviderTotal.textContent = money(cost.reported); elements.costCoverage.textContent = percent(view.summary.pricedTokenCoverage);
-  renderCostRows(elements.providerCostComponents, ["codex", "claude", "cursor"].map((provider) => ({
+  renderCostRows(elements.providerCostComponents, providerIds.map((provider) => ({
     name: providerLabels[provider], cost: costTotals(view.sessions.filter((session) => session.provider === provider)),
   })));
   renderCostRows(elements.repositoryCostComponents, view.repositories.map(({ repository }) => ({
@@ -490,18 +498,19 @@ function renderModels(view) {
     output: { format: (value) => `${compact.format(value)} tokens`, value: (model) => model.outputTokens },
     value: { format: money, value: (model) => model.totalUsd },
   }[modelMetric];
-  for (const provider of ["codex", "claude", "cursor"]) {
+  for (const provider of providerIds) {
     const providerModels = models.filter((model) => model.provider === provider);
     if (providerModels.length === 0) continue;
-    const group = node("section", null, "provider-model-group"); group.style.setProperty("--provider-color", `var(--${provider})`);
+    const group = node("section", null, "provider-model-group"); group.style.setProperty("--provider-color", providerColors[provider]);
     const header = node("header"); const title = node("div");
     title.append(node("h2", providerLabels[provider]), node("div", `${sessions.filter((session) => session.provider === provider).length} sessions`));
-    header.append(title, node("span", provider === "cursor" ? "Provider-reported value" : "API-equivalent value", "pill")); group.append(header);
+    const bases = new Set(sessions.filter((s) => s.provider === provider).map((s) => s.costBasis));
+    header.append(title, node("span", bases.has("provider-reported") ? bases.has("api-list-price-equivalent") ? "API-equivalent + reported" : "Provider-reported value" : "API-equivalent value", "pill")); group.append(header);
     const maximum = Math.max(1, ...providerModels.map(metric.value));
     for (const model of providerModels.sort((left, right) => metric.value(right) - metric.value(left))) {
       const row = node("div", null, "model-row"); row.append(node("span", model.model));
       const track = node("div", null, "model-track"), fill = node("i"); fill.style.width = `${Math.max(1, (metric.value(model) / maximum) * 100)}%`; track.append(fill);
-      const suffix = `${metric.format(metric.value(model))} · ${sessionsPerModel.get(`${provider}:${model.model}`) || 0} sessions${provider === "cursor" || model.priced ? "" : " · unpriced"}`;
+      const suffix = `${metric.format(metric.value(model))} · ${sessionsPerModel.get(`${provider}:${model.model}`) || 0} sessions${model.priced ? "" : " · unpriced"}`;
       row.append(track, node("strong", suffix)); group.append(row);
     }
     elements.modelsByProvider.append(group);
@@ -593,28 +602,13 @@ function renderActiveAnalyticsView(view) {
 }
 
 function dailyProviderSpend(sessions) {
-  const days = new Map();
-  const first = new Date(`${elements.windowStart.value}T00:00:00Z`), last = new Date(`${elements.windowEnd.value}T00:00:00Z`);
-  for (let day = first, count = 0; day <= last && count < 3660; day = new Date(day.valueOf() + 86_400_000), count += 1) {
-    const name = day.toISOString().slice(0, 10);
-    days.set(name, { name, codex: 0, claude: 0, cursor: 0 });
-  }
-  for (const session of sessions) {
-    for (const [day, value] of Object.entries(session.spendByDay)) {
-      if (day < elements.windowStart.value || day > elements.windowEnd.value) continue;
-      const current = days.get(day) || { name: day, codex: 0, claude: 0, cursor: 0 };
-      current[session.provider] += value;
-      days.set(day, current);
-    }
-  }
-  return [...days.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return dailySpendByProvider(sessions, elements.windowStart.value, elements.windowEnd.value);
 }
 
 function activeProviders() {
   return providerFilters.filter(({ checked }) => checked).map(({ dataset }) => dataset.providerFilter);
 }
 
-const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" };
 
 function renderLine(items) {
   clear(elements.dailySpend);
@@ -624,7 +618,7 @@ function renderLine(items) {
     const message = !selectedProviders.length
       ? "Choose at least one provider."
       : selectedProviders.length === 1 && selectedProviders[0] === "cursor"
-        ? "Cursor has no trustworthy daily cost timestamps in the local store; its provider-reported total remains in the usage-value summaries."
+        ? "Cursor database and SDK summaries have no per-request cost times; their values remain in the usage summaries."
         : "No daily priced activity in this view.";
     elements.dailySpend.append(node("p", message, "muted")); return;
   }
@@ -696,16 +690,20 @@ function renderLine(items) {
 }
 
 function renderDonut(sessions) {
-  const counts = { codex: 0, claude: 0, cursor: 0 };
+  const counts = Object.fromEntries(providerIds.map((provider) => [provider, 0]));
   for (const session of sessions) counts[session.provider] = (counts[session.provider] || 0) + 1;
-  const total = sessions.length || 1, codex = (counts.codex / total) * 100, claude = codex + (counts.claude / total) * 100;
-  elements.providerDonut.style.background = `conic-gradient(var(--codex) 0 ${codex}%, var(--claude) ${codex}% ${claude}%, var(--cursor) ${claude}% 100%)`;
+  let position = 0;
+  const segments = providerIds.map((provider) => {
+    const start = position; position += counts[provider] / (sessions.length || 1) * 100;
+    return `${providerColors[provider]} ${start}% ${position}%`;
+  });
+  elements.providerDonut.style.background = sessions.length ? `conic-gradient(${segments.join(", ")})` : "var(--surface-2)";
   elements.providerDonut.dataset.label = String(sessions.length);
   clear(elements.providerLegend);
-  [["Codex", counts.codex, "codex"], ["Claude", counts.claude, "claude"], ["Cursor", counts.cursor, "cursor"]].forEach(([label, value, provider]) => {
-    const row = node("div", null, "legend-row"); const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
-    row.append(logo, node("span", label), node("strong", String(value))); elements.providerLegend.append(row);
-  });
+  for (const provider of providerIds) {
+    const row = node("div", null, "legend-row");
+    row.append(providerMark(provider), node("span", providerLabels[provider]), node("strong", String(counts[provider]))); elements.providerLegend.append(row);
+  }
 }
 
 function tableCell(primary, secondary, className) {
@@ -785,7 +783,7 @@ function windowCaption() {
 
 function renderSharedView(view) {
   const selected = selectedRepository(); const summary = view.summary;
-  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.`;
+  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions dated during ${windowCaption()}; evidence coverage identifies file dates.`;
 }
 
 function renderSummary(view) {
@@ -802,6 +800,7 @@ function renderSummary(view) {
   renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
   renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.subagentSpendUsd })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
   renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
+  renderProviderEvidence($("#provider-evidence-rows"), view.sessions);
 }
 
 function renderView() {

@@ -6,6 +6,11 @@ const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
   ["codexArchiveRoot", "--codex-archive-root", "CODEX_ARCHIVE_ROOT"],
   ["codexRoot", "--codex-root", "CODEX_ROOT"],
   ["cursorDatabasePath", "--cursor-database", "CURSOR_DATABASE"],
+  ["cursorSdkRoot", "--cursor-sdk-root", "CURSOR_SDK_ROOT"],
+  ["cursorTranscriptRoot", "--cursor-transcript-root", "CURSOR_TRANSCRIPT_ROOT"],
+  ["copilotRoot", "--copilot-root", "COPILOT_ROOT"],
+  ["opencodeDatabasePath", "--opencode-database", "OPENCODE_DATABASE"],
+  ["geminiRoot", "--gemini-root", "GEMINI_ROOT"],
   ["databasePath", "--database", "CONDUCTOR_DATABASE"],
   ["rateCardPath", "--rate-card", "RATE_CARD"],
   ["repositoryId", "--repo-id", "REPO_ID"],
@@ -33,6 +38,7 @@ export function setting(
 
 export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): AnalyzeOptions {
   const options: AnalyzeOptions = { includeHidden: !argv.includes("--exclude-hidden") };
+  if (argv.includes("--no-additional-providers") || environment["SESSION_ANALYTICS_ADDITIONAL_PROVIDERS"] === "0") options.additionalProviders = false;
   for (const [property, flag, variable] of analysisSettings) {
     const value = setting(argv, environment, flag, variable);
     if (value) options[property] = value as never;
