@@ -1,0 +1,94 @@
+name: Bug report
+description: Something is broken, or a number looks wrong.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not paste transcripts, prompts, file paths, repository names you consider private, credentials, or JSON snapshots of your own history.** Reproduce with `npm run demo` or a minimal hand-written fixture where you can.
+
+        Security problems, including any content leaking into an output, belong in a [private vulnerability report](https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands and options you ran. Does it reproduce with `npm run demo`?
+      placeholder: |
+        1. session-analytics report --repo-name example
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      multiple: true
+      options:
+        - Dashboard
+        - Terminal report
+        - JSON snapshot
+        - Agent skill
+        - Demo
+    validations:
+      required: true
+  - type: dropdown
+    id: providers
+    attributes:
+      label: Providers involved
+      multiple: true
+      options:
+        - Claude Code
+        - Claude Desktop local agents
+        - Codex
+        - Cursor
+        - Conductor metadata
+        - Not provider-specific
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Wrong or missing number (tokens, cost, counts)
+        - Missing or misassigned sessions or repositories
+        - Crash or error message
+        - Dashboard display
+        - Installation or command line
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `session-analytics --version`.
+      placeholder: 0.5.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and version, Node.js version (`node --version`), and provider CLI versions if relevant.
+      placeholder: macOS 26.0, Node 24.18.0, Claude Code 2.x, Codex 0.x
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional details
+      description: Warnings from the dashboard or report, redacted record shapes (field names with values replaced), or screenshots of the demo.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: This report contains no transcript content, file paths, credentials, or private repository names.
+          required: true

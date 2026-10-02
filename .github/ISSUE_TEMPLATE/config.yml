@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue.
+  - name: Security policy
+    url: https://github.com/rokas-tarasevicius/session-analytics/blob/master/SECURITY.md
+    about: Supported versions and the threat model.

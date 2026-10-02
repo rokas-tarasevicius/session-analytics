@@ -41,6 +41,7 @@
   "scripts": {
     "start": "node bin/session-analytics.ts",
     "report": "node bin/session-analytics.ts report",
+    "demo": "node scripts/demo.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test"

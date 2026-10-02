@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 128" width="680" height="128" role="img" aria-label="session-analytics">
+  <title>session-analytics</title>
+  <rect x="4.75" y="4.75" width="118.5" height="118.5" rx="27.25" fill="#181a16" stroke="#3a3d36" stroke-width="1.5"/>
+  <path d="M30 46v36a8 8 0 0 0 8 8h14M30 56a8 8 0 0 0 8 8" fill="none" stroke="#62665c" stroke-width="4" stroke-linecap="round"/>
+  <rect x="22" y="30" width="84" height="16" rx="8" fill="#d66b55"/>
+  <rect x="44" y="56" width="46" height="16" rx="8" fill="#7eb7a7"/>
+  <rect x="58" y="82" width="48" height="16" rx="8" fill="#d4aa70"/>
+  <text x="156" y="86" textLength="494" lengthAdjust="spacingAndGlyphs" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="64" font-weight="600" letter-spacing="-1.2" fill="#f0efe9">session<tspan fill="#6f7268">-</tspan><tspan fill="#d66b55">analytics</tspan></text>
+</svg>

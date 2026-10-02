@@ -1,0 +1,73 @@
+name: Provider support
+description: Request support for a coding agent, or report a changed history format.
+title: "provider: "
+labels: [provider]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A provider adapter needs to know where the agent stores history and which fields carry counters. **Describe structure only.** Replace every value that could be content (prompts, messages, paths, commands, IDs) with a placeholder such as `"<redacted>"` before posting.
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      placeholder: Gemini CLI 1.2.3
+    validations:
+      required: true
+  - type: dropdown
+    id: request
+    attributes:
+      label: Request type
+      options:
+        - New provider
+        - Changed format for a supported provider
+        - Missing data from a supported provider
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 26.0
+    validations:
+      required: true
+  - type: textarea
+    id: location
+    attributes:
+      label: Where history is stored
+      description: Location pattern relative to your home directory, file naming, and format (JSONL, JSON, SQLite).
+      placeholder: "~/.example/sessions/<date>/<session-id>.jsonl"
+    validations:
+      required: true
+  - type: checkboxes
+    id: available
+    attributes:
+      label: What the history records
+      options:
+        - label: Session ID and working directory
+        - label: Model ID per request
+        - label: Token counters (input, cached input, cache writes, output, reasoning)
+        - label: A provider-computed cost
+        - label: Tool calls with names and IDs
+        - label: Skill or slash-command invocations
+        - label: Compactions or context resets
+        - label: Sub-agent or delegated sessions
+  - type: textarea
+    id: shape
+    attributes:
+      label: Redacted record shape
+      description: One or two records with field names kept and every value that could be content replaced. Keep numbers if they are plain counters.
+      render: json
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I can help test or write the adapter.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: The samples above contain no prompts, messages, paths, commands, IDs, or credentials.
+          required: true

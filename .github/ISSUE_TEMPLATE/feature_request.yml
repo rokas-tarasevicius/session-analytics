@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest a metric, view, or workflow.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/roadmap.md) first; your idea may already be planned. New provider support has its own template.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What question about your agent usage can you not answer today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The metric, view, or option you have in mind, and how you would use it.
+    validations:
+      required: true
+  - type: dropdown
+    id: privacy-tier
+    attributes:
+      label: Data it needs
+      description: See the [privacy tiers](https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/privacy.md#privacy-tiers).
+      options:
+        - Counters, timestamps, names, or model IDs only (P0)
+        - Pseudonymous keys or hashed paths and arguments (P1)
+        - Local rules over commands or diffs, with only counts leaving the parser (P2, opt-in)
+        - Text shown to me or sent to an LLM (P3, opt-in)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Dashboard
+        - Terminal report or JSON
+        - Agent skill or MCP
+        - Accounting and pricing
+        - Tool reliability
+        - Outcomes (commits, pull requests)
+        - Other
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds or other tools you have tried.
