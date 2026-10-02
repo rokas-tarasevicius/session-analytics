@@ -59,7 +59,7 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
 - **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
-- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
+- **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, offline by default, no telemetry, and read-only access to every store. OTLP delivery requires an explicit export flag.
 
 <table>
   <tr>
@@ -124,7 +124,22 @@ session-analytics report --json > snapshot.json
 jq '.repositories[] | {name: .repository.name, usd: .summary.estimatedSpendUsd}' snapshot.json
 ```
 
-The snapshot has the same shape as the dashboard's `/api/analytics` response. Every field is described in the [field manifest](docs/privacy.md#field-manifest).
+The snapshot has the same shape as the dashboard's `/api/analytics` response and carries `schemaVersion: 1`, validated by the [published JSON Schema](schemas/snapshot.v1.schema.json). Every field is described in the [field manifest](docs/privacy.md#field-manifest).
+
+### Exports and team sharing
+
+```bash
+session-analytics export --format csv --out ./exports
+session-analytics export --format ndjson --out ./ndjson
+session-analytics export --format otlp-json --out ./otlp
+session-analytics report --share > shared.json  # exact local preview; sends nothing
+session-analytics merge alice-shared.json bob-shared.json --out team.json
+session-analytics --snapshot team.json --no-open
+```
+
+CSV exports sessions, daily value, models, and tools. **Export view** in the dashboard downloads the filtered JSON or CSV locally. `report --share` removes session details, uses keyed repository pseudonyms or explicit aliases, and suppresses repository buckets with fewer than five distinct sessions by default. This threshold counts sessions, not people, and does not guarantee anonymity. Merge rejects repeated contributing sources. A full or shared snapshot can be opened without scanning provider history.
+
+See [schemas, exports, and sharing](docs/interop.md) for field definitions, aliases, threshold controls, the pinned OpenTelemetry mapping, and optional `--otlp-endpoint` delivery. Export files never overwrite existing files; network delivery happens only with that explicit flag.
 
 ### Options
 
@@ -132,7 +147,9 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 | --- | --- | --- |
 | `--no-open` | dashboard | Start the server without opening a browser. |
 | `--port PORT` | dashboard | Loopback port, 1024 to 65535. Default `4174`, or `CONDUCTOR_PORT + 4` inside a Conductor workspace. |
-| `--json` | report | Print the content-free snapshot as JSON. |
+| `--json` | report | Print the versioned content-free snapshot as JSON. |
+| `--share` | report | Preview aggregate-only JSON with pseudonymized repositories and a minimum of five sessions per bucket. |
+| `--snapshot FILE` | dashboard, report, export | Read a validated snapshot file instead of scanning provider stores. |
 | `--repo-name NAME` | both | Narrow to one uniquely named repository. |
 | `--repo-root PATH` | both | Narrow to the repository whose canonical root is `PATH`. |
 | `--repo-remote URL` | both | Narrow by Git remote. Remotes are known only for repositories registered in Conductor. |
@@ -247,7 +264,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 - **M1, reliability and economics:** tool error rates and latency, loop and churn flags, MCP server health, permission friction, rate-limit headroom, cache-break causes, and context fill.
 - **M2, outcomes and interaction:** evidence-ranked links from sessions to commits and pull requests, cost per merged change, autonomy and interruption measures, and concurrency.
 - **M3, agent-facing:** a metrics-only MCP server so agents can check budget, tool reliability, and hotspots without seeing transcript text, plus opt-in, off-by-default review features.
-- **M4, breadth and export:** more agents and OpenTelemetry GenAI export.
+- **M4, breadth and export:** versioned snapshots, CSV/NDJSON/OTLP exports, and aggregate sharing are available; more agents remain planned.
 
 Features that need content (local rules over commands, or an LLM review of selected sessions) will always be opt-in, off by default, and labeled. See [docs/roadmap.md](docs/roadmap.md) for the checklists.
 

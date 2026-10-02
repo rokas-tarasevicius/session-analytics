@@ -13,6 +13,9 @@
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/interop/` | Validated snapshot IO, sharing/merge, private file export, and explicit opt-in OTLP delivery. No additional provider parsing. |
+| `schemas/`, `scripts/snapshot-schema.ts` | Published v1 schemas and exhaustive TypeScript-checked field maps. |
+| `src/public/export-data.js`, `export-menu.js`, `shared-view.js` | Shared pure CSV/filter helpers, local browser downloads, and aggregate-only snapshot view. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
@@ -112,3 +115,7 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 ## Planned changes
 
 The roadmap moves the analyzer toward per-source adapters, a normalized event model, and a persistent content-free SQLite index with incremental ingest, so launches no longer rescan unchanged files. See [roadmap.md](roadmap.md).
+
+## Interchange boundary
+
+Full and shared snapshots have separate closed schemas. `--snapshot` bypasses analysis and validates file input before display. Shared files retain only thresholded repository counters; no synthetic sessions are created to reuse session charts. CSV/filter helpers run in both Node and the browser. Exports write new private files; OTLP posts only after local output succeeds and only with an explicit endpoint flag. See [interop.md](interop.md) for the formats and privacy limits.

@@ -1937,6 +1937,7 @@ function aggregate(
   if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include models without a rate card.`);
   return {
     generatedAt: new Date().toISOString(),
+    schemaVersion: 1,
     rateCard: {
       currency: rateCard.currency,
       effectiveDate: rateCard.effectiveDate,
@@ -2200,6 +2201,7 @@ function aggregateMachine(
   );
   return {
     generatedAt: combined.generatedAt,
+    schemaVersion: 1,
     rateCard: combined.rateCard,
     repositories: repositories.map(
       ({ repository, spendByDay, spendByModel, summary, topTools, warnings }) => ({

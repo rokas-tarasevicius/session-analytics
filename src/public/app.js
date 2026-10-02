@@ -1,3 +1,7 @@
+import { filterSnapshot } from "./export-data.js";
+import { installExportMenu } from "./export-menu.js";
+import { renderSharedSnapshot } from "./shared-view.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -816,6 +820,11 @@ function renderView() {
 }
 
 function render(data) {
+  if (data.kind === "shared") { snapshot = data; renderSharedSnapshot(data); return; }
+  $("#shared-snapshot").hidden = true;
+  $(".filters-bar").hidden = false; $(".view-tabs").hidden = false;
+  $(".skip-link").href = "#repository-comparison";
+  for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== currentViewName();
   snapshot = data; elements.generated.textContent = dateTime(data.generatedAt); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
   populateRepositories(); configureWindow(); renderRateCards(data.rateCard); ensureDistributionRepositories(); renderView();
 }
@@ -844,5 +853,12 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 const storedView = localStorage.getItem("session-analytics-view");
+installExportMenu(() => {
+  if (!snapshot || snapshot.kind === "shared") return snapshot;
+  const view = currentViewName();
+  const { start, end } = selectedWindow();
+  const providers = viewProviderFilters[view] ? [...viewProviderFilters[view]] : view === "summary" ? activeProviders() : null;
+  return filterSnapshot(snapshot, { repositoryId: view === "distributions" ? null : selectedRepository()?.repository.id, start, end, providers, repositoryIds: view === "distributions" ? [...distributionRepositories] : null });
+});
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
 setTheme(localStorage.getItem("session-analytics-theme") || "light"); void load(false);

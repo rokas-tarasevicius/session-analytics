@@ -1,10 +1,13 @@
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
+import { analysisValueFlags, analyzeOptionsFrom, argument } from "./options.ts";
+import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
+import { loadMachineSnapshot } from "./interop/snapshot.ts";
+import { InteropError } from "./interop/error.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 
-const valueFlags = new Set(analysisValueFlags);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version"]);
+const valueFlags = new Set([...analysisValueFlags, ...shareValueFlags]);
+const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--share", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -30,6 +33,11 @@ By default, unions all local Codex, Claude, and Cursor session evidence across t
 
 Options:
   --json                 Print the content-free snapshot as JSON
+  --snapshot FILE        Read a versioned snapshot instead of scanning local stores
+  --share                Preview aggregate-only sharing JSON; no network request
+  --min-sessions N       Minimum distinct sessions per shared repository (default 5, minimum 2)
+  --share-key-file FILE  Private machine key (created if absent); keep it local
+  --share-aliases FILE   JSON map of local repository IDs to explicit shared aliases
   --exclude-hidden       Exclude hidden optional repository/session metadata
   --repo-id ID           Narrow to one stable repository ID
   --repo-name NAME       Narrow to one uniquely named repository
@@ -68,11 +76,20 @@ function dollars(value: number): string {
 
 const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
 
-const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
+try {
+  assertSnapshotOptions(process.argv);
+  if (!process.argv.includes("--share") && shareValueFlags.slice(1).some((flag) => process.argv.includes(flag))) throw new InteropError("Sharing options require --share.");
+  if (process.argv.includes("--share")) {
+    await reportShare(process.argv);
+  }
+} catch (error) { reportInteropFailure(error); process.exit(1); }
+const snapshotFile = argument(process.argv, "--snapshot");
+const analytics = process.argv.includes("--share") ? null : await (snapshotFile ? loadMachineSnapshot(snapshotFile) : analyzeMachineSessionsIsolated(analyzeOptions))
+  .catch((error) => { reportInteropFailure(error); process.exit(1); });
 
-if (process.argv.includes("--json")) {
+if (analytics && process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);
-} else {
+} else if (analytics) {
   process.stdout.write(`${brand.name} · all locally evidenced repositories\n`);
   process.stdout.write(`Generated: ${analytics.generatedAt}\n`);
   process.stdout.write(

@@ -120,3 +120,26 @@ For OpenAI Codex transcripts, cached input is observable but cache writes are no
 For Claude transcripts, deduplicate assistant `message.id` values before summing usage. Claude Code writes one record per streamed content block; every record of a message repeats the same input and cache counters while `output_tokens` grows, so keep the final snapshot (the one with the most output) for each message. Pricing the first snapshot undercounts output and thinking tokens. `usage.output_tokens_details.thinking_tokens` is reported as reasoning output and remains included in output pricing; record-level `effort` is the session's reasoning effort. Use the cache-creation TTL breakdown when present. If only aggregate cache creation exists, label the assumed TTL rather than silently claiming an exact cache-write price.
 
 Apply long-context modifiers per request, not to the repository aggregate. Separately priced hosted tools, containers, search calls, storage, and network services require their own observable counters before they can enter the estimate.
+
+## Interchange metrics (schema version 1)
+
+Full machine and repository snapshots now include `schemaVersion: 1`. This is a format discriminator, not a provider parser version or package version. The [snapshot schema](../schemas/snapshot.v1.schema.json) describes the existing fields; their accounting semantics above are unchanged. CSV columns retain those field names and units. CSV/NDJSON structural fields and OTLP metadata are defined in [interop.md](interop.md).
+
+CSV `contributingSessions` counts sessions that contributed an entry to the particular repository/provider/day, repository/provider/cost-basis/model, or repository/provider/tool row. It is not the number of successful tasks, people, or model calls. Daily rows reflect actual cost-event dates; no daily Cursor value or model-level Cursor tokens are inferred. NDJSON `kind` discriminates the snapshot header, repository rollups, and session records; each row carries the schema version. Exported JSON recomputes every rollup after repository, provider, and session-start date filtering. It includes the whole selected session, even if that session's usage extends beyond the selected dates.
+
+The shared format contains only additive counters from successfully analyzed sessions in repository buckets with at least `minimumSessions` distinct provider/session keys (default 5; minimum 2). Explicit aliases may join roots before thresholding. `repositories[].repository` is a keyed pseudonym or explicit alias. `sources[]` contains domain-separated keyed installation identities so merges can reject repeated sources. There are no raw/local session keys or time windows in this format.
+
+| Shared counter (in each repository and `summary`) | Definition |
+| --- | --- |
+| `sessions` | Successfully analyzed distinct sessions in retained buckets; this is the threshold denominator, not a count of people. |
+| `inputTokens`, `outputTokens` | Observed session totals. Cache reads/writes are included in input; reasoning is included in output. |
+| `priceableTokens` | Sum of input + output tokens from sessions with a non-null pricing-coverage measurement. |
+| `pricedTokens` | Sum of each eligible session's input + output tokens multiplied by its pricing coverage. May have floating-point rounding. |
+| `apiEquivalentSpendUsd` | Sum of API-list-price-equivalent usage value only. |
+| `providerReportedSpendUsd` | Sum of provider-reported local value only (kept separate). |
+| `estimatedUpperSpendUsd` | Sum of upper estimates across retained sessions, on their existing cost bases. |
+| `toolCalls`, `compactions` | Sum of effective tool calls and compaction counts across retained sessions. |
+
+Every shared `summary` is the sum of **visible rows only**. Suppressed buckets never contribute to a hidden or global subtotal. Missing/invalid evidence does not count toward k. Merging uses the same k across inputs and sums counters; it never averages ratios or reconstructs session records. Shared pricing coverage is `pricedTokens / priceableTokens` with both counters visible; when there are no priceable tokens it is N/A. The whole row is suppressed below the session-activity guard. API-equivalent value is not an invoice. Counts and values are activity measures, not quality, success, or value delivered.
+
+The OTLP mapping uses `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, and conditionally `gen_ai.response.model` on custom session-aggregate **logs**. Snapshot observation time is not request start/end time. It does not synthesize request latency, histogram distributions, success status, provider endpoint identity, or inference spans. Repeated exports are overlapping observations, not new activity increments; see the [pinned mapping and ingestion caveats](interop.md#opentelemetry-mapping).

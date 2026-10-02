@@ -93,8 +93,9 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 ## M4: Breadth and export
 
 - [ ] More agents, driven by demand: GitHub Copilot CLI, OpenCode, Gemini CLI, Pi, Grok, Goose, and Cline.
-- [ ] OpenTelemetry GenAI export (pinned to a specification commit while the specification is in development), so sessions can be sent to existing observability backends.
-- [ ] Team mode, later: content-free aggregates, pseudonymized repositories, k-anonymity thresholds, and a preview of exactly what leaves the machine before anything is shared.
+- [x] OpenTelemetry GenAI attributes in OTLP/JSON session aggregate logs, pinned to a Development specification commit, with explicit opt-in collector delivery.
+- [x] Team sharing: aggregate-only preview, keyed repository pseudonyms or aliases, minimum-session suppression, disjoint-source merge, and a snapshot dashboard. Session thresholds do not guarantee person-level anonymity.
+- [x] Versioned JSON Schemas, CSV/NDJSON exports, and browser downloads of the filtered view.
 
 ## Architecture direction
 
@@ -113,7 +114,7 @@ surfaces/    cli, dashboard, mcp, skill, export
 
 - The index will live outside any repository: `~/Library/Application Support/<name>/` on macOS and `$XDG_DATA_HOME/<name>/` on Linux, holding the derived index and configuration.
 - An optional raw-transcript archive, so history can outlive provider retention, is content and therefore **opt-in and off by default**.
-- The JSON output will carry a `schemaVersion`, and MCP tool names and custom telemetry attributes will stay brand-neutral.
+- The JSON output carries a `schemaVersion`, and MCP tool names and custom telemetry attributes will stay brand-neutral.
 - The runtime stays dependency-free. Distribution is `git clone` today; an npm package or a single binary may follow.
 
 ## Interpretation guardrails

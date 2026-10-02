@@ -64,7 +64,7 @@ These rules apply to every change, including dashboard and documentation changes
    - covered by a test that plants sentinel content in the relevant provider records (see `test/fixtures.ts`) and asserts with `assert.doesNotMatch` that it does not appear in the serialized output.
 3. **Names must be bounded.** Tool names come from structured tool-call records. Skill identifiers must pass `normalizedSkillName`. Do not derive names from prompts, system instructions, or arbitrary text.
 4. **No paths, IDs, or errors in output.** File paths, working directories, repository roots and remotes, raw session or provider IDs, branch names, titles, and raw exception messages stay inside the analysis process. Use the existing hashed keys and fixed error messages.
-5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add network requests, telemetry, CORS headers, or non-loopback binds.
+5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add background network requests, telemetry, CORS headers, or non-loopback binds. The sole opt-in network surface is the reviewed OTLP export flag; see `docs/interop.md`.
 6. **No runtime dependencies.** Use Node built-ins. A new development dependency needs a reason in the pull request.
 7. **Opt-in for content.** Features that need content (privacy tiers P2 and P3) must be off by default, behind an explicit option, and labeled in the interface.
 

@@ -1,0 +1,125 @@
+# Snapshots, exports, and sharing
+
+These commands work on the existing allowlisted snapshot. They do not read new kinds of transcript content. CSV, NDJSON, JSON downloads, sharing previews, merges, and snapshot dashboards are local operations. Only an explicit `export --otlp-endpoint URL` sends a network request.
+
+## Versioned snapshots
+
+```bash
+session-analytics report --json > snapshot.json
+session-analytics --snapshot snapshot.json --no-open
+session-analytics report --snapshot snapshot.json
+```
+
+The machine snapshot and single-repository analysis result carry `schemaVersion: 1`. The published [JSON Schema](../schemas/snapshot.v1.schema.json) uses Draft 2020-12. Schema versions describe the interchange shape, independently of the package version. Changes to the shape require updating the checked field maps in `scripts/snapshot-schema.ts`, regenerating the JSON, and reviewing compatibility. Incompatible changes need another schema version; the v1 loader rejects unknown versions and unknown fields, including nested fields.
+
+`--snapshot` bypasses provider discovery and analysis environment settings. Explicit analysis flags cannot be combined with it. Refresh re-reads the same file. Invalid files return a fixed error and never trigger a scan. A file dashboard refuses to reuse an occupied port, since that server could be displaying another snapshot. Full and shared snapshots are accepted; shared snapshots have a separate aggregate view without fabricated sessions or charts.
+
+Files must be regular files, not symlinks, and at most 64 MiB. Loading also checks unique session/repository keys, timestamps, repository references, and summary consistency. The bounded dependency-free validator implements only the vocabulary in the shipped schemas. Structural validation cannot certify the provenance of hand-edited strings: import snapshots from a source you trust. Full snapshots retain repository display names and session keys; they are not the sharing format.
+
+## Export files
+
+```bash
+session-analytics export --format csv --out ./export-csv
+session-analytics export --format ndjson --out ./export-ndjson
+session-analytics export --format otlp-json --out ./export-otlp
+# Reuse a scan, with identical evidence across formats:
+session-analytics export --snapshot snapshot.json --format csv --out ./saved-csv
+```
+
+`--format` and `--out` are required. The normal analysis flags and environment settings work when no snapshot file is supplied. Export creates missing directories with mode 0700 and files with mode 0600. It refuses existing destination files, including symlinks. A failed batch removes only files it created; earlier exports remain intact. The output directory should be private and under your control. Nothing is written to provider stores.
+
+| File | Grain and meaning |
+| --- | --- |
+| `sessions.csv` | One session, flattened tokens, costs, cost basis, pricing coverage, timestamps, execution/evidence labels, and execution counters. |
+| `daily.csv` | Repository × provider × UTC activity day, with API-equivalent and provider-reported value and contributing-session count. Only evidenced cost dates appear; Cursor totals are not assigned invented dates. |
+| `models.csv` | Repository × provider × cost basis × model, with contributing sessions, calls, priced flag, token classes, and cost components. Cursor model costs do not establish model-level token attribution. |
+| `tools.csv` | Repository × provider × tool name, with effective calls and contributing sessions. |
+| `snapshot.ndjson` | First a `kind: "snapshot"` header with generation time, rate card, summary, and warnings; then `kind: "repository"` rollups and `kind: "session"` records. Every record carries `schemaVersion: 1`. Empty scans still have a header. |
+| `otlp-logs.json` | One OTLP `ExportLogsServiceRequest`; one content-free log record per observed session. |
+
+CSV is UTF-8 with a header and CRLF record separators; quotes and multiline values are escaped. Text beginning like a spreadsheet formula is prefixed with an apostrophe, so importing it cannot execute a formula. Null values are empty cells; they never become numeric zero. These files use existing field names and units. `totalUsd` and daily value are API-equivalent or provider-reported usage value as labeled, never an invoice. Token counts do not measure unique text or successful work.
+
+The dashboard's **Export view** menu downloads JSON or any individual CSV directly in the browser. It applies repository and date selection, the active view's provider selection, and the Distributions view's repository choices. On Summary, the daily chart's provider toggles select export providers too; the menu shows the resulting session count. Dates select **whole sessions by their start timestamp**, matching session summaries. A selected session's daily rows may therefore extend beyond the selected dates. All JSON summaries and rollups are recomputed for the selection, and the result can be reopened with `--snapshot`. Shared dashboards download only the existing shared JSON or an aggregate CSV. Downloads do not upload data or change the strict CSP.
+
+## Sharing preview
+
+```bash
+session-analytics report --share > shared.json
+session-analytics report --share --min-sessions 10 > shared-k10.json
+session-analytics report --share --snapshot snapshot.json > shared-from-file.json
+```
+
+`report --share` always prints JSON, with or without `--json`. Stdout is the **complete payload to review**; stderr identifies it as a preview. The command does not transmit it. Inspect the file, then choose your own way to share it. Its [separate schema](../schemas/shared.v1.schema.json) identifies it with `kind: "shared"` and `schemaVersion: 1`.
+
+The default minimum is **five distinct provider/session keys per repository bucket**; `--min-sessions` can set any integer at least two. Only successfully analyzed sessions count. Alias grouping happens before the threshold, so aliases can deliberately join local roots for one logical project. Below-threshold buckets disappear completely. Summary totals include only retained buckets. No suppressed count, omitted total, daily/provider/model/tool breakdown, timestamp, warning, rate-card link, original name, or session key is included.
+
+Each repository gets an HMAC-SHA256 pseudonym, truncated to 128 bits. The 32-byte random machine key is kept in `$XDG_STATE_HOME/session-analytics/sharing.key`, or `~/.local/state/session-analytics/sharing.key` by default. It is created with mode 0600; public permissions, wrong length, and symlinks are rejected. `--share-key-file FILE` or `SESSION_ANALYTICS_SHARE_KEY_FILE` selects another private key file. The key is never included in the output. Keep one key per contributing installation: rotating it changes both repository pseudonyms and the source identity used to detect repeated contributions.
+
+For cross-machine repository matching, agree on explicit aliases:
+
+```json
+{
+  "discovered-0123456789abcdef0123": "project-alpha",
+  "conductor-abcdef0123456789abcd": "project-beta"
+}
+```
+
+```bash
+session-analytics report --share --share-aliases aliases.json > shared.json
+```
+
+Keys are repository IDs from a local full snapshot; values use 1–64 letters, digits, dots, underscores, or hyphens and must start with a letter or digit. Output labels become `alias-project-alpha`. Unmapped repositories remain keyed pseudonyms. Unknown IDs fail rather than silently ignoring an alias. Aliases are intentional identifying metadata: choose neutral labels and inspect the preview.
+
+**The threshold counts sessions, not people.** This is minimum-count suppression, not differential privacy or a guarantee of anonymity. A bucket can contain one person's sessions; distinctive totals, aliases, repeated releases, and outside knowledge can identify activity. There is no protection against comparing repeated overlapping previews. Publish a single reviewed contribution per source for a team comparison, and avoid releasing increasingly narrow cuts. Model, tool, and time breakdowns are deliberately absent to avoid small intersection groups and subtraction attacks within one payload.
+
+## Merge shared snapshots
+
+```bash
+session-analytics merge alice-shared.json bob-shared.json --out team.json
+session-analytics --snapshot team.json --port 4180 --no-open
+```
+
+Merge accepts shared snapshots only, requires the same minimum threshold, sums additive counters, and validates the declared summaries. Identical labels combine; independent keyed pseudonyms stay separate. Pricing coverage is `pricedTokens / priceableTokens`, computed from the combined counters, never an average of percentages. Zero priceable tokens means N/A. Cursor provider-reported value stays separate from API-equivalent value.
+
+Every nonempty contribution includes a domain-separated keyed `sources[]` identifier. Merge rejects any repeated source, including one already present in a previous merge. This conservatively rejects repeated scans from the same key even when their periods are disjoint: without session identifiers or times, overlap cannot be established safely. Do not use key rotation to bypass the check. Source IDs are linkable pseudonyms, not authenticated identities. The merger cannot detect dishonest files, independently copied transcripts on different machines, or regenerated keys. Empty contributions reveal no source identity and have all-zero totals. `--out FILE` creates a new private file; without it JSON goes to stdout. Merge never uploads.
+
+## OpenTelemetry mapping
+
+The GenAI attribute mapping is pinned to **semantic-conventions 1.37.0**, commit [`aec6e9d3e86754683dab7c707655d69d953b2768`](https://github.com/open-telemetry/semantic-conventions/tree/aec6e9d3e86754683dab7c707655d69d953b2768/docs/gen-ai). That revision labels GenAI conventions Development. The pin is intentional; it is not a claim to track the latest evolving convention. The wire envelope follows [OTLP JSON Protobuf encoding](https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding).
+
+This is an OTLP **log export of session aggregates**, not standard GenAI inference spans or per-request token histograms. Session summaries cannot recover the original request timing, model invocation distribution, server identity, or trace relationships. Each log has a fixed body, the snapshot time as decimal nanoseconds, and these attributes:
+
+| Attributes | Mapping |
+| --- | --- |
+| `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` | Authoritative session totals; input includes caches, output includes reasoning. Encoded as decimal `intValue` strings. |
+| `gen_ai.response.model` | Only when exactly one known model accounts for all of the session's token counters. Omitted for mixed or unattributable usage. |
+| `session_analytics.provider`, `.repository.key`, `.session.key` | Agent provider enum and existing pseudonymous local keys. Repository display names are omitted. |
+| `session_analytics.record.type` | Always `session_aggregate`. |
+| `session_analytics.cost.basis`, `.transcript.status` | Existing enums for interpretation and evidence coverage. |
+| `session_analytics.usage.cache_read_tokens`, `.cache_write_tokens`, `.reasoning_tokens` | Subsets of the input/output totals; never add them again. |
+| `session_analytics.tool.calls`, `.model.calls` | Observed effective calls. |
+| `session_analytics.usage.value_usd`, `.upper_value_usd` | Labeled usage value and upper estimate, not invoice charges. |
+| `session_analytics.pricing.coverage` | Existing ratio; omitted if N/A. Its denominator is input + output tokens for this session. |
+| Resource `service.name`, `session_analytics.schema.version` | Neutral service ID and snapshot version. |
+| Scope `name`, `version`, `.semconv.version`, `.semconv.commit`; `schemaUrl` | Exporter package and pinned convention identifiers. The last two attributes use the `session_analytics` prefix. |
+
+`gen_ai.provider.name` is omitted because an agent name does not establish the actual API endpoint/vendor. `gen_ai.operation.name`, raw conversation/request IDs, content attributes, tool arguments/results, hostnames, paths, trace/span IDs, and inferred outcomes are also omitted. The collector should route these custom aggregate logs separately from inference-call telemetry. Re-exporting overlapping snapshots repeats observations, so summing every import would double-count.
+
+Local file output is the default. To send **the saved bytes** to a collector:
+
+```bash
+session-analytics export --snapshot snapshot.json --format otlp-json --out ./collector-export \
+  --otlp-endpoint http://127.0.0.1:4318/v1/logs
+```
+
+The URL is the full logs endpoint, including any custom path. Remote endpoints require HTTPS; loopback HTTP is allowed. Embedded credentials and URL fragments are rejected. No `OTEL_*` environment variable activates networking. There is one POST with JSON content type, a 10-second timeout, a 64 MiB request limit, and a 64 KiB acknowledgement limit. Redirects and automatic retries are disabled. Rejected records, collector warnings, malformed acknowledgements, timeouts, and HTTP failures return nonzero status without echoing response text. The saved file remains; a failure can mean delivery happened but acknowledgement was lost. Inspect the collector before manually resending. No authentication/header CLI is provided in v1; use a local authenticated collector or proxy when needed.
+
+## Development checks
+
+```bash
+node scripts/snapshot-schema.ts          # regenerate after a reviewed type change
+node scripts/snapshot-schema.ts --check  # fail on generated schema drift
+npm run check
+```
+
+The test suite covers fixture/schema parity, privacy sentinels, CSV quoting and injection, empty exports, filter totals, suppression boundaries, private key persistence, aliasing, merge conflicts, bounded file reads, no-overwrite writes, dashboard file refresh, OTLP field mapping, and a loopback collector including redirects and partial acknowledgement. No real history is used for test fixtures or screenshots.

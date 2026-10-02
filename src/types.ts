@@ -120,6 +120,7 @@ export interface NamedMetric {
 }
 
 export interface RepositoryAnalytics {
+  schemaVersion: 1;
   generatedAt: string;
   rateCard: {
     currency: "USD";
@@ -158,6 +159,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  schemaVersion: 1;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];
   repositories: RepositoryRollup[];
@@ -214,4 +216,31 @@ export interface AnalyzeOptions {
   repositoryName?: string;
   repositoryRemote?: string;
   repositoryRoot?: string;
+}
+
+/** Aggregate-only interchange format; never a substitute for session evidence. */
+export interface SharedCounters {
+  sessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  pricedTokens: number;
+  priceableTokens: number;
+  apiEquivalentSpendUsd: number;
+  providerReportedSpendUsd: number;
+  estimatedUpperSpendUsd: number;
+  toolCalls: number;
+  compactions: number;
+}
+
+export interface SharedRepository extends SharedCounters {
+  repository: string;
+}
+
+export interface SharedSnapshot {
+  schemaVersion: 1;
+  kind: "shared";
+  minimumSessions: number;
+  sources: string[];
+  repositories: SharedRepository[];
+  summary: SharedCounters;
 }

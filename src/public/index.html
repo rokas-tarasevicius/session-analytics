@@ -7,6 +7,7 @@
     <title>Session Analytics</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/interop.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -21,6 +22,18 @@
           <i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span>
         </span>
         <button class="button" id="refresh-button" type="button">Refresh snapshot</button>
+        <details id="export-menu" class="export-menu">
+          <summary class="button">Export view</summary>
+          <div class="export-options">
+            <p id="export-description">Downloads stay on this machine.</p>
+            <button class="button" type="button" data-export="json">JSON snapshot</button>
+            <button class="button" type="button" data-export="sessions">Sessions CSV</button>
+            <button class="button" type="button" data-export="daily">Daily value CSV</button>
+            <button class="button" type="button" data-export="models">Models CSV</button>
+            <button class="button" type="button" data-export="tools">Tools CSV</button>
+            <button class="button" type="button" data-export="shared" hidden>Shared aggregates CSV</button>
+          </div>
+        </details>
         <button class="icon-button" id="theme-switch" type="button" aria-label="Switch theme">
           <span id="theme-label">Light</span>
         </button>
@@ -29,6 +42,8 @@
 
     <main id="top">
       <p class="error-banner" id="error-banner" role="alert" hidden></p>
+      <p id="export-status" class="muted" role="status" aria-live="polite"></p>
+      <section id="shared-snapshot" class="panel" aria-label="Shared snapshot" hidden></section>
       <section class="warning-banner" id="warning-banner" aria-label="Coverage warnings" hidden>
         <strong>Coverage notes</strong><ul id="warning-list"></ul>
       </section>

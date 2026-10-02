@@ -13,6 +13,7 @@
     "bin",
     "src",
     "data",
+    "schemas",
     "skills"
   ],
   "engines": {

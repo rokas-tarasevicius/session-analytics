@@ -15,6 +15,8 @@ Content-free analytics for local coding-agent sessions.
 Usage:
   ${brand.command} [dashboard] [options]  Scan local sessions and open the localhost dashboard
   ${brand.command} report [options]       Print a terminal report (add --json for a snapshot)
+  ${brand.command} export [options]       Write CSV, NDJSON, or OTLP/JSON files
+  ${brand.command} merge FILE...          Combine aggregate-only shared snapshots
   ${brand.command} <command> --help       Show options for a command
   ${brand.command} --version              Print the version
 `);
@@ -23,6 +25,9 @@ Usage:
 } else if (command === "report") {
   forward(rest);
   await import("../src/cli.ts");
+} else if (command === "export" || command === "merge") {
+  const { runInterop, reportInteropFailure } = await import("../src/interop/cli.ts");
+  try { await runInterop(command, rest); } catch (error) { reportInteropFailure(error); }
 } else {
   const args = command === "dashboard" ? rest : process.argv.slice(2);
   const informational = args.includes("--help") || args.includes("--version");

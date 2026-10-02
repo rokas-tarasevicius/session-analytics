@@ -1,0 +1,15 @@
+/* Interchange controls; all colors and typography inherit the active theme. */
+.export-menu { position: relative; }
+.export-menu > summary { display: flex; align-items: center; cursor: pointer; }
+.export-options { position: absolute; right: 0; top: 100%; width: min(360px, 88vw); padding: 1rem; background: var(--surface); border: 1px solid var(--line); }
+.export-options p { font-size: .85rem; line-height: 1.5; }
+.export-options .button { display: block; width: 100%; text-align: left; border: 0; }
+.export-options .button[hidden] { display: none; }
+#export-status:empty { display: none; }
+#shared-snapshot { margin-block: 2rem; }
+#shared-snapshot .table-scroll { overflow-x: auto; }
+#shared-snapshot td { overflow-wrap: anywhere; }
+.filters-bar[hidden], .view-tabs[hidden], #shared-snapshot[hidden] { display: none; }
+@media (max-width: 470px) {
+  .topbar .export-menu > summary.button, .topbar .export-options .button:not([hidden]) { display: flex; }
+}

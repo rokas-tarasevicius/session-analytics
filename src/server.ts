@@ -5,15 +5,17 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
-import type { MachineAnalytics } from "./types.ts";
+import { analysisValueFlags, analyzeOptionsFrom, setting, argument } from "./options.ts";
+import type { MachineAnalytics, SharedSnapshot } from "./types.ts";
+import { loadSnapshot } from "./interop/snapshot.ts";
+import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
-const valueFlags = new Set([...analysisValueFlags, "--port"]);
+const valueFlags = new Set([...analysisValueFlags, "--port", "--snapshot"]);
 const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
@@ -37,6 +39,7 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it.
+--snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
 `);
   process.exit(0);
 }
@@ -83,6 +86,7 @@ async function sendFile(response: ServerResponse, path: string): Promise<void> {
 
 function safeError(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
+  if (message.includes("Snapshot")) return "The snapshot file is invalid, unsupported, or unavailable.";
   if (message.includes("rate card")) return "The configured rate card is invalid or unavailable.";
   if (message.includes("repository")) return "The requested repository could not be selected.";
   return "Local analytics evidence is unavailable or could not be parsed.";
@@ -105,7 +109,11 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
 const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
+  ["/export-data.js", join(publicRoot, "export-data.js")],
+  ["/export-menu.js", join(publicRoot, "export-menu.js")],
+  ["/shared-view.js", join(publicRoot, "shared-view.js")],
   ["/styles.css", join(publicRoot, "styles.css")],
+  ["/interop.css", join(publicRoot, "interop.css")],
   ["/fonts/space-grotesk-latin.woff2", join(publicRoot, "fonts", "space-grotesk-latin.woff2")],
   ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],
   ["/brands/codex.svg", join(publicRoot, "brands", "codex.svg")],
@@ -115,15 +123,20 @@ const staticFiles = new Map<string, string>([
 ]);
 
 const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
+try { assertSnapshotOptions(process.argv); } catch {
+  process.stderr.write("Snapshot input cannot be combined with analysis flags.\n");
+  process.exit(2);
+}
+const snapshotFile = argument(process.argv, "--snapshot");
 
-let analyticsPromise: Promise<MachineAnalytics> | null = null;
+let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
 let snapshotReady = false;
-function analytics(refresh = false): Promise<MachineAnalytics> {
+function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> {
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
-    analyticsPromise = analyzeMachineSessionsIsolated(analyzeOptions)
+    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachineSessionsIsolated(analyzeOptions))
       .then((result) => {
         snapshotReady = true;
         return result;
@@ -215,7 +228,7 @@ async function compatibleDashboardIsRunning(): Promise<boolean> {
 
 server.on("error", (error: NodeJS.ErrnoException) => {
   void (async () => {
-    if (error.code === "EADDRINUSE" && await compatibleDashboardIsRunning()) {
+    if (error.code === "EADDRINUSE" && !snapshotFile && await compatibleDashboardIsRunning()) {
       process.stdout.write(`${brand.name} already running: ${dashboardUrl}\n`);
       if (process.argv.includes("--open")) await openDashboard();
       process.exit(0);
@@ -235,6 +248,10 @@ server.listen(port, "127.0.0.1", () => {
   const warmup = analytics(false);
   void warmup
     .then((result) => {
+      if ("kind" in result) {
+        process.stdout.write(`Loaded shared aggregates for ${result.summary.sessions} sessions across ${result.repositories.length} repositories.\n`);
+        return;
+      }
       process.stdout.write(
         `Analyzed ${result.summary.analyzedSessions}/${result.summary.sessions} sessions across ` +
           `${result.summary.repositories} repositories; ` +

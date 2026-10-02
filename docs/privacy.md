@@ -2,7 +2,7 @@
 
 `session-analytics` reads coding-agent transcripts that already exist on your machine. Those transcripts contain everything you and your agents have written: prompts, responses, reasoning, commands, file paths, diffs, and tool output. This document defines exactly what the tool may return from them, how that boundary is enforced, and what it does not protect against.
 
-The contract applies to every output surface: the dashboard and its `/api/analytics` endpoint, the terminal report, the JSON snapshot (`report --json`), and the agent skill, which only runs those commands.
+The contract applies to every output surface: the dashboard and its `/api/analytics` endpoint, the terminal report, the JSON snapshot (`report --json`), exports and shared snapshots, and the agent skill, which only runs those commands.
 
 ## The contract
 
@@ -33,7 +33,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
 - **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded, so local paths in exceptions cannot reach the dashboard.
-- **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
+- **Offline by default.** Analysis and the dashboard make no outbound network requests and have no telemetry. Explicit `export --otlp-endpoint` delivery is the sole opt-in exception, described below. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 
 Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere.
@@ -61,6 +61,7 @@ Returned by `/api/analytics` and `report --json`.
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
+| `schemaVersion` | Snapshot interchange version, currently `1` (also present in single-repository results) | P0 |
 | `generatedAt` | ISO time the snapshot was computed | P0 |
 | `rateCard.currency` | Always `USD` | P0 |
 | `rateCard.effectiveDate` | Effective date of the rate card used | P0 |
@@ -233,3 +234,40 @@ A pull request that adds or changes a public field must:
 4. add or extend a test that plants sentinel content in the relevant provider records and asserts it does not appear in the serialized output.
 
 Fields in P2 or P3 additionally need an explicit opt-in that is off by default.
+
+### Interchange metadata and export fields
+
+All formats remain inside P0/P1. These fields extend the manifest above; the complete contracts and wire mappings are in [interop.md](interop.md). The two published schemas reject unknown nested fields. Snapshot import is structural validation, not proof that a hand-edited string is safe; use snapshots from trusted sources.
+
+| Field / surface | Meaning | Tier |
+| --- | --- | --- |
+| `schemaVersion` (machine/repository JSON, shared JSON, every CSV and NDJSON record; OTLP resource attribute) | Always `1` for this contract | P0 |
+| CSV `sessionKey`, `repositoryId`, `repositoryName` | Existing public identity fields, unchanged for local exports | P1 |
+| CSV `transcriptStatus` | Flattened `session.transcript.status` | P0 |
+| CSV `day`, `tool`, `model`, `calls` | Existing date/tool/model labels and counters at the documented table grain | P0 |
+| CSV `contributingSessions` | Sessions contributing an entry to a daily/model/tool row | P0 |
+| Other CSV columns | Flattened existing session/token/cost/metric fields, with original units and cost basis | P0/P1 as above |
+| NDJSON `kind` | `snapshot`, `repository`, or `session`; remaining fields are existing public fields | P0 |
+| Filtered JSON `warnings[]` | Fixed text explaining session-start filtering and cost interpretation | P0 |
+| Shared JSON `kind`, `minimumSessions` | `shared`; minimum distinct session count required for every released bucket | P0 |
+| Shared `sources[]` | Domain-separated HMAC installation identities, 128 bits; used to reject repeated contributions | P1 |
+| Shared `repositories[].repository` | `repo-<128-bit HMAC>` or `alias-<explicit user alias>`; no original ID/name | P1 |
+| Shared `repositories[]` and `summary`: `sessions`, `inputTokens`, `outputTokens`, `pricedTokens`, `priceableTokens`, `apiEquivalentSpendUsd`, `providerReportedSpendUsd`, `estimatedUpperSpendUsd`, `toolCalls`, `compactions` | Additive counters, restricted to retained buckets; no global total that includes suppressed buckets | P0 |
+| Shared browser CSV `repository` and all shared counter columns | Same released aggregates; no added identity | P0/P1 as above |
+| OTLP `resourceLogs[].resource.attributes`: `service.name`, `session_analytics.schema.version` | Fixed neutral service name and format version | P0 |
+| OTLP `scopeLogs[].scope`: `name`, `version`, attributes `session_analytics.semconv.version`, `session_analytics.semconv.commit`; `scopeLogs[].schemaUrl` | Fixed exporter/package and pinned convention identifiers | P0 |
+| OTLP `logRecords[]`: `timeUnixNano`, `observedTimeUnixNano`, `body.stringValue` | Snapshot observation time and fixed label `Observed session usage aggregate` | P0 |
+| OTLP `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.model` | Existing usage counters and a model only when fully attributable | P0 |
+| OTLP `session_analytics.repository.key`, `session_analytics.session.key` | Existing pseudonymous local keys; repository names omitted | P1 |
+| OTLP `session_analytics.provider`, `.record.type`, `.cost.basis`, `.transcript.status` | Source enum and fixed interpretation/evidence labels | P0 |
+| OTLP `session_analytics.usage.cache_read_tokens`, `.cache_write_tokens`, `.reasoning_tokens`, `.value_usd`, `.upper_value_usd`, `session_analytics.tool.calls`, `.model.calls`, `.pricing.coverage` | Existing counters/value/coverage; cache and reasoning counters are subsets, not extra tokens | P0 |
+
+The HMAC key, alias-file lookup keys, snapshot/input/output paths, collector URL, credentials, and collector response/error text are not public fields. Aliases are deliberately shared identifiers and can be identifying even if their syntax is bounded. Shared files omit timestamps, session rows, model/tool names, fine-grained slices, source rate links, and warnings. Empty shared files have empty source lists and all-zero totals.
+
+### Sharing and optional delivery boundary
+
+`report --share` produces a local preview: stdout contains exactly the JSON payload, and nothing is transmitted. The threshold defaults to five distinct sessions per repository bucket; it is **not person-level k-anonymity**. A single person can produce every session. Repeated overlapping releases, distinctive totals, and outside information can identify activity; this is not differential privacy. Use neutral aliases and review a single contribution per source before sharing. No grand total includes suppressed rows. Merge accepts only validated shared aggregates at the same threshold and rejects repeated source pseudonyms, including transitively through earlier merges. Pseudonyms are linkable and are not authentication; different keys or copied evidence can defeat overlap detection.
+
+A private 32-byte random sharing key is the only new persistent secret. Its default location is `$XDG_STATE_HOME/session-analytics/sharing.key` or `~/.local/state/session-analytics/sharing.key`; an explicit file option/environment override is supported. It is created with mode 0600, never exported, and symlink/public-permission keys are rejected. Files are opened exclusively to prevent overwrite. Existing output directories should be private and user-controlled. CSV neutralizes spreadsheet formulas in text cells. Browser downloads use local Blobs, no upload endpoint and no extra browser storage.
+
+Only `export --format otlp-json --otlp-endpoint URL` can POST telemetry. It first saves the exact allowlisted payload locally. It requires HTTPS except loopback HTTP, rejects embedded credentials, does not follow redirects, and does not retry or print collector text. OTLP remains a P0/P1 **session-level** export, not the thresholded sharing format. It includes local pseudonymous session/repository keys and possibly model IDs. The CLI flag authorizes that delivery; normal analysis, sharing previews, merge, the dashboard, and file-only exports never send it. This is a deliberate exception to the default offline guarantee, not background telemetry.

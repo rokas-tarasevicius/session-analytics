@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Versioned snapshot and shared-snapshot JSON Schemas; schema validation and file-backed dashboards via `--snapshot`.
+- CSV, NDJSON, and pinned OpenTelemetry GenAI attribute exports; explicit opt-in OTLP/JSON POST after saving locally.
+- Aggregate-only `report --share` preview with minimum-session suppression, private keyed repository pseudonyms, optional aliases, and duplicate-source-safe shared snapshot merge.
+- Dashboard downloads of filtered JSON and CSV, plus an aggregate view for shared snapshots.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

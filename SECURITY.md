@@ -27,7 +27,7 @@ The content of local provider history: prompts, responses, reasoning, tool argum
 
 ### Design
 
-- **Local only.** No network requests and no telemetry. Fonts and provider marks are bundled; nothing is loaded from a CDN.
+- **Offline by default.** No background network requests or telemetry. Fonts and provider marks are bundled; nothing is loaded from a CDN. The explicit `export --otlp-endpoint` option can POST the saved allowlisted payload; it never follows redirects or activates from environment variables. See [the delivery boundary](docs/interop.md#opentelemetry-mapping).
 - **Loopback bind.** The dashboard listens on `127.0.0.1` only.
 - **Host and Origin checks.** Requests whose `Host` header is not `127.0.0.1` or `localhost` (with an optional port) are rejected with `403`, which blocks DNS-rebinding attacks. Requests carrying an `Origin` header that is not a loopback origin are rejected, which blocks cross-site requests from other web pages.
 - **Read-only HTTP.** Only `GET` is accepted. There is no endpoint that writes, executes, or accepts uploaded data.
@@ -44,7 +44,7 @@ The content of local provider history: prompts, responses, reasoning, tool argum
 - Any transcript content, path, raw identifier, credential, or raw error appearing in the dashboard, API, report, JSON snapshot, or skill output.
 - Binding to a non-loopback interface, or bypassing the `Host` or `Origin` checks.
 - Reading files outside the static file map through the HTTP server.
-- Any write to provider stores or network request made by the tool.
+- Any write to provider stores, unrequested outbound network request, or content outside the documented OTLP allowlist being sent by an authorized export.
 - Denial of service through crafted transcript files that crash or hang the server process (rather than the isolated analysis process).
 
 ### Out of scope
