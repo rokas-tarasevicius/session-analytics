@@ -3,6 +3,47 @@ export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "una
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
 export type SkillEvidence = "explicit" | "inferred" | "unavailable";
 
+// Velocity is additive: old snapshots remain readable without these fields.
+export type ClaudeEntrypoint = "cli" | "sdk" | "desktop" | "unknown";
+export type ClaudeSubagentType = "general-purpose" | "explore" | "plan" | "other";
+export type CodexSource = "cli" | "exec" | "vscode" | "subagent" | "review" | "unknown";
+export type CodexOriginator = "cli" | "exec" | "vscode" | "desktop" | "unknown";
+export type VelocityAgent =
+  | "claude-cli" | "claude-sdk" | "claude-desktop" | "claude-unknown"
+  | "claude-general-purpose" | "claude-explore" | "claude-plan" | "claude-subagent"
+  | "codex-cli" | "codex-exec" | "codex-vscode" | "codex-desktop" | "codex-subagent" | "codex-review" | "codex-unknown"
+  | "cursor";
+export type VelocityEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "unknown";
+export interface AgentIdentity {
+  claudeEntrypoint?: ClaudeEntrypoint;
+  claudeSubagentType?: ClaudeSubagentType | "mixed";
+  codexSource?: CodexSource;
+  codexOriginator?: CodexOriginator;
+}
+export interface VelocityDimension {
+  agent: VelocityAgent;
+  model: string;
+  executionKind: Exclude<ExecutionKind, "mixed">;
+  effort: VelocityEffort;
+}
+/** Fixed-order counters avoid repeating field names in every hourly cell. */
+export type VelocityValues = [
+  valueUsd: number, inputTokens: number, uncachedInputTokens: number,
+  cachedInputTokens: number, cacheWriteInputTokens: number, outputTokens: number,
+  reasoningOutputTokens: number, modelCalls: number, toolCalls: number, sessionsStarted: number,
+  pricedTokens: number, reasoningKnownOutputTokens: number,
+  cacheReadKnownInputTokens: number, cacheWriteKnownInputTokens: number,
+];
+export interface SessionVelocity {
+  dimensions: VelocityDimension[];
+  buckets: Array<[day: string, hour: number, dimension: number, values: VelocityValues]>;
+  undated: Array<[dimension: number, values: VelocityValues]>;
+}
+export interface VelocityMetadata {
+  version: 1;
+  timeZone: string;
+}
+
 export interface LongContextRate {
   inputMultiplier: number;
   outputMultiplier: number;
@@ -83,6 +124,8 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  agentIdentity?: AgentIdentity;
+  velocity?: SessionVelocity;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -120,6 +163,7 @@ export interface NamedMetric {
 }
 
 export interface RepositoryAnalytics {
+  velocity?: VelocityMetadata;
   generatedAt: string;
   rateCard: {
     currency: "USD";
@@ -158,6 +202,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  velocity?: VelocityMetadata;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];
   repositories: RepositoryRollup[];

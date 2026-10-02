@@ -1,0 +1,196 @@
+// Pure calendar, aggregation and comparison functions shared by the two charts.
+// All arithmetic on calendar dates uses UTC *as a calendar*, never as the bucket timezone.
+export const metricDefinitions = {
+  value: { index: 0, label: "Priced usage value", unit: "USD", minimum: 0.01 },
+  input: { index: 1, label: "Input tokens", unit: "tokens", minimum: 100 },
+  uncached: { index: 2, label: "Uncached input", unit: "tokens", minimum: 100 },
+  cacheRead: { index: 3, label: "Cache-read input", unit: "tokens", minimum: 100 },
+  cacheWrite: { index: 4, label: "Cache-write input", unit: "tokens", minimum: 100 },
+  output: { index: 5, label: "Output tokens", unit: "tokens", minimum: 100 },
+  reasoning: { index: 6, label: "Reasoning tokens", unit: "tokens", minimum: 100 },
+  calls: { index: 7, label: "Model calls", unit: "calls", minimum: 3 },
+  tools: { index: 8, label: "Tool calls", unit: "calls", minimum: 5 },
+  sessions: { index: 9, label: "Sessions started", unit: "sessions", minimum: 3 },
+};
+export const agentLabels = {
+  "claude-cli": "Claude · CLI", "claude-sdk": "Claude · SDK / orchestrated",
+  "claude-desktop": "Claude · desktop local agent", "claude-unknown": "Claude · entrypoint unknown",
+  "claude-general-purpose": "Claude · general-purpose", "claude-explore": "Claude · Explore",
+  "claude-plan": "Claude · Plan", "claude-subagent": "Claude · other / unknown subagent",
+  "codex-cli": "Codex · CLI", "codex-exec": "Codex · exec", "codex-vscode": "Codex · VS Code",
+  "codex-desktop": "Codex · desktop", "codex-subagent": "Codex · subagent", "codex-review": "Codex · review", "codex-unknown": "Codex · source unknown",
+  cursor: "Cursor",
+};
+const providers = { claude: "Claude Code", codex: "Codex", cursor: "Cursor" };
+const blank = () => Array(14).fill(0);
+const add = (a, b) => { for (let i = 0; i < 14; i += 1) a[i] += b[i] || 0; return a; };
+const sum = (a) => a.reduce((total, value) => total + value, 0);
+
+const dayFormatters = new Map();
+export function localDay(timestamp, timeZone = "UTC") {
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.valueOf())) return null;
+  let formatter = dayFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dayFormatters.set(timeZone, formatter);
+  }
+  const parts = formatter.formatToParts(date);
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+export function shiftDay(day, amount) {
+  const date = new Date(`${day}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + amount);
+  return Number.isFinite(date.valueOf()) ? date.toISOString().slice(0, 10) : null;
+}
+export function calendarDays(start, end) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(end ?? "")) return [];
+  const days = [];
+  for (let day = start; day && day <= end && days.length < 36_600; day = shiftDay(day, 1)) days.push(day);
+  return days;
+}
+export function periodKey(day, granularity) {
+  if (granularity === "month") return day.slice(0, 7);
+  if (granularity === "week") return shiftDay(day, -((new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7));
+  return day;
+}
+function groupIdentity(session, dimension, group) {
+  if (group === "provider") return [session.provider, providers[session.provider] || "Unknown provider"];
+  if (group === "repository") return [session.repositoryId, session.repositoryName];
+  if (group === "model") return [`${session.provider}:${dimension.model}`, `${dimension.model === "<unknown>" ? "Unattributed model" : dimension.model} · ${providers[session.provider]}`];
+  if (group === "execution") return [dimension.executionKind, { "top-level": "Top-level", subagent: "Subagent", unknown: "Unknown execution" }[dimension.executionKind]];
+  if (group === "effort") return [dimension.effort, dimension.effort === "unknown" ? "Effort not recorded" : dimension.effort];
+  return [dimension.agent, agentLabels[dimension.agent] || "Unknown agent"];
+}
+
+/** Sum occupied hourly cells; never use session creation as the activity date. */
+export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7 } = {}) {
+  const index = metricDefinitions[metric].index;
+  const dates = calendarDays(start, end);
+  const dailyMap = new Map(dates.map((day) => [day, blank()]));
+  const keys = granularity === "hour" ? Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")) : [...new Set(dates.map((day) => periodKey(day, granularity)))];
+  const keyIndexes = new Map(keys.map((key, i) => [key, i]));
+  const groups = new Map();
+  const totals = blank(), undated = blank();
+  const coverage = { priceTokens: 0, cacheReadInput: 0, cacheWriteInput: 0, reasoningOutput: 0 };
+  let earliest = null, missingSessions = 0, contributingSessions = 0;
+  for (const session of sessions) {
+    if (!session.velocity) { missingSessions += 1; continue; }
+    let contributes = false;
+    for (const [, values] of session.velocity.undated) add(undated, values);
+    for (const [day, hour, dimensionId, values] of session.velocity.buckets) {
+      if (earliest === null || day < earliest) earliest = day;
+      const daily = dailyMap.get(day);
+      if (!daily) continue;
+      const dimension = session.velocity.dimensions[dimensionId];
+      if (!dimension) continue;
+      contributes = true;
+      add(totals, values); add(daily, values);
+      if (session.provider !== "cursor") {
+        coverage.priceTokens += values[1] + values[5];
+        coverage.cacheReadInput += values[1];
+        coverage.reasoningOutput += values[5];
+      }
+      if (session.provider === "claude") coverage.cacheWriteInput += values[1];
+      const [id, label] = groupIdentity(session, dimension, group);
+      let series = groups.get(id);
+      if (!series) { series = { id, label, total: 0, values: keys.map(() => 0) }; groups.set(id, series); }
+      const key = granularity === "hour" ? String(hour).padStart(2, "0") : periodKey(day, granularity);
+      const position = keyIndexes.get(key);
+      if (position !== undefined) { series.values[position] += values[index]; series.total += values[index]; }
+    }
+    if (contributes) contributingSessions += 1;
+  }
+  const allSeries = [...groups.values()].filter(({ total }) => total > 0).sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
+  let series = allSeries;
+  if ((group === "repository" || group === "model") && series.length > limit) {
+    const remainder = series.slice(limit);
+    const other = { id: "other", label: `Other (${remainder.length})`, total: sum(remainder.map((item) => item.total)), values: keys.map((_, i) => sum(remainder.map((item) => item.values[i]))) };
+    series = [...series.slice(0, limit), other];
+  }
+  const daily = [...dailyMap].map(([day, values]) => ({ day, values, total: values[index] }));
+  const rolling = daily.map((_, i) => i < 6 || daily[i - 6].day < earliest ? null : sum(daily.slice(i - 6, i + 1).map((item) => item.total)) / 7);
+  if (mode === "cumulative" && granularity !== "hour") series = series.map((item) => { let running = 0; return { ...item, values: item.values.map((value) => running += value) }; });
+  return { start, end, metric, granularity, mode, keys, series, allSeries, daily, rolling, totals, undated, coverage, earliest, missingSessions, contributingSessions };
+}
+
+/** Percentages need enough observed activity as well as a nonzero denominator. */
+export function guardedDelta(current, previous, metric, previousCalls = 0) {
+  const definition = metricDefinitions[metric];
+  if (previous < definition.minimum || (definition.index < 7 && previousCalls < 3)) return null;
+  return (current - previous) / previous;
+}
+export function quantile(values, fraction) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = (sorted.length - 1) * fraction, lower = Math.floor(position), weight = position - lower;
+  return sorted[lower] * (1 - weight) + sorted[Math.ceil(position)] * weight;
+}
+
+export function velocityIndicators(data, today) {
+  const end = data.end < today ? data.end : today;
+  const completeThrough = end === today ? shiftDay(today, -1) : end;
+  const days = new Map(data.daily.map((item) => [item.day, item]));
+  const observedStart = data.earliest && data.earliest > data.start ? data.earliest : data.start;
+  const range = (start, finish) => {
+    const dates = calendarDays(start, finish);
+    const rows = dates.map((day) => days.get(day));
+    const covered = dates.length > 0 && start >= observedStart && finish <= data.end && rows.every(Boolean);
+    return { start, end: finish, days: dates.length, coveredDays: dates.filter((day) => day >= observedStart && days.has(day)).length, covered, value: sum(rows.map((row) => row?.total || 0)), calls: sum(rows.map((row) => row?.values[7] || 0)) };
+  };
+  const compare = (current, previous) => ({ current, previous, delta: current.covered && previous.covered ? guardedDelta(current.value, previous.value, data.metric, previous.calls) : null });
+  const weekStart = periodKey(end, "week");
+  const week = compare(range(weekStart, completeThrough), range(shiftDay(weekStart, -7), shiftDay(completeThrough, -7)));
+  const monthStart = `${end.slice(0, 7)}-01`;
+  const previousMonthEnd = shiftDay(monthStart, -1);
+  const previousMonthStart = `${previousMonthEnd.slice(0, 7)}-01`;
+  const completeMonthDays = calendarDays(monthStart, completeThrough).length;
+  const pairedDays = Math.min(completeMonthDays, Number(previousMonthEnd.slice(-2)));
+  const month = compare(range(monthStart, shiftDay(monthStart, pairedDays - 1)), range(previousMonthStart, shiftDay(previousMonthStart, pairedDays - 1)));
+  const trailing = range(shiftDay(end, -14), shiftDay(end, -1));
+  const baseline = calendarDays(trailing.start, trailing.end).map((day) => days.get(day)?.total || 0);
+  const median = trailing.covered ? quantile(baseline, 0.5) : null;
+  const todayValue = end === today ? days.get(today)?.total ?? null : null;
+  const burn = { today: todayValue, median, days: trailing.coveredDays, activeDays: baseline.filter((v) => v > 0).length, ratio: null };
+  if (todayValue !== null && median !== null && burn.activeDays >= 3 && guardedDelta(median, median, data.metric, trailing.calls) !== null) burn.ratio = todayValue / median;
+  const nextMonth = new Date(`${monthStart}T12:00:00Z`); nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+  const monthEnd = shiftDay(nextMonth.toISOString().slice(0, 10), -1);
+  const historyStart = shiftDay(completeThrough, -13);
+  const history = calendarDays(historyStart < observedStart ? observedStart : historyStart, completeThrough).map((day) => days.get(day)?.total || 0);
+  const elapsed = range(monthStart, completeThrough);
+  const observed = range(monthStart, end).value;
+  const remaining = calendarDays(shiftDay(completeThrough, 1), monthEnd).length;
+  const active = history.filter((v) => v > 0).length;
+  let projection = null;
+  if (elapsed.covered && history.length >= 7 && active >= 3 && guardedDelta(sum(history), sum(history), data.metric, trailing.calls + elapsed.calls) !== null) {
+    const project = (fraction) => {
+      const rate = quantile(history, fraction);
+      // A busy partial day must not consume the allowance for future full days.
+      const partialDayAdjustment = end === today ? Math.max(0, (days.get(today)?.total || 0) - rate) : 0;
+      return elapsed.value + rate * remaining + partialDayAdjustment;
+    };
+    projection = { value: project(0.5), low: project(0.1), high: project(0.9), observed, sampleDays: history.length, activeDays: active, remainingDays: remaining, monthEnd };
+  }
+  return { week, month, burn, projection, completeThrough, end, trailing };
+}
+
+export function topMovers(sessions, options, today) {
+  options = { ...options, metric: options.metric ?? "value" };
+  const end = options.end < today ? options.end : shiftDay(today, -1);
+  const start = shiftDay(end, -6), previousStart = shiftDay(start, -7), previousEnd = shiftDay(start, -1);
+  const result = { start, end, previousStart, previousEnd, available: false, rows: [] };
+  if (previousStart < options.start || !sessions.length) return result;
+  for (const group of ["repository", "model", "agent"]) {
+    const current = buildVelocity(sessions, { ...options, group, start, end });
+    if (!current.earliest || current.earliest > previousStart) return result;
+    const previous = buildVelocity(sessions, { ...options, group, start: previousStart, end: previousEnd });
+    const prior = new Map(previous.allSeries.map((item) => [item.id, item.total]));
+    // Guard model/value percentages against the *group's* activity, not the whole fleet.
+    const calls = buildVelocity(sessions, { ...options, group, metric: "calls", start: previousStart, end: previousEnd });
+    const priorCalls = new Map(calls.allSeries.map((item) => [item.id, item.total]));
+    const rows = current.allSeries.map((item) => ({ group, label: item.label, current: item.total, previous: prior.get(item.id) || 0, increase: item.total - (prior.get(item.id) || 0), delta: guardedDelta(item.total, prior.get(item.id) || 0, options.metric, priorCalls.get(item.id) || 0) })).filter((item) => item.increase > 0).sort((a, b) => b.increase - a.increase).slice(0, 3);
+    result.rows.push(...rows);
+  }
+  result.available = true;
+  return result;
+}

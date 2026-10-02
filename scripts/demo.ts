@@ -217,6 +217,8 @@ function toolInput(name: string, repository: Repository): Record<string, unknown
 }
 
 interface ClaudeTranscriptOptions {
+  entrypoint: "cli" | "sdk-ts" | "local-agent";
+  attributionAgent?: "general-purpose" | "Explore" | "Plan";
   agentId?: string;
   cwd: string;
   messages: number;
@@ -234,7 +236,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   const state: ClaudeTurnState = { clock: options.start, compactions: 0, context: options.subagent ? integer(9_000, 16_000) : integer(18_000, 32_000) };
   const effort = model.includes("haiku") ? undefined : weighted(effortLevels);
   const longCache = !options.subagent && chance(0.35);
-  const base = { cwd, sessionId, version: "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
+  const base = { entrypoint: options.entrypoint, ...(options.attributionAgent ? { attributionAgent: options.attributionAgent } : {}), cwd, sessionId, version: "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
   let parent: string | null = null;
   let spawned = 0;
   const push = (record: Record<string, unknown>): void => {
@@ -311,13 +313,16 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
   const model = weighted(claudeModels);
   const messages = heavy(34, 0.85, 420);
   const projectDirectory = join(root, claudeProjectDirectory(cwd));
-  const main = claudeTranscript({ cwd, messages, model, repository, sessionId, start, subagent: false });
+  const entrypoint = weighted([["cli", 40], ["sdk-ts", 50], ["local-agent", 10]] as const);
+  const main = claudeTranscript({ entrypoint, cwd, messages, model, repository, sessionId, start, subagent: false });
   writeJsonl(join(projectDirectory, `${sessionId}.jsonl`), main.records);
   const subagents = main.spawned + (chance(0.18) ? 1 : 0);
   for (let index = 0; index < subagents; index += 1) {
     const agentId = hex(8);
     const offset = between(0.1, 0.8) * Math.max(60_000, main.end - start);
     const transcript = claudeTranscript({
+      entrypoint,
+      attributionAgent: pick(["general-purpose", "Explore", "Plan"] as const),
       agentId,
       cwd,
       messages: heavy(14, 0.6, 90),
@@ -356,8 +361,8 @@ function writeCodexSession(
   const push = (type: string, payload: Record<string, unknown>): void => {
     records.push({ timestamp: iso(clock), type, payload });
   };
-  const source = parentThreadId ? { subagent: { thread_spawn: { parent_thread_id: parentThreadId, depth: 1 } } } : pick(["cli", "vscode", "exec"]);
-  push("session_meta", { id, cwd, source, originator: "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock) });
+  const source = parentThreadId ? { subagent: { thread_spawn: { parent_thread_id: parentThreadId, depth: 1 } } } : pick(["cli", "vscode", "exec", "review"]);
+  push("session_meta", { id, cwd, source, originator: source === "exec" ? "codex_exec" : source === "vscode" ? "codex_vscode" : "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock) });
   push("turn_context", { cwd, model, effort, approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } });
   const total: CodexCounter = { cached_input_tokens: 0, input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 };
   let context = integer(9_000, 18_000);

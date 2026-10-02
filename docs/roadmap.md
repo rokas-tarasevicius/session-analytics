@@ -39,6 +39,13 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 - [ ] Permission friction: prompts per 100 tool calls, denials, and the most-approved command classes as allowlist candidates.
 - [ ] Failure-loop cost: tokens and value spent inside flagged windows.
 
+### Usage velocity
+
+- [x] Local date/hour activity buckets for value, token classes, calls and starts, preserving per-event agent, model, execution and effort.
+- [x] Velocity view by agent, provider, model, repository, execution and effort: day/week/month/hour, stacked/line/cumulative charts, rolling daily average, guarded comparisons, burn, scenario projection and movers.
+- [x] Summary daily chart shares the agent velocity ledger; coverage and missing timestamps remain explicit.
+- [ ] Distinguish custom agent identities through an opt-in reviewed taxonomy without exposing free-text attribution.
+
 ### Limits, cache, and context economics
 
 - [ ] Rate-limit headroom over time from Codex rate-limit snapshots and Claude quota records: time to limit, sessions that hit limits, and usage-limit errors.

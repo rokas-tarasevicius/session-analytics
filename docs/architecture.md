@@ -13,6 +13,9 @@
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/metrics/velocity.ts` | Fixed agent enums and a streaming hourly counter accumulator attached at existing deduplicated parser counting points. |
+| `src/public/velocity-data.js` | Pure calendar rollups, coverage, comparisons, projection scenarios and movers; exercised directly by tests. |
+| `src/public/velocity.js`, `velocity.css` | Shared Summary/Velocity charts and isolated view styling. Served through the static allowlist with the existing CSP. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
@@ -100,7 +103,7 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 
 ## Dashboard client
 
-`src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
+`src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Velocity filters event-date cells independently of session-start filtering, so a long-running session can contribute activity after its start falls outside the window. The snapshot declares the analysis timezone. Legacy UTC spend fields remain available to other consumers. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
 
 ## Design constraints
 

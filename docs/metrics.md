@@ -120,3 +120,142 @@ For OpenAI Codex transcripts, cached input is observable but cache writes are no
 For Claude transcripts, deduplicate assistant `message.id` values before summing usage. Claude Code writes one record per streamed content block; every record of a message repeats the same input and cache counters while `output_tokens` grows, so keep the final snapshot (the one with the most output) for each message. Pricing the first snapshot undercounts output and thinking tokens. `usage.output_tokens_details.thinking_tokens` is reported as reasoning output and remains included in output pricing; record-level `effort` is the session's reasoning effort. Use the cache-creation TTL breakdown when present. If only aggregate cache creation exists, label the assumed TTL rather than silently claiming an exact cache-write price.
 
 Apply long-context modifiers per request, not to the repository aggregate. Separately priced hosted tools, containers, search calls, storage, and network services require their own observable counters before they can enter the estimate.
+
+## Velocity (snapshot version 1)
+
+The Velocity tab and Summary's agent lines share the same deduplicated activity ledger.
+`MachineAnalytics.velocity` (also present on the single-repository result) declares
+`version: 1` and the analysis process's IANA `timeZone`. Each session optionally carries
+`agentIdentity` and `velocity`. Old snapshots without these additions remain readable;
+the velocity view asks for a refresh instead of reconstructing activity from session totals.
+
+### Calendar and attribution
+
+- A velocity cell is one **local calendar date × local clock hour × dimension**. Dimensions
+  combine agent, model, execution kind and effort. Provider and repository come from the
+  containing session, so the payload does not duplicate their identifying metadata.
+- Absolute provider timestamps are converted in the analysis process's local timezone,
+  honoring `TZ`. The browser uses the declared timezone for dates and global session-start
+  filtering even when its own timezone differs. Existing `spendByDay` fields retain their
+  UTC semantics for compatibility; new charts use `velocity`, not those legacy fields.
+- Missing, invalid or timezone-free timestamps go to `undated`. No cost or activity is
+  moved to the session creation time, file modification time or last update. Undated totals
+  are labeled as **all-time for the selected repository/provider scope**: a date window
+  cannot assign them honestly. Dated plus undated counters reconcile with session totals.
+- Claude prices the final streamed usage once at the first positive-usage snapshot's
+  timestamp in the owning execution kind. A usage-free parent placeholder cannot assign a
+  subagent's usage to the parent's date. Tools use their first deduplicated call timestamp.
+  Codex uses the owning token observation after the existing broadcast-counter dedupe;
+  source, model and effort are captured at that observation, not taken from the session's
+  final state. Code-mode tool expansion uses the same effective-call counts as the ledger.
+- Cursor's provider-reported cost has no per-call timestamp and stays undated. Bubble
+  tokens and tools are dated only when `clientStartTime` is an absolute Unix timestamp;
+  relative timings stay undated. Their model is `<unknown>` because joining those tokens
+  to a composer-level model cost would invent evidence. Cursor's legacy uncached-input
+  allocation is retained for reconciliation, with **zero cache-split coverage**.
+- Sessions started counts each public session once, including each independent Codex or
+  Cursor subagent session. Claude subagent files belong to the composite parent session
+  and do not add starts. Start dimensions use the first observed Claude assistant or
+  Codex turn context; where absent, model and effort are unknown. These labels describe
+  the initial observed context, not necessarily a request made at the creation timestamp.
+- Days include inactive dates. Weeks start Monday; months follow the local calendar.
+  Boundary weeks/months contain only dates selected in the global window. Hour profiles
+  sum the selected dates into 24 clock hours: the repeated autumn DST hour combines both
+  occurrences, and the missing spring hour contributes no activity. Cumulative lines
+  restart at the selected start date and are disabled for unordered hour profiles.
+- The rolling overlay is the total over the last seven calendar dates divided by seven,
+  including zero-activity dates. It needs seven dates inside both the selected range and
+  observed history. It is available on daily lines/areas; it is disabled for cumulative,
+  weekly, monthly and hour views so incompatible units are never overlaid.
+
+### Agent evidence
+
+Claude `entrypoint` maps `cli` → `cli`, `sdk-ts` → `sdk` (SDK/orchestrated), and
+`local-agent` → `desktop`. Other values become `unknown`. Subagent-file
+`attributionAgent` maps `general-purpose`, `Explore` and `Plan` to fixed enum values;
+custom types become `other`. A composite session reports `mixed` when it observes more
+than one subagent type. A subtype does not turn a main-file request into a subagent.
+
+Codex source is `cli`, `exec`, `vscode`, `review`, or `subagent` for a structured
+`source.subagent` record; other values become `unknown`. Originators are separately
+allowlisted: `codex_cli_rs`, `codex_exec`, `codex_vscode`, and `Codex Desktop` map to
+`cli`, `exec`, `vscode`, and `desktop`. The source takes precedence for grouping; a known
+originator is the fallback when source is unknown. Session identity describes the first
+metadata record; cells retain segment-specific identity. Parent IDs, nicknames and
+custom attribution strings never leave the parser. Cursor has a provider-level agent
+identity. Velocity effort is restricted to `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, `max`, `ultra`, or `unknown`, independently of the legacy session effort field.
+
+### Compact counters and coverage
+
+`session.velocity.dimensions` is a per-session dictionary. `buckets` entries are
+`[day, hour, dimensionIndex, values]`; `undated` entries are `[dimensionIndex, values]`.
+The fixed `values` tuple has 14 positions:
+
+| Index | Counter | Meaning |
+| --- | --- | --- |
+| 0 | `valueUsd` | Priced API-equivalent value, or undated Cursor provider-reported value; no price is invented for unknown models |
+| 1 | `inputTokens` | All processed input, including cache reads/writes |
+| 2 | `uncachedInputTokens` | Existing uncached-input counter; Cursor's unsplit input allocation is identified by missing coverage |
+| 3 | `cachedInputTokens` | Cache reads |
+| 4 | `cacheWriteInputTokens` | Observable cache writes; Codex/Cursor do not expose these |
+| 5 | `outputTokens` | Output including reasoning |
+| 6 | `reasoningOutputTokens` | Separately reported reasoning/thinking; missing detail is not evidence of no reasoning |
+| 7 | `modelCalls` | Existing deduplicated positive-usage model calls, priced or unpriced |
+| 8 | `toolCalls` | Existing effective tool calls, including code-mode expansion |
+| 9 | `sessionsStarted` | One per public session, at creation time when absolute |
+| 10 | `pricedTokens` | Input plus output assigned to an applicable model price |
+| 11 | `reasoningKnownOutputTokens` | Output on requests exposing a separate reasoning breakdown |
+| 12 | `cacheReadKnownInputTokens` | Input on requests exposing cache-read counters |
+| 13 | `cacheWriteKnownInputTokens` | Input on requests exposing cache-write counters |
+
+Pricing coverage is index 10 / (1 + 5) for eligible Claude/Codex cells. Separate-reasoning
+coverage is 11 / 5 and cache-read coverage is 12 / 1 for Claude/Codex; cache-write
+coverage is 13 / 1 for Claude only. Cursor has no applicable API-price or split-counter
+denominator, and Codex has no cache-write denominator. The UI names these eligible
+providers and shows numerators and denominators; a missing denominator is N/A. These are evidence-coverage ratios, not
+reasoning shares or cache-hit rates. Missing provider fields remain missing evidence,
+even when the underlying legacy counter is zero. Token classes overlap: reasoning is
+inside output, and uncached/read/write are inside input. Do not add all selectors together.
+
+Counters aggregate on the server before serialization. There are no public per-request
+records, no IDs in cells, and no duplicate daily/hour or six-dimensional marginal payloads.
+Model/repository charts show the largest seven series plus an exact Other remainder; agent,
+provider, execution and effort charts retain every evidenced group. This cap changes only
+presentation, never totals. All chart modes share a text readout, pointer inspection, and
+one keyboard focus stop with Left/Right, Home/End navigation.
+
+### Change, burn and projection guardrails
+
+“Today” is the snapshot date in the declared timezone. Historical windows use their end
+date as the comparison anchor. Week-to-date compares completed dates with the same dates
+one week earlier. Month-to-date compares completed dates with the same number of dates
+at the start of the previous month; when the prior month is shorter, **both** sides are
+clipped to its length. Today is excluded from both comparisons. Coverage shows selected,
+observed calendar days / required calendar days for each period. It does not prove the
+provider retained all historical transcripts. A range clipped by the global window or the
+first observed date is not a complete comparison.
+
+Percent changes require a previous value of at least $0.01, 100 tokens, 3 sessions/model
+calls, or 5 tool calls. Value/token percentages also require at least 3 prior model calls.
+A zero or tiny baseline produces N/A, never an infinite percentage or a fabricated 0%.
+Top movers rank absolute increases separately for repository, model and agent over the
+last seven completed days versus the preceding seven. Percent guards use each group's
+own prior calls; new groups can have a positive absolute increase with an N/A percentage.
+
+Burn is today's partial value divided by the median of the previous 14 full calendar
+days. It needs all 14 dates, at least 3 active dates, and the same minimum-activity guard.
+The full denominator and its coverage are displayed. **This is not a same-hour comparison**
+and will usually rise during the day. Historical windows do not show a “today” ratio.
+
+The end-of-month projection uses the observed total through the last complete date plus
+remaining calendar days at the median of up to 14 trailing complete daily values. The
+low/high scenarios use their 10th/90th percentiles. If today is partial, its projected
+contribution is the larger of the observed value and the scenario daily rate; a busy
+today does not consume the projection for future full days. It requires the month
+from its start inside the selected/observed range, at least 7 complete sample dates,
+at least 3 active dates, and a minimum-activity guard. Zero dates count. The band is a
+**rate scenario, not a confidence interval**: no normality, independence or probability
+of future usage is claimed. It assumes the workload continues and cannot anticipate
+project changes. API-equivalent value is not an invoice; activity counters do not prove
+success, quality, human time saved or value delivered.

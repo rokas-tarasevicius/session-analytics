@@ -57,7 +57,8 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Tokens by class.** Input, uncached input, cache reads, cache writes split by 5-minute and 1-hour TTL, output, and reasoning output where the provider records it.
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
-- **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
+- **Dashboard views.** Summary (daily usage by agent, provider mix, repository comparison), Velocity (usage trends and guarded projections), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
+- **Velocity across dimensions.** Group by agent, provider, model, repository, execution kind or effort; select value, token classes, model/tool calls or session starts. Local day/week/month and hour profiles, stacked/line/cumulative charts, a rolling 7-day average, matched-period changes, today’s burn against a 14-day median, scenario projections and top movers. Coverage and small-baseline guards stay beside the numbers.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
 - **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access, no telemetry, and read-only access to every store.
 
@@ -108,6 +109,8 @@ session-analytics --port 4180     # use another loopback port
 ```
 
 The server binds to `127.0.0.1` only and answers read-only `GET` requests. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
+
+Velocity follows **activity dates**, even when the session began before the selected window. Other totals select sessions by start date. The analysis timezone is shown in the view; set `TZ` before launching to choose a different one. Cursor value and other activity without timestamps stay undated. Projection bands are workload scenarios, not confidence intervals or invoices. See the [velocity definitions](docs/metrics.md#velocity-snapshot-version-1) for denominators and attribution rules.
 
 ### Terminal report
 

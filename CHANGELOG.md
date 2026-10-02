@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Added
+
+- Velocity tab for agent, provider, model, repository, execution and effort across priced value, token classes, model/tool calls and starts. Includes local day/week/month and hour profiles, stacked/line/cumulative charts, rolling averages, guarded period comparisons, burn, end-of-month scenario bands and top movers.
+- Compact content-free hourly cells, explicit timezone, fixed agent identity enums and undated/coverage counters in JSON snapshots. Synthetic demo now varies Claude entrypoints and subagent types, plus Codex review sources.
+
+### Changed
+
+- Summary daily usage chart now shows agents using the same velocity data. Global date filters use the analysis timezone; legacy JSON `spendByDay` remains UTC.
+- A usage-free Claude parent placeholder no longer assigns a subagent response to the parent timestamp; total usage/value is unchanged, but day attribution can move.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

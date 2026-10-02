@@ -1,3 +1,6 @@
+import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
+import { localDay } from "./velocity-data.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -85,16 +88,16 @@ function selectedRepository() {
 const tokenFields = ["cacheWrite1hInputTokens", "cacheWrite5mInputTokens", "cacheWriteInputTokens", "cachedInputTokens", "inputTokens", "nonReasoningOutputTokens", "outputTokens", "reasoningOutputTokens", "uncachedInputTokens"];
 const costFields = ["cacheWriteUsd", "cachedInputUsd", "inputUsd", "outputUsd", "totalUsd", "upperEstimateUsd"];
 
-function selectedWindow() {
-  return {
-    start: elements.windowStart.value ? `${elements.windowStart.value}T00:00:00.000Z` : null,
-    end: elements.windowEnd.value ? `${elements.windowEnd.value}T23:59:59.999Z` : null,
-  };
+function velocityContext() {
+  return { start: elements.windowStart.value || elements.windowStart.min, end: elements.windowEnd.value || elements.windowEnd.max, timeZone: snapshot?.velocity?.timeZone || "UTC", generatedAt: snapshot.generatedAt };
 }
 
 function sessionsInWindow(sessions) {
-  const { start, end } = selectedWindow();
-  return sessions.filter(({ createdAt }) => (!start || createdAt >= start) && (!end || createdAt <= end));
+  const { start, end, timeZone } = velocityContext();
+  return sessions.filter(({ createdAt }) => {
+    const day = localDay(createdAt, timeZone);
+    return day && (!start || day >= start) && (!end || day <= end);
+  });
 }
 
 function summarize(sessions) {
@@ -580,6 +583,7 @@ function renderActiveAnalyticsView(view) {
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
   if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
+  if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, velocityContext());
   if (name === "costs") renderCosts(view);
   if (name === "models") renderModels(view);
   if (name === "tools") {
@@ -592,108 +596,11 @@ function renderActiveAnalyticsView(view) {
   }
 }
 
-function dailyProviderSpend(sessions) {
-  const days = new Map();
-  const first = new Date(`${elements.windowStart.value}T00:00:00Z`), last = new Date(`${elements.windowEnd.value}T00:00:00Z`);
-  for (let day = first, count = 0; day <= last && count < 3660; day = new Date(day.valueOf() + 86_400_000), count += 1) {
-    const name = day.toISOString().slice(0, 10);
-    days.set(name, { name, codex: 0, claude: 0, cursor: 0 });
-  }
-  for (const session of sessions) {
-    for (const [day, value] of Object.entries(session.spendByDay)) {
-      if (day < elements.windowStart.value || day > elements.windowEnd.value) continue;
-      const current = days.get(day) || { name: day, codex: 0, claude: 0, cursor: 0 };
-      current[session.provider] += value;
-      days.set(day, current);
-    }
-  }
-  return [...days.values()].sort((left, right) => left.name.localeCompare(right.name));
-}
-
 function activeProviders() {
   return providerFilters.filter(({ checked }) => checked).map(({ dataset }) => dataset.providerFilter);
 }
 
 const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" };
-
-function renderLine(items) {
-  clear(elements.dailySpend);
-  const selectedProviders = activeProviders();
-  const providers = selectedProviders.filter((provider) => items.some((item) => item[provider] > 0));
-  if (!items.length || !selectedProviders.length || !providers.length) {
-    const message = !selectedProviders.length
-      ? "Choose at least one provider."
-      : selectedProviders.length === 1 && selectedProviders[0] === "cursor"
-        ? "Cursor has no trustworthy daily cost timestamps in the local store; its provider-reported total remains in the usage-value summaries."
-        : "No daily priced activity in this view.";
-    elements.dailySpend.append(node("p", message, "muted")); return;
-  }
-  const width = 900, height = 270, left = 96, right = 22, top = 18, bottom = 46;
-  const plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
-  const roughTick = maximum / 4;
-  const tickMagnitude = 10 ** Math.floor(Math.log10(roughTick));
-  const tick = Math.ceil(roughTick / tickMagnitude) * tickMagnitude;
-  const axisMaximum = tick * 4;
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`); svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Daily priced usage value in US dollars by provider");
-  const tooltip = node("div", null, "chart-tooltip"); tooltip.hidden = true;
-  const addText = (value, x, y, className, anchor = "start") => {
-    const label = document.createElementNS(svg.namespaceURI, "text");
-    label.setAttribute("x", String(x)); label.setAttribute("y", String(y));
-    label.setAttribute("class", className); label.setAttribute("text-anchor", anchor);
-    label.textContent = value; svg.append(label);
-  };
-  for (let index = 0; index < 5; index += 1) {
-    const y = top + (index / 4) * plotHeight;
-    const value = axisMaximum * (1 - index / 4);
-    const line = document.createElementNS(svg.namespaceURI, "line");
-    line.setAttribute("x1", String(left)); line.setAttribute("x2", String(width - right));
-    line.setAttribute("y1", String(y)); line.setAttribute("y2", String(y)); line.setAttribute("class", "grid-line"); svg.append(line);
-    addText(money(value), left - 10, y + 4, "axis-label", "end");
-  }
-  const tickIndexes = [...new Set([0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
-  for (const index of tickIndexes) {
-    const x = items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
-    const date = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(`${items[index].name}T00:00:00`));
-    addText(date, x, height - 16, "axis-label", index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
-  }
-  for (const provider of providers) {
-    const points = items.map((item, index) => ({
-      item,
-      x: items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth,
-      y: top + (1 - item[provider] / axisMaximum) * plotHeight,
-    }));
-    const line = document.createElementNS(svg.namespaceURI, "polyline");
-    line.setAttribute("points", points.map(({ x, y }) => `${x},${y}`).join(" "));
-    line.setAttribute("class", `trend-line ${provider}`); svg.append(line);
-    for (const point of points) {
-      // Zero-value dates stay in the polyline so missing calendar days are
-      // represented, but they do not become hundreds of redundant controls.
-      if (point.item[provider] <= 0) continue;
-      const group = document.createElementNS(svg.namespaceURI, "g");
-      group.setAttribute("class", `chart-point ${provider}`); group.setAttribute("tabindex", "0");
-      group.setAttribute("role", "button");
-      group.setAttribute("aria-label", `${providerLabels[provider]}, ${point.item.name}, ${money(point.item[provider])}`);
-      const dot = document.createElementNS(svg.namespaceURI, "circle");
-      dot.setAttribute("cx", String(point.x)); dot.setAttribute("cy", String(point.y)); dot.setAttribute("r", "4"); dot.setAttribute("class", "trend-dot");
-      const hit = document.createElementNS(svg.namespaceURI, "circle");
-      hit.setAttribute("cx", String(point.x)); hit.setAttribute("cy", String(point.y)); hit.setAttribute("r", "13"); hit.setAttribute("class", "trend-hit");
-      group.append(dot, hit); svg.append(group);
-      const show = () => {
-        group.classList.add("active"); tooltip.hidden = false;
-        tooltip.textContent = `${providerLabels[provider]} · ${point.item.name} · ${money(point.item[provider])}`;
-        tooltip.style.left = `${Math.min(82, Math.max(12, (point.x / width) * 100))}%`;
-        tooltip.style.top = `${Math.max(8, (point.y / height) * 100 - 8)}%`;
-      };
-      const hide = () => { group.classList.remove("active"); tooltip.hidden = true; };
-      group.addEventListener("pointerenter", show); group.addEventListener("pointerleave", hide);
-      group.addEventListener("focus", show); group.addEventListener("blur", hide); group.addEventListener("click", show);
-    }
-  }
-  elements.dailySpend.append(svg, tooltip);
-}
 
 function renderDonut(sessions) {
   const counts = { codex: 0, claude: 0, cursor: 0 };
@@ -751,8 +658,9 @@ function populateRepositories() {
 }
 
 function configureWindow() {
-  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay)]).sort();
-  const minimum = dates[0] || new Date().toISOString().slice(0, 10), maximum = dates.at(-1) || minimum;
+  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay, velocity }) => [localDay(createdAt, snapshot.velocity?.timeZone || "UTC"), ...(velocity ? velocity.buckets.map(([day]) => day) : Object.keys(spendByDay))]).filter(Boolean).sort();
+  const today = localDay(snapshot.generatedAt, snapshot.velocity?.timeZone || "UTC");
+  const minimum = dates[0] || today, maximum = dates.at(-1) > today ? dates.at(-1) : today;
   for (const input of [elements.windowStart, elements.windowEnd]) { input.min = minimum; input.max = maximum; }
   elements.windowStart.value = minimum; elements.windowEnd.value = maximum; elements.windowPreset.value = "all";
 }
@@ -771,6 +679,8 @@ function applyWindowPreset() {
 
 function applyCustomWindow(changed) {
   elements.windowPreset.value = "custom";
+  if (!elements.windowStart.value) elements.windowStart.value = elements.windowStart.min;
+  if (!elements.windowEnd.value) elements.windowEnd.value = elements.windowEnd.max;
   if (elements.windowStart.value > elements.windowEnd.value) {
     if (changed === "start") elements.windowEnd.value = elements.windowStart.value;
     else elements.windowStart.value = elements.windowEnd.value;
@@ -785,7 +695,7 @@ function windowCaption() {
 
 function renderSharedView(view) {
   const selected = selectedRepository(); const summary = view.summary;
-  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.`;
+  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${currentViewName() === "velocity" ? "Activity observed" : "Sessions started"} during ${windowCaption()} (${snapshot.velocity?.timeZone || "UTC"}).`;
 }
 
 function renderSummary(view) {
@@ -795,7 +705,7 @@ function renderSummary(view) {
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`;
   elements.input.textContent = compact.format(summary.totalInputTokens); elements.cache.textContent = `${percent(summary.cacheReadRatio)} cached · repeated context included`;
   elements.output.textContent = compact.format(summary.outputTokens); elements.tools.textContent = compact.format(summary.toolCalls); elements.compactions.textContent = integer.format(summary.compactions); elements.live.textContent = integer.format(summary.workingSnapshots);
-  renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
+  renderSummaryVelocity(elements.dailySpend, view.dailySessions.filter(({ provider }) => activeProviders().includes(provider)), velocityContext()); renderDonut(view.sessions);
   renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
   renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
   renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd }) => ({ name: model, value: totalUsd, provider })), money, 8);

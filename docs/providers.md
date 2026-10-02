@@ -171,3 +171,14 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 ## Adding a provider
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-provider) for the checklist. A new source needs a discovery rule with an explicit override option, an identity check, a parser that only accumulates allowlisted counters, fixtures with sentinel content, and a section on this page.
+
+## Velocity evidence
+
+All three adapters populate compact velocity counters at the same counting points as
+existing session totals. Claude entrypoint and fixed subagent attribution enums, and
+Codex source/originator enums, provide finer agent groups without exporting custom names.
+Per-request model, effort and execution stay attached to their activity cells, including
+model/source changes inside a Codex rollout. Cursor provider value stays undated, while
+only bubbles with absolute start timestamps contribute dated tokens/tools. The full
+[velocity definition](metrics.md#velocity-snapshot-version-1) covers local timezone/DST
+behavior, unavailable cache/reasoning fields and the session-start denominator.

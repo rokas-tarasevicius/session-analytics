@@ -132,6 +132,16 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const pageText = await page.text();
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
+    assert.match(pageText, /data-view-button="velocity"/);
+    assert.match(pageText, /id="velocity-view"/);
+    assert.match(serialized, /"velocity":\{"version":1,"timeZone":/);
+    for (const resource of ["velocity.js", "velocity-data.js", "velocity.css"]) {
+      const asset = await fetch(`${origin}/${resource}`);
+      assert.equal(asset.status, 200);
+      assert.match(asset.headers.get("content-type") ?? "", resource.endsWith(".css") ? /text\/css/ : /text\/javascript/);
+      assert.match(asset.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+      assert.equal((await fetch(`${origin}/${resource}`, { method: "POST" })).status, 405);
+    }
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
     const application = await fetch(`${origin}/app.js`);

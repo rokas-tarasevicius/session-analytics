@@ -7,6 +7,7 @@
     <title>Session Analytics</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/velocity.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -60,6 +61,7 @@
 
       <nav class="view-tabs" aria-label="Analytics views">
         <button type="button" data-view-button="summary" aria-current="page">Summary</button>
+        <button type="button" data-view-button="velocity">Velocity</button>
         <button type="button" data-view-button="distributions">Distributions</button>
         <button type="button" data-view-button="activity">Activity</button>
         <button type="button" data-view-button="costs">Costs</button>
@@ -84,7 +86,7 @@
       <section class="dashboard-grid" aria-label="Machine analytics">
         <article class="panel span-8">
           <header>
-            <div><p class="kicker">USAGE VELOCITY</p><h2>Daily priced usage value</h2></div>
+            <div><p class="kicker">USAGE VELOCITY</p><h2>Daily priced usage by agent</h2></div>
             <div class="provider-key" aria-label="Filter daily usage by provider">
               <label class="provider-toggle"><input type="checkbox" data-provider-filter="codex" checked /><img src="/brands/codex.svg" alt="" />Codex</label>
               <label class="provider-toggle"><input type="checkbox" data-provider-filter="claude" checked /><img src="/brands/claude.svg" alt="" />Claude</label>
@@ -92,7 +94,7 @@
             </div>
           </header>
           <div class="line-chart" id="daily-spend"></div>
-          <p class="chart-note">Codex and Claude use reviewed API list-price equivalents. Cursor totals use its provider-reported local cost record, but Cursor is not plotted by day because the local store has no per-call cost timestamps. None of these values proves an amount charged.</p>
+          <p class="chart-note">Codex and Claude use reviewed API list-price equivalents. Cursor totals use its provider-reported local cost record, but Cursor is not plotted by day because the local store has no per-call cost timestamps. Activity dates follow the selected window; summary cards select session starts. None of these values proves an amount charged.</p>
         </article>
         <article class="panel span-4">
           <header><div><p class="kicker">PROVIDER MIX</p><h2>Session share</h2></div></header>
@@ -125,6 +127,11 @@
         <div class="table-wrap"><table><thead><tr><th>Repository</th><th>Sessions</th><th>Usage value</th><th>Input</th><th>Output</th><th>Tools</th><th>Cache</th><th>Coverage</th></tr></thead><tbody id="repository-rows"></tbody></table></div>
       </section>
       </div>
+
+      <section class="analytics-view" data-view-panel="velocity" hidden aria-labelledby="velocity-title">
+        <header class="view-header"><div><p class="kicker">ACTIVITY OVER TIME</p><h2 id="velocity-title">Velocity</h2><p>Where usage is moving, by agent and every evidenced dimension. Value is not an invoice; activity is not an outcome.</p></div></header>
+        <div id="velocity-view"></div>
+      </section>
 
       <section class="analytics-view" data-view-panel="distributions" hidden aria-labelledby="distributions-title">
         <header class="view-header"><div><p class="kicker">COMPARE REPOSITORIES</p><h2 id="distributions-title">Distributions</h2><p>Each line is normalized to the share of sessions in its repository.</p></div></header>

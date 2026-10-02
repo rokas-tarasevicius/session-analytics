@@ -8,7 +8,13 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
+import {
+  VelocityAccumulator, claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed,
+  usageVelocity, velocityDimension, velocityMetadata, zeroVelocity,
+} from "./metrics/velocity.ts";
+
 import type {
+  AgentIdentity, ClaudeSubagentType, VelocityDimension,
   AnalyzeOptions,
   CostBreakdown,
   ModelRate,
@@ -76,6 +82,9 @@ export interface RepositoryRow {
 }
 
 interface TokenEvent {
+  dimension: VelocityDimension;
+  reasoningExposed: boolean;
+  cacheReadExposed: boolean;
   executionKind: SessionAnalytics["executionKind"];
   fingerprint: string | null;
   last: TokenUsage | null;
@@ -101,6 +110,9 @@ interface TranscriptCandidate {
 }
 
 interface MutableSession {
+  agentIdentity: AgentIdentity;
+  velocity: VelocityAccumulator;
+  startDimension: VelocityDimension | null;
   assistantMessages: number;
   compactions: number;
   delegatedAgents: Set<string>;
@@ -297,6 +309,7 @@ function addModelUsage(
   timestamp: string | null,
   fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
+  velocityContext?: { dimension: VelocityDimension; reasoning: boolean; cacheRead: boolean; cacheWrite: boolean },
 ): void {
   let aggregate = session.models.get(model);
   if (!aggregate) {
@@ -312,11 +325,14 @@ function addModelUsage(
   aggregate.calls += 1;
   sumTokens(aggregate, usage);
   const rate = rateCard.models[model];
+  const cost = rate ? calculateCost(rate, usage, inputForRequest) : zeroCost();
+  if (velocityContext) {
+    session.velocity.add(timestamp, velocityContext.dimension, usageVelocity(usage, cost.totalUsd, Boolean(rate), velocityContext));
+  }
   if (!rate) {
     aggregate.priced = false;
     return;
   }
-  const cost = calculateCost(rate, usage, inputForRequest);
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
@@ -326,6 +342,9 @@ function addModelUsage(
 
 function createMutableSession(): MutableSession {
   return {
+    agentIdentity: {},
+    velocity: new VelocityAccumulator(),
+    startDimension: null,
     assistantMessages: 0,
     compactions: 0,
     delegatedAgents: new Set<string>(),
@@ -602,6 +621,7 @@ async function analyzeCodex(
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
   let currentModel = row.database_model ?? "<unknown>";
+  let currentIdentity: AgentIdentity = {};
   let parseErrors = 0;
   // Codex has recorded the same lifecycle events in several shapes over time:
   // legacy `event_msg` notifications, `item_completed` items, and top-level
@@ -627,6 +647,8 @@ async function analyzeCodex(
     const payloadType = stringValue(payload?.["type"]);
 
     if (type === "session_meta") {
+      currentIdentity = { codexSource: codexSource(payload?.["source"]), codexOriginator: codexOriginator(payload?.["originator"]) };
+      if (!state.agentIdentity.codexSource) state.agentIdentity = currentIdentity;
       state.executionKind = asRecord(payload?.["source"])?.["subagent"]
         ? "subagent"
         : "top-level";
@@ -637,6 +659,7 @@ async function analyzeCodex(
     if (type === "turn_context") {
       currentModel = stringValue(payload?.["model"]) ?? currentModel;
       state.effort = stringValue(payload?.["effort"]) ?? state.effort;
+      state.startDimension ??= velocityDimension("codex", currentIdentity, state.executionKind, currentModel, state.effort);
       return;
     }
     if (type === "compacted") {
@@ -669,6 +692,9 @@ async function analyzeCodex(
             nonNegativeNumberValue(info?.["model_context_window"]),
           );
           tokenEvents.push({
+            dimension: velocityDimension("codex", currentIdentity, state.executionKind, currentModel, state.effort),
+            reasoningExposed: counterExposed((last ?? total)["reasoning_output_tokens"]),
+            cacheReadExposed: counterExposed((last ?? total)["cached_input_tokens"]),
             executionKind: state.executionKind,
             fingerprint: codexCounterFingerprint(total, last),
             inputForRequest,
@@ -699,6 +725,7 @@ async function analyzeCodex(
         const skillInput = payload?.["input"] ?? payload?.["arguments"];
         for (const name of inferredSkillNames(skillInput)) increment(state.skills, name);
       }
+      state.velocity.tool(timestamp, velocityDimension("codex", currentIdentity, state.executionKind, currentModel, state.effort), Math.max(1, nested.length));
       if (nested.length === 0) {
         increment(state.tools, transportName);
       } else {
@@ -764,6 +791,7 @@ async function analyzeCodex(
         event.timestamp,
         row.updated_at,
         event.executionKind,
+        { dimension: { ...event.dimension, model }, reasoning: event.reasoningExposed, cacheRead: event.cacheReadExposed, cacheWrite: false },
       );
     }
   }
@@ -854,6 +882,9 @@ async function analyzeClaude(
   // only the final snapshot - the one with the most output - is the message's
   // usage. Pricing the first snapshot undercounts output and reasoning.
   const assistantUsage = new Map<string, {
+    dimension: VelocityDimension;
+    cacheRead: boolean;
+    cacheWrite: boolean;
     executionKind: SessionAnalytics["executionKind"];
     model: string;
     reasoningExposed: boolean;
@@ -866,6 +897,7 @@ async function analyzeClaude(
   const effort: {
     current: { executionKind: SessionAnalytics["executionKind"]; timestamp: string; value: string } | null;
   } = { current: null };
+  const subagentTypes = new Set<ClaudeSubagentType>();
   const seenHumanMessages = new Set<string>();
   const seenToolCalls = new Set<string>();
   let parseErrors = 0;
@@ -875,6 +907,8 @@ async function analyzeClaude(
     const executionKind: SessionAnalytics["executionKind"] =
       path === mainPath ? "top-level" : "subagent";
     state.executionKindsSeen.add(executionKind);
+    let identity: AgentIdentity = { claudeEntrypoint: state.agentIdentity.claudeEntrypoint ?? "unknown" };
+    let fileEffort: string | null = null;
     await visitJsonLines(path, (record, line) => {
       if (record["__parse_error"] === true) {
         parseErrors += 1;
@@ -882,6 +916,13 @@ async function analyzeClaude(
       }
       const timestamp = stringValue(record["timestamp"]);
       trackTimestamp(state, timestamp);
+      if (record["entrypoint"] !== undefined) identity.claudeEntrypoint = claudeEntrypoint(record["entrypoint"]);
+      if (record["attributionAgent"] !== undefined) {
+        identity.claudeSubagentType = claudeSubagentType(record["attributionAgent"]);
+        if (executionKind === "subagent") subagentTypes.add(identity.claudeSubagentType);
+      }
+      if (executionKind === "top-level") state.agentIdentity = { claudeEntrypoint: identity.claudeEntrypoint ?? "unknown" };
+      fileEffort = stringValue(record["effort"]) ?? fileEffort;
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
       const agentId = stringValue(record["agentId"]);
@@ -906,10 +947,15 @@ async function analyzeClaude(
         }
         const usageRecord = asRecord(message["usage"]);
         const usage = usageRecord ? claudeUsage(usageRecord) : zeroTokens();
+        const dimension = velocityDimension("claude", identity, executionKind, stringValue(message["model"]) ?? row.database_model ?? "<unknown>", fileEffort);
+        if (executionKind === "top-level") state.startDimension ??= dimension;
         const snapshot = {
+          dimension,
+          cacheRead: counterExposed(usageRecord?.["cache_read_input_tokens"]),
+          cacheWrite: counterExposed(usageRecord?.["cache_creation_input_tokens"]),
           executionKind,
           model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
-          reasoningExposed: Boolean(asRecord(usageRecord?.["output_tokens_details"])),
+          reasoningExposed: counterExposed(asRecord(usageRecord?.["output_tokens_details"])?.["thinking_tokens"]),
           timestamp,
           usage,
         };
@@ -927,7 +973,7 @@ async function analyzeClaude(
         if (replaces) {
           assistantUsage.set(messageId, {
             ...snapshot,
-            timestamp: previous?.timestamp ?? timestamp,
+            timestamp: previous && tokenCount(previous.usage) > 0 && previous.executionKind === executionKind ? previous.timestamp ?? timestamp : timestamp,
           });
         }
         for (const rawBlock of contentBlocks(message)) {
@@ -939,6 +985,7 @@ async function analyzeClaude(
           const name = stringValue(block["name"]) ?? "tool_use";
           increment(state.tools, name);
           increment(state.transportTools, name);
+          state.velocity.tool(timestamp, dimension);
           if (name === "Skill") {
             const skill = normalizedSkillName(asRecord(block["input"])?.["skill"]);
             if (skill) increment(state.skills, skill);
@@ -960,12 +1007,13 @@ async function analyzeClaude(
     });
   }
   state.effort = effort.current?.value ?? null;
+  if (subagentTypes.size) state.agentIdentity.claudeSubagentType = subagentTypes.size > 1 ? "mixed" : [...subagentTypes][0];
   let reasoningMissing = false;
-  for (const { executionKind, model, reasoningExposed, timestamp, usage } of assistantUsage.values()) {
+  for (const { dimension, cacheRead, cacheWrite, executionKind, model, reasoningExposed, timestamp, usage } of assistantUsage.values()) {
     if (tokenCount(usage) === 0) continue;
     if (usage.outputTokens > 0 && !reasoningExposed) reasoningMissing = true;
     sumTokens(totals, usage);
-    addModelUsage(state, rateCard, model, usage, usage.inputTokens, timestamp, row.updated_at, executionKind);
+    addModelUsage(state, rateCard, model, usage, usage.inputTokens, timestamp, row.updated_at, executionKind, { dimension, reasoning: reasoningExposed, cacheRead, cacheWrite });
   }
   if (reasoningMissing) {
     state.warnings.push(
@@ -1028,6 +1076,8 @@ function finalizeSession(
     userTurns: state.userTurns,
   };
   return {
+    agentIdentity: state.agentIdentity,
+    velocity: state.velocity.finish(row.created_at, state.startDimension ?? velocityDimension(row.agent_type as SessionProvider, state.agentIdentity, state.executionKind, "<unknown>", null)),
     cost,
     costBasis:
       row.agent_type === "cursor"
@@ -1477,6 +1527,8 @@ function addCursorReportedCost(
       upperEstimateUsd: value,
     };
     state.models.set(model, aggregate);
+    const values = zeroVelocity(); values[0] = value;
+    state.velocity.add(null, velocityDimension("cursor", {}, state.executionKind, model, null), values);
     if (state.executionKind === "subagent") state.costByExecution.subagentUsd += value;
     else if (state.executionKind === "top-level") state.costByExecution.topLevelUsd += value;
     else state.costByExecution.unknownUsd += value;
@@ -1514,6 +1566,8 @@ function analyzeCursorComposer(
     if (type === 1) state.userTurns += 1;
     if (type === 2) state.assistantMessages += 1;
     const timing = asRecord(bubble["timingInfo"]);
+    const timestamp = millisecondTimestamp(timing?.["clientStartTime"]);
+    const dimension = velocityDimension("cursor", {}, executionKind, "<unknown>", null);
     trackTimestamp(state, millisecondTimestamp(timing?.["clientStartTime"]));
     trackTimestamp(state, millisecondTimestamp(timing?.["clientEndTime"]));
     const tokenCountRecord = asRecord(bubble["tokenCount"]);
@@ -1522,14 +1576,19 @@ function analyzeCursorComposer(
       tokens.inputTokens += input; tokens.uncachedInputTokens += input;
       tokens.outputTokens += output; tokens.nonReasoningOutputTokens += output;
       state.maxInputTokensPerCall = Math.max(state.maxInputTokensPerCall, input); modelCalls += 1;
+      const values = zeroVelocity();
+      values[1] = input; values[2] = input; values[5] = output; values[7] = 1;
+      state.velocity.add(timestamp, dimension, values);
     }
     const modernTool = cursorModernTool(bubble);
     if (modernTool && !seenToolCalls.has(modernTool.id)) {
       seenToolCalls.add(modernTool.id);
+      state.velocity.tool(timestamp, dimension);
       increment(state.tools, modernTool.name);
       increment(state.transportTools, modernTool.name);
     }
     for (const name of cursorToolNames(bubble["capabilitiesRan"])) {
+      state.velocity.tool(timestamp, dimension);
       increment(state.tools, name);
       increment(state.transportTools, name);
     }
@@ -1936,6 +1995,7 @@ function aggregate(
   const unpricedSessions = sessions.filter(({ costComplete }) => !costComplete).length;
   if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include models without a rate card.`);
   return {
+    velocity: velocityMetadata(),
     generatedAt: new Date().toISOString(),
     rateCard: {
       currency: rateCard.currency,
@@ -2199,6 +2259,7 @@ function aggregateMachine(
     rateCard,
   );
   return {
+    velocity: combined.velocity,
     generatedAt: combined.generatedAt,
     rateCard: combined.rateCard,
     repositories: repositories.map(

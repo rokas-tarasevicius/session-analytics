@@ -105,6 +105,9 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
 const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
+  ["/velocity.js", join(publicRoot, "velocity.js")],
+  ["/velocity-data.js", join(publicRoot, "velocity-data.js")],
+  ["/velocity.css", join(publicRoot, "velocity.css")],
   ["/styles.css", join(publicRoot, "styles.css")],
   ["/fonts/space-grotesk-latin.woff2", join(publicRoot, "fonts", "space-grotesk-latin.woff2")],
   ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],

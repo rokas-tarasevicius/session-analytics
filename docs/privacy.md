@@ -45,7 +45,7 @@ Every field belongs to a tier. The tiers also govern planned features (see [road
 | Tier | Contents | Status |
 | --- | --- | --- |
 | **P0** | Counts, token counters, costs, timestamps, durations, model IDs, tool and skill names, enumerated labels | Returned today |
-| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys and repository metadata only) |
+| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys, repository metadata and analysis timezone) |
 | **P2** | Results of local rules over commands or diffs, where only rule IDs and counts leave the parser | Not implemented; will be opt-in |
 | **P3** | Text shown to you or sent to an LLM, such as an opt-in session review | Not implemented; will be opt-in per run, stored separately, and labeled |
 
@@ -62,6 +62,8 @@ Returned by `/api/analytics` and `report --json`.
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `generatedAt` | ISO time the snapshot was computed | P0 |
+| `velocity.version` | Optional velocity payload version; currently `1` (also on single-repository analysis results) | P0 |
+| `velocity.timeZone` | IANA timezone used to bucket activity; analysis process local zone, including `TZ` override | P1 |
 | `rateCard.currency` | Always `USD` | P0 |
 | `rateCard.effectiveDate` | Effective date of the rate card used | P0 |
 | `rateCard.models[].model` | Model ID that has a reviewed rate | P0 |
@@ -118,6 +120,11 @@ Repository summaries and the machine summary share these fields.
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
+| `agentIdentity.claudeEntrypoint` | Optional fixed enum: `cli`, `sdk`, `desktop`, `unknown` | P0 |
+| `agentIdentity.claudeSubagentType` | Optional observed subtype: `general-purpose`, `explore`, `plan`, `other`, or `mixed` for a composite session | P0 |
+| `agentIdentity.codexSource` | Optional initial source enum: `cli`, `exec`, `vscode`, `subagent`, `review`, `unknown` | P0 |
+| `agentIdentity.codexOriginator` | Optional initial originator enum: `cli`, `exec`, `vscode`, `desktop`, `unknown`; arbitrary originator text is excluded | P0 |
+| `velocity` | Optional compact, content-free local-time activity cells; see [Velocity cells](#velocity-cells-sessionvelocity) | P0 |
 | `sessionKey` | First 12 hex characters of SHA-256 of `<provider>:<session ID>` (or of the Conductor session ID for Conductor-registered sessions). It is not keyed with a secret, so it is stable across runs; someone who already holds the raw ID can recompute it, but the key does not reveal the ID | P1 |
 | `provider` | `claude`, `codex`, or `cursor` | P0 |
 | `repositoryId` | Repository key, as in `repository.id` | P1 |
@@ -208,6 +215,48 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 | `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
 | `calls` | Requests attributed to this model | P0 |
 | `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
+
+### Velocity cells (`SessionVelocity`)
+
+Every new field is projected from counters or fixed enums. Dates/hours and finer agent
+mix increase temporal detail; the explicit timezone is P1 because it can disclose a
+region. Repository and session keys are inherited from the enclosing P1 session and are
+not repeated inside cells. No event ID, agent ID, parent ID, command, nickname or custom
+agent name is exported. Synthetic sentinel tests cover metadata, streamed content, tool
+inputs, invalid timestamps and spawned-agent objects on the same API/JSON projection.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `dimensions[]` | Per-session dictionary of observed dimension combinations | P0 |
+| `dimensions[].agent` | Fixed enum: `claude-cli`, `claude-sdk`, `claude-desktop`, `claude-unknown`, `claude-general-purpose`, `claude-explore`, `claude-plan`, `claude-subagent`, `codex-cli`, `codex-exec`, `codex-vscode`, `codex-desktop`, `codex-subagent`, `codex-review`, `codex-unknown`, `cursor` | P0 |
+| `dimensions[].model` | Existing model ID or `<unknown>`; never inferred from text | P0 |
+| `dimensions[].executionKind` | `top-level`, `subagent`, or `unknown`; no mixed cells | P0 |
+| `dimensions[].effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, or `unknown` | P0 |
+| `buckets[][0]` | Local `YYYY-MM-DD` date of evidenced activity | P0 |
+| `buckets[][1]` | Local clock hour, integer 0–23 | P0 |
+| `buckets[][2]` | Index into `dimensions` | P0 |
+| `buckets[][3]` | Fixed tuple of counters, defined below | P0 |
+| `undated[][0]` | Dimension index for activity without an absolute timestamp | P0 |
+| `undated[][1]` | Same counter tuple, excluded from dated charts | P0 |
+| `values[0]` | Priced value in USD | P0 |
+| `values[1]` | Processed input tokens | P0 |
+| `values[2]` | Uncached input tokens (legacy Cursor unsplit allocation; coverage remains unavailable) | P0 |
+| `values[3]` | Cache-read input tokens | P0 |
+| `values[4]` | Cache-write input tokens | P0 |
+| `values[5]` | Output tokens, including reasoning | P0 |
+| `values[6]` | Separately recorded reasoning tokens | P0 |
+| `values[7]` | Model calls | P0 |
+| `values[8]` | Effective tool calls | P0 |
+| `values[9]` | Public sessions started | P0 |
+| `values[10]` | Tokens assigned to a model price; coverage numerator | P0 |
+| `values[11]` | Output tokens with separately recorded reasoning; coverage numerator | P0 |
+| `values[12]` | Input tokens with a cache-read counter; coverage numerator | P0 |
+| `values[13]` | Input tokens with a cache-write counter; coverage numerator | P0 |
+
+`values` means the tuple in `buckets[][3]` or `undated[][1]`; it is not another JSON key.
+Week/month/hour series, rolling means, changes, movers and projection bands are computed
+in the browser from these cells and are not additional exported fields. Definitions,
+minimum-activity guards and unknown-data rules are in [metrics.md](metrics.md#velocity-snapshot-version-1).
 
 ### Health endpoint
 

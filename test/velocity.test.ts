@@ -1,0 +1,264 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { analyzeMachineSessions } from "../src/analyzer.ts";
+import { claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed, localClock, VelocityAccumulator, velocityDimension, velocityEffort, zeroVelocity } from "../src/metrics/velocity.ts";
+import { buildVelocity, calendarDays, guardedDelta, localDay, metricDefinitions, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
+import type { SessionAnalytics, SessionVelocity, VelocityValues } from "../src/types.ts";
+import { createSessionAnalyticsFixture } from "./fixtures.ts";
+
+const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-8 * Math.max(1, Math.abs(b)), `${a} != ${b}`);
+const sumCells = (velocity: SessionVelocity): number[] => {
+  const result = zeroVelocity();
+  for (const values of [...velocity.buckets.map((cell) => cell[3]), ...velocity.undated.map((cell) => cell[1])]) for (let i = 0; i < result.length; i += 1) result[i]! += values[i]!;
+  return result;
+};
+const jsonl = (records: unknown[]) => `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
+
+test("velocity reconciles every provider's dated plus undated counters with the existing ledger", async () => {
+  const root = await mkdtemp(join(tmpdir(), "velocity-ledger-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const data = await analyzeMachineSessions(fixture);
+    assert.equal(data.velocity?.version, 1);
+    assert.equal(data.velocity?.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    for (const session of data.sessions) {
+      assert.ok(session.velocity);
+      const values = sumCells(session.velocity);
+      near(values[0]!, session.cost.totalUsd);
+      for (const [index, field] of [[1, "inputTokens"], [2, "uncachedInputTokens"], [3, "cachedInputTokens"], [4, "cacheWriteInputTokens"], [5, "outputTokens"], [6, "reasoningOutputTokens"]] as const) near(values[index]!, session.tokens[field]);
+      assert.equal(values[7], session.metrics.modelCalls);
+      assert.equal(values[8], session.metrics.toolCalls);
+      assert.equal(values[9], 1);
+      const execution = { "top-level": 0, subagent: 0, unknown: 0 };
+      for (const [,, index, value] of session.velocity.buckets) execution[session.velocity.dimensions[index]!.executionKind] += value[0];
+      for (const [index, value] of session.velocity.undated) execution[session.velocity.dimensions[index]!.executionKind] += value[0];
+      near(execution["top-level"], session.costByExecution.topLevelUsd);
+      near(execution.subagent, session.costByExecution.subagentUsd);
+      near(execution.unknown, session.costByExecution.unknownUsd);
+      if (session.provider === "cursor") {
+        assert.equal(session.velocity.buckets.reduce((n, cell) => n + cell[3][0], 0), 0, "Never put undated provider cost on the session start day");
+        assert.ok(session.velocity.undated.length);
+        assert.equal(values[10], 0, "Cursor tokens have no attributable model price");
+      }
+    }
+    const serialized = JSON.stringify(data);
+    assert.doesNotMatch(serialized, /content-is-not-returned|secret-command|secret-path|secret-skill-args|conductor-codex|22222222-2222/);
+    const modelTotal = data.sessions.reduce((total, session) => total + sumCells(session.velocity!)[7]!, 0);
+    assert.equal(modelTotal, data.sessions.reduce((total, session) => total + session.metrics.modelCalls, 0));
+  } finally { await rm(root, { force: true, recursive: true }); }
+});
+
+test("agent identity is a fixed enum, never a free-text originator, attribution or effort", () => {
+  const sentinel = "private-agent-/secret-path-and-title";
+  assert.equal(claudeEntrypoint("sdk-ts"), "sdk"); assert.equal(claudeEntrypoint("local-agent"), "desktop");
+  assert.equal(claudeEntrypoint(sentinel), "unknown"); assert.equal(claudeSubagentType(sentinel), "other");
+  assert.equal(claudeSubagentType("Explore"), "explore");
+  assert.equal(codexSource({ subagent: { thread_spawn: { parent_thread_id: sentinel } } }), "subagent");
+  assert.equal(codexSource(sentinel), "unknown"); assert.equal(codexOriginator(sentinel), "unknown");
+  assert.equal(codexOriginator("codex_exec"), "exec"); assert.equal(velocityEffort(sentinel), "unknown");
+  assert.equal(counterExposed(-1), false); assert.equal(counterExposed("10"), false);
+  assert.equal(counterExposed(Number.NaN), false); assert.equal(counterExposed(0), true);
+  assert.equal(localClock(sentinel), null); assert.equal(localClock("2026-10-01T12:00:00"), null);
+});
+
+test("local buckets respect TZ, midnight, fractional offsets, and both sides of DST", () => {
+  const source = new URL("../src/metrics/velocity.ts", import.meta.url).href;
+  const stamps = ["2026-10-01T23:30:00Z", "2026-03-08T09:30:00Z", "2026-03-08T10:30:00Z", "2026-11-01T08:30:00Z", "2026-11-01T09:30:00Z"];
+  for (const [zone, expected] of [
+    ["UTC", [["2026-10-01", 23], ["2026-03-08", 9], ["2026-03-08", 10], ["2026-11-01", 8], ["2026-11-01", 9]]],
+    ["America/Los_Angeles", [["2026-10-01", 16], ["2026-03-08", 1], ["2026-03-08", 3], ["2026-11-01", 1], ["2026-11-01", 1]]],
+    ["Asia/Kathmandu", [["2026-10-02", 5], ["2026-03-08", 15], ["2026-03-08", 16], ["2026-11-01", 14], ["2026-11-01", 15]]],
+    ["Europe/London", [["2026-10-02", 0], ["2026-03-08", 9], ["2026-03-08", 10], ["2026-11-01", 8], ["2026-11-01", 9]]],
+  ] as const) {
+    const code = `import {localClock} from ${JSON.stringify(source)}; console.log(JSON.stringify(${JSON.stringify(stamps)}.map(localClock)));`;
+    const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", code], { env: { ...process.env, TZ: zone }, encoding: "utf8" })) as Array<{ day: string; hour: number }>;
+    assert.deepEqual(result.map(({ day, hour }) => [day, hour]), expected);
+    for (let i = 0; i < stamps.length; i += 1) assert.equal(localDay(stamps[i]!, zone), result[i]?.day);
+  }
+  assert.equal(localDay("2026-02-01T00:00:00Z", "America/Los_Angeles"), "2026-01-31");
+  assert.deepEqual(calendarDays("2024-02-28", "2024-03-01"), ["2024-02-28", "2024-02-29", "2024-03-01"]);
+  assert.equal(periodKey("2026-01-01", "week"), "2025-12-29");
+  assert.equal(periodKey("2026-01-01", "month"), "2026-01");
+});
+
+test("hour cells aggregate requests, keep dimensions distinct, and quarantine missing timestamps", () => {
+  const accumulator = new VelocityAccumulator();
+  const dimension = velocityDimension("claude", { claudeEntrypoint: "cli" }, "top-level", "model-a", "high");
+  const tokens = zeroVelocity(); tokens[1] = 30; tokens[7] = 1;
+  for (let i = 0; i < 100; i += 1) accumulator.add("2026-10-02T10:00:00Z", dimension, tokens);
+  accumulator.tool("2026-10-02T10:01:00Z", dimension);
+  accumulator.add("secret-timestamp", dimension, tokens);
+  accumulator.add("2026-10-02T10:00:00Z", { ...dimension, executionKind: "subagent" }, tokens);
+  const result = accumulator.finish("2026-10-01T23:00:00Z", dimension);
+  assert.equal(result.buckets.length, 3);
+  assert.equal(result.dimensions.length, 2);
+  assert.equal(result.undated[0]?.[1][1], 30);
+  assert.equal(sumCells(result)[7], 102);
+  assert.equal(sumCells(result)[9], 1);
+  assert.doesNotMatch(JSON.stringify(result), /secret-timestamp/);
+});
+
+test("streamed Claude usage and subagents retain per-event models, agents, effort and timezone dates", async () => {
+  const root = await mkdtemp(join(tmpdir(), "velocity-claude-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const path = join(fixture.claudeRoot, "synthetic");
+    await mkdir(join(path, id, "subagents"), { recursive: true });
+    const assistant = (timestamp: string | null, output: number, extra: Record<string, unknown> = {}) => ({
+      cwd: fixture.repositoryRoot, sessionId: id, type: "assistant", entrypoint: "sdk-ts", effort: "high", timestamp,
+      message: { id: "stream-a", model: "claude-opus-5", usage: { input_tokens: 10, cache_read_input_tokens: 50, cache_creation_input_tokens: 3, output_tokens: output, output_tokens_details: { thinking_tokens: 2 } }, content: [{ type: "tool_use", id: "tool-a", name: "Read", input: { file_path: "velocity-secret-path" } }, { type: "text", text: "velocity-private-message" }] }, ...extra,
+    });
+    await writeFile(join(path, `${id}.jsonl`), jsonl([
+      assistant("2026-10-01T22:59:00Z", 3), assistant("2026-10-02T01:00:00Z", 30),
+      assistant(null, 2, { entrypoint: "velocity-secret-originator", attributionAgent: "velocity-secret-subagent", message: { id: "undated-b", model: "unpriced-model", usage: { input_tokens: 22, output_tokens: 2 }, content: [{ type: "text", text: "velocity-secret-response" }] } }),
+    ]));
+    await writeFile(join(path, id, "subagents", "agent-a.jsonl"), jsonl([assistant("2026-10-02T12:00:00Z", 7, { attributionAgent: "Explore", effort: "low", message: { id: "child-b", model: "claude-opus-5", usage: { input_tokens: 4, output_tokens: 7 }, content: [] } })]));
+    const data = await analyzeMachineSessions(fixture);
+    const session = data.sessions.find((session) => session.tokens.inputTokens === 89)!;
+    assert.ok(session?.velocity);
+    assert.equal(session.velocity.buckets.filter((cell) => cell[3][7]).length, 2);
+    const parent = session.velocity.buckets.find((cell) => cell[3][5] === 30)!;
+    assert.equal(parent[0], localClock("2026-10-01T22:59:00Z")?.day);
+    assert.equal(parent[3][7], 1); assert.equal(sumCells(session.velocity)[8], 1);
+    assert.equal(session.velocity.dimensions[parent[2]]?.agent, "claude-sdk");
+    const child = session.velocity.dimensions.find((dimension) => dimension.executionKind === "subagent")!;
+    assert.equal(child.agent, "claude-explore"); assert.equal(child.effort, "low");
+    assert.equal(session.agentIdentity?.claudeSubagentType, "explore");
+    assert.equal(session.velocity.undated[0]?.[1][1], 22);
+    assert.equal(session.velocity.undated[0]?.[1][10], 0);
+    assert.doesNotMatch(JSON.stringify(data), /velocity-secret|velocity-private|aaaaaaaa-aaaa/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// Small synthetic public snapshots exercise the exact browser aggregation module.
+function synthetic(dailyValues: Array<[string, number]>, options: { agent?: string; model?: string; repository?: string } = {}): SessionAnalytics {
+  const values = (value: number): VelocityValues => [value, value * 100, value * 50, value * 40, value * 10, value * 20, value * 5, 4, 6, 1, value * 120, value * 20, value * 100, value * 100];
+  return {
+    provider: "claude", repositoryId: options.repository ?? "repo-one", repositoryName: options.repository ?? "Synthetic repository", sessionKey: "synthetic-key", createdAt: "2020-01-01T00:00:00Z",
+    velocity: { dimensions: [{ agent: options.agent ?? "claude-cli", model: options.model ?? "synthetic-model", executionKind: "top-level", effort: "high" }], buckets: dailyValues.map(([day, value]) => [day, 12, 0, values(value)]), undated: [[0, values(2)]] },
+  } as SessionAnalytics;
+}
+
+test("all dimensions, token classes and granularities conserve totals within the activity window", () => {
+  const sessions = Array.from({ length: 12 }, (_, i) => synthetic([["2026-09-30", 500], ["2026-10-01", i + 1], ["2026-10-03", 10], ["2026-10-04", 100]], { repository: `synthetic-${i}`, model: `model-${i}` }));
+  for (const metric of Object.keys(metricDefinitions) as Array<keyof typeof metricDefinitions>) {
+    for (const group of ["agent", "provider", "model", "repository", "execution", "effort"]) {
+      for (const granularity of ["day", "week", "month", "hour"]) {
+        const data = buildVelocity(sessions, { start: "2026-10-01", end: "2026-10-03", metric, group, granularity });
+        near(data.series.reduce((n, series) => n + series.total, 0), data.totals[metricDefinitions[metric].index]!);
+        near(data.series.reduce((n, series) => n + series.values.reduce((sum, value) => sum + value, 0), 0), data.totals[metricDefinitions[metric].index]!);
+        assert.equal(data.daily[1]?.total, 0);
+        assert.equal(data.contributingSessions, 12, "Sessions predating the range must still contribute their in-window activity");
+        if (group === "model" || group === "repository") assert.match(data.series.at(-1)?.label ?? "", /Other/);
+      }
+    }
+  }
+  const cumulative = buildVelocity(sessions, { start: "2026-10-01", end: "2026-10-03", mode: "cumulative" });
+  near(cumulative.series.reduce((n, series) => n + series.values.at(-1)!, 0), 198);
+});
+
+test("rolling average includes zero days but never invents prehistory; short baselines stay N/A", () => {
+  const data = buildVelocity([synthetic([["2026-10-01", 7], ["2026-10-07", 7]])], { start: "2026-09-28", end: "2026-10-08" });
+  assert.equal(data.rolling[6], null);
+  assert.equal(data.rolling[9], 2);
+  assert.equal(data.rolling[10], 1);
+  assert.equal(guardedDelta(20, 0, "value", 8), null);
+  assert.equal(guardedDelta(20, 1, "value", 2), null);
+  assert.equal(guardedDelta(20, 1, "sessions"), null);
+  assert.equal(guardedDelta(12, 6, "tools"), 1);
+});
+
+test("comparisons use matched complete dates; projection and burn expose their denominators", () => {
+  const dates = calendarDays("2026-08-01", "2026-09-20");
+  const session = synthetic(dates.map((day) => [day, day === "2026-09-20" ? 1 : 10]));
+  const data = buildVelocity([session], { start: "2026-08-01", end: "2026-09-20" });
+  const indicators = velocityIndicators(data, "2026-09-20");
+  assert.equal(indicators.completeThrough, "2026-09-19");
+  assert.equal(indicators.week.current.days, 6); assert.equal(indicators.week.previous.days, 6);
+  assert.equal(indicators.week.current.value, 60); assert.equal(indicators.week.delta, 0);
+  assert.equal(indicators.month.current.days, 19); assert.equal(indicators.month.previous.days, 19);
+  assert.equal(indicators.burn.ratio, 0.1); assert.equal(indicators.burn.days, 14);
+  assert.equal(indicators.projection?.value, 300); assert.equal(indicators.projection?.low, 300);
+  assert.equal(indicators.projection?.sampleDays, 14); assert.equal(indicators.projection?.remainingDays, 11);
+  const spike = synthetic(dates.map((day) => [day, day === "2026-09-20" ? 99 : 10]));
+  const spikeProjection = velocityIndicators(buildVelocity([spike], { start: "2026-08-01", end: "2026-09-20" }), "2026-09-20").projection;
+  assert.equal(spikeProjection?.value, 389, "A busy partial day adds observed usage without erasing future full-day projection");
+  const clipped = buildVelocity([session], { start: "2026-09-18", end: "2026-09-20" });
+  const missing = velocityIndicators(clipped, "2026-09-20");
+  assert.equal(missing.projection, null); assert.equal(missing.burn.ratio, null); assert.equal(missing.week.delta, null);
+  const historical = velocityIndicators(data, "2026-10-02");
+  assert.equal(historical.burn.today, null); assert.equal(historical.completeThrough, "2026-09-20");
+  const monday = velocityIndicators(buildVelocity([session], { start: "2026-08-01", end: "2026-09-14" }), "2026-09-14");
+  assert.equal(monday.week.delta, null); assert.equal(monday.week.current.days, 0);
+});
+
+test("month comparisons handle unequal months and projections retain an honest nonzero scenario band", () => {
+  const sessions = [synthetic(calendarDays("2024-01-01", "2024-03-31").map((day, i) => [day, i % 3 === 0 ? 1 : 20]))];
+  const data = buildVelocity(sessions, { start: "2024-01-01", end: "2024-03-31" });
+  const result = velocityIndicators(data, "2024-03-31");
+  assert.equal(result.month.current.days, 29); assert.equal(result.month.previous.days, 29);
+  assert.ok(result.projection && result.projection.low <= result.projection.value && result.projection.high >= result.projection.value);
+  const short = velocityIndicators(buildVelocity([synthetic([["2024-03-01", 1], ["2024-03-07", 1]])], { start: "2024-03-01", end: "2024-03-08" }), "2024-03-08");
+  assert.equal(short.projection, null, "Fewer than three active days cannot forecast");
+});
+
+test("movers rank absolute increases and guard each group's denominator", () => {
+  const previous = calendarDays("2026-09-01", "2026-09-07"), current = calendarDays("2026-09-08", "2026-09-14");
+  const sessions = [synthetic([...previous.map((day): [string, number] => [day, 1]), ...current.map((day): [string, number] => [day, 5])]), synthetic(current.map((day) => [day, 2]), { model: "new-model", repository: "new-repo", agent: "claude-sdk" })];
+  const movers = topMovers(sessions, { start: "2026-09-01", end: "2026-09-14", metric: "value" }, "2026-09-15");
+  assert.equal(movers.available, true); assert.equal(movers.rows[0]?.increase, 28);
+  assert.equal(movers.rows.find((row) => row.label === "new-repo")?.delta, null);
+  assert.equal(topMovers(sessions, { start: "2026-09-02", end: "2026-09-14", metric: "value" }, "2026-09-15").available, false);
+  assert.equal(shiftDay("2026-01-01", -1), "2025-12-31");
+});
+
+test("Codex changes source, execution, model and effort without reassigning earlier usage or copying identity content", async () => {
+  const root = await mkdtemp(join(tmpdir(), "velocity-codex-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const context = (timestamp: string, model: string, effort: string) => ({ timestamp, type: "turn_context", payload: { model, effort } });
+    const counter = (timestamp: string | null, input: number, output: number, lastInput: number, lastOutput: number) => ({ timestamp, type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: input, output_tokens: output, cached_input_tokens: 0, reasoning_output_tokens: 0 }, last_token_usage: { input_tokens: lastInput, output_tokens: lastOutput, cached_input_tokens: 0, reasoning_output_tokens: 0 } } } });
+    const call = { timestamp: "2026-10-01T23:58:00Z", type: "response_item", payload: { type: "custom_tool_call", call_id: "private-call-id", name: "exec", input: 'await tools.exec_command({cmd:"private-velocity-command"}); await tools.read_file({path:"private-velocity-path"});' } };
+    await writeFile(join(fixture.codexRoot, `rollout-${id}.jsonl`), jsonl([
+      { timestamp: "2026-10-01T23:55:00Z", type: "session_meta", payload: { cwd: fixture.repositoryRoot, id, source: "review", originator: "private-velocity-originator", agent_nickname: "private-velocity-nickname" } },
+      context("2026-10-01T23:56:00Z", "gpt-5.6-sol", "high"), call, call,
+      counter("2026-10-01T23:59:00Z", 1234, 124, 1234, 124), counter("2026-10-01T23:59:00Z", 1234, 124, 1234, 124),
+      { timestamp: "2026-10-02T00:00:00Z", type: "session_meta", payload: { source: { subagent: { thread_spawn: { parent_thread_id: "private-velocity-parent" } } }, originator: "codex_exec" } },
+      context("2026-10-02T00:01:00Z", "unpriced-test-model", "low"), counter("2026-10-02T00:02:00Z", 2234, 224, 1000, 100),
+      counter(null, 3234, 324, 1000, 100),
+    ]));
+    const data = await analyzeMachineSessions(fixture);
+    const session = data.sessions.find((session) => session.tokens.inputTokens === 3234)!;
+    assert.ok(session?.velocity);
+    assert.equal(session.executionKind, "mixed"); assert.equal(session.metrics.modelCalls, 3);
+    assert.equal(session.agentIdentity?.codexSource, "review"); assert.equal(session.agentIdentity?.codexOriginator, "unknown");
+    const top = session.velocity.dimensions.find((dimension) => dimension.executionKind === "top-level")!;
+    const subagent = session.velocity.dimensions.find((dimension) => dimension.executionKind === "subagent")!;
+    assert.deepEqual([top.agent, top.model, top.effort], ["codex-review", "gpt-5.6-sol", "high"]);
+    assert.deepEqual([subagent.agent, subagent.model, subagent.effort], ["codex-subagent", "unpriced-test-model", "low"]);
+    assert.equal(sumCells(session.velocity)[7], 3); assert.equal(sumCells(session.velocity)[8], 2);
+    assert.equal(session.velocity.undated[0]?.[1][1], 1000);
+    assert.doesNotMatch(JSON.stringify(data), /private-velocity|private-call-id|bbbbbbbb-bbbb/);
+  } finally { await rm(root, { force: true, recursive: true }); }
+});
+
+test("coverage denominators exclude providers for which a split or API price is not applicable", () => {
+  const cursor = synthetic([["2026-10-01", 2]]);
+  cursor.provider = "cursor";
+  // Real Cursor cells have input/output and tools, but none of these split counters.
+  for (const cell of cursor.velocity!.buckets) { cell[3][0] = 0; cell[3][3] = 0; cell[3][4] = 0; cell[3][6] = 0; for (let i = 10; i < 14; i += 1) cell[3][i] = 0; }
+  const data = buildVelocity([cursor], { start: "2026-10-01", end: "2026-10-01" });
+  assert.deepEqual(data.coverage, { priceTokens: 0, cacheReadInput: 0, cacheWriteInput: 0, reasoningOutput: 0 });
+  const codex = synthetic([["2026-10-01", 3]]); codex.provider = "codex";
+  const mixed = buildVelocity([cursor, codex], { start: "2026-10-01", end: "2026-10-01" });
+  assert.equal(mixed.coverage.cacheWriteInput, 0); assert.equal(mixed.coverage.priceTokens, 360);
+  const claude = synthetic([["2026-10-01", 4]]);
+  const all = buildVelocity([cursor, codex, claude], { start: "2026-10-01", end: "2026-10-01" });
+  assert.equal(all.coverage.cacheWriteInput, 400); assert.equal(all.coverage.priceTokens, 840);
+});
