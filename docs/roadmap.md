@@ -57,6 +57,7 @@ M2 links agent sessions to the code they produced, retroactively from existing l
 - [x] Opt-in bounded local Git branch/window correlation, agent co-author trailer counts, and authenticated GitHub state/time-to-merge lookup for already evidenced PRs.
 - [x] Guarded API-equivalent value per merged PR, changed lines per dollar, and edits-without-commit value labeled as a linkage heuristic, with deduplicated PRs and explicit pricing denominators.
 - [x] Lines added and removed from Claude patches/cumulative totals, Codex completed FileChange diffs, and Cursor composer totals; missing and partial coverage remain visible.
+- [x] Reconcile snapshot tails and resets, deduplicate cross-file Claude results, retain valid files in mixed Codex batches, and guard/report capped evidence consistently across surfaces.
 - [ ] Hashed file-overlap correlation, reverted changes, line survival at 14 and 30 days, and follow-up fix commits.
 - [ ] Cost per surviving line and independently evidenced abandoned or reverted spend.
 - [ ] Hotspots: files with the most failed edits, churn, and sessions over time. File paths are shown locally only and never leave the parser in shared outputs.

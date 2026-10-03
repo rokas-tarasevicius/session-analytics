@@ -9,7 +9,8 @@ export async function createOutcomeFixture(root: string) {
   const fixture = await createSessionAnalyticsFixture(root);
   const claudeId = "22222222-2222-4222-8222-222222222222";
   const claudePath = join(fixture.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", `${claudeId}.jsonl`);
-  const base = { sessionId: claudeId, cwd: "/fixtures/workspaces/conductor/claude-workspace", gitBranch: "outcome-private-branch", timestamp: "2026-07-20T12:10:00Z" };
+  const base = { sessionId: claudeId, cwd: "/fixtures/workspaces/conductor/claude-workspace", gitBranch: "outcome-private-branch", timestamp: "2026-07-20T12:10:00Z",
+    prAssociationsComplete: "outcome-private-content", coverage: "outcome-private-content", incompleteEvidenceSessions: "outcome-private-content" };
   const prUrl = "https://github.com/outcome-private-owner/outcome-private-repository/pull/987654321";
   const result = (id: string, output: unknown) => ({ ...base, type: "user", uuid: id, toolUseResult: output, message: { content: [{ type: "tool_result", tool_use_id: id, content: "outcome-private-content" }] } });
   const records = [

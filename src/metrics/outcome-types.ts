@@ -39,6 +39,7 @@ export interface SessionOutcomes {
   agentCoauthorTrailers: number;
   enrichment: { git: OutcomeEnrichmentStatus; github: OutcomeEnrichmentStatus };
   truncated: boolean;
+  prAssociationsComplete: boolean;
 }
 
 export interface OutcomeRatio {
@@ -49,7 +50,8 @@ export interface OutcomeRatio {
   minimumSessions: number;
   eligibleSessions: number;
   candidateSessions: number;
-  status: "available" | "unavailable" | "insufficient-activity" | "incomplete-pricing";
+  incompleteEvidenceSessions: number;
+  status: "available" | "unavailable" | "insufficient-activity" | "incomplete-pricing" | "incomplete-evidence";
 }
 
 export interface OutcomeSummary {
@@ -61,6 +63,11 @@ export interface OutcomeSummary {
   mergedPrSessions: number;
   contextOnlySessions: number;
   lineMeasuredSessions: number;
+  coverage: {
+    lines: Record<SessionOutcomes["lineCoverage"], number>;
+    truncatedSessions: number;
+    enrichment: { git: Record<OutcomeEnrichmentStatus, number>; github: Record<OutcomeEnrichmentStatus, number> };
+  };
   linesAdded: number;
   linesRemoved: number;
   apiSessions: number;

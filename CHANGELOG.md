@@ -10,6 +10,13 @@ All notable changes to this project are documented here. The format follows [Kee
 - Opt-in `--outcomes-git` for bounded local branch/window correlation and `--outcomes-github` for authenticated GitHub state and time-to-merge lookup of PRs already evidenced locally. Both default off; raw branches, SHAs, PR numbers, URLs, titles, and messages remain private.
 - Synthetic outcome evidence in the demo, plus parser, aggregation, enrichment, API, CLI, and privacy regression tests.
 
+### Fixed
+
+- Reconcile Claude cumulative line snapshots with later parent/child edits; stale snapshots no longer erase observed tails, and resets or ambiguous overlap retain partial lower bounds. Deduplicate tool results across parent and sibling files so copied edits and Git/PR operations no longer inflate counts.
+- Retain measurable Codex file diffs when the same FileChange includes missing or malformed diffs; partial batches no longer lose all line counts.
+- Withhold PR-value ratios when association caps could distort allocation. Share commit/unlinked evidence predicates with dashboard drilldowns and explain truncated details.
+- Show terminal enrichment status counts, evidence limits, and complete/partial/unavailable line cohorts with lower-bound labels.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

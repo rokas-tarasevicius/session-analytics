@@ -11,6 +11,7 @@ import { OutcomeCollector } from "../src/metrics/outcomes.ts";
 import { OutcomeEnricher } from "../src/metrics/outcomes-enrichment.ts";
 import type { MachineAnalytics, SessionDatabaseRow } from "../src/types.ts";
 import { createOutcomeFixture, outcomeSentinels } from "./outcomes-fixtures.ts";
+import { assertOutcomeSummaryProjection, assertSessionOutcomeProjection } from "./outcomes-contract.ts";
 
 test("outcomes survive the analyzer, isolated JSON/report surfaces, and optional old/new Conductor schemas without content", async () => {
   const directory = await mkdtemp(join(tmpdir(), "outcomes-integration-"));
@@ -18,6 +19,9 @@ test("outcomes survive the analyzer, isolated JSON/report surfaces, and optional
     const fixture = await createOutcomeFixture(directory);
     const options = { claudeRoot: fixture.claudeRoot, codexRoot: fixture.codexRoot, codexArchiveRoot: fixture.codexArchiveRoot, cursorDatabasePath: fixture.cursorDatabasePath, databasePath: fixture.databasePath };
     const snapshot = await analyzeMachineSessions(options);
+    for (const session of snapshot.sessions) if (session.outcomes) assertSessionOutcomeProjection(session.outcomes);
+    assertOutcomeSummaryProjection(snapshot.outcomes!);
+    for (const repository of snapshot.repositories) assertOutcomeSummaryProjection(repository.outcomes!);
     assert.equal(snapshot.summary.sessions, 5); assert.equal(snapshot.outcomes?.commitSessions, 1);
     assert.equal(snapshot.outcomes?.pullRequests.created, 1); assert.equal(snapshot.outcomes?.pullRequests.merged, 1);
     assert.equal(snapshot.outcomes?.editSessions, 3); assert.equal(snapshot.outcomes?.linesAdded, 37); assert.equal(snapshot.outcomes?.linesRemoved, 9);
@@ -30,6 +34,7 @@ test("outcomes survive the analyzer, isolated JSON/report surfaces, and optional
     assert.equal(json.status, 0, json.stderr);
     const isolated = JSON.parse(json.stdout) as MachineAnalytics;
     assert.deepEqual(isolated.outcomes, snapshot.outcomes);
+    for (const session of isolated.sessions) if (session.outcomes) assertSessionOutcomeProjection(session.outcomes);
     const report = spawnSync(process.execPath, args, { encoding: "utf8", timeout: 15_000 });
     assert.equal(report.status, 0, report.stderr);
     assert.match(report.stdout, /Identified PRs: 1 linked; 1 created; 1 merged/);

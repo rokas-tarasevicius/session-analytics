@@ -63,7 +63,7 @@ test("starting commits and Conductor workspace metadata remain context, even wit
   assert.equal(summary.contextOnlySessions, 1); privateOutput({ output, summary });
 });
 
-test("Claude line counters prefer cumulative top-level totals without summing snapshots, patches, or sub-agent totals", () => {
+test("Claude counter resets and conflicting child totals retain a partial high-water lower bound", () => {
   const collector = new OutcomeCollector(row());
   const patch = result("edit", { structuredPatch: [{ oldLines: 2, newLines: 3, lines: [" same", `-${secret}`, `+${secret}`, "+another"] }], filePath: secret });
   collector.observeClaude(patch); collector.observeClaude(patch);
@@ -74,8 +74,8 @@ test("Claude line counters prefer cumulative top-level totals without summing sn
   collector.observeClaude({ type: "cost-state", totalLinesAdded: 100, totalLinesRemoved: 40 }, "private-subagent-path");
   collector.observeClaude(patch, "private-subagent-path");
   const output = collector.project();
-  assert.equal(output.linesAdded, 10); assert.equal(output.linesRemoved, 5); assert.equal(output.editOperations, 2);
-  assert.equal(output.lineSource, "claude-cost-state"); assert.equal(output.lineCoverage, "complete"); privateOutput(output);
+  assert.equal(output.linesAdded, 100); assert.equal(output.linesRemoved, 40); assert.equal(output.editOperations, 1);
+  assert.equal(output.lineSource, "claude-cost-state"); assert.equal(output.lineCoverage, "partial"); privateOutput(output);
 });
 
 test("line measurements distinguish missing, partial, empty, malformed, failed, and repeated FileChange evidence", () => {

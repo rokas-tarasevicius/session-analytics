@@ -154,6 +154,8 @@ Both commands also read `SESSION_ANALYTICS_*` environment variables for the same
 
 Outcome enrichment is off by default. Set `SESSION_ANALYTICS_OUTCOMES_GIT=1` or `SESSION_ANALYTICS_OUTCOMES_GITHUB=1` to opt in through configuration; other environment values do not enable it. Missing tools, authentication, branches, or deleted history are shown as unavailable. The [outcome metric definitions](docs/metrics.md#outcomes) explain confidence, coverage, deduplication, attribution, and scan limits. The snapshot always uses pseudonymous references, including when enrichment is enabled.
 
+The report and Outcomes tab show enrichment status counts, evidence limits, and complete/partial/unavailable line coverage. Ambiguous or reset line counters stay partial and are excluded from line-value ratios; incomplete PR associations withhold PR-value ratios.
+
 To open the demo directly in the Outcomes tab, visit `http://127.0.0.1:4175/?view=outcomes` after starting `npm run demo`.
 
 ## Supported agents and evidence

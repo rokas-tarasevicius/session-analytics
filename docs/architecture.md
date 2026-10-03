@@ -14,6 +14,7 @@
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
 | `src/metrics/outcomes.ts`, `outcome-types.ts` | Streaming outcome evidence collector and explicit content-free types/projection. |
+| `src/metrics/outcome-lines.ts` | Bounded numeric observations, snapshot coverage/chronology reconciliation, and conservative partial line counts. |
 | `src/metrics/outcomes-enrichment.ts` | Per-scan opt-in read-only Git and authenticated GitHub enrichment, with shared budgets and a PR cache. |
 | `src/metrics/outcomes-summary.js`, `outcomes-report.ts` | Shared pure outcome aggregation for the analyzer/browser and terminal presentation. |
 | `src/public/outcomes.js`, `outcomes.css` | Isolated Outcomes view and theme-variable-based layout. |
@@ -82,6 +83,7 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 | The same session file under more than one root | The transcript index merges candidate paths per session ID. |
 | Claude Code writes one record per streamed content block, repeating input and cache counters while output grows | Usage is kept per `message.id`, and the snapshot with the most output (the final one) is priced once. |
 | Claude tool-use blocks repeated across streamed records | Tool calls are counted once per tool-use ID. |
+| Claude tool results replayed in parent or sibling files | Outcome operations and patches deduplicate tool-use IDs across the logical session; the first accepted result owns line evidence. Only UUID fallbacks are stream-local. |
 | Claude human messages repeated in a file | Counted once per record UUID; tool results are not human turns. |
 | Codex broadcasts the same process-wide cumulative counter into several session files | Each `(total, last)` usage state is fingerprinted; the file whose nearest preceding local activity is closest owns it, ties broken by timestamp and path; other files skip it. Only `last_token_usage` is summed. |
 | A Codex file opens on a process-wide counter that includes requests it never issued | Without per-request usage, only deltas between two snapshots the same file observed are counted; the opening snapshot and any post-reset snapshot are baselines. |

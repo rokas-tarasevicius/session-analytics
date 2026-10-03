@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
-import { summarizeOutcomes } from "../src/metrics/outcomes-summary.js";
+import { enrichmentStatuses, mergedOutcomeRefs, outcomeEvidence, summarizeOutcomes } from "../src/metrics/outcomes-summary.js";
 import { OutcomeCollector } from "../src/metrics/outcomes.ts";
 import type { SessionAnalytics, SessionDatabaseRow } from "../src/types.ts";
 
@@ -38,7 +38,7 @@ class Option extends Element {
 async function view() {
   const source = (await readFile(new URL("../src/public/outcomes.js", import.meta.url), "utf8"))
     .replace(/^import .*;\n/m, "").replace("export function renderOutcomes", "function renderOutcomes");
-  const context = { document: { createElement: (tag: string) => new Element(tag) }, Option, summarizeOutcomes };
+  const context = { document: { createElement: (tag: string) => new Element(tag) }, Option, enrichmentStatuses, mergedOutcomeRefs, outcomeEvidence, summarizeOutcomes };
   const render = runInNewContext(`${source}\nrenderOutcomes;`, context) as (container: Element, sessions: SessionAnalytics[]) => void;
   return { render, container: new Element("div") };
 }
@@ -81,4 +81,32 @@ test("stage drilldown agrees with cross-session merged PR totals and supports pa
   // The merge observation was in the now-excluded Claude session. State must
   // not leak from a prior filter's aggregate into the current provider cohort.
   assert.match(container.textContent, /No sessions have this evidence/);
+});
+
+test("commit and unlinked drilldowns retain operation evidence after the detail cap", async () => {
+  const { render, container } = await view();
+  const collector = new OutcomeCollector({ repository_id: "demo-repo", conductor_session_id: "synthetic-cap" } as SessionDatabaseRow);
+  for (let number = 1; number <= 128; number++) collector.observeClaude({ type: "pr-link", prUrl: `https://github.com/example/demo/pull/${number}` });
+  collector.observeClaude({ type: "user", toolUseResult: { structuredPatch: [{ lines: ["+private-content-sentinel"] }], gitOperation: { commit: { sha: "a".repeat(40), kind: "committed" } } }, message: { content: [{ type: "tool_result", tool_use_id: "cap-commit" }] } });
+  const session = sample("claude", 1); session.outcomes = collector.project();
+  render(container, [session]);
+  const commits = container.all().filter((element) => element.className === "outcome-stage")[2]!;
+  assert.match(commits.textContent, /1\/1 sessions/); commits.fire("click");
+  const evidence = container.querySelector("#outcome-session-evidence")!;
+  assert.match(evidence.textContent, /1–1 of 1 sessions/);
+  assert.match(evidence.textContent, /Commit operation recorded; link details were truncated/);
+  const select = evidence.all().find((element) => element.tagName === "select")!;
+  select.value = "unlinked"; select.fire("change");
+  assert.match(container.querySelector("#outcome-session-evidence")!.textContent, /No sessions have this evidence/);
+  assert.doesNotMatch(container.textContent, /private-content-sentinel|example\/demo/);
+});
+
+test("dashboard withholds allocation ratios for incomplete PR associations", async () => {
+  const { render, container } = await view();
+  const collector = new OutcomeCollector({ repository_id: "demo-repo", conductor_session_id: "synthetic-ratio" } as SessionDatabaseRow);
+  for (let number = 1; number <= 129; number++) collector.observeClaude({ type: "user", toolUseResult: { gitOperation: { pr: { url: `https://github.com/example/demo/pull/${number}`, action: number <= 3 ? "merged" : "created" } } }, message: { content: [{ type: "tool_result", tool_use_id: `pr-${number}` }] } });
+  const session = sample("claude", 1); session.outcomes = collector.project();
+  render(container, [session]);
+  assert.match(container.textContent, /Incomplete PR associations; ratio withheld/);
+  assert.match(container.textContent, /1 sessions with incomplete evidence/);
 });

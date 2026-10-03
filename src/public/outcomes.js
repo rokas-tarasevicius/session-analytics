@@ -1,4 +1,4 @@
-import { summarizeOutcomes } from "./outcomes-summary.js";
+import { enrichmentStatuses, mergedOutcomeRefs, outcomeEvidence, summarizeOutcomes } from "./outcomes-summary.js";
 
 const money = (value) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 const number = (value) => new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(value);
@@ -27,8 +27,9 @@ function metric(label, value, detail) {
 }
 function ratioValue(ratio, format = number) { return ratio.value === null ? "N/A" : format(ratio.value); }
 function ratioNote(ratio, unit) {
-  const reason = { available: "", unavailable: "No eligible denominator. ", "insufficient-activity": `Needs ≥${ratio.minimumDenominator} ${unit} and ≥${ratio.minimumSessions} eligible sessions. `, "incomplete-pricing": "Incomplete pricing; ratio withheld. " }[ratio.status];
-  return `${reason}${number(ratio.numerator)} / ${number(ratio.denominator)} ${unit}; ${ratio.eligibleSessions}/${ratio.candidateSessions} eligible sessions.`;
+  const reason = { available: "", unavailable: "No eligible denominator. ", "insufficient-activity": `Needs ≥${ratio.minimumDenominator} ${unit} and ≥${ratio.minimumSessions} eligible sessions. `, "incomplete-pricing": "Incomplete pricing; ratio withheld. ", "incomplete-evidence": "Incomplete PR associations; ratio withheld. " }[ratio.status];
+  return `${reason}${number(ratio.numerator)} / ${number(ratio.denominator)} ${unit}; ${ratio.eligibleSessions}/${ratio.candidateSessions} eligible sessions.` +
+    (ratio.incompleteEvidenceSessions ? ` ${ratio.incompleteEvidenceSessions} sessions with incomplete evidence.` : "");
 }
 function panel(title, kicker) {
   const article = node("article", null, "panel"); const header = node("header"), block = node("div");
@@ -40,14 +41,8 @@ function table(headers) {
   head.append(row); element.append(head, body); wrap.append(element); return { wrap, body };
 }
 function matches(session, mergedRefs) {
-  const outcomes = session.outcomes;
   if (stage === "all") return true;
-  if (!outcomes) return false;
-  if (stage === "edits") return outcomes.editsObserved;
-  if (stage === "commits") return outcomes.links.some((link) => link.kind === "commit" && link.role === "outcome");
-  if (stage === "prs") return outcomes.links.some((link) => link.kind === "pull-request" && link.role === "outcome");
-  if (stage === "merged") return outcomes.links.some((link) => link.kind === "pull-request" && link.role === "outcome" && (link.state === "merged" || mergedRefs.has(link.ref)));
-  return outcomes.editsObserved && !outcomes.links.some((link) => link.kind === "commit" && link.role === "outcome");
+  return outcomeEvidence(session, mergedRefs)[stage] ?? false;
 }
 
 export function renderOutcomes(container, scopeSessions) {
@@ -117,18 +112,18 @@ export function renderOutcomes(container, scopeSessions) {
   legend.append(legendList, note(`Observed operations: ${summary.operations.commits} commits · ${summary.operations.pushes} pushes · ${summary.operations.prsCreated} PR creates · ${summary.operations.prsEdited} edits · ${summary.operations.prsMerged} merges · ${summary.operations.prsClosed} closes. Operations are not unique artifacts. ${summary.pullRequests.unidentifiedCreatedOperations} creates and ${summary.pullRequests.unidentifiedMergedOperations} merges lack a PR identity and are excluded from distinct PR totals.`));
   legend.append(note("Coverage differs by agent: Claude can record Git operations and PR links; Codex starting checkout metadata is context only; Cursor line totals do not link commits or PRs. Unlinked value can reflect these recording gaps. Compare similar work with the same evidence coverage."));
   const enrichment = ["git", "github"].map((kind) => {
-    const states = new Map();
-    for (const session of sessions) { const state = session.outcomes?.enrichment[kind] ?? "unavailable"; states.set(state, (states.get(state) || 0) + 1); }
-    return `${kind === "git" ? "Local Git" : "GitHub"}: ${[...states].map(([state, count]) => `${count} ${state}`).join(", ")}`;
+    const states = summary.coverage.enrichment[kind];
+    return `${kind === "git" ? "Local Git" : "GitHub"}: ${enrichmentStatuses.filter((state) => states[state]).map((state) => `${states[state]} ${state}`).join(", ") || "no inspected sessions"}`;
   });
-  legend.append(note(`${enrichment.join(". ")}. Enrichment is optional and off by default. ${sessions.filter((session) => session.outcomes?.truncated).length} sessions reached evidence limits.`));
+  legend.append(note(`${enrichment.join(". ")}. Enrichment is optional and off by default. ${summary.coverage.truncatedSessions} sessions reached evidence limits; affected counts are lower bounds.`));
+  legend.append(note(`Line coverage: ${summary.coverage.lines.complete} complete · ${summary.coverage.lines.partial} partial · ${summary.coverage.lines.unavailable} unavailable, out of ${summary.observedSessions} inspected sessions. Partial counts are lower bounds and excluded from the line-value ratio.`));
   container.append(legend);
 
   const evidence = panel("Inspect session evidence", "PSEUDONYMOUS REFERENCES"); evidence.id = "outcome-session-evidence";
   const stageLabel = node("label"), stageSelect = node("select"); stageLabel.append(node("span", "Show sessions"));
   for (const [value, label] of [["all", "All sessions"], ["edits", "With edits"], ["commits", "With commit evidence"], ["prs", "With PR evidence"], ["merged", "With a merge observation"], ["unlinked", "Edits without commit evidence"]]) stageSelect.append(new Option(label, value));
   stageSelect.value = stage; stageSelect.addEventListener("change", () => { stage = stageSelect.value; page = 0; renderOutcomes(container, scopeSessions); }); stageLabel.append(stageSelect); evidence.append(stageLabel);
-  const mergedRefs = new Set(sessions.flatMap((session) => (session.outcomes?.links || []).filter((link) => link.role === "outcome" && link.identity === "artifact" && link.state === "merged").map((link) => link.ref)));
+  const mergedRefs = mergedOutcomeRefs(sessions);
   const filtered = sessions.filter((session) => matches(session, mergedRefs)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   page = Math.min(page, Math.max(0, Math.ceil(filtered.length / size) - 1));
   const detailTable = table(["Session", "Line evidence", "Commit / PR links", "Context"]);
@@ -140,6 +135,9 @@ export function renderOutcomes(container, scopeSessions) {
       details.append(node("summary", `${link.kind} ${link.ref.slice(-8)} · ${link.confidence}${link.state === "unknown" ? "" : ` · ${link.state}`}`));
       details.append(note(`${link.sources.map((source) => sourceNames[source]).join("; ")}. ${link.identity === "observation" ? "No artifact identity; excluded from distinct PR totals. " : ""}${link.created ? "Creation recorded. " : ""}${link.timeToMergeMilliseconds === null ? "" : `${number(link.timeToMergeMilliseconds / 3_600_000)} hours from PR creation to merge.`}`));
       (link.role === "context" ? contextCell : outcomeCell).append(details);
+    }
+    if (outcomes?.operations.commits > 0 && !outcomes.links.some((link) => link.kind === "commit" && link.role === "outcome")) {
+      outcomeCell.prepend(note("Commit operation recorded; link details were truncated."));
     }
     if (!outcomeCell.childNodes.length) outcomeCell.append(node("span", "No commit or PR evidence"));
     if (!contextCell.childNodes.length) contextCell.append(node("span", "None recorded"));

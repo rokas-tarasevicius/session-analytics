@@ -51,7 +51,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 - Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). History it has deleted cannot be analyzed.
 - `stats-cache.json` and other provider-reported totals are not yet used for reconciliation.
-- Outcome evidence is limited to structured `toolUseResult.gitOperation` results (`commit.{sha,kind,branch}`, `push.branch`, `pr.{number,url,action}`), `pr-link` coordinates, `gitBranch`, `structuredPatch[].lines`, and `cost-state.totalLinesAdded/Removed`. Commands and free-form output are never searched for commits or PRs. Successful tool results deduplicate by stream and tool-use ID; PRs deduplicate by canonical coordinates. See [outcomes](metrics.md#outcomes).
+- Outcome evidence is limited to structured `toolUseResult.gitOperation` results (`commit.{sha,kind,branch}`, `push.branch`, `pr.{number,url,action}`), `pr-link` coordinates, `gitBranch`, `structuredPatch[].lines`, and `cost-state.totalLinesAdded/Removed`. Commands and free-form output are never searched for commits or PRs. Successful tool results deduplicate by tool-use ID across the whole logical session; only UUID fallbacks are stream-local. PRs deduplicate by canonical coordinates. Cumulative line snapshots absorb covered edits; verified later edits add deltas. Resets or ambiguous cross-file timestamps leave partial lower bounds, excluded from the line-value ratio. See [outcomes](metrics.md#outcomes).
 - Views do not yet show which profile a session came from.
 
 ## Claude Desktop local agents

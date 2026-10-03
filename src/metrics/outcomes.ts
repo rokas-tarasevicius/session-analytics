@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { SessionDatabaseRow } from "../types.ts";
 import type { OutcomeConfidence, OutcomeLink, OutcomeOperations, OutcomeSource, SessionOutcomes } from "./outcome-types.ts";
 import type { OutcomeEnricher } from "./outcomes-enrichment.ts";
+import { OutcomeLines } from "./outcome-lines.ts";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue | null => value !== null && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : null;
@@ -52,20 +53,19 @@ export function countUnifiedDiff(value: unknown): { added: number; removed: numb
   return hunks && !oldRemaining && !newRemaining ? { added, removed } : null;
 }
 
-interface Lines { added: number; removed: number; measured: boolean; unmeasured: boolean; totalAdded: number | null; totalRemoved: number | null }
-
 /** Accumulates allowlisted counters. Raw branches and PR targets are short-lived enrichment inputs only. */
 export class OutcomeCollector {
   private row: SessionDatabaseRow;
   private links = new Map<string, OutcomeLink>();
   private seen = new Set<string>();
   private tools = new Map<string, string>();
-  private streams = new Map<string, Lines>();
+  private lines = new OutcomeLines();
+  private editOwners = new Map<string, string>();
   private ops = operations();
   private editOperations = 0;
   private editsObserved = false;
-  private lineSource: SessionOutcomes["lineSource"] = "unavailable";
   private truncated = false;
+  private prAssociationsComplete = true;
   private agentCommits = new Map<string, number>();
   private enrichment: SessionOutcomes["enrichment"] = { git: "off", github: "off" };
   readonly branches = new Set<string>();
@@ -87,14 +87,8 @@ export class OutcomeCollector {
   private unique(key: string): boolean {
     const digest = hash("event", key);
     if (this.seen.has(digest)) return false;
-    if (this.seen.size >= 100_000) { this.truncated = true; return false; }
+    if (this.seen.size >= 100_000) { this.truncated = true; this.prAssociationsComplete = false; this.lines.truncated = true; return false; }
     this.seen.add(digest); return true;
-  }
-
-  private stream(key: string): Lines {
-    let lines = this.streams.get(key);
-    if (!lines) { lines = { added: 0, removed: 0, measured: false, unmeasured: false, totalAdded: null, totalRemoved: null }; this.streams.set(key, lines); }
-    return lines;
   }
 
   private link(kind: OutcomeLink["kind"], ref: string, confidence: OutcomeConfidence, source: OutcomeSource,
@@ -125,7 +119,7 @@ export class OutcomeCollector {
   private pr(target: PullRequestTarget | null, event: string, source: OutcomeSource, action = ""): string | null {
     const ref = target ? hash("pr", `${target.repository}#${target.number}`) : hash("pr-event", `${this.row.conductor_session_id}:${event}`);
     const link = this.link("pull-request", ref, target ? "strong" : "medium", source, "outcome", target ? "artifact" : "observation");
-    if (!link) return null;
+    if (!link) { this.prAssociationsComplete = false; return null; }
     if (target) this.pullRequests.set(ref, target);
     if (action === "created") link.created = true;
     if (action === "merged") link.state = "merged";
@@ -154,9 +148,7 @@ export class OutcomeCollector {
     if (raw["type"] === "cost-state") {
       const added = count(raw["totalLinesAdded"]), removed = count(raw["totalLinesRemoved"]);
       if (added !== null && removed !== null) {
-        const lines = this.stream(stream);
-        lines.totalAdded = Math.max(lines.totalAdded ?? 0, added);
-        lines.totalRemoved = Math.max(lines.totalRemoved ?? 0, removed);
+        this.lines.snapshot(stream, raw["timestamp"], added, removed, "claude-cost-state");
         this.editsObserved ||= added + removed > 0;
       }
     }
@@ -166,8 +158,8 @@ export class OutcomeCollector {
       for (const block of blocks) {
         const id = text(block?.["id"]), name = text(block?.["name"]);
         if (block?.["type"] === "tool_use" && id && name && ["Edit", "Write", "MultiEdit"].includes(name)) {
-          if (this.tools.size < 100_000) this.tools.set(`${stream}:${id}`, name);
-          else this.truncated = true;
+          if (this.tools.size < 100_000) this.tools.set(id, name);
+          else { this.truncated = true; this.lines.truncated = true; }
         }
       }
       return;
@@ -176,10 +168,18 @@ export class OutcomeCollector {
     const results = blocks.filter((block) => block?.["type"] === "tool_result");
     const result = results.length === 1 ? results[0] : null;
     const output = record(raw["toolUseResult"]);
-    const id = text(result?.["tool_use_id"]) ?? text(raw["uuid"]);
+    const toolId = text(result?.["tool_use_id"]);
+    const id = toolId ?? text(raw["uuid"]);
     if (!result || !output || !id || result["is_error"] === true || output["interrupted"] === true ||
-        (count(output["timedOutAfterMs"]) ?? 0) > 0 || !this.unique(`claude:${stream}:${id}`)) return;
-    const event = `${stream}:${id}`;
+        (count(output["timedOutAfterMs"]) ?? 0) > 0) return;
+    // Tool-use IDs identify a result across every file in this logical session.
+    // Only the UUID fallback is stream-local. The first result owns line evidence.
+    const event = toolId ? `tool:${toolId}` : `uuid:${stream}:${id}`;
+    if (!this.unique(`claude:${event}`)) {
+      const owner = this.editOwners.get(event);
+      if (owner !== undefined && owner !== stream) this.lines.replay();
+      return;
+    }
     const op = record(output["gitOperation"]);
     const commit = record(op?.["commit"]);
     if (commit && (commit["kind"] === undefined || ["committed", "amended"].includes(String(commit["kind"])))) {
@@ -204,9 +204,10 @@ export class OutcomeCollector {
       }
     }
     const patch = output["structuredPatch"];
-    const edit = Array.isArray(patch) || this.tools.has(event);
+    const edit = Array.isArray(patch) || (toolId !== null && this.tools.has(toolId));
     if (edit) {
       this.editsObserved = true; this.editOperations += 1;
+      this.editOwners.set(event, stream);
     }
     if (Array.isArray(patch) && patch.length > 0) {
       let added = 0, removed = 0, valid = true;
@@ -216,9 +217,9 @@ export class OutcomeCollector {
         for (const line of lines as string[]) { added += Number(line.startsWith("+")); removed += Number(line.startsWith("-")); }
       }
       if (valid) {
-        const lines = this.stream(stream); lines.added += added; lines.removed += removed; lines.measured = true;
-      } else this.stream(stream).unmeasured = true;
-    } else if (edit) this.stream(stream).unmeasured = true;
+        this.lines.edit(stream, raw["timestamp"], { added, removed }, "claude-structured-patch");
+      } else this.lines.edit(stream, raw["timestamp"], null, "claude-structured-patch");
+    } else if (edit) this.lines.edit(stream, raw["timestamp"], null, "claude-structured-patch");
   }
 
   observeCodex(raw: RecordValue, line: number): void {
@@ -240,22 +241,22 @@ export class OutcomeCollector {
     if (!this.unique(`codex:${id}`)) return;
     this.editsObserved = true; this.editOperations += 1;
     const changes = record(item["changes"]);
-    if (!changes || Object.keys(changes).length === 0) { this.stream("main").unmeasured = true; return; }
-    let added = 0, removed = 0;
+    if (!changes || Object.keys(changes).length === 0) { this.lines.edit("main", raw["timestamp"], null, "codex-file-change"); return; }
+    let added = 0, removed = 0, measured = false, partial = false;
     for (const change of Object.values(changes)) {
       const diff = countUnifiedDiff(record(change)?.["unified_diff"]);
-      if (!diff) { this.stream("main").unmeasured = true; return; } // Never turn an incomplete event into measured zero.
-      added += diff.added; removed += diff.removed;
+      if (!diff) { partial = true; continue; }
+      added += diff.added; removed += diff.removed; measured = true;
     }
-    const lines = this.stream("main"); lines.added += added; lines.removed += removed; lines.measured = true;
-    this.lineSource = "codex-file-change";
+    if (measured) this.lines.edit("main", raw["timestamp"], { added, removed }, "codex-file-change");
+    if (partial) this.lines.edit("main", raw["timestamp"], null, "codex-file-change");
   }
 
   observeCursor(raw: RecordValue): void {
     const added = count(raw["totalLinesAdded"]), removed = count(raw["totalLinesRemoved"]);
     if (added === null || removed === null) return;
-    const lines = this.stream("main"); lines.totalAdded = added; lines.totalRemoved = removed;
-    this.editsObserved = added + removed > 0; this.lineSource = "cursor-composer";
+    this.lines.snapshot("main", undefined, added, removed, "cursor-composer");
+    this.editsObserved = added + removed > 0;
   }
 
   addGitCommit(commit: string, agentCoauthorTrailers: number): void {
@@ -283,27 +284,11 @@ export class OutcomeCollector {
 
   project(): SessionOutcomes {
     this.resolvePrs();
-    let added = 0, removed = 0, measured = false, partial = false;
-    const sources = new Set<SessionOutcomes["lineSource"]>();
-    const main = this.streams.get("main");
-    // Top-level cost-state is the provider's composite session total. Do not add
-    // the same sub-agent edits or structured patches to that cumulative counter.
-    const streams = main?.totalAdded !== null && main?.totalAdded !== undefined ? [main] : [...this.streams.values()];
-    for (const lines of streams) {
-      if (lines.totalAdded !== null && lines.totalRemoved !== null) {
-        added += lines.totalAdded; removed += lines.totalRemoved; measured = true;
-        sources.add(this.lineSource === "cursor-composer" ? "cursor-composer" : "claude-cost-state");
-      } else if (lines.measured) {
-        added += lines.added; removed += lines.removed; measured = true;
-        sources.add(this.lineSource === "codex-file-change" ? "codex-file-change" : "claude-structured-patch");
-      }
-      if (lines.totalAdded === null && lines.unmeasured) partial = true;
-    }
+    const lines = this.lines.project();
     return {
       editsObserved: this.editsObserved, editOperations: this.editOperations,
-      linesAdded: measured ? added : null, linesRemoved: measured ? removed : null,
-      lineCoverage: !measured ? "unavailable" : partial ? "partial" : "complete",
-      lineSource: sources.size > 1 ? "mixed" : [...sources][0] ?? "unavailable",
+      linesAdded: lines.linesAdded, linesRemoved: lines.linesRemoved,
+      lineCoverage: lines.lineCoverage, lineSource: lines.lineSource,
       operations: { ...this.ops },
       links: [...this.links.values()].map((link) => ({ ref: link.ref, kind: link.kind, role: link.role,
         identity: link.identity, confidence: link.confidence, sources: [...link.sources].sort(),
@@ -311,7 +296,8 @@ export class OutcomeCollector {
       })).sort((a, b) => a.ref.localeCompare(b.ref) || a.role.localeCompare(b.role)),
       agentCoauthoredCommits: this.agentCommits.size,
       agentCoauthorTrailers: [...this.agentCommits.values()].reduce((sum, value) => sum + value, 0),
-      enrichment: { ...this.enrichment }, truncated: this.truncated,
+      enrichment: { ...this.enrichment }, truncated: this.truncated || this.lines.truncated,
+      prAssociationsComplete: this.prAssociationsComplete,
     };
   }
 }

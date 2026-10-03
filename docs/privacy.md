@@ -238,6 +238,7 @@ All fields below are inside `session.outcomes`. Names and semantics are declared
 | `agentCoauthorTrailers` | Recognized agent co-author trailers on matched commits, deduplicated by commit across branch queries | P2 (opt-in) |
 | `enrichment.git`, `enrichment.github` | off, not-applicable, matched, no-match, unavailable, limited | P0 |
 | `truncated` | Collector reached an evidence cap; counts may be lower bounds | P0 |
+| `prAssociationsComplete` | False when a PR association or further result inspection was lost to a collector cap; guards PR allocation | P0 |
 
 Outcome refs are stable, unkeyed pseudonyms, not anonymity guarantees. Commit and branch identities are qualified by repository key; PR identities use canonical repository/number; anonymous observations use provider-qualified session/tool IDs; workspace context uses workspace ID. No new path/argument hashes are exposed. An observer already holding candidate identities can recompute these hashes. Raw SHAs, branches, PR numbers, slugs, URLs, titles, and workspaces remain private even with enrichment. There is deliberately no raw-PR display mode.
 
@@ -253,6 +254,9 @@ The root and repository `outcomes` share this schema. All fields are P0; totals 
 | `editSessions`, `commitSessions`, `prSessions`, `mergedPrSessions` | Independent session evidence stages | P0 |
 | `contextOnlySessions` | Sessions whose links are all weak context | P0 |
 | `lineMeasuredSessions`, `linesAdded`, `linesRemoved` | Measured-session coverage and summed observed line counters | P0 |
+| `coverage.lines.complete`, `coverage.lines.partial`, `coverage.lines.unavailable` | Mutually exclusive coverage counts among inspected sessions | P0 |
+| `coverage.truncatedSessions` | Inspected sessions reaching evidence limits | P0 |
+| `coverage.enrichment.git`, `coverage.enrichment.github` | Fixed counters keyed by off, not-applicable, matched, no-match, unavailable, limited; each sums to inspected sessions | P0 |
 | `apiSessions`, `apiPricedSessions`, `apiEquivalentValueUsd` | API-basis session coverage and known-rate value | P0 |
 | `unlinkedEditSessions`, `unlinkedApiEquivalentUsd` | API sessions/value with edits and no produced commit evidence; heuristic | P0 |
 | `pullRequests.linked`, `pullRequests.created`, `pullRequests.merged` | Distinct identified PR counts | P0 |
@@ -270,7 +274,8 @@ Each of the three ratios has the following fields:
 | `numerator`, `denominator` | Observed operands, including when a guard withholds the ratio | P0 |
 | `minimumDenominator`, `minimumSessions` | Activity thresholds applied to that ratio | P0 |
 | `eligibleSessions`, `candidateSessions` | Coverage counts for the ratio's measurement cohort | P0 |
-| `status` | available, unavailable, insufficient-activity, incomplete-pricing | P0 |
+| `incompleteEvidenceSessions` | API sessions with incomplete PR associations for the PR ratio; zero for other ratios | P0 |
+| `status` | available, unavailable, insufficient-activity, incomplete-pricing, incomplete-evidence | P0 |
 
 ### Health endpoint
 
