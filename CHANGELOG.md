@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format follows [Kee
 - Reviewed model exceptions take precedence over API prices by default; the bundled card remains the offline fallback. `--rate-card` pins a card and disables automatic price refresh.
 - Dashboard startup refreshes stale public prices after its first local scan; reports only print a hint. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). Offline mode disables these requests.
 
+### Fixed
+
+- Redact invalid provider model values across reports, API, pricing status and the Pricing panel while retaining token denominators; report failures now emit a fixed content-free error.
+- Expose cache-price/TTL substitutions and reviewed upper-estimate assumptions; count only explicit token-class rates in coverage.
+- Index pricing history and cache alias resolution; share identical rate tables on disk and in memory while preserving every observation and legacy snapshot compatibility.
+- Reject non-string provider values in reviewed cards and align the PR privacy checklist with tested public-pricing GETs and offline mode.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

@@ -47,7 +47,7 @@ function devTier(value: unknown, aboveInputTokens: unknown, rate: ModelRate): Co
   if (cost.cache_write_1h !== undefined) tier.cacheWrite1hPerMillion = price(cost.cache_write_1h);
   else if (rate.provider === "claude" && tier.cacheWrite5mPerMillion !== undefined) {
     tier.cacheWrite1hPerMillion = tier.inputPerMillion * 2;
-    rate.assumptions = ["anthropic-cache-1h-2x"];
+    tier.assumptions = ["anthropic-cache-1h-2x"];
   }
   return tier;
 }
@@ -101,7 +101,7 @@ function litellmRate(raw: unknown, provider: "claude" | "codex"): ModelRate | un
     for (const [key, field] of fields) if (data[`${key}${suffix}`] !== undefined) tier[field] = unitPrice(data[`${key}${suffix}`]);
     if (provider === "claude" && tier.cacheWrite5mPerMillion !== undefined && tier.cacheWrite1hPerMillion === undefined) {
       tier.cacheWrite1hPerMillion = tier.inputPerMillion * 2;
-      rate.assumptions = ["anthropic-cache-1h-2x"];
+      tier.assumptions = ["anthropic-cache-1h-2x"];
     }
     return tier;
   });

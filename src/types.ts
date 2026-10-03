@@ -33,11 +33,15 @@ export interface ContextPriceTier {
   cacheReadPerMillion?: number;
   cacheWrite5mPerMillion?: number;
   cacheWrite1hPerMillion?: number;
+  assumptions?: PricingAssumption[];
 }
 
 export type PricingSource = "models.dev" | "litellm";
 export type PricingPolicy = "reviewed-first" | "api-first" | "reviewed-only";
-export type PricingAssumption = "anthropic-cache-1h-2x" | "codex-cache-write-upper-1.25x";
+export type PricingAssumption = "anthropic-cache-1h-2x" | "codex-cache-write-upper-1.25x"
+  | "cache-write-upper-multiplier" | "cache-read-at-input" | "cache-write-5m-at-input"
+  | "cache-write-5m-multiplier" | "cache-write-1h-at-5m" | "context-cache-read-at-base"
+  | "context-cache-write-5m-at-base" | "context-cache-write-1h-at-base" | "cache-write-ttl-5m";
 
 export interface RateProvenance {
   source: PricingSource | "reviewed";

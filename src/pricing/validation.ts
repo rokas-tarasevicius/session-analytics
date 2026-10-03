@@ -1,4 +1,4 @@
-import type { ContextPriceTier, ModelRate, RateCard } from "../types.ts";
+import type { ContextPriceTier, ModelRate, PricingAssumption, RateCard } from "../types.ts";
 import { validModelId } from "./aliases.ts";
 
 export const MAX_PRICE = 10_000; // USD per million text tokens; reject unit/schema accidents.
@@ -6,6 +6,12 @@ export const MAX_PAYLOAD_BYTES = 32 * 1024 * 1024;
 export const MAX_MODELS = 10_000;
 export const priceFields = ["inputPerMillion", "outputPerMillion", "cachedInputPerMillion",
   "cacheReadPerMillion", "cacheWrite5mPerMillion", "cacheWrite1hPerMillion"] as const;
+
+export function upperEstimateAssumption(rate: ModelRate): PricingAssumption | undefined {
+  if (rate.cacheWriteObservable !== false || (rate.cacheWriteMultiplier ?? 1) <= 1) return undefined;
+  return rate.provider === "codex" && rate.cacheWriteMultiplier === 1.25
+    ? "codex-cache-write-upper-1.25x" : "cache-write-upper-multiplier";
+}
 
 export function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -48,9 +54,9 @@ function sourceUrl(value: unknown): string {
 /** Build a new object: unknown feed/cache fields must never enter a public projection. */
 export function validateRate(raw: unknown, trustedSource?: string): ModelRate {
   const input = record(raw);
-  if (!input || !["claude", "codex"].includes(String(input.provider))) throw new Error("Invalid rate card.");
+  if (!input || (input.provider !== "claude" && input.provider !== "codex")) throw new Error("Invalid rate card.");
   const rate: ModelRate = {
-    provider: input.provider as "claude" | "codex",
+    provider: input.provider,
     inputPerMillion: price(input.inputPerMillion),
     outputPerMillion: price(input.outputPerMillion),
     source: trustedSource ?? sourceUrl(input.source),
@@ -91,6 +97,9 @@ export function validateRate(raw: unknown, trustedSource?: string): ModelRate {
       for (const key of ["cacheReadPerMillion", "cacheWrite5mPerMillion", "cacheWrite1hPerMillion"] as const) {
         if (tier[key] !== undefined) result[key] = price(tier[key]);
       }
+      if (Array.isArray(tier.assumptions) && tier.assumptions.includes("anthropic-cache-1h-2x")) {
+        result.assumptions = ["anthropic-cache-1h-2x"];
+      }
       return result;
     }).sort((a, b) => a.aboveInputTokens - b.aboveInputTokens);
     if (new Set(rate.contextTiers.map((tier) => tier.aboveInputTokens)).size !== rate.contextTiers.length) {
@@ -99,8 +108,10 @@ export function validateRate(raw: unknown, trustedSource?: string): ModelRate {
   }
   if (Array.isArray(input.assumptions)) {
     rate.assumptions = [...new Set(input.assumptions.filter((value) =>
-      value === "anthropic-cache-1h-2x" || value === "codex-cache-write-upper-1.25x"))];
+      value === "anthropic-cache-1h-2x"))];
   }
+  const upper = upperEstimateAssumption(rate);
+  if (upper) rate.assumptions = [...(rate.assumptions ?? []), upper];
   return rate;
 }
 

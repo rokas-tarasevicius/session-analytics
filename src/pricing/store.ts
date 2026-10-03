@@ -27,7 +27,20 @@ export function pricingDirectory(options: PricingOptions = {}, environment: Node
   return join(base, "pricing");
 }
 
-function validateSnapshot(value: unknown): StoredSnapshot {
+type RateTable = SourceSnapshot["models"];
+
+function validateModels(value: unknown, source: SourceSnapshot["source"]): RateTable {
+  const input = record(value);
+  if (!input || !Object.keys(input).length || Object.keys(input).length > MAX_MODELS) throw new Error("Invalid pricing models.");
+  const models: RateTable = Object.create(null);
+  for (const model of Object.keys(input).sort()) {
+    if (!validModelId(model)) throw new Error("Invalid pricing model.");
+    models[model] = validateRate(input[model], SOURCE_URLS[source]);
+  }
+  return models;
+}
+
+function validateSnapshot(value: unknown, validatedModels?: RateTable): StoredSnapshot {
   const raw = record(value);
   if (!raw || raw.version !== 1 || !isoTimestamp(raw.fetchedAt) ||
       typeof raw.payloadSha256 !== "string" || !/^[a-f0-9]{64}$/.test(raw.payloadSha256)) {
@@ -39,15 +52,10 @@ function validateSnapshot(value: unknown): StoredSnapshot {
     return { version: 1, source: "reviewed", fetchedAt: raw.fetchedAt, payloadSha256: raw.payloadSha256, card };
   }
   if (raw.source !== "models.dev" && raw.source !== "litellm") throw new Error("Invalid pricing source.");
-  const source = raw.source, input = record(raw.models);
-  if (raw.sourceUrl !== SOURCE_URLS[source] || !input || !Object.keys(input).length ||
-      Object.keys(input).length > MAX_MODELS || !Number.isSafeInteger(raw.rejectedModels) ||
+  const source = raw.source;
+  if (raw.sourceUrl !== SOURCE_URLS[source] || !Number.isSafeInteger(raw.rejectedModels) ||
       (raw.rejectedModels as number) < 0) throw new Error("Invalid pricing snapshot.");
-  const models: SourceSnapshot["models"] = Object.create(null);
-  for (const [model, rate] of Object.entries(input)) {
-    if (!validModelId(model)) throw new Error("Invalid pricing model.");
-    models[model] = validateRate(rate, SOURCE_URLS[source]);
-  }
+  const models = validatedModels ?? validateModels(raw.models, source);
   return { version: 1, source, sourceUrl: SOURCE_URLS[source], fetchedAt: raw.fetchedAt,
     payloadSha256: raw.payloadSha256, models, rejectedModels: raw.rejectedModels as number };
 }
@@ -61,6 +69,15 @@ export async function readSnapshots(directory: string): Promise<{
     return { snapshots: [], warnings: (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : ["cache-unavailable"] };
   }
   const snapshots: StoredSnapshot[] = [], warnings: PricingStatus["warnings"] = [];
+  const tables = new Map<string, RateTable>();
+  const blobs = new Map<string, RateTable>();
+  const intern = (models: RateTable): RateTable => {
+    const hash = sha256(JSON.stringify(models));
+    const existing = tables.get(hash);
+    if (existing) return existing;
+    tables.set(hash, models);
+    return models;
+  };
   for (const name of names.sort()) {
     if (!/^(?:models\.dev|litellm|reviewed)-[\dT-]+-[a-f0-9]{64}\.json$/.test(name)) continue;
     try {
@@ -71,7 +88,39 @@ export async function readSnapshots(directory: string): Promise<{
           sha256(JSON.stringify(envelope.snapshot)) !== envelope.checksum || !name.endsWith(`-${envelope.checksum}.json`)) {
         throw new Error("Pricing snapshot checksum mismatch.");
       }
-      snapshots.push(validateSnapshot(envelope.snapshot));
+      let snapshot: StoredSnapshot;
+      if (envelope.storageVersion === 2) {
+        const descriptor = record(envelope.snapshot);
+        const hash = descriptor?.modelsSha256, source = descriptor?.source;
+        if (typeof hash !== "string" || !/^[a-f0-9]{64}$/.test(hash) ||
+            (source !== "models.dev" && source !== "litellm")) throw new Error("Invalid rate table reference.");
+        // Scope the validated blob cache by source: trusted URLs must not cross source boundaries.
+        const key = `${source}:${hash}`;
+        let models = blobs.get(key);
+        if (!models) {
+          const path = join(directory, `rates-${hash}.json`), info = await lstat(path);
+          if (!info.isFile() || info.size > MAX_PAYLOAD_BYTES) throw new Error("Invalid rate table file.");
+          const payload = await readFile(path, "utf8");
+          if (sha256(payload) !== hash) throw new Error("Rate table checksum mismatch.");
+          models = intern(validateModels(JSON.parse(payload), source));
+          blobs.set(key, models);
+        }
+        snapshot = validateSnapshot({ ...descriptor, models }, models);
+      } else if (envelope.storageVersion === undefined || envelope.storageVersion === 1) {
+        snapshot = validateSnapshot(envelope.snapshot);
+        if (snapshot.source !== "reviewed") {
+          // Old inline snapshots marked derived 1h prices globally, without identifying the tier.
+          // Preserve the warning conservatively; their numerical prices and observation hashes stay intact.
+          for (const rate of Object.values(snapshot.models)) {
+            if (!rate.assumptions?.includes("anthropic-cache-1h-2x")) continue;
+            for (const tier of rate.contextTiers ?? []) {
+              if (tier.cacheWrite1hPerMillion !== undefined && tier.assumptions === undefined) tier.assumptions = ["anthropic-cache-1h-2x"];
+            }
+          }
+          snapshot.models = intern(snapshot.models);
+        }
+      } else throw new Error("Invalid storage version.");
+      snapshots.push(snapshot);
     } catch { if (!warnings.includes("invalid-snapshot")) warnings.push("invalid-snapshot"); }
   }
   snapshots.sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt) || a.payloadSha256.localeCompare(b.payloadSha256));
@@ -81,13 +130,37 @@ export async function readSnapshots(directory: string): Promise<{
 /** Publish complete files atomically, without replacing an existing snapshot (also safe across processes). */
 export async function saveSnapshot(directory: string, snapshot: StoredSnapshot): Promise<void> {
   const clean = validateSnapshot(snapshot);
-  const checksum = sha256(JSON.stringify(clean));
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  let descriptor: unknown = clean;
+  if (clean.source !== "reviewed") {
+    const payload = JSON.stringify(clean.models);
+    const modelsSha256 = sha256(payload);
+    await publish(directory, `rates-${modelsSha256}.json`, payload);
+    const { models: _, ...metadata } = clean;
+    descriptor = { ...metadata, modelsSha256 };
+  }
+  const checksum = sha256(JSON.stringify(descriptor));
   const name = `${clean.source}-${clean.fetchedAt.replace(/[:.Z]/g, "")}-${checksum}.json`;
+  await publish(directory, name, `${JSON.stringify({ ...(clean.source === "reviewed" ? {} : { storageVersion: 2 }), checksum, snapshot: descriptor })}\n`);
+}
+
+async function publish(directory: string, name: string, payload: string): Promise<void> {
   const temporary = join(directory, `.pending-${randomUUID()}`);
   try {
-    await writeFile(temporary, `${JSON.stringify({ checksum, snapshot: clean })}\n`, { flag: "wx", mode: 0o600 });
+    await writeFile(temporary, payload, { flag: "wx", mode: 0o600 });
     try { await link(temporary, join(directory, name)); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const existing = await readFile(join(directory, name), "utf8");
+      if (existing !== payload) {
+        // Reviewed envelopes predate the optional storage-version marker. Keep either valid spelling intact.
+        const previous = name.startsWith("reviewed-") ? record(JSON.parse(existing)) : undefined;
+        const next = previous ? record(JSON.parse(payload)) : undefined;
+        if (!previous || (previous.storageVersion !== undefined && previous.storageVersion !== 1) ||
+            previous.checksum !== next?.checksum || sha256(JSON.stringify(previous.snapshot)) !== next?.checksum) {
+          throw new Error("Existing pricing evidence is damaged.");
+        }
+      }
+    }
   } finally { await unlink(temporary).catch(() => undefined); }
 }

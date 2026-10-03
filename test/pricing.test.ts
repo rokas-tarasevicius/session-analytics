@@ -122,10 +122,10 @@ test("selects immutable request-time history, labels oldest and missing-time fal
 test("snapshot store is atomic, immutable, checksummed and tolerant of damaged files", async () => temporary(async (directory) => {
   const snapshot = sourceSnapshot("models.dev", JAN);
   await Promise.all([saveSnapshot(directory, snapshot), saveSnapshot(directory, snapshot)]);
-  assert.equal((await readdir(directory)).length, 1);
+  assert.equal((await readdir(directory)).length, 2); // One immutable observation and one shared rate table.
   const loaded = await readSnapshots(directory);
   assert.equal(loaded.snapshots.length, 1); assert.deepEqual(loaded.warnings, []);
-  const name = (await readdir(directory))[0]!;
+  const name = (await readdir(directory)).find((name) => name.startsWith("rates-"))!;
   await writeFile(join(directory, name), (await readFile(join(directory, name), "utf8")).replace('"inputPerMillion":2', '"inputPerMillion":999'));
   const corrupt = await readSnapshots(directory);
   assert.equal(corrupt.snapshots.length, 0); assert.deepEqual(corrupt.warnings, ["invalid-snapshot"]);

@@ -145,6 +145,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal(pricing.status, 200);
     assert.match(await pricing.text(), /renderPricingPanel/);
     assert.equal((await fetch(`${origin}/pricing.css`)).status, 200);
+    assert.equal((await fetch(`${origin}/model-id.js`)).status, 200);
     assert.match(applicationText, /renderDistributions/);
     assert.match(applicationText, /renderNamedDistribution/);
     assert.match(applicationText, /activityTooltip[\s\S]*pointerenter/);

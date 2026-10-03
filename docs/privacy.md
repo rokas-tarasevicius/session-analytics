@@ -9,7 +9,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 **Returned:** allowlisted counters and identifiers only.
 
 - Token counters by class, cost figures, counts of events, durations, and ISO timestamps.
-- Model IDs and reasoning-effort labels as the provider recorded them.
+- Bounded model IDs and reasoning-effort labels. Invalid model values become `<unknown>` while their counters remain eligible for coverage.
 - Tool names, and skill identifiers that match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
@@ -30,9 +30,10 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 
 - **Allowlist projection.** Parsers accumulate counters into an internal session state, and `finalizeSession` in `src/analyzer.ts` builds each public object field by field. Raw provider records are never spread into an output, so a new field in a provider's format cannot reach an output without a code change.
 - **Internal-only types.** `SessionDatabaseRow` and `AnalyzeOptions` in `src/types.ts` carry paths, titles, branches, and IDs for correlation. They are used inside the analysis process and are not part of any public type.
+- **Bounded model IDs.** Parsers, pricing lookup/status and the Pricing renderer share `src/public/model-id.js`. Model IDs are at most 160 characters, start with a letter, and contain only letters, digits, dots, underscores and dashes, with an optional `openai/` or `anthropic/` prefix. Paths, URLs, controls, common file suffixes, recognizable raw UUID/hex/ULID identifiers and credential/session-style prefixes are rejected. Rejected and absent values share `<unknown>`; rejected input is never echoed, and eligible tokens are retained. Syntactically valid unmatched model IDs remain visible and unpriced.
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
-- **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded, so local paths in exceptions cannot reach the dashboard.
+- **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded. The report catches analysis failures, emits only `Session analysis could not be completed.` on stderr, leaves stdout empty, and exits nonzero. Pricing commands also use fixed errors.
 - **No session upload.** No telemetry. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). They target fixed models.dev and GitHub raw endpoints, without credentials, cookies, bodies or redirects. `--offline` / `SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests. Public services see the client IP and request time. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 
@@ -111,7 +112,7 @@ Repository summaries and the machine summary share these fields.
 | `topLevelSpendUsd` | Value attributed to top-level execution | P0 |
 | `toolCalls` | Sum of effective tool calls | P0 |
 | `totalInputTokens` | Sum of processed input tokens, including cache reads and writes | P0 |
-| `unpricedSessions` | Sessions with at least one unpriced model | P0 |
+| `unpricedSessions` | Sessions with at least one estimated or unavailable token-class rate | P0 |
 | `repositories` | Machine summary only: repositories in scope | P0 |
 | `repositoriesWithSessions` | Machine summary only: repositories with at least one session | P0 |
 | `workingSnapshots` | Machine summary only: sessions that were still running when scanned | P0 |
@@ -132,7 +133,7 @@ Repository summaries and the machine summary share these fields.
 | `effort` | Reasoning-effort label as recorded, or `null` | P0 |
 | `executionKind` | `top-level`, `subagent`, `mixed`, or `unknown` | P0 |
 | `costBasis` | `api-list-price-equivalent`, `provider-reported`, or `unavailable` | P0 |
-| `costComplete` | `true` when every observed token was priced or no tokens were observed | P0 |
+| `costComplete` | `true` when every observed token has an explicit token-class rate, or no tokens were observed; substituted cache rates reduce completeness | P0 |
 | `pricedTokenCoverage` | Share of this session's tokens with a known rate, or `null` | P0 |
 | `cost` | Cost breakdown; see [Cost breakdown](#cost-breakdown-costbreakdown) | P0 |
 | `costByExecution.topLevelUsd` | Value attributed to top-level execution | P0 |
@@ -207,11 +208,11 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
-| `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
+| `model` | Bounded model ID; `<unknown>` for absent or rejected values, retaining their token counters | P0 |
 | `calls` | Requests attributed to this model | P0 |
-| `priced` | `true` when all observed requests for this model have a selected rate (always `true` for Cursor provider-reported values) | P0 |
+| `priced` | `true` when every observed token class has an explicit rate across all requests (always `true` for Cursor provider-reported values) | P0 |
 | `pricing[]` | Distinct rate provenance used across this model's requests; empty when no request was API-priced; see below | P0 |
-| `pricingCoverage.pricedTokens`, `pricingCoverage.eligibleTokens` | Priced and eligible observed token counts for API usage, retaining partial coverage within a model; absent for provider-reported usage | P0 |
+| `pricingCoverage.pricedTokens`, `pricingCoverage.eligibleTokens` | Explicitly priced and eligible observed token counts for API usage; estimated cache classes and unknown models remain in the denominator only; absent for provider-reported usage | P0 |
 
 ### Pricing provenance (`RateProvenance`)
 
@@ -226,7 +227,7 @@ Present on current rate-card entries and on model usage in sessions, repositorie
 | `rateModel` | ID of the matching rate entry | P0 |
 | `match` | `exact` or `alias` | P0 |
 | `temporal` | `at-or-before`, `oldest` (request predates evidence), or `undated` | P0 |
-| `assumptions[]` | `anthropic-cache-1h-2x` or `codex-cache-write-upper-1.25x` | P0 |
+| `assumptions[]` | `anthropic-cache-1h-2x`, `codex-cache-write-upper-1.25x`, `cache-write-upper-multiplier`, `cache-read-at-input`, `cache-write-5m-at-input`, `cache-write-5m-multiplier`, `cache-write-1h-at-5m`, `cache-write-ttl-5m`, `context-cache-read-at-base`, `context-cache-write-5m-at-base`, `context-cache-write-1h-at-base` | P0 |
 
 ### Pricing status (`rateCard.pricing`, `rates show/status`)
 
@@ -253,21 +254,22 @@ All fields below are **P0**. `rates status` returns `status` as above plus `cove
 | `coverage.modelsSeen`, `coverage.modelsPriced` | Distinct observed API-model IDs and those matched by current rates | P0 |
 | `coverage.ratio` | Priced/seen fraction; null when the denominator is zero | P0 |
 | `coverage.bySource[].source`, `coverage.bySource[].models` | Source enum and count of local IDs priced by that source | P0 |
-| `coverage.unpricedModels[]` | Observed model IDs without a matching current rate | P0 |
+| `coverage.unpricedModels[]` | Bounded observed model IDs without a matching current rate; rejected/absent values collapse to `<unknown>` | P0 |
 | `models[].model`, `models[].provenance` | Requested/current model ID and rate evidence | P0 |
 | `models[].rate.provider`, `models[].rate.source` | Rate's provider enum and public source URL | P0 |
 | `models[].rate.inputPerMillion`, `outputPerMillion`, `cachedInputPerMillion`, `cacheReadPerMillion`, `cacheWrite5mPerMillion`, `cacheWrite1hPerMillion` | Allowlisted USD/million numeric rates | P0 |
 | `models[].rate.cacheWriteMultiplier`, `cacheWriteObservable` | Reviewed/derived upper-estimate configuration | P0 |
 | `models[].rate.longContext.inputMultiplier`, `outputMultiplier`, `thresholdInputTokens` | Reviewed per-request premium configuration | P0 |
 | `models[].rate.contextTiers[].aboveInputTokens`, `inputPerMillion`, `outputPerMillion`, `cacheReadPerMillion`, `cacheWrite5mPerMillion`, `cacheWrite1hPerMillion` | Absolute tier rates and strict per-request threshold | P0 |
-| `models[].rate.assumptions[]` | Same bounded assumption codes as provenance | P0 |
+| `models[].rate.assumptions[]` | Normalized rate conventions: derived Anthropic one-hour price and configured cache-write upper-estimate rule | P0 |
+| `models[].rate.contextTiers[].assumptions[]` | Optional `anthropic-cache-1h-2x` on a tier with a derived one-hour cache price; request provenance uses the applied tier | P0 |
 | `comparisons[].source`, `before`, `after` | Source and previous/latest timestamps; null when unavailable | P0 |
 | `changes[].source`, `model`, `change`, `large` | Source, model ID, `added`/`removed`/`changed`, and large-change flag | P0 |
 | `changes[].before`, `after` | Full normalized rates as above; null for a missing side | P0 |
 | update `status` | `updated`, `partial`, `failed`, `offline`, `reviewed-only` | P0 |
 | update `sources[].source`, `status`, `models`, `rejectedModels` | Source enum, `updated`/`failed`, accepted/rejected counts | P0 |
 
-`test/pricing.test.ts` plants sentinel content in feed descriptions/links/extra fields and inspects actual HTTP requests from a loopback fixture server. `test/pricing-accounting.test.ts` carries transcript sentinels through history selection, API projection, aggregation, report and rates status. Only fixed source URLs and explicitly projected fields survive. Corrupt payloads/errors do not enter output.
+`test/pricing.test.ts` plants sentinel content in feed descriptions/links/extra fields and inspects actual HTTP requests from a loopback fixture server. `test/pricing-accounting.test.ts` carries transcript sentinels through history selection, API projection, aggregation, report and rates status. Only fixed source URLs and explicitly projected fields survive. Corrupt payloads/errors do not enter output. `test/pricing-review.test.ts` injects invalid model values into Claude/Codex metadata and verifies CLI text/JSON, actual API responses and the actual Pricing renderer, retaining eligible tokens. It also tests report failures in both modes with missing/invalid cards and a crashed worker. `test/pricing-usage.test.ts` rejects sentinel assumption strings at the new tier boundary.
 
 ### Health endpoint
 

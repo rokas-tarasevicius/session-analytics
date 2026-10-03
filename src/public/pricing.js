@@ -1,3 +1,5 @@
+import { projectModelId } from "./model-id.js";
+
 const element = (tag, text, className) => {
   const item = document.createElement(tag);
   if (text !== undefined) item.textContent = text;
@@ -6,8 +8,17 @@ const element = (tag, text, className) => {
 };
 const date = (value) => value ? new Date(value).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "Not cached";
 const assumptionLabels = {
-  "anthropic-cache-1h-2x": "1-hour cache write: 2× input",
+  "anthropic-cache-1h-2x": "1-hour cache write: estimated at 2× input",
   "codex-cache-write-upper-1.25x": "Cache-write upper estimate: 1.25× input",
+  "cache-write-upper-multiplier": "Cache-write upper estimate: configured input multiplier",
+  "cache-read-at-input": "Cache read: estimated at input rate",
+  "cache-write-5m-at-input": "5-minute cache write: estimated at input rate",
+  "cache-write-5m-multiplier": "5-minute cache write: estimated with input multiplier",
+  "cache-write-1h-at-5m": "1-hour cache write: estimated at 5-minute rate (input-rate fallback if unavailable)",
+  "cache-write-ttl-5m": "Cache-write TTL unavailable: estimated as 5 minutes",
+  "context-cache-read-at-base": "Context-tier cache read: estimated at base-context rate",
+  "context-cache-write-5m-at-base": "Context-tier 5-minute write: estimated at base-context rate",
+  "context-cache-write-1h-at-base": "Context-tier 1-hour write: estimated at base-context rate",
 };
 const warningLabels = {
   "cache-unavailable": "The pricing cache could not be read.",
@@ -50,15 +61,17 @@ export function renderPricingPanel(container, rateCard, sessions) {
     for (const usage of session.models) {
       const count = usage.pricingCoverage?.eligibleTokens ?? usage.inputTokens + usage.outputTokens;
       tokens += count; pricedTokens += usage.pricingCoverage?.pricedTokens ?? (usage.priced ? count : 0);
-      const existing = models.get(usage.model) ?? { priced: true, provenance: new Map() };
+      const model = projectModelId(usage.model);
+      const existing = models.get(model) ?? { priced: true, provenance: new Map() };
       existing.priced &&= usage.priced;
       for (const provenance of usage.pricing ?? []) existing.provenance.set(JSON.stringify(provenance), provenance);
-      models.set(usage.model, existing);
+      models.set(model, existing);
     }
   }
   const coverage = element("article", undefined, "metric-card");
   coverage.append(element("span", "Selected token coverage"), element("strong", tokens ? `${(100 * pricedTokens / tokens).toFixed(1)}%` : "N/A"),
     element("small", `${pricedTokens.toLocaleString("en-GB")} / ${tokens.toLocaleString("en-GB")} observed tokens`),
+    element("small", "Explicit token-class rates; substituted cache rates excluded"),
     element("small", "Claude + Codex; provider-reported values excluded"));
   cards.append(coverage); container.append(cards);
   container.append(element("p", "API-equivalent value is not an invoice. Each request uses the newest snapshot at or before its timestamp. Earlier requests use the oldest available evidence, labeled below.", "chart-note"));
@@ -84,9 +97,9 @@ export function renderPricingPanel(container, rateCard, sessions) {
     if (!usage.priced || !entries.length) entries.push(null);
     for (const provenance of entries) {
       const row = element("tr");
-      const selection = !provenance ? "Unpriced" : provenance.temporal === "oldest" ? "Oldest available (later than request)"
+      const selection = !provenance ? "Incomplete token-class coverage" : provenance.temporal === "oldest" ? "Oldest available (later than request)"
         : provenance.temporal === "undated" ? "Latest; request time unavailable" : "At or before request";
-      for (const value of [model, provenance ? `${provenance.source} / ${provenance.kind}` : "No matching rate",
+      for (const value of [model, provenance ? `${provenance.source} / ${provenance.kind}` : entries.length > 1 ? "Some tokens use estimated or unavailable rates" : "No matching rate",
         provenance ? date(provenance.snapshotDate) : "—", selection,
         provenance?.assumptions.map((code) => assumptionLabels[code] ?? "Derived cache rate").join("; ") || "None"]) row.append(element("td", value));
       body.append(row);

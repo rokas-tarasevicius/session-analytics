@@ -71,7 +71,12 @@ let analyzeOptions;
 try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
 catch { process.stderr.write("Invalid pricing configuration.\n"); process.exit(2); }
 
-const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
+let analytics;
+try { analytics = await analyzeMachineSessionsIsolated(analyzeOptions); }
+catch {
+  process.stderr.write("Session analysis could not be completed.\n");
+  process.exit(1);
+}
 
 if (analytics.rateCard.pricing?.stale && !analytics.rateCard.pricing.offline) {
   process.stderr.write(`Pricing cache is stale or missing. Run ${brand.command} rates update to refresh public prices.\n`);

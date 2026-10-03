@@ -11,7 +11,6 @@ import { fileURLToPath } from "node:url";
 import type {
   AnalyzeOptions,
   CostBreakdown,
-  ModelRate,
   ModelUsage,
   MachineAnalytics,
   NamedMetric,
@@ -23,7 +22,9 @@ import type {
   TokenUsage,
 } from "./types.ts";
 
-import { loadPricingCatalog, mergeProvenance, publicRateCard, rateForContext, resolveRate, type PricingCatalog } from "./pricing/catalog.ts";
+import { loadPricingCatalog, mergeProvenance, publicRateCard, resolveRate, type PricingCatalog } from "./pricing/catalog.ts";
+import { projectModelId } from "./public/model-id.js";
+import { priceUsage } from "./pricing/usage.ts";
 
 const toolRoot = new URL(".", import.meta.url);
 const zeroTokens = (): TokenUsage => ({
@@ -192,63 +193,6 @@ function durationMilliseconds(start: string | null, end: string | null): number 
     : 0;
 }
 
-function calculateCost(
-  rate: ModelRate,
-  usage: TokenUsage,
-  inputForRequest: number,
-): CostBreakdown {
-  rate = rateForContext(rate, inputForRequest);
-  const inputMultiplier =
-    rate.longContext && inputForRequest > rate.longContext.thresholdInputTokens
-      ? rate.longContext.inputMultiplier
-      : 1;
-  const outputMultiplier =
-    rate.longContext && inputForRequest > rate.longContext.thresholdInputTokens
-      ? rate.longContext.outputMultiplier
-      : 1;
-  const inputUsd =
-    (usage.uncachedInputTokens * rate.inputPerMillion * inputMultiplier) / 1_000_000;
-  const cachedRate =
-    rate.cachedInputPerMillion ?? rate.cacheReadPerMillion ?? rate.inputPerMillion;
-  const cachedInputUsd =
-    (usage.cachedInputTokens * cachedRate * inputMultiplier) / 1_000_000;
-  const fiveMinuteWriteRate =
-    rate.cacheWrite5mPerMillion ??
-    rate.inputPerMillion * (rate.cacheWriteMultiplier ?? 1);
-  const oneHourWriteRate = rate.cacheWrite1hPerMillion ?? fiveMinuteWriteRate;
-  const unsplitCacheWrites = Math.max(
-    0,
-    usage.cacheWriteInputTokens -
-      usage.cacheWrite5mInputTokens -
-      usage.cacheWrite1hInputTokens,
-  );
-  const cacheWriteUsd =
-    ((usage.cacheWrite5mInputTokens + unsplitCacheWrites) *
-      fiveMinuteWriteRate *
-      inputMultiplier +
-      usage.cacheWrite1hInputTokens * oneHourWriteRate * inputMultiplier) /
-    1_000_000;
-  const outputUsd =
-    (usage.outputTokens * rate.outputPerMillion * outputMultiplier) / 1_000_000;
-  const totalUsd = inputUsd + cachedInputUsd + cacheWriteUsd + outputUsd;
-  const unobservableWriteAdjustment =
-    rate.cacheWriteObservable === false && rate.cacheWriteMultiplier
-      ? (usage.uncachedInputTokens *
-          rate.inputPerMillion *
-          (rate.cacheWriteMultiplier - 1) *
-          inputMultiplier) /
-        1_000_000
-      : 0;
-  return {
-    cacheWriteUsd,
-    cachedInputUsd,
-    inputUsd,
-    outputUsd,
-    totalUsd,
-    upperEstimateUsd: totalUsd + unobservableWriteAdjustment,
-  };
-}
-
 function addModelUsage(
   session: MutableSession,
   rateCard: PricingCatalog,
@@ -259,6 +203,7 @@ function addModelUsage(
   fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
 ): void {
+  model = projectModelId(model);
   let aggregate = session.models.get(model);
   if (!aggregate) {
     aggregate = {
@@ -280,9 +225,10 @@ function addModelUsage(
     aggregate.priced = false;
     return;
   }
-  mergeProvenance(aggregate, [selected.provenance]);
-  aggregate.pricingCoverage!.pricedTokens += tokenCount(usage);
-  const cost = calculateCost(selected.rate, usage, inputForRequest);
+  const { cost, pricedTokens, assumptions } = priceUsage(selected.rate, usage, inputForRequest);
+  mergeProvenance(aggregate, [{ ...selected.provenance, assumptions }]);
+  aggregate.pricingCoverage!.pricedTokens += pricedTokens;
+  aggregate.priced &&= pricedTokens === tokenCount(usage);
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
@@ -516,7 +462,7 @@ async function buildCodexCounterLedger(paths: string[]): Promise<Map<string, Cod
       const payload = asRecord(record["payload"]);
       const timestamp = stringValue(record["timestamp"]);
       if (record["type"] === "turn_context") {
-        const model = stringValue(payload?.["model"]);
+        const model = payload && Object.hasOwn(payload, "model") ? projectModelId(payload["model"]) : null;
         if (model) models.add(model);
       }
       const tokenEvent = record["type"] === "event_msg" && payload?.["type"] === "token_count";
@@ -567,7 +513,7 @@ async function analyzeCodex(
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
-  let currentModel = row.database_model ?? "<unknown>";
+  let currentModel = projectModelId(row.database_model);
   let parseErrors = 0;
   // Codex has recorded the same lifecycle events in several shapes over time:
   // legacy `event_msg` notifications, `item_completed` items, and top-level
@@ -601,7 +547,7 @@ async function analyzeCodex(
     }
 
     if (type === "turn_context") {
-      currentModel = stringValue(payload?.["model"]) ?? currentModel;
+      if (payload && Object.hasOwn(payload, "model")) currentModel = projectModelId(payload["model"]);
       state.effort = stringValue(payload?.["effort"]) ?? state.effort;
       return;
     }
@@ -770,9 +716,8 @@ function claudeUsage(raw: JsonRecord): TokenUsage {
     nonNegativeNumberValue(asRecord(raw["output_tokens_details"])?.["thinking_tokens"]),
   );
   const cacheCreation = asRecord(raw["cache_creation"]);
-  let cacheWrite5m = nonNegativeNumberValue(cacheCreation?.["ephemeral_5m_input_tokens"]);
+  const cacheWrite5m = nonNegativeNumberValue(cacheCreation?.["ephemeral_5m_input_tokens"]);
   const cacheWrite1h = nonNegativeNumberValue(cacheCreation?.["ephemeral_1h_input_tokens"]);
-  if (cacheWrite > 0 && cacheWrite5m + cacheWrite1h === 0) cacheWrite5m = cacheWrite;
   return {
     cacheWrite1hInputTokens: cacheWrite1h,
     cacheWrite5mInputTokens: cacheWrite5m,
@@ -874,7 +819,7 @@ async function analyzeClaude(
         const usage = usageRecord ? claudeUsage(usageRecord) : zeroTokens();
         const snapshot = {
           executionKind,
-          model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
+          model: projectModelId(Object.hasOwn(message, "model") ? message["model"] : row.database_model),
           reasoningExposed: Boolean(asRecord(usageRecord?.["output_tokens_details"])),
           timestamp,
           usage,
@@ -973,7 +918,9 @@ function finalizeSession(
       : ([...state.executionKindsSeen][0] ?? state.executionKind);
   for (const model of models) {
     if (model.model === "<unknown>") state.warnings.push("Provider history did not record a stable model ID; those tokens are excluded from API-equivalent spend coverage.");
-    else if (!model.priced) state.warnings.push(`No rate card is configured for ${model.model}.`);
+    else if (!model.priced) state.warnings.push(model.pricing?.length
+      ? `Some token classes have estimated or unavailable rates for ${model.model}.`
+      : `No rate card is configured for ${model.model}.`);
   }
   const metrics: SessionMetrics = {
     assistantMessages: state.assistantMessages,
@@ -1429,20 +1376,21 @@ function addCursorReportedCost(
 ): number {
   const usageData = asRecord(data["usageData"]);
   let total = 0;
-  for (const [model, rawUsage] of Object.entries(usageData ?? {})) {
+  for (const [rawModel, rawUsage] of Object.entries(usageData ?? {})) {
+    const model = projectModelId(rawModel);
     const usage = asRecord(rawUsage);
     const value = Math.max(0, numberValue(usage?.["costInCents"]) / 100);
     if (value === 0) continue;
-    const aggregate: ModelUsage = {
+    const aggregate: ModelUsage = state.models.get(model) ?? {
       ...zeroTokens(),
       ...zeroCost(),
       calls: 0,
       model,
       priced: true,
-      totalUsd: value,
       pricing: [],
-      upperEstimateUsd: value,
     };
+    aggregate.totalUsd += value;
+    aggregate.upperEstimateUsd += value;
     state.models.set(model, aggregate);
     if (state.executionKind === "subagent") state.costByExecution.subagentUsd += value;
     else if (state.executionKind === "top-level") state.costByExecution.topLevelUsd += value;
@@ -1907,7 +1855,7 @@ function aggregate(
     );
   }
   const unpricedSessions = sessions.filter(({ costComplete }) => !costComplete).length;
-  if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include models without a rate card.`);
+  if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include estimated or unavailable token-class rates.`);
   return {
     generatedAt: new Date().toISOString(),
     rateCard: publicRateCard(rateCard),

@@ -6,6 +6,7 @@ import { diffSource, type PriceChange } from "./diff.ts";
 import { DEFAULT_SOURCES, SOURCE_URLS, sha256, type SourceSnapshot } from "./sources.ts";
 import { pricingDirectory, readSnapshots, type ReviewedSnapshot, type StoredSnapshot } from "./store.ts";
 import { MAX_PAYLOAD_BYTES, validateCard } from "./validation.ts";
+import { projectModelId } from "../public/model-id.js";
 
 export interface PricingCatalog extends RateCard {
   history: StoredSnapshot[];
@@ -36,23 +37,40 @@ export async function loadReviewed(path: string | URL = defaultRateCardPath): Pr
   } catch { throw new Error("The configured rate card is invalid or unavailable."); }
 }
 
-function atTime<T extends StoredSnapshot>(snapshots: T[], timestamp: number): T | undefined {
-  // Arrays are chronologically sorted. Never replace an earlier price with a later observation.
-  return snapshots.findLast((snapshot) => Date.parse(snapshot.fetchedAt) <= timestamp) ?? snapshots[0];
+interface Observation<T extends StoredSnapshot> { snapshot: T; time: number }
+interface HistoryIndex {
+  reviewed: Observation<ReviewedSnapshot>[];
+  sources: Map<PricingSource, Observation<SourceSnapshot>[]>;
+  times: Map<StoredSnapshot, number>;
+}
+const historyIndexes = new WeakMap<PricingCatalog, HistoryIndex>();
+
+function atTime<T extends StoredSnapshot>(observations: Observation<T>[], timestamp: number): T | undefined {
+  if (!observations.length) return undefined;
+  // Constant-time boundaries cover old transcripts and current-rate inspections.
+  if (timestamp < observations[0]!.time) return observations[0]!.snapshot;
+  if (timestamp >= observations.at(-1)!.time) return observations.at(-1)!.snapshot;
+  let lower = 0, upper = observations.length;
+  while (lower < upper) {
+    const middle = (lower + upper) >>> 1;
+    if (observations[middle]!.time <= timestamp) lower = middle + 1;
+    else upper = middle;
+  }
+  return observations[lower - 1]!.snapshot;
 }
 
 export function resolveRate(catalog: PricingCatalog, model: string, timestamp?: string | null): ResolvedRate | undefined {
   const parsed = timestamp ? Date.parse(timestamp) : NaN;
   const time = Number.isFinite(parsed) ? parsed : Infinity;
-  const reviewedHistory = catalog.history.filter((snapshot): snapshot is ReviewedSnapshot => snapshot.source === "reviewed");
-  const reviewed = atTime(reviewedHistory, time);
+  const index = historyIndexes.get(catalog)!;
+  const reviewed = atTime(index.reviewed, time);
   const match = reviewed ? findModelRate(reviewed.card.models, model) : undefined;
   const resolved = (snapshot: StoredSnapshot, found: NonNullable<typeof match>, kind: RateProvenance["kind"]): ResolvedRate => ({
     rate: found.rate,
     provenance: {
       source: snapshot.source, kind, snapshotDate: snapshot.fetchedAt, payloadSha256: snapshot.payloadSha256,
       rateModel: found.model, match: found.match,
-      temporal: !Number.isFinite(parsed) ? "undated" : Date.parse(snapshot.fetchedAt) <= time ? "at-or-before" : "oldest",
+      temporal: !Number.isFinite(parsed) ? "undated" : index.times.get(snapshot)! <= time ? "at-or-before" : "oldest",
       assumptions: found.rate.assumptions ?? [],
     },
   });
@@ -62,8 +80,7 @@ export function resolveRate(catalog: PricingCatalog, model: string, timestamp?: 
   if (catalog.status.policy === "reviewed-first" && pinned) return reviewedMatch();
   const candidates: ResolvedRate[] = [];
   for (const { source } of catalog.status.sources) {
-    const history = catalog.history.filter((snapshot): snapshot is SourceSnapshot => snapshot.source === source);
-    const selected = atTime(history, time);
+    const selected = atTime(index.sources.get(source) ?? [], time);
     const found = selected ? findModelRate(selected.models, model) : undefined;
     if (selected && found) candidates.push(resolved(selected, found, "api"));
   }
@@ -99,6 +116,18 @@ export function catalogFromSnapshots(reviewed: ReviewedSnapshot, snapshots: Stor
   };
   const catalog: PricingCatalog = { currency: "USD", effectiveDate: reviewed.card.effectiveDate,
     models: Object.create(null), reviewedOverrides: reviewed.card.reviewedOverrides, history, status };
+  const index: HistoryIndex = { reviewed: [], sources: new Map(), times: new Map() };
+  for (const snapshot of history) {
+    const time = Date.parse(snapshot.fetchedAt);
+    index.times.set(snapshot, time);
+    if (snapshot.source === "reviewed") index.reviewed.push({ snapshot, time });
+    else {
+      const observations = index.sources.get(snapshot.source) ?? [];
+      observations.push({ snapshot, time });
+      index.sources.set(snapshot.source, observations);
+    }
+  }
+  historyIndexes.set(catalog, index);
   const ids = new Set(Object.keys(reviewed.card.models));
   for (const source of config.sources) {
     const latest = history.findLast((snapshot): snapshot is SourceSnapshot => snapshot.source === source);
@@ -145,7 +174,7 @@ export function mergeProvenance(target: ModelUsage, incoming: RateProvenance[]):
 }
 
 export function pricingCoverage(catalog: PricingCatalog, models: Iterable<string>): PricingCoverage {
-  const seen = [...new Set(models)].sort();
+  const seen = [...new Set(Array.from(models, projectModelId))].sort();
   const bySource: PricingCoverage["bySource"] = [...catalog.status.sources.map(({ source }) => ({ source, models: 0 })), { source: "reviewed", models: 0 }];
   const unpricedModels: string[] = [];
   for (const model of seen) {
@@ -164,5 +193,7 @@ export function rateForContext(rate: ModelRate, inputTokens: number): ModelRate 
   return { ...rate, inputPerMillion: tier.inputPerMillion, outputPerMillion: tier.outputPerMillion,
     cachedInputPerMillion: undefined, cacheReadPerMillion: tier.cacheReadPerMillion ?? rate.cacheReadPerMillion ?? rate.cachedInputPerMillion,
     cacheWrite5mPerMillion: tier.cacheWrite5mPerMillion ?? rate.cacheWrite5mPerMillion,
-    cacheWrite1hPerMillion: tier.cacheWrite1hPerMillion ?? rate.cacheWrite1hPerMillion, longContext: undefined };
+    cacheWrite1hPerMillion: tier.cacheWrite1hPerMillion ?? rate.cacheWrite1hPerMillion, longContext: undefined,
+    assumptions: [...(rate.assumptions ?? []).filter((code) => code !== "anthropic-cache-1h-2x" || tier.cacheWrite1hPerMillion === undefined),
+      ...(tier.assumptions ?? [])] };
 }

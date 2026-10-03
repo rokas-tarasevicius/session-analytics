@@ -75,7 +75,7 @@ Provider support currently lives in `src/analyzer.ts`; the [roadmap](docs/roadma
 1. **Discovery.** Default locations, profile handling if the tool supports several profiles, and an explicit override option added to `src/options.ts`, which gives both commands the flag and its `SESSION_ANALYTICS_*` environment variable. An explicit override must replace discovery so synthetic and narrowed scans never read real history.
 2. **Identity.** Read the provider's own session ID and working directory, and only accept a file whose recorded ID matches its name or key.
 3. **Parser.** Stream records and accumulate counters into the session state, then call `finalizeSession`. Decide and document the dedupe key for every counter (message IDs, call IDs, cumulative counters).
-4. **Cost basis.** Use the rate card when the provider records model IDs and token classes; otherwise use a provider-reported value on its own basis, or mark cost unavailable. Never guess a price.
+4. **Cost basis.** Use the rate card when the provider records model IDs and token classes; otherwise use a provider-reported value on its own basis, or mark cost unavailable. Never present an imputed token-class price as observed evidence; any documented substitution must carry a bounded assumption and exclude affected tokens from explicit-rate coverage.
 5. **Evidence labels.** Set `executionKind`, `skillEvidence`, and fidelity honestly. Missing data is `unavailable`, not zero.
 6. **Types and UI.** Extend `SessionProvider`, add a provider mark to `src/public/brands/` with an entry in its `NOTICE.md`, and add the provider to the dashboard filters.
 7. **Fixtures and tests.** Add records in the provider's real shape to `test/fixtures.ts`, including sentinel content, and test counts, dedupe, cost, and the absence of content.
@@ -92,7 +92,7 @@ Open a [provider support issue](https://github.com/rokas-tarasevicius/session-an
 - note pricing exceptions (cache multipliers, long-context thresholds) in the pricing section of `docs/metrics.md`;
 - keep `test/contract.test.ts` passing, and add a test when the change exercises new pricing logic.
 
-Public pricing fetches belong only in `src/pricing/`; analysis stays network-free. Tests use loopback HTTP fixtures, never real sources. Preserve immutable snapshots, the reviewed override list, model-specific exceptions, and content-free provenance when changing normalization or precedence.
+Public pricing fetches belong only in `src/pricing/`; analysis stays network-free. Tests use loopback HTTP fixtures, never real sources. Preserve immutable observations, shared rate tables (including legacy snapshot readability), the reviewed override list, model-specific exceptions, and content-free provenance when changing normalization or precedence. Exercise the history-size benchmark when changing lookup/storage, and test both report modes for fixed errors when changing failure handling.
 
 ## Commits and pull requests
 
