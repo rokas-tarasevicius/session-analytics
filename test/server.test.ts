@@ -11,6 +11,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { createInsightsFixture, setUtcBoundaryStarts } from "./insights-fixtures.ts";
+import type { InsightsReport } from "../src/types.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -67,6 +69,36 @@ async function requestWithHost(port: number, host: string): Promise<number | und
     outgoing.end();
   });
 }
+
+test("populated insights HTTP cards preserve privacy and filter UTC instants including offsets", { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "insights-http-populated-"));
+  let child: ChildProcess | null = null;
+  try {
+    const fixture = await createInsightsFixture(root);
+    await setUtcBoundaryStarts(fixture.source);
+    const port = await availablePort();
+    child = spawn(process.execPath, [serverPath, "--port", String(port), ...fixture.flags], { cwd: repositoryRoot, stdio: ["ignore", "pipe", "pipe"] });
+    let ready = false;
+    child.stdout?.on("data", (chunk: Buffer) => { ready ||= chunk.toString().includes("Session Analytics ready:"); });
+    child.stderr?.resume();
+    await waitFor(() => ready, () => "Synthetic insights HTTP server did not start.");
+    const origin = `http://127.0.0.1:${port}`;
+    const serialized = await (await fetch(`${origin}/api/insights`)).text();
+    const full = JSON.parse(serialized) as InsightsReport;
+    assert.ok(full.items.length >= 5, "Privacy assertions must exercise populated cards");
+    assert.equal(full.schemaVersion, 2); assert.ok(full.groups.length >= 5);
+    assert.deepEqual(full.groups.flatMap((group) => group.itemIds).sort(), full.items.map((item) => item.id).sort());
+    assert.doesNotMatch(serialized, /secret-|content-is-not-returned|synthetic-private-branch|private\.example|person@example|11111111-1111|rollout-/);
+    assert.ok(!serialized.includes(root));
+    assert.equal(full.coverage[0]!.totalSessions, 6);
+    const filtered = await (await fetch(`${origin}/api/insights?from=2026-09-02&through=2026-09-02`)).json() as InsightsReport;
+    assert.ok(filtered.items.length > 0);
+    assert.ok(filtered.coverage.every((row) => row.totalSessions === 4));
+    assert.match(filtered.warnings.join(" "), /1.*invalid or missing.*start/);
+    const next = await (await fetch(`${origin}/api/insights?from=2026-09-03&through=2026-09-03`)).json() as InsightsReport;
+    assert.equal(next.coverage[0]!.totalSessions, 1);
+  } finally { if (child) await stopServer(child); await rm(root, { recursive: true, force: true }); }
+});
 
 test("serves a localhost-only read-only analytics API and dashboard", { timeout: 20_000 }, async () => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "conductor-session-server-"));
@@ -129,7 +161,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal(insightResponse.status, 200);
     const insightText = await insightResponse.text();
     const insights = JSON.parse(insightText) as { schemaVersion: number; coverage: Array<{ totalSessions: number }> };
-    assert.equal(insights.schemaVersion, 1); assert.equal(insights.coverage.length, 10);
+    assert.equal(insights.schemaVersion, 2); assert.equal(insights.coverage.length, 10);
     assert.equal(insights.coverage[0]?.totalSessions, 5);
     assert.doesNotMatch(insightText, /secret-command|secret-path|secret-skill-args|content-is-not-returned|rollout-/);
     assert.equal((await fetch(`${origin}/api/insights?from=2026-02-30`)).status, 400);
@@ -137,8 +169,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal((await fetch(`${origin}/api/insights?send-content=1`)).status, 400);
     assert.equal((await fetch(`${origin}/api/insights`, { method: "POST" })).status, 405);
     assert.equal((await fetch(`${origin}/api/review`)).status, 404);
-    const emptyInsights = await (await fetch(`${origin}/api/insights?from=2099-01-01`)).json() as { cards: unknown[]; coverage: Array<{ totalSessions: number }> };
-    assert.equal(emptyInsights.cards.length, 0); assert.equal(emptyInsights.coverage[0]?.totalSessions, 0);
+    const emptyInsights = await (await fetch(`${origin}/api/insights?from=2099-01-01`)).json() as { items: unknown[]; coverage: Array<{ totalSessions: number }> };
+    assert.equal(emptyInsights.items.length, 0); assert.equal(emptyInsights.coverage[0]?.totalSessions, 0);
     for (const path of ["/views/insights.js", "/views/insights-state.js", "/views/insights.css"]) assert.equal((await fetch(`${origin}${path}`)).status, 200);
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);

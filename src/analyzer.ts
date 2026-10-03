@@ -8,6 +8,10 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { cacheGapSignals } from "./insights/cache-gaps.ts";
+import { TranscriptLifecycle } from "./insights/transcript-evidence.ts";
+import { captureReviewSource, sameVersion, verifyReviewSource } from "./insights/review-source.ts";
+import type { ReviewSource } from "./insights/review-source.ts";
+import { canonicalMcpServer } from "./insights/mcp-attribution.ts";
 
 import type {
   AnalyzeOptions,
@@ -77,6 +81,7 @@ export interface RepositoryRow {
 }
 
 interface TokenEvent {
+  requestSizeKnown: boolean;
   executionKind: SessionAnalytics["executionKind"];
   fingerprint: string | null;
   last: TokenUsage | null;
@@ -102,6 +107,10 @@ interface TranscriptCandidate {
 }
 
 interface MutableSession {
+  mcpServers: Record<string, number>;
+  requestSizes: { observedTokens: number; unknownTokens: number };
+  completeness: "complete" | "partial" | "unknown";
+  liveness: "inactive" | "active" | "unknown";
   assistantMessages: number;
   compactions: number;
   delegatedAgents: Set<string>;
@@ -298,8 +307,10 @@ function addModelUsage(
   timestamp: string | null,
   fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
+  requestSizeKnown = true,
 ): void {
-  session.maxInputTokensPerCall = Math.max(session.maxInputTokensPerCall, inputForRequest);
+  if (requestSizeKnown) session.maxInputTokensPerCall = Math.max(session.maxInputTokensPerCall, inputForRequest);
+  session.requestSizes[requestSizeKnown ? "observedTokens" : "unknownTokens"] += tokenCount(usage);
   let aggregate = session.models.get(model);
   if (!aggregate) {
     aggregate = {
@@ -328,6 +339,10 @@ function addModelUsage(
 
 function createMutableSession(): MutableSession {
   return {
+    mcpServers: Object.create(null) as Record<string, number>,
+    requestSizes: { observedTokens: 0, unknownTokens: 0 },
+    completeness: "unknown",
+    liveness: "unknown",
     assistantMessages: 0,
     compactions: 0,
     delegatedAgents: new Set<string>(),
@@ -600,9 +615,12 @@ async function analyzeCodex(
   claimedCounters: Set<string> = new Set<string>(),
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
+  const sourceBefore = await stat(path);
+  const lifecycle = new TranscriptLifecycle();
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
+  const seenMcp = new Set<string>();
   let currentModel = row.database_model ?? "<unknown>";
   let parseErrors = 0;
   // Codex has recorded the same lifecycle events in several shapes over time:
@@ -623,6 +641,7 @@ async function analyzeCodex(
       return;
     }
     const timestamp = stringValue(record["timestamp"]);
+    lifecycle.observe("codex", record);
     trackTimestamp(state, timestamp);
     const type = stringValue(record["type"]);
     const payload = asRecord(record["payload"]);
@@ -658,6 +677,11 @@ async function analyzeCodex(
         if (itemType === "UserMessage") items.userMessages.add(itemId);
         if (itemType === "AgentMessage") items.agentMessages.add(itemId);
         if (itemType === "ContextCompaction") items.compactions.add(itemId);
+        if (itemType === "McpToolCall" && !seenMcp.has(itemId)) {
+          seenMcp.add(itemId);
+          const server = canonicalMcpServer(item?.["server"]);
+          if (server) increment(state.mcpServers, server);
+        }
       }
       if (payloadType === "token_count") {
         const info = asRecord(payload?.["info"]);
@@ -665,12 +689,12 @@ async function analyzeCodex(
         if (total) {
           const last = asRecord(info?.["last_token_usage"]);
           const inputForRequest = nonNegativeNumberValue(last?.["input_tokens"]);
-          state.maxInputTokensPerCall = Math.max(state.maxInputTokensPerCall, inputForRequest);
           state.maxContextWindow = Math.max(
             state.maxContextWindow,
             nonNegativeNumberValue(info?.["model_context_window"]),
           );
           tokenEvents.push({
+            requestSizeKnown: typeof last?.["input_tokens"] === "number" && Number.isFinite(last["input_tokens"]) && last["input_tokens"] >= 0,
             executionKind: state.executionKind,
             fingerprint: codexCounterFingerprint(total, last),
             inputForRequest,
@@ -766,6 +790,7 @@ async function analyzeCodex(
         event.timestamp,
         row.updated_at,
         event.executionKind,
+        Boolean(event.last && tokenCount(event.last) > 0 && event.requestSizeKnown),
       );
     }
   }
@@ -793,6 +818,9 @@ async function analyzeCodex(
   state.warnings.push(
     "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes.",
   );
+  const sourceAfter = await stat(path);
+  state.completeness = parseErrors || !sameVersion(sourceBefore, sourceAfter) ? "partial" : "complete";
+  state.liveness = lifecycle.liveness();
   return finalizeSession(row, state, finalTokens, 1);
 }
 
@@ -851,6 +879,8 @@ async function analyzeClaude(
   state.executionKindsSeen.add("top-level");
   state.warnings.push(...inheritedWarnings);
   const paths = await claudeEvidencePaths(mainPath);
+  let changed = false;
+  let activeEvidence = false, unknownLiveness = false;
   // Claude Code writes one record per streamed content block. Every record of
   // a message repeats the same input and cache counters while output grows, so
   // only the final snapshot - the one with the most output - is the message's
@@ -861,6 +891,7 @@ async function analyzeClaude(
     executionKind: SessionAnalytics["executionKind"];
     model: string;
     reasoningExposed: boolean;
+    requestSizeKnown: boolean;
     timestamp: string | null;
     usage: TokenUsage;
   }>();
@@ -876,6 +907,8 @@ async function analyzeClaude(
   const totals = zeroTokens();
 
   for (const path of paths) {
+    const sourceBefore = await stat(path);
+    const lifecycle = new TranscriptLifecycle();
     const executionKind: SessionAnalytics["executionKind"] =
       path === mainPath ? "top-level" : "subagent";
     state.executionKindsSeen.add(executionKind);
@@ -885,6 +918,7 @@ async function analyzeClaude(
         return;
       }
       const timestamp = stringValue(record["timestamp"]);
+      lifecycle.observe("claude", record);
       trackTimestamp(state, timestamp);
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
@@ -921,6 +955,7 @@ async function analyzeClaude(
           executionKind,
           model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
           reasoningExposed: Boolean(asRecord(usageRecord?.["output_tokens_details"])),
+          requestSizeKnown: typeof usageRecord?.["input_tokens"] === "number" && Number.isFinite(usageRecord["input_tokens"]) && usageRecord["input_tokens"] >= 0,
           timestamp,
           usage,
         };
@@ -950,6 +985,8 @@ async function analyzeClaude(
           const name = stringValue(block["name"]) ?? "tool_use";
           increment(state.tools, name);
           increment(state.transportTools, name);
+          const server = canonicalMcpServer(record["attributionMcpServer"]);
+          if (server) increment(state.mcpServers, server);
           if (name === "Skill") {
             const skill = normalizedSkillName(asRecord(block["input"])?.["skill"]);
             if (skill) increment(state.skills, skill);
@@ -969,14 +1006,18 @@ async function analyzeClaude(
         }
       }
     });
+    const sourceAfter = await stat(path);
+    changed ||= !sameVersion(sourceBefore, sourceAfter);
+    activeEvidence ||= lifecycle.liveness() === "active";
+    unknownLiveness ||= lifecycle.liveness() === "unknown";
   }
   state.effort = effort.current?.value ?? null;
   let reasoningMissing = false;
-  for (const { executionKind, model, reasoningExposed, timestamp, usage } of assistantUsage.values()) {
+  for (const { executionKind, model, reasoningExposed, requestSizeKnown, timestamp, usage } of assistantUsage.values()) {
     if (tokenCount(usage) === 0) continue;
     if (usage.outputTokens > 0 && !reasoningExposed) reasoningMissing = true;
     sumTokens(totals, usage);
-    addModelUsage(state, rateCard, model, usage, usage.inputTokens, timestamp, row.updated_at, executionKind);
+    addModelUsage(state, rateCard, model, usage, usage.inputTokens, timestamp, row.updated_at, executionKind, requestSizeKnown);
   }
   if (reasoningMissing) {
     state.warnings.push(
@@ -984,8 +1025,10 @@ async function analyzeClaude(
     );
   }
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
+  state.completeness = parseErrors || changed ? "partial" : "complete";
+  state.liveness = activeEvidence ? "active" : unknownLiveness ? "unknown" : "inactive";
   const session = finalizeSession(row, state, totals, paths.length);
-  session.insightSignals = { cacheGaps: cacheGapSignals(assistantUsage.values(), rateCard) };
+  session.insightSignals!.cacheGaps = cacheGapSignals(assistantUsage.values(), rateCard);
   return session;
 }
 
@@ -1041,6 +1084,7 @@ function finalizeSession(
     userTurns: state.userTurns,
   };
   return {
+    ...(row.agent_type === "claude" || row.agent_type === "codex" ? { insightSignals: { requestSizes: { ...state.requestSizes }, ...(Object.keys(state.mcpServers).length ? { mcpServers: state.mcpServers } : {}) } } : {}),
     cost,
     costBasis:
       row.agent_type === "cursor"
@@ -1074,6 +1118,8 @@ function finalizeSession(
     tokens,
     tools: state.tools,
     transcript: {
+      completeness: state.completeness,
+      liveness: row.status === "working" ? "active" : state.liveness,
       files,
       snapshotWhileWorking: row.status === "working",
       status: "ok",
@@ -1989,7 +2035,16 @@ function aggregate(
 }
 
 /** Internal review hook. Paths stay in the review worker and never enter a snapshot. */
-export type EvidenceObserver = (session: SessionAnalytics, path: string) => void;
+export type EvidenceObserver = ((session: SessionAnalytics, path: string, source: ReviewSource) => void) & { sessionKey?: string };
+
+async function analyzeObservedEvidence(path: string, provider: "claude" | "codex", id: string, cwd: string, analyze: () => Promise<SessionAnalytics>, observer?: EvidenceObserver, correlationId = `${provider}:${id}`): Promise<SessionAnalytics> {
+  const selected = observer && (!observer.sessionKey || observer.sessionKey === createHash("sha256").update(correlationId).digest("hex").slice(0, 12));
+  const source = selected ? await captureReviewSource(path, provider) : null;
+  if (source && (source.id !== id || source.cwd !== cwd)) throw new Error("Review evidence identity changed.");
+  const session = await analyze();
+  if (source) { await verifyReviewSource(path, source); observer!(session, path, source); }
+  return session;
+}
 
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
@@ -2111,11 +2166,10 @@ async function analyzeSelectedRepositories(
         return null;
       }
       try {
-        const session = provider === "codex"
-          ? await analyzeCodex(row, selected.path, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, selected.path, rateCard, selected.warnings);
+        const session = await analyzeObservedEvidence(selected.path, row.agent_type, row.provider_session_id!, row.workspace_path, async () => provider === "codex"
+          ? await analyzeCodex(row, selected.path!, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters)
+          : await analyzeClaude(row, selected.path!, rateCard, selected.warnings), observeEvidence, row.conductor_session_id);
         claimed.add(`${provider}:${row.provider_session_id}`);
-        observeEvidence?.(session, selected.path);
         return session;
       } catch (error) {
         void error;
@@ -2134,10 +2188,9 @@ async function analyzeSelectedRepositories(
       if (matches.length !== 1 || !matches[0]) return null;
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
-        const session = candidate.provider === "codex"
+        const session = await analyzeObservedEvidence(candidate.path, candidate.provider, candidate.id, candidate.cwd, async () => candidate.provider === "codex"
           ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]);
-        observeEvidence?.(session, candidate.path);
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."]), observeEvidence, row.conductor_session_id);
         return session;
       } catch { return null; }
     });
@@ -2145,8 +2198,7 @@ async function analyzeSelectedRepositories(
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
       try {
-        const session = await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters);
-        observeEvidence?.(session, candidate.path);
+        const session = await analyzeObservedEvidence(candidate.path, candidate.provider, candidate.id, candidate.cwd, () => analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters), observeEvidence);
         return session;
       } catch { return null; }
     });

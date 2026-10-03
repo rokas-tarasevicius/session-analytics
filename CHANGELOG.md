@@ -6,13 +6,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
-- Ten content-free coaching rules, with evidence denominators, configurable activity guards, confidence, suggested actions and explicit interpretation limits. `session-analytics insights [--json]` and the Insights dashboard tab share the rules; repository/date filters recompute baselines. Cards support local dismiss, seven-day snooze and restore.
-- Within-provider same-token price scenarios, repository peer outliers, cache reuse and idle-gap write associations, compaction/context flags, delegation comparisons, configured extensions without observed use, and neutral time-of-day patterns. Unknown impact remains unavailable; overlapping estimates are never summed.
+- Ten content-free coaching rules, with evidence denominators, configurable activity guards, confidence, suggested actions and explicit interpretation limits. `session-analytics insights [--json]` and the Insights dashboard tab share the rules; repository/date filters recompute baselines. Grouped rules and individual scopes support local dismiss, seven-day snooze and restore.
+- Within-provider same-token price scenarios, repository peer outliers, cache reuse and idle-gap write associations, compaction/context flags, delegation comparisons, configured extensions without observed use, and neutral time-of-day patterns. Unknown impact remains unavailable; estimates from overlapping rules are never summed.
 - Opt-in P3 review scaffolding: `review --session KEY --via claude|codex` previews bounded excerpt sizes and redaction counts. Only `--send-content` invokes the user's CLI; raw agent output is projected to assessment enums. Default analytics remain content-free and local.
 
 ### Fixed
 
 - Populate Claude's maximum request input from deduplicated usage, including requests without a known price. This enables context insight coverage without changing token or cost totals.
+- Exclude foreign Codex broadcasts from request peaks; disclose request-size coverage and suppress premium-sensitive price scenarios with unknown sizes. Mapped price scenarios retain cohort/call and premium guards; ineligible targets never cause a cheapest-model fallback. Token/cost totals are unchanged by the peak correction.
+- Distinguish partial transcripts, observed active sessions and unknown liveness; require complete/inactive evidence for peer baselines and propagate bounded coverage reasons. UTC filters now compare instants, including offset timestamps.
+- Review rejects ineligible targets, uses each finding's actual contributors, checks source identity/stability, and accepts only primitive response enums. Ambiguous MCP spellings no longer confirm multiple servers' use.
+- Replace repeated per-repository/session cards with one ranked card per rule/scope level, up to ten initially. Retain scope evidence in searchable expandable tables with repository drill-down, scoped decisions and review dry-run commands.
+
+### Changed
+
+- Insights JSON is now schema version 2: `groups` contains summaries and ranked item references; `items` replaces v1 `cards` for per-scope evidence. The CLI prints grouped results with `--rule` and `--all-scopes` drill-down.
+- Counterfactual pricing defaults to a documented, configurable same-provider next-tier-down mapping. Mixed-model usage moves once per model; unmapped usage stays unchanged. Explicit provider targets remain available.
 
 ## [0.5.0] - 2026-10-02
 

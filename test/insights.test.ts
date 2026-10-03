@@ -14,7 +14,7 @@ import { context, createInsightsFixture, session, sessions, testRateCard, tokens
 import type { SessionAnalytics } from "../src/types.ts";
 
 const report = (items: SessionAnalytics[], config: InsightContext = context()) => buildInsights(items, config, "2026-10-01T12:00:00Z");
-const cards = (rule: InsightRule, items: SessionAnalytics[], config = context()) => report(items, config).cards.filter((card) => card.rule === rule);
+const cards = (rule: InsightRule, items: SessionAnalytics[], config = context()) => report(items, config).items.filter((card) => card.rule === rule);
 
 test("outlier uses leave-one-out repository/provider/execution median and guards small samples", () => {
   const items = sessions(); const candidate = items[0]!; candidate.cost.totalUsd = 20;
@@ -44,7 +44,7 @@ test("counterfactual preserves cache/output classes, excludes zero-price preview
   config.rateCard.models["free-preview"] = { ...testRateCard.models["claude-small"]!, inputPerMillion: 0, outputPerMillion: 0 };
   const card = cards("model-pricing", items, config)[0]!;
   assert.deepEqual(card.names, ["claude-small"]);
-  assert.equal(card.evidence[2]!.value, 5 * (0.02 + 0.018 + 0.05));
+  assert.ok(Math.abs(card.evidence[2]!.value - 5 * (0.02 + 0.018 + 0.05)) < 1e-10);
   assert.ok(Math.abs(card.estimatedImpact.value! - 1.76) < 1e-10);
   assert.match(card.guardrail, /Price arithmetic only/);
   config.comparisonModels.claude = "claude-premium";
@@ -135,7 +135,7 @@ test("time patterns use an explicit fixed offset, ignore subagent starts and mak
 test("coverage distinguishes missing, insufficient, disabled and evaluated; empty evidence never produces a zero-percent card", () => {
   const config = context(); config.disabledRules = ["cache-waste"];
   const empty = report([], config);
-  assert.equal(empty.cards.length, 0); assert.equal(empty.coverage.find((c) => c.rule === "cache-waste")!.status, "disabled");
+  assert.equal(empty.items.length, 0); assert.equal(empty.coverage.find((c) => c.rule === "cache-waste")!.status, "disabled");
   assert.ok(empty.coverage.filter((c) => c.rule !== "cache-waste").every((c) => c.status === "unavailable"));
   assert.equal(report([session(1)]).coverage.find((c) => c.rule === "time-pattern")!.status, "insufficient");
   const items = sessions(); items[0]!.transcript.snapshotWhileWorking = true; items[1]!.transcript.status = "invalid";
@@ -145,12 +145,12 @@ test("coverage distinguishes missing, insufficient, disabled and evaluated; empt
 
 test("card IDs and ordering are deterministic, thresholds are validated without echoing private config", () => {
   const items = sessions(20), config = context();
-  assert.deepEqual(report(items).cards, report(items.toReversed()).cards);
-  const first = report(items).cards[0]!; assert.equal(first.estimatedImpact.unit, "USD");
+  assert.deepEqual(report(items).items, report(items.toReversed()).items);
+  const first = report(items).items[0]!; assert.equal(first.estimatedImpact.unit, "USD");
   assert.match(first.id, /^insight-[a-f0-9]{20}$/);
   for (const raw of [null, { thresholds: { secret: 1 } }, { thresholds: { minRepoSessions: 0 } }, { thresholds: { cacheReadShare: 2 } }, { thresholds: { minModelCalls: NaN } }, { disabledRules: ["secret-invalid-rule"] }, { comparisonModels: { claude: "/secret-path" } }, { thresholds: { utcOffsetMinutes: -841 } }]) assert.throws(() => parseInsightConfig(raw), /configuration is invalid/);
   assert.equal(parseInsightConfig({ thresholds: { utcOffsetMinutes: -60, cacheReadShare: 0.2 } }).thresholds.cacheReadShare, 0.2);
-  config.disabledRules = [...ruleIds]; assert.equal(report(items, config).cards.length, 0);
+  config.disabledRules = [...ruleIds]; assert.equal(report(items, config).items.length, 0);
 });
 
 test("inventory projection drops settings content, rejects path-like names and recognizes disabled servers", () => {
@@ -170,7 +170,7 @@ test("real parser shapes yield deduplicated Claude gaps, request peaks and priva
     const s = snapshot.sessions[0]!;
     assert.equal(s.metrics.modelCalls, 20); assert.equal(s.metrics.maxInputTokensPerCall, 200_060);
     assert.equal(s.insightSignals!.cacheGaps!.observableCalls, 20); assert.equal(s.insightSignals!.cacheGaps!.timedTransitions, 19); assert.equal(s.insightSignals!.cacheGaps!.fiveMinuteExpiries, 19);
-    for (const rule of ["cache-waste", "model-pricing", "compaction-heavy", "long-context", "idle-cache", "unused-skills", "unused-mcp"]) assert.ok(output.cards.some((card) => card.rule === rule), rule);
+    for (const rule of ["cache-waste", "model-pricing", "compaction-heavy", "long-context", "idle-cache", "unused-skills", "unused-mcp"]) assert.ok(output.items.some((card) => card.rule === rule), rule);
     for (const serialized of [JSON.stringify(snapshot), JSON.stringify(output), formatInsights(output)]) {
       assert.doesNotMatch(serialized, /secret-|content-is-not-returned|synthetic-private-branch|person@example|private\.example|11111111-1111|\/projects\/|rollout-/);
       assert.ok(!serialized.includes(root));

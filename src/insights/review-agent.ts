@@ -22,7 +22,9 @@ const schema = {
 export function projectAssessment(value: unknown): ReviewAssessment {
   if (!value || typeof value !== "object" || Array.isArray(value)) return unknown();
   const item = value as Record<string, unknown>;
-  if (!schema.properties.assessment.enum.includes(String(item["assessment"])) || !schema.properties.confidence.enum.includes(String(item["confidence"])) || !schema.properties.suggestion.enum.includes(String(item["suggestion"]))) return unknown();
+  if (typeof item["assessment"] !== "string" || !schema.properties.assessment.enum.includes(item["assessment"]) ||
+      typeof item["confidence"] !== "string" || !schema.properties.confidence.enum.includes(item["confidence"]) ||
+      typeof item["suggestion"] !== "string" || !schema.properties.suggestion.enum.includes(item["suggestion"])) return unknown();
   return { assessment: item["assessment"] as ReviewAssessment["assessment"], confidence: item["confidence"] as ReviewAssessment["confidence"], suggestion: item["suggestion"] as ReviewAssessment["suggestion"] };
 }
 
@@ -32,7 +34,7 @@ function parseAgentOutput(output: string): ReviewAssessment {
   for (const line of output.split("\n")) {
     const event = parse(line) as Record<string, unknown> | null;
     if (!event || typeof event !== "object") continue;
-    if (event["structured_output"]) selected = event["structured_output"];
+    if (Object.hasOwn(event, "structured_output")) selected = event["structured_output"];
     else if (event["type"] === "result" && typeof event["result"] === "string") selected = parse(event["result"]);
     else if (event["type"] === "item.completed") {
       const item = event["item"] as Record<string, unknown> | undefined;

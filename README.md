@@ -58,7 +58,7 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Cost with provenance.** API list-price equivalents from [`data/rate-cards.json`](data/rate-cards.json), an upper estimate where cache writes are not observable, Cursor's own provider-reported value kept on a separate basis, and pricing coverage beside every total.
 - **Execution shape.** Tool calls by name, skill invocations (explicit for Claude, an inferred lower bound for Codex), compactions, user turns, model calls, durations, reasoning effort, and the split between top-level and sub-agent cost.
 - **Dashboard views.** Summary (daily usage velocity, provider mix, repository comparison), Distributions (up to six repositories side by side), Activity (weekday-by-hour heatmap), Costs (components by provider and repository), Models, Tools, and Skills. Filter by time window and drill into any repository. Light and dark themes.
-- **Measured insights.** A dedicated Insights tab and `insights [--json]` command explain ten local signals with denominators, confidence, estimated impact and suggested actions. Repository/date filters recompute the evidence. Dismiss or snooze cards locally. Estimates can overlap and do not prove waste, quality or savings.
+- **Measured insights.** A dedicated Insights tab and `insights [--json]` command explain ten local signals with denominators, confidence, estimated impact and suggested actions. Repository/date filters recompute the evidence. One ranked card per rule opens a table of affected scopes; dismiss or snooze a rule or scope locally. Estimates can overlap and do not prove waste, quality or savings.
 - **Four surfaces.** A localhost dashboard, a terminal report, a JSON snapshot, and an [agent skill](skills/session-analytics/SKILL.md) so Claude Code or Codex can open the dashboard for you.
 - **Small trust surface.** Node 24 built-ins only (native TypeScript and `node:sqlite`), zero runtime dependencies, no network access during analytics, no telemetry, and read-only access to every store. A separate content review is off by default and requires an explicit per-run flag.
 
@@ -132,12 +132,15 @@ The snapshot has the same shape as the dashboard's `/api/analytics` response. Ev
 ```bash
 session-analytics insights
 session-analytics insights --json --from 2026-09-01 --through 2026-09-30
+session-analytics insights --rule session-outlier --all-scopes
 session-analytics insights --insights-config ./insights.json
 session-analytics review --session <hashed-session-key> --via claude  # metadata-only dry-run
 session-analytics review --session <hashed-session-key> --via codex --send-content
 ```
 
 Insights cover peer outliers, cache reuse, model-price scenarios, compaction, delegation, large request contexts, installed skills/MCP servers without observed use, writes after idle gaps, and neutral start-time patterns. Missing evidence and insufficient activity are visible in rule coverage, never presented as 0%. [Thresholds and formulas](docs/insights.md) are documented and configurable with `--insights-config` or `SESSION_ANALYTICS_INSIGHTS_CONFIG`.
+
+The tab starts with at most 10 grouped cards, each with total estimated impact, affected counts and an expandable ranked scope table. Search scope rows, filter to a repository, inspect denominators/guardrails, or copy a session review dry-run command. `insights --json` uses schema version 2 (`groups` plus `items`). Pricing defaults to a configurable same-provider **next-tier-down** mapping; each model moves once, with unmapped usage unchanged. Known partial/active sessions are excluded; unknown liveness is disclosed, and completed-peer comparisons require observed inactivity. Context-premium price scenarios require complete request-size coverage. Date filters select UTC instants, including timestamps written with offsets.
 
 **Content review is P3, opt-in and off by default.** The dry-run prints only rule IDs, sizes and redaction counts. `--send-content` permits bounded, redacted human/assistant excerpts to be sent through your own `claude -p` or `codex exec`; it has no environment-variable equivalent. Redaction is best effort, and remaining prose may still be sensitive. Your agent provider's retention and billing apply. Tools, reasoning and tool-result blocks are excluded; no content is sent from the dashboard. See [review behavior and limits](docs/insights.md#opt-in-review-p3).
 
@@ -161,7 +164,7 @@ Try synthetic insights with `npm run demo -- insights`, or open the demo dashboa
 | `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
-| `--insights-config PATH` | insights, review, dashboard | Thresholds, disabled rules, comparison models and optional explicit extension inventory; see [configuration](docs/insights.md#configuration). |
+| `--insights-config PATH` | insights, review, dashboard | Thresholds, disabled rules, next-tier mappings, explicit targets and optional extension inventory; see [configuration](docs/insights.md#configuration). |
 | `--version`, `--help` | all | Print the version or command help. |
 
 Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.

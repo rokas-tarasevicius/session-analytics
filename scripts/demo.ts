@@ -310,6 +310,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       state.compactions += 1;
     }
   }
+  push({ type: "system", subtype: "turn_duration", durationMs: state.clock - options.start });
   return { records, end: state.clock, spawned };
 }
 

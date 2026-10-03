@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
-import { calculateCost } from "../analyzer.ts";
 import type { SessionAnalytics, SessionProvider } from "../types.ts";
 import { boundedName } from "./config.ts";
 import { ruleIds } from "./types.ts";
 import type { Insight, InsightContext, InsightRule, InsightsReport } from "./types.ts";
+import { completedEvidence, completeRequestSizes, eligibleEvidence, pricedEvidence as priced } from "./eligibility.ts";
+import { mcpAttribution } from "./mcp-attribution.ts";
+import { compareImpact, groupInsights } from "./grouping.ts";
+import { pricingScenario } from "./pricing-scenario.ts";
 
 const sum = (sessions: SessionAnalytics[], value: (s: SessionAnalytics) => number): number => sessions.reduce((total, session) => total + value(session), 0);
 function peerValues(sessions: SessionAnalytics[], value: (s: SessionAnalytics) => number): Map<string, number[]> {
@@ -27,24 +30,36 @@ function peerMedian(sorted: number[], excluded: number): number {
 const evidence = (label: string, value: number, unit: Insight["evidence"][number]["unit"] = "count", denominator: number | null = null, denominatorLabel: string | null = null): Insight["evidence"][number] => ({ label, value, unit, denominator, denominatorLabel });
 const ratio = (label: string, numerator: number, denominator: number, denominatorLabel: string) => evidence(label, numerator, "ratio", denominator, denominatorLabel);
 const impact = (value: number | null, label: string, basis: Insight["estimatedImpact"]["basis"] = "associated-usage", unit: "USD" | "tokens" = "USD"): Insight["estimatedImpact"] => ({ value, unit, basis: value === null ? "unavailable" : basis, label });
-const priced = (s: SessionAnalytics): boolean => s.costBasis === "api-list-price-equivalent" && s.costComplete && s.pricedTokenCoverage === 1 && s.metrics.modelCalls > 0;
 const noInvoice = "API-equivalent value is not an invoice. ";
 
 /** Content-free, deterministic rules. No I/O, transcript text or inferred outcomes. */
-export function buildInsights(sessions: SessionAnalytics[], context: InsightContext, generatedAt: string): InsightsReport {
+export function buildInsights(sessions: SessionAnalytics[], context: InsightContext, generatedAt: string, onFinding?: (card: Insight, contributors: SessionAnalytics[]) => void): InsightsReport {
+  sessions = [...sessions].sort((a, b) => a.sessionKey.localeCompare(b.sessionKey));
   const t = context.thresholds;
-  const stable = sessions.filter((s) => s.transcript.status === "ok" && !s.transcript.snapshotWhileWorking);
+  const stable = sessions.filter(eligibleEvidence);
+  const byKey = new Map(sessions.map((s) => [s.sessionKey, s]));
   const cards: Insight[] = [];
+  const contributorsByItem = new Map<string, SessionAnalytics[]>();
   const eligible = new Map<InsightRule, Set<string>>(ruleIds.map((rule) => [rule, new Set()]));
   const enough = new Set<InsightRule>();
   const mark = (rule: InsightRule, items: SessionAnalytics[], sufficient: boolean): void => {
     for (const s of items) eligible.get(rule)!.add(s.sessionKey);
     if (sufficient) enough.add(rule);
   };
-  const add = (rule: InsightRule, scope: Insight["scope"], peers: SessionAnalytics[] | number, total: number, detail: Omit<Insight, "id" | "rule" | "scope" | "coverage">): void => {
+  const add = (rule: InsightRule, scope: Insight["scope"], peers: SessionAnalytics[] | number, total: number, detail: Omit<Insight, "id" | "rule" | "scope" | "coverage">, contributors?: SessionAnalytics[]): void => {
     if (context.disabledRules.includes(rule)) return;
     const key = JSON.stringify([rule, scope, detail.names]);
-    cards.push({ id: `insight-${createHash("sha256").update(key).digest("hex").slice(0, 20)}`, rule, scope, coverage: { eligibleSessions: typeof peers === "number" ? peers : peers.length, totalSessions: total }, ...detail });
+    const selected = scope.sessionKey ? byKey.get(scope.sessionKey) : undefined;
+    const evidenceSessions = contributors ?? (selected ? [selected] : typeof peers === "number" ? [] : peers);
+    const uncertain = (typeof peers === "number" ? evidenceSessions : peers).some((s) => !completedEvidence(s));
+    const card: Insight = { id: `insight-${createHash("sha256").update(key).digest("hex").slice(0, 20)}`, rule, scope, coverage: { eligibleSessions: typeof peers === "number" ? peers : peers.length, totalSessions: total }, ...detail,
+      confidence: uncertain ? "low" : detail.confidence,
+      guardrail: detail.guardrail + (uncertain ? " Some liveness or completeness is unknown; observed totals are lower-bound evidence and may change." : ""),
+      ...(selected ? { session: { startedAt: Number.isFinite(Date.parse(selected.createdAt)) ? new Date(selected.createdAt).toISOString() : null, models: selected.models.map((m) => m.model).filter(boundedName).sort() } } : {}),
+    };
+    cards.push(card);
+    contributorsByItem.set(card.id, evidenceSessions);
+    onFinding?.(card, evidenceSessions);
   };
   const scope = (kind: Insight["scope"]["kind"], repositoryId: string | null = null, provider: SessionProvider | null = null, sessionKey: string | null = null): Insight["scope"] => ({ kind, repositoryId, sessionKey, provider });
   const groups = new Map<string, SessionAnalytics[]>();
@@ -58,10 +73,11 @@ export function buildInsights(sessions: SessionAnalytics[], context: InsightCont
     for (const provider of ["claude", "codex"] as const) {
       const cohort = repo.filter((s) => s.provider === provider);
       const api = cohort.filter(priced);
-      const costPeers = peerValues(api, (s) => s.cost.totalUsd);
-      mark("session-outlier", api, api.some((s) => s.metrics.modelCalls >= t.minModelCalls && costPeers.get(`${s.provider}:${s.executionKind}`)!.length > t.minRepoSessions));
+      const completed = api.filter(completedEvidence);
+      const costPeers = peerValues(completed, (s) => s.cost.totalUsd);
+      mark("session-outlier", completed, completed.some((s) => s.metrics.modelCalls >= t.minModelCalls && costPeers.get(`${s.provider}:${s.executionKind}`)!.length > t.minRepoSessions));
       // Match execution kind as well as repository/provider. Leave the candidate out of its baseline.
-      for (const s of api) {
+      for (const s of completed) {
         const values = costPeers.get(`${s.provider}:${s.executionKind}`)!;
         const peers = values.length - 1;
         if (peers < t.minRepoSessions || s.metrics.modelCalls < t.minModelCalls) continue;
@@ -90,24 +106,16 @@ export function buildInsights(sessions: SessionAnalytics[], context: InsightCont
         });
       }
 
-      const availableRates = Object.entries(context.rateCard.models).filter(([name, rate]) => boundedName(name) && rate.provider === provider && rate.inputPerMillion > 0 && rate.outputPerMillion > 0);
-      const chosen = context.comparisonModels[provider];
-      // Evaluate each positive priced target on the same eligible sessions. Targets with a
-      // long-context threshold cannot be reconstructed from aggregate usage above that threshold.
-      const comparisons = availableRates.filter(([name]) => !chosen || chosen === name).map(([name, rate]) => {
-        const eligible = api.filter((s) => (!rate.longContext || s.metrics.maxInputTokensPerCall <= rate.longContext.thresholdInputTokens) && s.metrics.maxInputTokensPerCall > 0);
-        const before = sum(eligible, (s) => s.cost.totalUsd);
-        const after = sum(eligible, (s) => calculateCost(rate, s.tokens, 0).totalUsd);
-        return { name, eligible, before, after, difference: before - after };
-      }).sort((a, b) => b.difference - a.difference || a.name.localeCompare(b.name));
-      const comparison = comparisons[0];
-      mark("model-pricing", comparison?.eligible ?? [], Boolean(comparison && comparison.eligible.length >= t.minRepoSessions && sum(comparison.eligible, (s) => s.metrics.modelCalls) >= t.minModelCalls));
-      if (comparison && comparison.eligible.length >= t.minRepoSessions && sum(comparison.eligible, (s) => s.metrics.modelCalls) >= t.minModelCalls && comparison.difference >= t.minDifferenceUsd) {
+      const comparison = pricingScenario(api, provider, context);
+      mark("model-pricing", comparison.eligible, comparison.sufficient);
+      if (comparison.sufficient && comparison.difference >= t.minDifferenceUsd) {
+        const selectedProvider = sessions.filter((s) => s.repositoryId === repositoryId && s.provider === provider);
         add("model-pricing", scope("repo", repositoryId, provider), comparison.eligible, total, {
-          title: "Same-token model price comparison", confidence: "high", names: [comparison.name],
-          evidence: [evidence("Sessions in this scenario", comparison.eligible.length, "count", cohort.length, "provider sessions"), evidence("Current API-equivalent value", comparison.before, "USD"), evidence("Scenario API-equivalent value", comparison.after, "USD")],
+          title: comparison.pricing.strategy === "next-tier-down" ? "Same-token scenario: next tier down within the provider" : "Same-token scenario: configured target", confidence: "high", names: comparison.names,
+          pricing: comparison.pricing,
+          evidence: [evidence("Sessions in this scenario", comparison.eligible.length, "count", selectedProvider.length, "selected provider sessions"), evidence("Current API-equivalent value", comparison.before, "USD"), evidence("Scenario API-equivalent value", comparison.after, "USD"), evidence("Tokens in this scenario", sum(comparison.eligible, (s) => s.tokens.inputTokens + s.tokens.outputTokens), "tokens", sum(selectedProvider, (s) => s.tokens.inputTokens + s.tokens.outputTokens), "selected provider input and output tokens"), evidence("Tokens moved to a target tier", comparison.changedTokens, "tokens", sum(comparison.eligible, (s) => s.tokens.inputTokens + s.tokens.outputTokens), "scenario input and output tokens")],
           estimatedImpact: impact(comparison.difference, "Estimated same-token price difference", "scenario-difference"),
-          guardrail: noInvoice + "Price arithmetic only: the target may use different tokens, tools or context limits and deliver different quality. No model capability or savings claim. Targets needing unknown per-request premiums are excluded.",
+          guardrail: noInvoice + "Price arithmetic only: the target may use different tokens, tools or context limits and deliver different quality. No model capability or savings claim. Targets needing unknown per-request premiums are excluded. Each mapped model moves once; unmapped or already-target usage stays unchanged. Tiers are a configurable scenario policy, not a capability ranking.",
           suggestedAction: "Treat the comparison as a budget scenario. Evaluate the target on a representative task before changing models.",
         });
       }
@@ -123,10 +131,10 @@ export function buildInsights(sessions: SessionAnalytics[], context: InsightCont
         estimatedImpact: impact(sum(compact.filter((s) => s.metrics.compactions > 0), (s) => s.tokens.inputTokens), "Estimated input exposure in sessions with compaction; not compaction cost", "associated-usage", "tokens"),
         guardrail: "Compaction is normal context management. Counts do not show lost information, failure or a causal cost; long tasks naturally compact more.",
         suggestedAction: "Check whether a concise handoff or a task boundary would help preserve useful context. Compare against similar work in this repository.",
-      });
+      }, compact.filter((s) => s.metrics.compactions > 0));
     }
 
-    const delegation = repo.filter((s) => priced(s) && s.cost.totalUsd > 0 && s.costByExecution.unknownUsd === 0 && s.executionKind !== "unknown");
+    const delegation = repo.filter((s) => completedEvidence(s) && priced(s) && s.cost.totalUsd > 0 && s.costByExecution.unknownUsd === 0 && s.executionKind !== "unknown");
     const delegationPeers = peerValues(delegation, (s) => s.costByExecution.subagentUsd / s.cost.totalUsd);
     mark("subagent-share", delegation, delegation.some((s) => s.metrics.modelCalls >= t.minModelCalls && delegationPeers.get(`${s.provider}:${s.executionKind}`)!.length > t.minRepoSessions));
     for (const s of delegation) {
@@ -153,9 +161,9 @@ export function buildInsights(sessions: SessionAnalytics[], context: InsightCont
         title: "Large request contexts recur here", confidence: "medium", names: [],
         evidence: [ratio("Sessions reaching the input threshold", large.length, contextSessions.length, "sessions with observed request sizes"), evidence("Request input threshold", t.longContextInputTokens, "tokens"), evidence("Largest observed request", Math.max(...large.map((s) => s.metrics.maxInputTokensPerCall)), "tokens")],
         estimatedImpact: impact(sum(large, (s) => s.tokens.inputTokens), "Estimated total input exposure in flagged sessions; not long-context token volume", "associated-usage", "tokens"),
-        guardrail: "A session peak does not measure how many requests were large or prove a pricing premium. Context limits differ by model; input volume does not measure useful work.",
+        guardrail: "A session peak does not measure how many requests were large or prove a pricing premium. Unknown-size usage makes peaks and this share lower bounds. Context limits differ by model; input volume does not measure useful work.",
         suggestedAction: "Consider a focused handoff or smaller context bundle for a comparable task, then check whether it retains the needed information.",
-      });
+      }, large);
     }
 
     const gaps = repo.filter((s) => (s.insightSignals?.cacheGaps?.timedTransitions ?? 0) > 0);
@@ -170,7 +178,7 @@ export function buildInsights(sessions: SessionAnalytics[], context: InsightCont
         estimatedImpact: impact(pricedTokens > 0 ? sum(gaps, (s) => s.insightSignals!.cacheGaps!.estimatedPremiumUsd) : null, "Estimated write-versus-read premium on priced tokens after gaps", "scenario-difference"),
         guardrail: noInvoice + "A gap plus a cache write is an association, not proof of expiry or reusable content. Five-minute and one-hour event counts can overlap. Unrecorded TTLs are excluded.",
         suggestedAction: "Compare related requests before and after pauses. Keep natural breaks; consider provider cache settings only if the repeated context is actually reusable.",
-      });
+      }, gaps.filter((s) => s.insightSignals!.cacheGaps!.rewriteTokens > 0));
     }
   }
 
@@ -182,13 +190,14 @@ export function buildInsights(sessions: SessionAnalytics[], context: InsightCont
       const sufficient = usable.length >= t.extensionMinSessions && toolCalls >= t.extensionMinToolCalls;
       if (configured.length) mark(rule, usable, sufficient);
       if (!configured.length || !sufficient) continue;
-      const unused = configured.filter((name) => boundedName(name) && !usable.some((s) => rule === "unused-skills" ? (s.skills[name] ?? 0) > 0 : Object.entries(s.tools).some(([tool, count]) => count > 0 && (tool.startsWith(`mcp__${name}__`) || tool.startsWith(`mcp_${name}_`)))));
+      const attribution = mcpAttribution(usable, configured);
+      const unused = configured.filter((name) => boundedName(name) && (rule === "unused-skills" ? !usable.some((s) => (s.skills[name] ?? 0) > 0) : !attribution.used.has(name)));
       if (!unused.length) continue;
       add(rule, scope("machine", null, inventory.provider), usable, sessions.length, {
-        title: rule === "unused-skills" ? "Installed skills with no observed invocation" : "Configured MCP servers with no observed calls", confidence: "low", names: unused,
-        evidence: [ratio("Names without observed use", unused.length, configured.length, "configured names"), evidence("Observed tool calls", toolCalls), evidence("Eligible provider sessions", usable.length, "count", sessions.length, "selected sessions")],
+        title: rule === "unused-skills" ? "Installed skills with no observed invocation" : "Configured MCP servers without confirmed calls", confidence: "low", names: unused,
+        evidence: [ratio("Names without confirmed observed use", unused.length, configured.length, "configured names"), evidence("Observed tool calls", toolCalls), evidence("Eligible provider sessions", usable.length, "count", sessions.length, "selected sessions"), ...(rule === "unused-mcp" ? [evidence("Names with ambiguous attribution", attribution.ambiguous.size, "count", configured.length, "configured names")] : [])],
         estimatedImpact: impact(null, "Impact unavailable: schema size and avoided cost are not recorded"),
-        guardrail: "Inventory is current; history may predate installation and may be partial. Profiles are pooled. Codex skill reads are a lower bound. No observed use does not mean unnecessary or safe to remove.",
+        guardrail: "Inventory is current; history may predate installation and may be partial. Profiles are pooled. Codex skill reads are a lower bound. Legacy MCP names with ambiguous server boundaries do not confirm use. No observed use does not mean unnecessary or safe to remove.",
         suggestedAction: "Review whether these extensions still serve your workflow. Check recent tasks and installation timing before disabling anything.",
       });
     }
@@ -206,19 +215,28 @@ export function buildInsights(sessions: SessionAnalytics[], context: InsightCont
       estimatedImpact: impact(null, "Impact unavailable: timing does not measure productivity"),
       guardrail: "This describes start times, not working hours, attention, performance or wellbeing. The configured fixed UTC offset does not adjust for daylight saving time.",
       suggestedAction: "Use the observed window for capacity planning if useful. There is no recommended time of day to work.",
-    });
+    }, dated.filter((s) => Math.floor(new Date(Date.parse(s.createdAt) + t.utcOffsetMinutes * 60_000).getUTCHours() / 6) === index));
   }
 
   // Dollars and tokens are distinct units; never add them or present overlapping cards as total savings.
-  const rank = (card: Insight) => card.estimatedImpact.value === null ? 2 : card.estimatedImpact.unit === "USD" ? 0 : 1;
-  cards.sort((a, b) => rank(a) - rank(b) || (b.estimatedImpact.value ?? 0) - (a.estimatedImpact.value ?? 0) || a.id.localeCompare(b.id));
+  cards.sort(compareImpact);
+  const grouped = groupInsights(cards, sessions, contributorsByItem, eligible);
+  const coverageReasons: Array<[InsightsReport["evidenceCoverage"][number]["reason"], (s: SessionAnalytics) => boolean, string]> = [
+    ["partial-transcript", (s) => s.transcript.completeness === "partial", "Known partial transcripts are excluded; their counters are lower bounds."],
+    ["active-session", (s) => s.transcript.snapshotWhileWorking || s.transcript.liveness === "active", "Observed active sessions are excluded."],
+    ["unknown-liveness", (s) => !s.transcript.snapshotWhileWorking && (!s.transcript.liveness || s.transcript.liveness === "unknown"), "Unknown liveness excludes completed-peer baselines and lowers confidence in aggregate observations."],
+    ["unknown-completeness", (s) => !s.transcript.completeness || s.transcript.completeness === "unknown", "Unknown completeness excludes completed-peer baselines; aggregate observations are lower bounds."],
+    ["unknown-request-size", (s) => s.provider !== "cursor" && s.tokens.inputTokens + s.tokens.outputTokens > 0 && !completeRequestSizes(s), "Incomplete request-size coverage excludes premium-sensitive source or target scenarios."],
+  ];
+  const evidenceCoverage = coverageReasons.map(([reason, test]) => ({ reason, sessions: sessions.filter(test).length, totalSessions: sessions.length }));
   return {
-    schemaVersion: 1, generatedAt, rateCardEffectiveDate: context.rateCard.effectiveDate,
-    thresholds: { ...t }, cards,
+    schemaVersion: 2, generatedAt, rateCardEffectiveDate: context.rateCard.effectiveDate,
+    thresholds: { ...t }, groups: grouped, items: cards,
+    evidenceCoverage,
     coverage: ruleIds.map((rule) => {
       const count = eligible.get(rule)!.size, findings = cards.filter((card) => card.rule === rule).length;
-      return { rule, eligibleSessions: count, totalSessions: sessions.length, findings, status: context.disabledRules.includes(rule) ? "disabled" : findings ? "findings" : !count ? "unavailable" : enough.has(rule) ? "no-findings" : "insufficient" };
+      return { rule, eligibleSessions: count, totalSessions: sessions.length, findings, groups: grouped.filter((group) => group.rule === rule).length, status: context.disabledRules.includes(rule) ? "disabled" : findings ? "findings" : !count ? "unavailable" : enough.has(rule) ? "no-findings" : "insufficient" };
     }),
-    warnings: [...context.warnings, "Cards can overlap. Do not sum estimates; associated usage is not recoverable savings. Working snapshots are excluded."],
+    warnings: [...context.warnings, ...coverageReasons.flatMap(([, , note], index) => evidenceCoverage[index]!.sessions ? [`${evidenceCoverage[index]!.sessions}/${sessions.length} selected sessions: ${note}`] : []), "Rules can overlap. Do not sum group estimates; associated usage is not recoverable savings. Liveness is observed, not guaranteed; sessions can resume after a scan."],
   };
 }

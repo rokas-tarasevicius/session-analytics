@@ -26,3 +26,18 @@ test("dismiss, snooze, expiry and restore persist only opaque IDs and survive co
   assert.equal(saveDecision(null, {}, id, "dismiss").persisted, false);
   assert.deepEqual(saveDecision(storage, {}, "secret-key", "dismiss").decisions, {});
 });
+
+test("rule and scope snoozes persist independently and expire or restore without erasing each other", () => {
+  let value = "{}";
+  const storage = { getItem: () => value, setItem: (_key: string, next: string) => { value = next; } };
+  const scope = "insight-1234567890abcdef1234", rule = "insight-rule-abcdef12345678901234";
+  let result = saveDecision(storage, {}, scope, "snooze", 1000);
+  result = saveDecision(storage, result.decisions, rule, "snooze", 2000);
+  assert.deepEqual(readDecisions(storage, 3000), { [scope]: 1000 + snoozeMilliseconds, [rule]: 2000 + snoozeMilliseconds });
+  assert.deepEqual(readDecisions(storage, 1000 + snoozeMilliseconds), { [rule]: 2000 + snoozeMilliseconds });
+  result = saveDecision(storage, result.decisions, rule, "restore", 3000);
+  assert.deepEqual(result.decisions, { [scope]: 1000 + snoozeMilliseconds });
+  saveDecision(storage, result.decisions, rule, "dismiss", 3000);
+  assert.equal(readDecisions(storage, 3000)[rule], "dismissed");
+  assert.deepEqual(saveDecision(storage, {}, rule, "secret-action").decisions, {});
+});

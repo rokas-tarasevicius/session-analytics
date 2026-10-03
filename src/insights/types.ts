@@ -15,6 +15,26 @@ export interface Insight {
   suggestedAction: string;
   names: string[];
   coverage: { eligibleSessions: number; totalSessions: number };
+  session?: { startedAt: string | null; models: string[] };
+  pricing?: { strategy: "next-tier-down" | "configured-target"; transitions: Array<{ sourceModel: string; targetModel: string }> };
+}
+
+export type NextTierModels = Partial<Record<"claude" | "codex", Record<string, string | null>>>;
+
+export interface InsightGroup {
+  id: string;
+  ruleDecisionId: string;
+  rule: InsightRule;
+  scopeKind: Insight["scope"]["kind"];
+  title: string;
+  itemIds: string[];
+  affected: { repositories: number; sessions: number };
+  coverage: { eligibleSessions: number; totalSessions: number; totalRepositories: number };
+  estimatedImpact: Insight["estimatedImpact"];
+  impactCoverage: { quantifiedItems: number; totalItems: number };
+  confidence: Insight["confidence"];
+  guardrails: string[];
+  suggestedAction: string;
 }
 
 export interface InsightThresholds {
@@ -50,19 +70,22 @@ export interface InsightContext {
   thresholds: InsightThresholds;
   disabledRules: InsightRule[];
   comparisonModels: Partial<Record<"claude" | "codex", string>>;
+  nextTierModels: NextTierModels;
   inventory: ExtensionInventory[];
   rateCard: RateCard;
   warnings: string[];
 }
 
 export interface InsightsReport {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
   rateCardEffectiveDate: string;
   thresholds: InsightThresholds;
-  cards: Insight[];
-  coverage: Array<{ rule: InsightRule; eligibleSessions: number; totalSessions: number; findings: number; status: "disabled" | "unavailable" | "insufficient" | "no-findings" | "findings" }>;
+  groups: InsightGroup[];
+  items: Insight[];
+  coverage: Array<{ rule: InsightRule; eligibleSessions: number; totalSessions: number; findings: number; groups: number; status: "disabled" | "unavailable" | "insufficient" | "no-findings" | "findings" }>;
   warnings: string[];
+  evidenceCoverage: Array<{ reason: "partial-transcript" | "active-session" | "unknown-liveness" | "unknown-completeness" | "unknown-request-size"; sessions: number; totalSessions: number }>;
 }
 
 /** P0 only. Claude requests deduplicated before measurement, within each evidence file. */

@@ -45,7 +45,7 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 - [ ] Cache-break events with their cause (provider-reported cache-miss reason, idle gap longer than the TTL, model switch, tool-set change) and the cost of re-caching.
 - [ ] Context fill curve, peak fill, compaction before and after sizes, and turns between compactions.
 - [ ] Subscription leverage per profile: API-equivalent value against plan price.
-- [x] Counterfactual pricing: the same tokens at another model's rates, within provider and with explicit eligible-session coverage and no quality claim ([Insights](insights.md)).
+- [x] Counterfactual pricing: the same tokens at the next mapped tier's rates by default (configurable, explicit-target override), within provider and with explicit eligible-session coverage and no quality claim ([Insights](insights.md)).
 
 ## M2: Outcomes
 
@@ -88,7 +88,9 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 Content-free coaching is local (P0/P1). Content review is **opt-in, off by default (P3)**.
 
 - [x] Bounded review scaffolding: run content-free detectors first, preview sizes and redaction counts, then optionally review up to three windows through the user's CLI with explicit `--send-content` and an `unknown` fallback. Main Claude/Codex transcripts only; no causal attribution claim.
-- [x] Ten coaching rules with denominators, configurable guards, estimated impact, confidence and suggested actions: repository peer outliers, cache reuse, price scenarios, compaction, delegation, large contexts, no-observed-use skills/MCP servers, idle-gap write associations and neutral start-time patterns. Insights tab, CLI/JSON, dismiss/snooze/restore.
+- [x] Ten coaching rules with denominators, configurable guards, estimated impact, confidence and suggested actions: repository peer outliers, cache reuse, price scenarios, compaction, delegation, large contexts, no-observed-use skills/MCP servers, idle-gap write associations and neutral start-time patterns. Insights tab with bounded rendering and session dry-run commands, CLI/JSON, dismiss/snooze/restore.
+- [x] Coaching evidence guards: owned request peaks/size coverage, explicit partial/liveness states, completed-peer eligibility, per-target activity guards, unambiguous MCP attribution and stable eligible review sources.
+- [x] Group coaching by rule/scope level with unique affected counts, ranked expandable scope tables, independent rule/scope dismiss/snooze, grouped CLI output and versioned `groups` + `items` JSON.
 - [ ] Coaching extensions requiring richer evidence: request-level context fill above 60%, correction streaks, unverified final edits, repeated-approval context and hotspots. Permission approvals alone carry little signal.
 
 ## M4: Breadth and export

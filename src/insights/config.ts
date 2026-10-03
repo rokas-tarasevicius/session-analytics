@@ -5,6 +5,7 @@ import { discoverProviderRoots, loadRateCard } from "../analyzer.ts";
 import type { AnalyzeOptions } from "../types.ts";
 import { ruleIds } from "./types.ts";
 import type { ExtensionInventory, InsightContext, InsightThresholds } from "./types.ts";
+import { defaultNextTierModels } from "./pricing-policy.ts";
 
 export const defaultThresholds: Readonly<InsightThresholds> = Object.freeze({
   minRepoSessions: 5, minModelCalls: 10, minInputTokens: 100_000,
@@ -22,9 +23,9 @@ export const boundedName = (value: unknown): value is string => typeof value ===
 const names = (value: unknown): string[] => Array.isArray(value) ? [...new Set(value.filter(boundedName))].sort().slice(0, 200) : [];
 const invalid = (): never => { throw new Error("The insights configuration is invalid or unavailable."); };
 
-export function parseInsightConfig(raw: unknown): Pick<InsightContext, "thresholds" | "disabledRules" | "comparisonModels"> {
+export function parseInsightConfig(raw: unknown): Pick<InsightContext, "thresholds" | "disabledRules" | "comparisonModels" | "nextTierModels"> {
   const config = record(raw);
-  if (!config || Object.keys(config).some((key) => !["thresholds", "disabledRules", "comparisonModels", "inventory"].includes(key))) return invalid();
+  if (!config || Object.keys(config).some((key) => !["thresholds", "disabledRules", "comparisonModels", "nextTierModels", "inventory"].includes(key))) return invalid();
   const thresholds = { ...defaultThresholds };
   if (config["thresholds"] !== undefined) {
     const overrides = record(config["thresholds"]);
@@ -42,8 +43,16 @@ export function parseInsightConfig(raw: unknown): Pick<InsightContext, "threshol
   if (!Array.isArray(disabled) || disabled.some((id) => !ruleIds.includes(id))) return invalid();
   const comparison = record(config["comparisonModels"] ?? {});
   if (!comparison || Object.entries(comparison).some(([provider, name]) => !["claude", "codex"].includes(provider) || !boundedName(name))) return invalid();
+  const nextTierModels = structuredClone(defaultNextTierModels);
+  const mappings = record(config["nextTierModels"] ?? {});
+  if (!mappings || Object.keys(mappings).some((provider) => !["claude", "codex"].includes(provider))) return invalid();
+  for (const provider of ["claude", "codex"] as const) {
+    const overrides = record(mappings[provider] ?? {});
+    if (!overrides || Object.keys(overrides).length > 200 || Object.entries(overrides).some(([source, target]) => !boundedName(source) || (target !== null && (!boundedName(target) || source === target)))) return invalid();
+    nextTierModels[provider] = { ...nextTierModels[provider], ...overrides as Record<string, string | null> };
+  }
   return {
-    thresholds, disabledRules: [...new Set(disabled)],
+    thresholds, disabledRules: [...new Set(disabled)], nextTierModels,
     comparisonModels: { ...(comparison["claude"] ? { claude: comparison["claude"] as string } : {}), ...(comparison["codex"] ? { codex: comparison["codex"] as string } : {}) },
   };
 }
@@ -138,6 +147,15 @@ export async function loadInsightContext(options: AnalyzeOptions): Promise<Insig
   for (const provider of ["claude", "codex"] as const) {
     const model = config.comparisonModels[provider];
     if (model && (!Object.hasOwn(rateCard.models, model) || rateCard.models[model]?.provider !== provider)) return invalid();
+    const explicit = record(record(raw["nextTierModels"])?.[provider]) ?? {};
+    for (const [source, target] of Object.entries(config.nextTierModels[provider] ?? {})) {
+      const sourceRate = Object.hasOwn(rateCard.models, source) ? rateCard.models[source] : undefined;
+      const targetRate = target && Object.hasOwn(rateCard.models, target) ? rateCard.models[target] : undefined;
+      if (sourceRate?.provider !== provider || (target !== null && (!targetRate || targetRate.provider !== provider || targetRate.inputPerMillion <= 0 || targetRate.outputPerMillion <= 0))) {
+        if (Object.hasOwn(explicit, source)) return invalid();
+        delete config.nextTierModels[provider]![source]; // A custom card may omit default tiers.
+      }
+    }
   }
   let discovered: { inventory: ExtensionInventory[]; warnings: string[] };
   if (raw["inventory"] !== undefined) {

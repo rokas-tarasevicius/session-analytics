@@ -1,5 +1,5 @@
 import type { CacheGapSignals } from "./insights/types.ts";
-export type { Insight, InsightsReport, InsightThresholds, CacheGapSignals } from "./insights/types.ts";
+export type { Insight, InsightGroup, InsightsReport, InsightThresholds, CacheGapSignals } from "./insights/types.ts";
 export type { ReviewPreview } from "./insights/review-context.ts";
 export type { ReviewAssessment } from "./insights/review-agent.ts";
 
@@ -81,6 +81,8 @@ export interface SessionMetrics {
 }
 
 export interface TranscriptHealth {
+  completeness?: "complete" | "partial" | "unknown";
+  liveness?: "inactive" | "active" | "unknown";
   files: number;
   snapshotWhileWorking: boolean;
   status: "invalid" | "missing" | "ok" | "unsupported";
@@ -88,7 +90,11 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
-  insightSignals?: { cacheGaps?: CacheGapSignals };
+  insightSignals?: {
+    cacheGaps?: CacheGapSignals;
+    requestSizes?: { observedTokens: number; unknownTokens: number };
+    mcpServers?: Record<string, number>;
+  };
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {

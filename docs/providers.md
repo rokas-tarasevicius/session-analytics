@@ -33,6 +33,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | `assistant` | `effort`; `message.id`, `message.model`; `message.usage`: `input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `cache_creation.ephemeral_5m_input_tokens`, `cache_creation.ephemeral_1h_input_tokens`, `output_tokens`, `output_tokens_details.thinking_tokens`; `tool_use` blocks: `id`, `name`, and `input.skill` for the `Skill` tool only |
 | `user` | whether `message.content` is non-empty text (to count human turns; tool results are not turns) |
 | `queue-operation`, compaction and summary records | counted by type |
+| lifecycle and MCP attribution | `message.stop_reason` and `system.turn_duration` for observed inactivity; ordered user/assistant records for open work; `attributionMcpServer` on deduplicated tool-use records, bounded names only |
 
 **Fidelity:**
 
@@ -85,6 +86,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | `event_msg` | `payload.type`: `user_message`, `agent_message`, `task_started`, `task_complete`, `context_compacted`, `item_completed` (`item.type` of `UserMessage`, `AgentMessage`, or `ContextCompaction`, and `item.id`), and `token_count` (`info.total_token_usage`, `info.last_token_usage`, `info.model_context_window`) |
 | `compacted` | counted as a compaction |
 | `response_item` | `function_call` and `custom_tool_call`: `name`, `call_id`. A `custom_tool_call` input is scanned for code-mode `tools.<name>(` invocations. The input of a read-capable call (`exec_command`, `read_file`, `Bash`, `Read`, or a code-mode call to one of the first two) is scanned for `<skill>/SKILL.md`. Only tool names and skill identifiers are kept. |
+| lifecycle and MCP attribution | Ordered `task_started`, `user_message`, `task_complete`, `turn_aborted` for liveness observations; `item_completed.item` with `type: McpToolCall`, `id`, `server` for bounded, deduplicated attribution. Tool arguments/results are discarded. |
 
 **Fidelity:**
 
@@ -98,6 +100,8 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | Turns, messages, compactions | Exact; the largest count among the legacy, `item_completed`, and `compacted` shapes. |
 | Sub-agent cost | Exact split by the execution segment active when each request was observed. |
 | Model | From `turn_context`; when a request precedes any model record, the file's single model is used if it has exactly one. |
+
+Owned request peaks exclude foreign broadcast counters. Request-size coverage separately counts owned input-plus-output tokens with known size and cumulative-only usage without size; price coverage does not imply size coverage. Both Claude and Codex record parse/file-version completeness and observed liveness. Recent unmatched open markers (within 15 minutes) are active, stale/missing/future ones unknown, and a terminal marker indicates observed inactivity. These states are not a retention or future-inactivity guarantee. See [Insights evidence rules](insights.md#rules-and-formulas).
 
 **Known gaps:**
 

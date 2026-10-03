@@ -151,9 +151,13 @@ Repository summaries and the machine summary share these fields.
 | `skillEvidence` | `explicit` (Claude), `inferred` (Codex lower bound), or `unavailable` (Cursor) | P0 |
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
 | `insightSignals.cacheGaps` | Optional Claude-only counters; see [Cache-gap signals](#cache-gap-signals) | P0 |
+| `insightSignals.requestSizes.observedTokens`, `.unknownTokens` | Accounted input-plus-output tokens with known/unknown request input size, after ownership and deduplication | P0 |
+| `insightSignals.mcpServers` | Optional map of bounded server name to structured observations: deduplicated Codex MCP items or Claude tool calls carrying explicit server attribution; no arguments/results | P1 names, P0 counts |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
-| `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
+| `transcript.snapshotWhileWorking` | `true` for Conductor's explicit `working` status; false does not establish inactivity | P0 |
+| `transcript.completeness` | Optional `complete`, `partial`, `unknown`: parse/file-version completeness of observed evidence, not lifetime retention | P0 |
+| `transcript.liveness` | Optional `active`, `inactive`, `unknown`: observed lifecycle/Conductor state; see [evidence rules](insights.md#rules-and-formulas) | P0 |
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
 
 ### Session metrics (`SessionMetrics`)
@@ -174,7 +178,7 @@ Repository summaries and the machine summary share these fields.
 | `durationMilliseconds` | Session start to last event | P0 |
 | `eventSpanMilliseconds` | First event to last event | P0 |
 | `maxContextWindow` | Largest context window the provider reported | P0 |
-| `maxInputTokensPerCall` | Largest input of a single request | P0 |
+| `maxInputTokensPerCall` | Largest owned, deduplicated request with known input size; a lower bound when request-size coverage is partial | P0 |
 | `contextUtilizationPeak` | `maxInputTokensPerCall / maxContextWindow`, or `null` when no window is reported | P0 |
 
 ### Token usage (`TokenUsage`)
@@ -236,32 +240,49 @@ Returned by `insights --json` and `GET /api/insights`; public types are re-expor
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
-| `schemaVersion` | Version 1 of this separate report contract | P0 |
+| `schemaVersion` | Version 2 of this separate report contract (`groups` plus `items`; v1 `cards` migrated to `items`) | P0 |
 | `generatedAt` | Source snapshot time | P0 |
 | `rateCardEffectiveDate` | Rate card date used for comparisons | P0 |
 | `thresholds` | Explicit numeric configuration: `minRepoSessions`, `minModelCalls`, `minInputTokens`, `outlierMultiplier`, `minOutlierUsd`, `minDifferenceUsd`, `cacheReadShare`, `cacheWriteShare`, `compactionsPer100Calls`, `minCompactions`, `subagentShare`, `subagentDelta`, `longContextInputTokens`, `longContextShare`, `extensionMinSessions`, `extensionMinToolCalls`, `idleGapMinEvents`, `timeMinSessions`, `timeBucketShare`, `utcOffsetMinutes` | P0 |
-| `cards[].id` | `insight-` plus 20 hex SHA-256 characters from rule, scope and names; stable browser decision key, not a secret-keyed hash | P1 |
-| `cards[].rule` | One of the ten fixed rule IDs in [insights.md](insights.md#rules-and-formulas) | P0 |
-| `cards[].title` | Fixed rule title | P0 |
-| `cards[].scope.kind` | `machine`, `repo`, `session` | P0 |
-| `cards[].scope.repositoryId`, `cards[].scope.sessionKey` | Existing pseudonymous key or null | P1 |
-| `cards[].scope.provider` | Existing provider enum or null | P0 |
-| `cards[].evidence[].label` | Fixed description of a numeric measurement | P0 |
-| `cards[].evidence[].value` | Numeric scalar or ratio numerator | P0 |
-| `cards[].evidence[].unit` | `USD`, `tokens`, `count`, `ratio`, `multiple`, `hour` | P0 |
-| `cards[].evidence[].denominator` | Numeric denominator, or null for a scalar | P0 |
-| `cards[].evidence[].denominatorLabel` | Fixed denominator meaning, or null | P0 |
-| `cards[].estimatedImpact.value` | Numeric estimate or null when unquantified | P0 |
-| `cards[].estimatedImpact.unit` | `USD` or `tokens`; never summed across units | P0 |
-| `cards[].estimatedImpact.basis` | `scenario-difference`, `associated-usage`, `unavailable` | P0 |
-| `cards[].estimatedImpact.label` | Fixed description of estimate and limits | P0 |
-| `cards[].confidence` | `low`, `medium`, `high`; interpretive confidence | P0 |
-| `cards[].guardrail`, `cards[].suggestedAction` | Fixed explanatory text, no transcript or config text | P0 |
-| `cards[].names[]` | Compared model ID or bounded configured skill/MCP server name; no settings values | P0 for models/skills, P1 for MCP servers |
-| `cards[].coverage.eligibleSessions`, `cards[].coverage.totalSessions` | Eligible/selected session counts, peers for peer comparisons | P0 |
-| `coverage[].rule`, `coverage[].eligibleSessions`, `coverage[].totalSessions`, `coverage[].findings` | Rule ID, evidence coverage and emitted-card count | P0 |
+| `groups[]`, `items[]` | Ranked rule/scope summaries and complete per-scope findings; no transcript records | P0/P1 |
+| `groups[].id` | `insight-group-` plus 20 hex SHA-256 characters from rule/scope kind; stable display key | P1 |
+| `groups[].ruleDecisionId` | `insight-rule-` plus 20 hex SHA-256 characters from rule alone; browser decision key across all scopes/filters | P1 |
+| `groups[].rule`, `groups[].scopeKind` | Fixed rule ID and `machine`, `repo` or `session` | P0 |
+| `groups[].title` | Fixed grouped rule title, including next-tier/configured-target scenario label | P0 |
+| `groups[].itemIds[]` | References to existing opaque per-scope insight IDs, ranked within the group | P1 |
+| `groups[].affected.repositories`, `.sessions` | Distinct actual contributor counts; inventory rules count sessions/repositories checked | P0 |
+| `groups[].coverage.eligibleSessions`, `.totalSessions`, `.totalRepositories` | Unique rule-eligible session count and selected session/repository denominators | P0 |
+| `groups[].estimatedImpact.value`, `.unit`, `.basis`, `.label` | Sum of disjoint quantified scope values within one rule/unit, or null; same enums as item impact and fixed total/partial-total label | P0 |
+| `groups[].impactCoverage.quantifiedItems`, `.totalItems` | Quantified-scope count and all affected-scope denominator | P0 |
+| `groups[].confidence` | Lowest per-scope confidence: `low`, `medium`, `high` | P0 |
+| `groups[].guardrails[]`, `.suggestedAction` | Distinct fixed item interpretation notes and fixed rule action | P0 |
+| `items[].id` | `insight-` plus 20 hex SHA-256 characters from rule, scope and names; stable browser decision key, not a secret-keyed hash | P1 |
+| `items[].rule` | One of the ten fixed rule IDs in [insights.md](insights.md#rules-and-formulas) | P0 |
+| `items[].title` | Fixed rule title | P0 |
+| `items[].scope.kind` | `machine`, `repo`, `session` | P0 |
+| `items[].scope.repositoryId`, `items[].scope.sessionKey` | Existing pseudonymous key or null | P1 |
+| `items[].scope.provider` | Existing provider enum or null | P0 |
+| `items[].session.startedAt`, `items[].session.models[]` | Present on session items: normalized UTC start (null if invalid/missing) and bounded model IDs; no title or path | P0 |
+| `items[].evidence[].label` | Fixed description of a numeric measurement | P0 |
+| `items[].evidence[].value` | Numeric scalar or ratio numerator | P0 |
+| `items[].evidence[].unit` | `USD`, `tokens`, `count`, `ratio`, `multiple`, `hour` | P0 |
+| `items[].evidence[].denominator` | Numeric denominator, or null for a scalar | P0 |
+| `items[].evidence[].denominatorLabel` | Fixed denominator meaning, or null | P0 |
+| `items[].estimatedImpact.value` | Numeric estimate or null when unquantified | P0 |
+| `items[].estimatedImpact.unit` | `USD` or `tokens`; never summed across units | P0 |
+| `items[].estimatedImpact.basis` | `scenario-difference`, `associated-usage`, `unavailable` | P0 |
+| `items[].estimatedImpact.label` | Fixed description of estimate and limits | P0 |
+| `items[].confidence` | `low`, `medium`, `high`; interpretive confidence | P0 |
+| `items[].guardrail`, `items[].suggestedAction` | Fixed explanatory text, no transcript or config text | P0 |
+| `items[].names[]` | Compared model ID or bounded configured skill/MCP server name; no settings values | P0 for models/skills, P1 for MCP servers |
+| `items[].pricing.strategy` | Optional `next-tier-down` or `configured-target`, on price scenario items | P0 |
+| `items[].pricing.transitions[].sourceModel`, `.targetModel` | Bounded model IDs describing each one-step within-provider scenario move; never arbitrary configuration values | P0 |
+| `items[].coverage.eligibleSessions`, `items[].coverage.totalSessions` | Eligible/selected session counts, peers for peer comparisons | P0 |
+| `coverage[].rule`, `coverage[].eligibleSessions`, `coverage[].totalSessions`, `coverage[].findings`, `coverage[].groups` | Rule ID, evidence coverage, scope-item count and grouped-card count | P0 |
 | `coverage[].status` | `disabled`, `unavailable`, `insufficient`, `no-findings`, `findings` | P0 |
-| `warnings[]` | Fixed messages about partial inventory and interpretation | P0 |
+| `evidenceCoverage[].reason` | `partial-transcript`, `active-session`, `unknown-liveness`, `unknown-completeness`, `unknown-request-size` | P0 |
+| `evidenceCoverage[].sessions`, `.totalSessions` | Reason count and selected-session denominator; overlapping counts | P0 |
+| `warnings[]` | Fixed messages with counts about evidence, invalid/missing starts, partial inventory and interpretation; never raw provider warnings | P0 |
 
 ### Review metadata (`ReviewPreview`) and assessment
 
@@ -290,7 +311,7 @@ Returned by `insights --json` and `GET /api/insights`; public types are re-expor
 
 ### Browser storage
 
-The dashboard stores the selected view (`session-analytics-view`), theme (`session-analytics-theme`), and insight decisions (`session-analytics-insights-v1`). Insight decisions map opaque P1 card IDs to `dismissed` or a snooze-expiry timestamp; no card evidence, names, prose or settings are persisted. They can be restored from the Insights tab and do not affect API/CLI results.
+The dashboard stores the selected view (`session-analytics-view`), theme (`session-analytics-theme`), and insight decisions (`session-analytics-insights-v1`). Insight decisions map opaque P1 scope IDs (`insight-…`) and rule IDs (`insight-rule-…`) to `dismissed` or a snooze-expiry timestamp; legacy scope decisions are retained. Rule choices apply across all scopes; restoring one does not erase independent scope choices; no card evidence, names, prose or settings are persisted. They can be restored from the Insights tab and do not affect API/CLI results.
 
 ## What this does not protect against
 

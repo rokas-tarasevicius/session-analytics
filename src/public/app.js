@@ -589,7 +589,7 @@ function renderActiveAnalyticsView(view) {
   if (name === "insights") void renderInsights(document.querySelector("#insights-root"), {
     repositoryId: elements.repositoryFilter.value === "all" ? null : elements.repositoryFilter.value,
     from: elements.windowStart.value, through: elements.windowEnd.value,
-    generatedAt: snapshot.generatedAt, repositories: snapshot.repositories,
+    generatedAt: snapshot.generatedAt, repositories: snapshot.repositories, onSelectRepository: selectRepository,
   });
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
