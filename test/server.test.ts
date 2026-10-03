@@ -130,7 +130,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     const page = await fetch(origin);
     assert.equal(page.status, 200);
     const pageText = await page.text();
-    assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
+    assert.match(pageText, /Session <b>Analytics<\/b>/);
+    assert.match(pageText, /<svg class="mark"[\s\S]*fill="#d66b55"/);
     assert.match(pageText, /data-view-button="distributions"/);
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
@@ -144,7 +145,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(applicationText, /session-analytics-theme"\) \|\| "light"/);
     const stylesheet = await fetch(`${origin}/styles.css`);
     const stylesheetText = await stylesheet.text();
-    assert.match(stylesheetText, /--heat-7:\s*#1f5b49/);
+    assert.match(stylesheetText, /--heat-7:\s*#181a16/);
+    assert.match(stylesheetText, /font-family: "Newsreader"/);
     assert.doesNotMatch(stylesheetText, /--heat-[1-7]:\s*#(?:9a7736|c85b45|c69a5d|d66b55)/);
     assert.equal((await fetch(`${origin}/api/health`, { method: "POST" })).status, 405);
     assert.equal((await fetch(`${origin}/missing`)).status, 404);

@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Changed
+
+- Dashboard theme "Field Notes": an editorial, print-first redesign derived from the logo. Off-white paper and a warm-charcoal night edition, Newsreader for display figures and headlines, Inter for labels and tabular figures, Geist Mono for kickers and ticks. Coral marks priced value (and Claude), sage marks Codex, ochre marks Cursor; everything else is greyscale ink.
+- Summary opens with a generated lede sentence (sessions, repositories, tokens, API-equivalent value, provider shares, busiest repository and day) above the hero figures; the repository ledger gains a totals row.
+- Daily usage value is drawn as small multiples per provider on a shared scale with a dotted average rule, a "busiest day" callout, and one crosshair tooltip that reads every provider for the hovered or arrow-keyed day.
+- Distributions are a matrix of small multiples (one column per compared repository, one row per metric) with a median mark instead of overlaid lines; Tools and Skills are share matrices (ink-tinted percentages) instead of six-colour stacks; Costs are ledgers with per-component figures beside each composition bar; the provider mix is a labelled share bar instead of a donut.
+- Navigation is a numbered table of contents, scope controls are rule-underlined fields, tooltips and empty states follow the paper style, and `?view=&theme=&repository=` URL hooks reproduce any view for screenshots without persisting the choice.
+- Bundled fonts are now Newsreader, Inter, and Geist Mono (OFL); Space Grotesk was removed.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

@@ -332,4 +332,4 @@ Please report vulnerabilities privately through [GitHub private vulnerability re
 
 ## License
 
-[MIT](LICENSE). Bundled fonts (Space Grotesk and Geist Mono) are licensed under the [SIL Open Font License 1.1](src/public/fonts/OFL-1.1.txt). Provider names and marks shown in the dashboard identify the data source and remain trademarks of their owners; see [src/public/brands/NOTICE.md](src/public/brands/NOTICE.md).
+[MIT](LICENSE). Bundled fonts (Newsreader, Inter, and Geist Mono) are licensed under the [SIL Open Font License 1.1](src/public/fonts/OFL-1.1.txt). Provider names and marks shown in the dashboard identify the data source and remain trademarks of their owners; see [src/public/brands/NOTICE.md](src/public/brands/NOTICE.md).

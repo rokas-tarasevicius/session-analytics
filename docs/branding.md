@@ -11,22 +11,24 @@
 | `assets/logo-wordmark.svg` | Mark and wordmark for light backgrounds. |
 | `assets/logo-wordmark-dark.svg` | Mark and wordmark for dark backgrounds. |
 | `assets/social-preview.svg`, `.png` | 1280 × 640 repository social preview (upload the PNG in the GitHub repository settings). |
-| `src/public/favicon.svg` | Dashboard favicon; a copy of the mark without the title element. |
+| `src/public/favicon.svg` | Dashboard favicon; a copy of the mark without the title element. The dashboard masthead inlines the same mark next to the serif wordmark. |
 | `assets/screenshot-*.png` | Dashboard screenshots, rendered from the synthetic demo only. |
 
 The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
 
-Palette, shared with the dashboard's light and dark themes:
+Palette, shared with the dashboard's "Field Notes" theme (day and night editions):
 
 | Role | Color |
 | --- | --- |
-| Ink (tile, light-theme text) | `#181a16` |
-| Paper (light background) | `#efeee7` |
-| Coral (top-level span, accent) | `#d66b55`, text accent `#c85b45` |
-| Sage (sub-agent span) | `#7eb7a7` |
-| Ochre (sub-agent span) | `#d4aa70` |
+| Ink (tile, day-edition text) | `#181a16` |
+| Paper (day-edition background) | `#f4f1ea`; night edition `#1c1d19` with ink `#ece8dd` |
+| Coral (top-level span; priced value and Claude) | `#d66b55`, text accent `#a84a37` (day) / `#e58a76` (night) |
+| Sage (sub-agent span; Codex) | `#7eb7a7`; day-edition mark `#3a8773` |
+| Ochre (sub-agent span; Cursor) | `#d4aa70`; day-edition mark `#b07f2e` |
 | Connector | `#62665c` |
-| Heatmap ramp | `#e0ece5` to `#1f5b49` |
+| Heatmap ramp | greyscale ink, `#ddd8ca` to `#181a16` (day) and `#33352e` to `#ece8dd` (night) |
+
+Dashboard type: Newsreader (display figures, headlines, ledes), Inter (labels, body, tabular figures), Geist Mono (kickers, axis ticks, meta). All three are bundled under `src/public/fonts/` with their OFL notice.
 
 ### Regenerating images
 
@@ -41,7 +43,7 @@ Screenshots come from the demo dataset only. Start it with `npm run demo -- --no
 
 1. **`src/brand.ts`**: `brand.name` (display name in help text, logs, and the dashboard) and `brand.command` (the command name shown in help).
 2. **`package.json`**: `name`, `description`, the `bin` key, and the `repository`, `homepage`, and `bugs` URLs. Rename `bin/session-analytics.ts` if the file name should match, and update the `start`, `report`, and `demo` scripts.
-3. **Dashboard**: the `<title>`, the wordmark text (`SESSION <b>ANALYTICS</b>`), and the wordmark's `aria-label` in `src/public/index.html`.
+3. **Dashboard**: the `<title>`, the wordmark text (`Session <b>Analytics</b>`), the masthead tagline, and the wordmark's `aria-label` in `src/public/index.html`.
 4. **Agent skill**: the directory `skills/session-analytics/`, its `name` and command in `SKILL.md`, and `skills/session-analytics/agents/openai.yaml`. Users who symlinked the skill need to update the link.
 5. **Assets**: edit the SVG text in both wordmarks and the social preview, regenerate the PNGs, and replace `src/public/favicon.svg` if the mark changes.
 6. **Documentation**: README badges and links, `SECURITY.md` and `CODE_OF_CONDUCT.md` links, `.github/ISSUE_TEMPLATE/config.yml`, and the clone URL.
