@@ -1,9 +1,12 @@
+import { compact, integer, ledeParts, longDate, median, money, nextChartIndex, niceMaximum, peakDay, percent, plural, share, shortDate, spelled, windowPhrase } from "./lib.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityNote: $("#activity-note"), activityProviderFilters: $("#activity-provider-filters"),
   activityRepositories: $("#activity-repositories"),
   activityTooltip: $("#activity-tooltip"),
   cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
+  dailyStatus: $("#daily-status"), dailyTable: $("#daily-table-wrap"),
   costApiTotal: $("#cost-api-total"), costCoverage: $("#cost-coverage"),
   costProviderTotal: $("#cost-provider-total"), costUpperTotal: $("#cost-upper-total"),
   distributionCompactions: $("#distribution-compactions"), distributionCost: $("#distribution-cost"),
@@ -43,6 +46,9 @@ let modelMetric = "value";
 let toolsDetailRepositoryId = null;
 let skillsDetailRepositoryId = null;
 let pendingRepositoryName = null;
+let distributionsTouched = false;
+/** State of the current daily chart; its listeners are bound once, below. */
+let dailyChart = null;
 const distributionRepositories = new Set();
 const maximumComparedRepositories = 6;
 const viewProviderFilters = {
@@ -52,33 +58,12 @@ const viewProviderFilters = {
 };
 const providerOrder = ["claude", "codex", "cursor"];
 const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" };
-const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
-const integer = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
-const currency = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
-const money = (value) => currency.format(value || 0);
-const percent = (value) => value === null || value === undefined ? "N/A" : `${(value * 100).toFixed(1)}%`;
-const share = (value) => `${Math.round(value * 100)}%`;
-const numberWords = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
-const spelled = (value) => value < numberWords.length ? numberWords[value] : integer.format(value);
-const plural = (value, singular, pluralForm = `${singular}s`) => value === 1 ? singular : pluralForm;
-
-function duration(milliseconds) {
-  if (!milliseconds) return "—";
-  const hours = milliseconds / 3_600_000;
-  if (hours >= 24) return `${(hours / 24).toFixed(1)}d`;
-  if (hours >= 1) return `${hours.toFixed(1)}h`;
-  return `${Math.max(1, Math.round(milliseconds / 60_000))}m`;
-}
+const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function dateTime(value) {
   if (!value) return "Unknown time";
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
-
-const shortDateFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
-const longDateFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long" });
-const shortDate = (day) => shortDateFormat.format(new Date(`${day}T00:00:00`));
-const longDate = (day) => longDateFormat.format(new Date(`${day}T00:00:00`));
 
 function node(tag, value, className) {
   const element = document.createElement(tag);
@@ -100,6 +85,16 @@ function svgText(parent, value, x, y, className, anchor = "start") {
 }
 
 function clear(element) { element.replaceChildren(); }
+
+function groupBy(sessions, key) {
+  const groups = new Map();
+  for (const session of sessions) {
+    const value = session[key];
+    const group = groups.get(value);
+    if (group) group.push(session); else groups.set(value, [session]);
+  }
+  return groups;
+}
 
 function selectedRepository() {
   const id = elements.repositoryFilter.value;
@@ -181,19 +176,20 @@ function coverageWarnings(sessions) {
 }
 
 function repositoryAggregate(item, sessions) {
-  return { repository: item.repository, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), summary: summarize(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions) };
+  return { repository: item.repository, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), summary: summarize(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions) };
 }
 
 function activeView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? snapshot.sessions.filter(({ repositoryId }) => repositoryId === selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
+  const byRepository = groupBy(windowSessions, "repositoryId");
   const sourceRepositories = selected ? [selected] : snapshot.repositories;
-  const repositories = sourceRepositories.map((item) => repositoryAggregate(item, windowSessions.filter(({ repositoryId }) => repositoryId === item.repository.id)));
+  const repositories = sourceRepositories.map((item) => repositoryAggregate(item, byRepository.get(item.repository.id) || []));
   const sessions = windowSessions;
   const summary = summarize(sessions);
   return {
-    dailySessions: scopeSessions, repositories, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions),
+    byRepository, dailySessions: scopeSessions, repositories, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions),
     summary: { ...summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter(({ summary: item }) => item.sessions > 0).length, workingSnapshots: sessions.filter(({ transcript }) => transcript.snapshotWhileWorking).length },
   };
 }
@@ -201,7 +197,7 @@ function activeView() {
 function selectRepository(id) {
   elements.repositoryFilter.value = id;
   renderView();
-  document.querySelector(".front-page").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(".front-page").scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
 }
 
 function renderBars(container, items, formatter, limit = 9, onSelect = null) {
@@ -226,13 +222,13 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
   }
 }
 
-function switchView(name) {
+function switchView(name, persist = true) {
   for (const button of viewButtons) {
     if (button.dataset.viewButton === name) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   }
   for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== name;
-  localStorage.setItem("session-analytics-view", name);
+  if (persist) localStorage.setItem("session-analytics-view", name);
   if (snapshot) renderView();
 }
 
@@ -249,11 +245,17 @@ function providerLogo(provider) {
   const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = ""; return logo;
 }
 
+/** Builds the per-view provider toggles once per visit and syncs them in place afterwards, so focus survives a change. */
 function renderViewProviderFilters(container, scope) {
+  const existing = [...container.querySelectorAll("input")];
+  if (existing.length === providerOrder.length) {
+    for (const input of existing) input.checked = viewProviderFilters[scope].has(input.dataset.provider);
+    return;
+  }
   clear(container);
   for (const provider of providerOrder) {
     const label = node("label", null, "provider-toggle");
-    const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider);
+    const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider); input.dataset.provider = provider;
     input.addEventListener("change", () => {
       if (input.checked) viewProviderFilters[scope].add(provider);
       else viewProviderFilters[scope].delete(provider);
@@ -264,7 +266,7 @@ function renderViewProviderFilters(container, scope) {
 }
 
 function ensureDistributionRepositories() {
-  if (distributionRepositories.size > 0) return;
+  if (distributionRepositories.size > 0 || distributionsTouched) return;
   const selected = selectedRepository();
   if (selected) distributionRepositories.add(selected.repository.id);
   const counts = snapshot.repositories.map((item) => ({
@@ -276,34 +278,35 @@ function ensureDistributionRepositories() {
   }
 }
 
+/** Compare options keep a stable order and are updated in place, so toggling one never loses keyboard focus. */
 function renderDistributionRepositoryOptions() {
-  ensureDistributionRepositories(); clear(elements.distributionRepositoryOptions);
+  ensureDistributionRepositories();
   const sessionCounts = new Map();
   for (const { repositoryId } of snapshot.sessions) sessionCounts.set(repositoryId, (sessionCounts.get(repositoryId) || 0) + 1);
-  const repositories = snapshot.repositories.filter(({ repository }) => sessionCounts.has(repository.id)).sort((left, right) => {
-    const selectedOrder = Number(distributionRepositories.has(right.repository.id)) - Number(distributionRepositories.has(left.repository.id));
-    if (selectedOrder !== 0) return selectedOrder;
-    const activityOrder = (sessionCounts.get(right.repository.id) || 0) - (sessionCounts.get(left.repository.id) || 0);
-    return activityOrder || left.repository.name.localeCompare(right.repository.name);
-  });
-  for (const { repository } of repositories) {
-    const label = node("label", null, "compare-option");
-    const input = node("input"); input.type = "checkbox"; input.checked = distributionRepositories.has(repository.id);
-    input.disabled = !input.checked && distributionRepositories.size >= maximumComparedRepositories;
-    input.addEventListener("change", () => {
-      if (input.checked) distributionRepositories.add(repository.id);
-      else distributionRepositories.delete(repository.id);
-      renderDistributions();
-    });
-    const position = [...distributionRepositories].indexOf(repository.id);
-    label.append(input, node("b", position >= 0 ? String(position + 1).padStart(2, "0") : "··"), document.createTextNode(`${repository.name} · ${integer.format(sessionCounts.get(repository.id) || 0)}`)); elements.distributionRepositoryOptions.append(label);
+  const repositories = snapshot.repositories.filter(({ repository }) => sessionCounts.has(repository.id)).sort((left, right) =>
+    (sessionCounts.get(right.repository.id) || 0) - (sessionCounts.get(left.repository.id) || 0) || left.repository.name.localeCompare(right.repository.name));
+  const options = [...elements.distributionRepositoryOptions.querySelectorAll("label")];
+  const reusable = options.length === repositories.length && options.every((option, index) => option.dataset.repository === repositories[index].repository.id);
+  if (!reusable) {
+    clear(elements.distributionRepositoryOptions);
+    for (const { repository } of repositories) {
+      const label = node("label", null, "compare-option"); label.dataset.repository = repository.id;
+      const input = node("input"); input.type = "checkbox";
+      input.addEventListener("change", () => {
+        distributionsTouched = true;
+        if (input.checked) distributionRepositories.add(repository.id);
+        else distributionRepositories.delete(repository.id);
+        renderDistributions();
+      });
+      label.append(input, node("b"), document.createTextNode(`${repository.name} · ${integer.format(sessionCounts.get(repository.id) || 0)}`)); elements.distributionRepositoryOptions.append(label);
+    }
   }
-}
-
-function median(values) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((left, right) => left - right), middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  for (const label of elements.distributionRepositoryOptions.querySelectorAll("label")) {
+    const input = label.querySelector("input"), position = [...distributionRepositories].indexOf(label.dataset.repository);
+    input.checked = position >= 0;
+    input.disabled = position < 0 && distributionRepositories.size >= maximumComparedRepositories;
+    label.querySelector("b").textContent = position >= 0 ? String(position + 1).padStart(2, "0") : "··";
+  }
 }
 
 function renderDistributionChart(container, series, accessor, formatter, logarithmic = false) {
@@ -392,9 +395,10 @@ function renderActivity(view) {
   elements.activityHeatmap.setAttribute("aria-label", `Session starts by local weekday and hour for ${integer.format(sessions.length)} selected sessions.`);
   elements.activityHeatmap.append(node("span", "", "heat-hour"));
   for (let hour = 0; hour < 24; hour += 1) elements.activityHeatmap.append(node("span", hour % 4 === 0 ? String(hour).padStart(2, "0") : "", "heat-hour"));
-  elements.activityHeatmap.append(node("span", "Σ", "heat-sum head"));
+  const sumHead = node("span", "Σ", "heat-sum head"); sumHead.setAttribute("aria-label", "Weekday total"); elements.activityHeatmap.append(sumHead);
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   let peak = { value: 0, day: 0, hour: 0 };
+  const hideTooltip = () => { elements.activityTooltip.hidden = true; };
   for (let day = 0; day < 7; day += 1) {
     elements.activityHeatmap.append(node("span", days[day], "heat-label"));
     for (let hour = 0; hour < 24; hour += 1) {
@@ -427,12 +431,12 @@ function renderActivity(view) {
         elements.activityTooltip.style.top = `${top}px`;
         elements.activityTooltip.style.setProperty("--tooltip-arrow-left", `${Math.min(tooltipRect.width - 10, Math.max(10, cellRect.left + cellRect.width / 2 - left))}px`);
       };
-      const hideTooltip = () => { elements.activityTooltip.hidden = true; };
       cell.addEventListener("pointerenter", showTooltip);
       cell.addEventListener("pointerleave", hideTooltip);
       cell.addEventListener("focus", showTooltip);
       cell.addEventListener("blur", hideTooltip);
       cell.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") { hideTooltip(); return; }
         const movement = { ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0] }[event.key];
         if (!movement) return;
         const nextDay = day + movement[0], nextHour = hour + movement[1];
@@ -443,7 +447,7 @@ function renderActivity(view) {
       elements.activityHeatmap.append(cell);
     }
     const rowTotal = grid[day].reduce((sum, value) => sum + value, 0);
-    elements.activityHeatmap.append(node("span", rowTotal ? integer.format(rowTotal) : "·", "heat-sum"));
+    elements.activityHeatmap.append(node("span", rowTotal ? integer.format(rowTotal) : "0", "heat-sum"));
   }
   clear(elements.activityNote);
   if (sessions.length === 0) {
@@ -456,9 +460,10 @@ function renderActivity(view) {
       document.createTextNode(` with ${integer.format(peak.value)} ${plural(peak.value, "start")}; ${share(workingHours / sessions.length)} of starts fall on weekdays between 09:00 and 18:00.`),
     );
   }
+  const byRepository = groupBy(sessions, "repositoryId");
   const repositories = view.repositories.map(({ repository }) => ({
     name: repository.name,
-    value: sessions.filter(({ repositoryId }) => repositoryId === repository.id).length,
+    value: (byRepository.get(repository.id) || []).length,
   })).filter(({ value }) => value > 0).sort((left, right) => right.value - left.value);
   renderBars(elements.activityRepositories, repositories, (value) => integer.format(value), 12);
 }
@@ -475,23 +480,25 @@ function costTotals(sessions) {
   return result;
 }
 
-const costComponents = [["input", "Input"], ["output", "Output"], ["cached", "Cache read"], ["write", "Cache write"]];
+const costComponents = [["input", "Input"], ["output", "Output"], ["cached", "Cache read"], ["write", "Cache write"], ["reported", "Provider-reported"]];
 
 function costStack(cost) {
   const total = cost.total + cost.reported;
-  const stack = node("div", null, "cost-stack");
-  const components = costComponents.map(([name, label]) => [name, label, cost[name]]);
-  if (cost.reported > 0) components.push(["reported", "Provider-reported", cost.reported]);
-  for (const [name, label, value] of components) {
+  const stack = node("div", null, "cost-stack"); stack.setAttribute("role", "img");
+  const described = [];
+  for (const [name, label] of costComponents) {
+    const value = cost[name];
     if (value <= 0) continue;
     const bar = node("i"); bar.dataset.component = name; bar.style.width = `${(value / total) * 100}%`;
     bar.title = `${label} · ${money(value)} · ${share(value / total)}`; stack.append(bar);
+    described.push(`${label} ${share(value / total)}`);
   }
+  stack.setAttribute("aria-label", `Composition: ${described.join(", ")}`);
   return stack;
 }
 
-function componentCell(value, total, className = "component") {
-  const cell = node("td", null, className);
+function componentCell(value, total) {
+  const cell = node("td", null, "component");
   if (value > 0) { cell.append(node("span", money(value)), node("small", share(value / total))); }
   else cell.append(node("span", "—", "muted"));
   return cell;
@@ -501,7 +508,7 @@ function renderCostRows(container, groups, basisFor) {
   clear(container);
   const rows = groups.filter((group) => group.cost.total + group.cost.reported > 0);
   if (!rows.length) { container.append(node("p", "No priced activity in this view.", "muted")); return; }
-  const table = node("table", null, "ledger"), head = node("thead"), headRow = node("tr");
+  const wrap = node("div", null, "table-wrap"), table = node("table", null, "ledger"), head = node("thead"), headRow = node("tr");
   headRow.append(node("th", ""), node("th", "Composition"));
   for (const [, label] of costComponents) headRow.append(node("th", label, "component"));
   headRow.append(node("th", "Total"));
@@ -514,10 +521,7 @@ function renderCostRows(container, groups, basisFor) {
     name.append(node("span", group.name), node("small", basisFor(group)));
     const stackCell = node("td", null, "stack-cell"); stackCell.append(costStack(group.cost));
     row.append(name, stackCell);
-    if (group.cost.reported > 0 && group.cost.total === 0) {
-      const reported = node("td", null, "component basis"); reported.colSpan = 4; reported.append(node("span", "Provider-reported · no component breakdown"));
-      row.append(reported);
-    } else for (const [key] of costComponents) row.append(componentCell(group.cost[key], total));
+    for (const [key] of costComponents) row.append(componentCell(group.cost[key], total));
     row.append(node("td", money(total), "total"));
     body.append(row);
     for (const key of Object.keys(totals)) totals[key] += group.cost[key];
@@ -531,9 +535,9 @@ function renderCostRows(container, groups, basisFor) {
     for (const [key] of costComponents) footRow.append(componentCell(totals[key], grand));
     footRow.append(node("td", money(grand), "total")); foot.append(footRow); table.append(foot);
   }
-  container.append(table);
+  wrap.append(table); container.append(wrap);
   const legend = node("div", null, "cost-legend");
-  for (const [name, label] of [...costComponents, ["reported", "Provider-reported"]]) {
+  for (const [name, label] of costComponents) {
     const item = node("span"); const swatch = node("i"); swatch.dataset.component = name; item.append(swatch, document.createTextNode(label)); legend.append(item);
   }
   container.append(legend);
@@ -543,11 +547,12 @@ function renderCosts(view) {
   const cost = costTotals(view.sessions);
   elements.costApiTotal.textContent = money(cost.total); elements.costUpperTotal.textContent = money(cost.upper);
   elements.costProviderTotal.textContent = money(cost.reported); elements.costCoverage.textContent = percent(view.summary.pricedTokenCoverage);
+  const byProvider = groupBy(view.sessions, "provider");
   renderCostRows(elements.providerCostComponents, providerOrder.map((provider) => ({
-    name: providerLabels[provider], provider, cost: costTotals(view.sessions.filter((session) => session.provider === provider)),
+    name: providerLabels[provider], provider, cost: costTotals(byProvider.get(provider) || []),
   })), ({ provider }) => provider === "cursor" ? "Provider-reported" : "API-equivalent");
   renderCostRows(elements.repositoryCostComponents, view.repositories.map(({ repository }) => ({
-    name: repository.name, cost: costTotals(view.sessions.filter(({ repositoryId }) => repositoryId === repository.id)),
+    name: repository.name, cost: costTotals(view.byRepository.get(repository.id) || []),
   })).sort((left, right) => (right.cost.total + right.cost.reported) - (left.cost.total + left.cost.reported)).slice(0, 12), ({ cost: item }) => item.reported > 0 && item.total > 0 ? "Mixed basis" : item.reported > 0 ? "Provider-reported" : "API-equivalent");
 }
 
@@ -564,13 +569,14 @@ function renderModels(view) {
     output: { format: (value) => `${compact.format(value)} tokens`, value: (model) => model.outputTokens },
     value: { format: money, value: (model) => model.totalUsd },
   }[modelMetric];
+  const byProvider = groupBy(sessions, "provider");
   for (const provider of providerOrder) {
     const providerModels = models.filter((model) => model.provider === provider);
     if (providerModels.length === 0) continue;
     const group = node("section", null, "provider-model-group"); group.style.setProperty("--provider-color", `var(--${provider})`);
     const header = node("header"); const title = node("div"); const heading = node("h2");
     heading.append(providerLogo(provider), document.createTextNode(providerLabels[provider]));
-    const providerSessions = sessions.filter((session) => session.provider === provider).length;
+    const providerSessions = (byProvider.get(provider) || []).length;
     title.append(heading, node("div", `${integer.format(providerSessions)} ${plural(providerSessions, "session")} · ${providerModels.length} ${plural(providerModels.length, "model")}`));
     header.append(title, node("span", provider === "cursor" ? "Provider-reported value" : "API-equivalent value", "pill")); group.append(header);
     const providerTotal = providerModels.reduce((sum, model) => sum + metric.value(model), 0);
@@ -597,9 +603,11 @@ function evidenceLabel(sessions) {
 function renderNamedDistribution({ view, field, tableContainer, detailContainer, detailTitle, providerScope, skillMode = false }) {
   const sessions = sessionsForProviders(view.sessions, providerScope);
   const names = namedTotals(sessions, field).slice(0, 6);
+  const focused = document.activeElement?.dataset?.repository && tableContainer.contains(document.activeElement) ? document.activeElement.dataset.repository : null;
   clear(tableContainer);
+  const byRepository = groupBy(sessions, "repositoryId");
   const rows = view.repositories.map(({ repository }) => {
-    const repositorySessions = sessions.filter(({ repositoryId }) => repositoryId === repository.id);
+    const repositorySessions = byRepository.get(repository.id) || [];
     const totals = new Map(namedTotals(repositorySessions, field).map(({ name, value }) => [name, value]));
     return { repository, sessions: repositorySessions, total: [...totals.values()].reduce((sum, value) => sum + value, 0), totals };
   }).filter(({ total }) => total > 0).sort((left, right) => right.total - left.total);
@@ -620,7 +628,9 @@ function renderNamedDistribution({ view, field, tableContainer, detailContainer,
     for (const item of rows) {
       const row = node("tr"); row.setAttribute("aria-selected", String(item.repository.id === selectedId));
       const nameCell = node("td", null, "name"); const open = node("button", item.repository.name);
-      open.type = "button"; open.addEventListener("click", () => {
+      open.type = "button"; open.dataset.repository = item.repository.id;
+      open.setAttribute("aria-label", `Show ${skillMode ? "skills" : "tools"} for ${item.repository.name}`);
+      open.addEventListener("click", () => {
         if (field === "skills") skillsDetailRepositoryId = item.repository.id; else toolsDetailRepositoryId = item.repository.id;
         renderActiveAnalyticsView(view);
       }); nameCell.append(open); row.append(nameCell);
@@ -628,7 +638,7 @@ function renderNamedDistribution({ view, field, tableContainer, detailContainer,
       const values = names.map(({ name }) => item.totals.get(name) || 0);
       if (hasOther) values.push(item.total - represented);
       for (const value of values) {
-        const cell = node("td", null, "cell"), ratio = value / item.total, text = node("span", value > 0 ? share(ratio) : "·");
+        const cell = node("td", null, "cell"), ratio = value / item.total, text = node("span", share(ratio));
         text.style.setProperty("--share", String(ratio)); if (value === 0) text.dataset.zero = "true";
         text.title = `${integer.format(value)} of ${integer.format(item.total)}`; cell.append(text); row.append(cell);
       }
@@ -636,6 +646,7 @@ function renderNamedDistribution({ view, field, tableContainer, detailContainer,
       row.append(node("td", integer.format(item.total), "total"), node("td", skillMode ? evidenceLabel(item.sessions) : top, "meta")); body.append(row);
     }
     table.append(body); tableContainer.append(table);
+    if (focused) tableContainer.querySelector(`button[data-repository="${focused}"]`)?.focus();
   }
   const selectedRow = rows.find(({ repository }) => repository.id === selectedId);
   detailTitle.textContent = selectedRow?.repository.name || "No repository selected";
@@ -673,6 +684,7 @@ function renderActiveAnalyticsView(view) {
   }
 }
 
+/** Daily value per provider for every calendar day in the window; the same series feeds the chart, the table and the lede. */
 function dailyProviderSpend(sessions) {
   const days = new Map();
   const first = new Date(`${elements.windowStart.value}T00:00:00Z`), last = new Date(`${elements.windowEnd.value}T00:00:00Z`);
@@ -695,14 +707,25 @@ function activeProviders() {
   return providerFilters.filter(({ checked }) => checked).map(({ dataset }) => dataset.providerFilter);
 }
 
-function niceMaximum(maximum) {
-  const roughTick = Math.max(0.001, maximum) / 4;
-  const tickMagnitude = 10 ** Math.floor(Math.log10(roughTick));
-  return Math.ceil(roughTick / tickMagnitude) * tickMagnitude * 4;
+function renderDailyTable(items, providers) {
+  clear(elements.dailyTable);
+  const table = node("table", null, "daily-values"), head = node("thead"), headRow = node("tr");
+  headRow.append(node("th", "Day"));
+  for (const provider of providers) headRow.append(node("th", providerLabels[provider]));
+  headRow.append(node("th", "Total")); head.append(headRow); table.append(head);
+  const body = node("tbody");
+  for (const item of items) {
+    const row = node("tr"); row.append(node("td", longDate(item.name)));
+    for (const provider of providers) row.append(node("td", money(item[provider])));
+    row.append(node("td", money(providers.reduce((sum, provider) => sum + item[provider], 0)))); body.append(row);
+  }
+  table.append(body); elements.dailyTable.append(table);
 }
 
 function renderLine(items) {
-  clear(elements.dailySpend); elements.dailySpend.removeAttribute("tabindex");
+  clear(elements.dailySpend); clear(elements.dailyTable); elements.dailyStatus.textContent = "";
+  elements.dailySpend.removeAttribute("tabindex"); elements.dailySpend.removeAttribute("role"); elements.dailySpend.removeAttribute("aria-label"); elements.dailySpend.removeAttribute("aria-describedby");
+  dailyChart = null;
   const selectedProviders = activeProviders();
   const providers = providerOrder.filter((provider) => selectedProviders.includes(provider) && items.some((item) => item[provider] > 0));
   if (!items.length || !selectedProviders.length || !providers.length) {
@@ -718,9 +741,9 @@ function renderLine(items) {
   const height = top + providers.length * (panelHeight + panelGap) - panelGap + bottom;
   const axisMaximum = niceMaximum(Math.max(...items.flatMap((item) => providers.map((provider) => item[provider]))));
   const x = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
-  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `Daily priced usage value in US dollars, one panel per provider: ${providers.map((provider) => providerLabels[provider]).join(", ")}` });
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
   const tooltip = node("div", null, "chart-tooltip"); tooltip.hidden = true;
-  const panels = [];
+  const panels = [], descriptions = [];
   for (const [index, provider] of providers.entries()) {
     const panelTop = top + index * (panelHeight + panelGap), plotTop = panelTop + 22, plotBottom = panelTop + panelHeight;
     const y = (value) => plotBottom - (value / axisMaximum) * (plotBottom - plotTop);
@@ -739,6 +762,7 @@ function renderLine(items) {
     svgText(group, providerLabels[provider], left, panelTop + 12, "mult-title");
     svgText(group, `${money(total)} in window`, width - right, panelTop + 12, "mult-total", "end");
     const peakIndex = values.indexOf(Math.max(...values));
+    let description = `${providerLabels[provider]}: ${money(total)} in the window, average ${money(average)} per day`;
     if (values[peakIndex] > 0) {
       const peak = points[peakIndex];
       group.append(svgNode("circle", { cx: peak.x, cy: peak.y, r: 4 }, "mult-peak"));
@@ -746,10 +770,13 @@ function renderLine(items) {
       const label = svgNode("text", { x: peak.x, y: Math.max(plotTop + 2, peak.y - 10), "text-anchor": anchor }, "mult-peak-label");
       const value = svgNode("tspan", {}, "v"); value.textContent = money(values[peakIndex]);
       label.append(document.createTextNode(`busiest day ${shortDate(items[peakIndex].name)} · `), value); group.append(label);
+      description += `, busiest day ${longDate(items[peakIndex].name)} at ${money(values[peakIndex])}`;
     }
+    descriptions.push(description);
     panels.push({ provider, values, y, group, dot: null });
     svg.append(group);
   }
+  svg.setAttribute("aria-label", `Daily priced usage value, one panel per provider on a shared scale. ${descriptions.join(". ")}.`);
   const axisY = height - 8;
   const tickIndexes = [...new Set([0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
   for (const index of tickIndexes) svgText(svg, shortDate(items[index].name), x(index), axisY, "axis-label", index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
@@ -758,41 +785,52 @@ function renderLine(items) {
   for (const panel of panels) { panel.dot = svgNode("circle", { cx: 0, cy: 0, r: 4 }, "crosshair-dot"); panel.dot.setAttribute("data-provider", panel.provider); panel.group.append(panel.dot); panel.dot.setAttribute("visibility", "hidden"); }
   const hit = svgNode("rect", { x: left - 6, y: top, width: plotWidth + 12, height: height - top - bottom + 6 }, "hit-layer");
   svg.append(crosshair, hit);
-  let activeIndex = -1;
-  const showIndex = (index) => {
-    activeIndex = Math.max(0, Math.min(items.length - 1, index));
-    const px = x(activeIndex);
+  const chart = { activeIndex: -1, length: items.length };
+  chart.showIndex = (index) => {
+    chart.activeIndex = Math.max(0, Math.min(items.length - 1, index));
+    const px = x(chart.activeIndex);
     crosshairLine.setAttribute("x1", String(px)); crosshairLine.setAttribute("x2", String(px)); crosshair.setAttribute("visibility", "visible");
-    clear(tooltip); tooltip.append(node("p", longDate(items[activeIndex].name), "tooltip-date"));
+    clear(tooltip); tooltip.append(node("p", longDate(items[chart.activeIndex].name), "tooltip-date"));
+    const readout = [];
     for (const panel of panels) {
-      panel.dot.setAttribute("cx", String(px)); panel.dot.setAttribute("cy", String(panel.y(panel.values[activeIndex]))); panel.dot.setAttribute("visibility", "visible");
+      panel.dot.setAttribute("cx", String(px)); panel.dot.setAttribute("cy", String(panel.y(panel.values[chart.activeIndex]))); panel.dot.setAttribute("visibility", "visible");
       const row = node("div", null, "tooltip-row"); row.style.setProperty("--series", `var(--${panel.provider})`);
-      row.append(node("i"), node("span", providerLabels[panel.provider]), node("strong", money(panel.values[activeIndex]))); tooltip.append(row);
+      row.append(node("i"), node("span", providerLabels[panel.provider]), node("strong", money(panel.values[chart.activeIndex]))); tooltip.append(row);
+      readout.push(`${providerLabels[panel.provider]} ${money(panel.values[chart.activeIndex])}`);
     }
     tooltip.hidden = false;
     tooltip.style.left = `${Math.min(84, Math.max(16, (px / width) * 100))}%`;
     tooltip.style.top = `${((top + 26) / height) * 100}%`;
+    elements.dailyStatus.textContent = `${longDate(items[chart.activeIndex].name)}: ${readout.join(", ")}`;
   };
-  const hide = () => { activeIndex = -1; crosshair.setAttribute("visibility", "hidden"); tooltip.hidden = true; for (const panel of panels) panel.dot.setAttribute("visibility", "hidden"); };
+  chart.hide = () => { chart.activeIndex = -1; crosshair.setAttribute("visibility", "hidden"); tooltip.hidden = true; for (const panel of panels) panel.dot.setAttribute("visibility", "hidden"); };
   const indexAt = (event) => {
     const rect = svg.getBoundingClientRect();
     const ratio = ((event.clientX - rect.left) / rect.width) * width;
     return items.length === 1 ? 0 : Math.round(((ratio - left) / plotWidth) * (items.length - 1));
   };
-  hit.addEventListener("pointermove", (event) => showIndex(indexAt(event)));
-  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("pointermove", (event) => chart.showIndex(indexAt(event)));
+  hit.addEventListener("pointerleave", chart.hide);
+  dailyChart = chart;
   elements.dailySpend.tabIndex = 0;
-  elements.dailySpend.setAttribute("aria-label", "Daily priced usage value. Use the left and right arrow keys to read values by day.");
-  elements.dailySpend.addEventListener("keydown", (event) => {
-    const steps = { ArrowLeft: -1, ArrowRight: 1, Home: -Infinity, End: Infinity }[event.key];
-    if (event.key === "Escape") { hide(); return; }
-    if (steps === undefined) return;
-    event.preventDefault();
-    showIndex(activeIndex < 0 ? (steps > 0 ? 0 : items.length - 1) : Number.isFinite(steps) ? activeIndex + steps : steps > 0 ? items.length - 1 : 0);
-  });
-  elements.dailySpend.addEventListener("blur", hide);
+  elements.dailySpend.setAttribute("role", "group");
+  elements.dailySpend.setAttribute("aria-label", `Daily priced usage value for ${providers.map((provider) => providerLabels[provider]).join(" and ")}. Left and right arrows read the values day by day; Home and End jump to the first and last day; Escape clears the reading. The same values follow as a table.`);
+  elements.dailySpend.setAttribute("aria-describedby", "daily-status");
   elements.dailySpend.append(svg, tooltip);
+  renderDailyTable(items, providers);
 }
+
+// The daily chart's keyboard handlers are bound once here; each render only
+// swaps the `dailyChart` state, so rerenders never accumulate listeners.
+elements.dailySpend.addEventListener("keydown", (event) => {
+  if (!dailyChart) return;
+  const next = nextChartIndex(event.key, dailyChart.activeIndex, dailyChart.length);
+  if (next === null) return;
+  event.preventDefault();
+  if (next === "hide") dailyChart.hide(); else dailyChart.showIndex(next);
+});
+elements.dailySpend.addEventListener("focus", () => { if (dailyChart && dailyChart.activeIndex < 0) dailyChart.showIndex(dailyChart.length - 1); });
+elements.dailySpend.addEventListener("blur", () => dailyChart?.hide());
 
 function renderProviderShare(sessions) {
   const counts = { codex: 0, claude: 0, cursor: 0 };
@@ -822,21 +860,17 @@ function repositoryKey(id) {
   return id.startsWith("discovered-") ? id.slice(-8) : id.slice(0, 8);
 }
 
-function cacheRatio(value) {
-  const tokens = value.tokens || value;
-  const denominator = tokens.uncachedInputTokens + tokens.cachedInputTokens + tokens.cacheWriteInputTokens;
-  return denominator ? tokens.cachedInputTokens / denominator : 0;
-}
-
 function renderRepositoryTable(repositories, summary) {
   clear(elements.repositoryRows); clear(elements.repositoryTotal);
   const sorted = [...repositories].sort((a, b) => b.summary.estimatedSpendUsd - a.summary.estimatedSpendUsd);
   for (const item of sorted) {
     const row = node("tr"); const line = item.summary;
-    row.tabIndex = 0; row.setAttribute("role", "link"); row.setAttribute("aria-label", `Open metrics for ${item.repository.name}`);
+    const nameCell = node("td"); const open = node("button", item.repository.name, "row-link");
+    open.type = "button"; open.setAttribute("aria-label", `Open metrics for ${item.repository.name}`);
+    open.addEventListener("click", (event) => { event.stopPropagation(); selectRepository(item.repository.id); });
+    nameCell.append(open, node("small", `ID ${repositoryKey(item.repository.id)}`));
     row.addEventListener("click", () => selectRepository(item.repository.id));
-    row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectRepository(item.repository.id); } });
-    row.append(tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`), tableCell(integer.format(line.sessions), `${line.topLevelSessions} top-level · ${line.subagentSessions} sub-agent`), tableCell(money(line.estimatedSpendUsd), `${money(line.subagentSpendUsd)} sub-agent`, "money"), tableCell(compact.format(line.totalInputTokens)), tableCell(compact.format(line.outputTokens)), tableCell(compact.format(line.toolCalls)), tableCell(percent(line.cacheReadRatio)), tableCell(percent(line.pricedTokenCoverage), line.missingTranscripts ? `${line.missingTranscripts} missing` : "complete"));
+    row.append(nameCell, tableCell(integer.format(line.sessions), `${line.topLevelSessions} top-level · ${line.subagentSessions} sub-agent`), tableCell(money(line.estimatedSpendUsd), `${money(line.subagentSpendUsd)} sub-agent`, "money"), tableCell(compact.format(line.totalInputTokens)), tableCell(compact.format(line.outputTokens)), tableCell(compact.format(line.toolCalls)), tableCell(percent(line.cacheReadRatio)), tableCell(percent(line.pricedTokenCoverage), line.missingTranscripts ? `${line.missingTranscripts} missing` : "complete"));
     elements.repositoryRows.append(row);
   }
   if (sorted.length > 1) {
@@ -894,14 +928,8 @@ function windowCaption() {
   return `${elements.windowStart.value} through ${elements.windowEnd.value}`;
 }
 
-function windowPhrase() {
-  const start = elements.windowStart.value, end = elements.windowEnd.value;
-  if (!start || !end) return "In this window";
-  const preset = elements.windowPreset.value;
-  if (preset === "7" || preset === "30" || preset === "90") return `In the last ${preset} days`;
-  const whole = start === elements.windowStart.min && end === elements.windowEnd.max;
-  const range = start === end ? `on ${longDate(start)}` : `${shortDate(start)} to ${shortDate(end)}`;
-  return whole ? `Across every observed day, ${range},` : `Between ${start === end ? longDate(start) : `${shortDate(start)} and ${shortDate(end)}`},`;
+function currentWindowPhrase() {
+  return windowPhrase({ start: elements.windowStart.value, end: elements.windowEnd.value, min: elements.windowStart.min, max: elements.windowEnd.max, preset: elements.windowPreset.value });
 }
 
 function renderSharedView(view) {
@@ -909,57 +937,34 @@ function renderSharedView(view) {
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : `${summary.repositories === 1 ? "One repository" : `All ${spelled(summary.repositories)} repositories`} evidenced by local agent history.`} Sessions started during ${windowCaption()}.`;
 }
 
-function renderLede(view) {
-  const summary = view.summary, selected = selectedRepository();
-  clear(elements.lede);
-  const text = (value) => document.createTextNode(value);
-  const strong = (value, className) => node("strong", value, className);
-  if (summary.sessions === 0) {
-    elements.lede.append(text(`${windowPhrase().replace(/,$/, "")}, no sessions started${selected ? ` in ${selected.repository.name}` : ""}. Widen the window or choose another repository.`));
-    return;
-  }
+function renderLede(view, dailyItems) {
+  const selected = selectedRepository();
   const valueByProvider = { claude: 0, codex: 0, cursor: 0 };
   for (const session of view.sessions) valueByProvider[session.provider] += session.cost.totalUsd;
-  elements.lede.append(
-    text(`${windowPhrase()} ${selected ? `agents working in ${selected.repository.name}` : "your agents"} ran `),
-    strong(`${integer.format(summary.sessions)} ${plural(summary.sessions, "session")}`),
-    text(selected ? "" : ` across ${spelled(summary.repositoriesWithSessions)} ${plural(summary.repositoriesWithSessions, "repository", "repositories")}`),
-    text(", processing "), strong(`${compact.format(summary.totalInputTokens)} input tokens`),
-    text(" and writing "), strong(`${compact.format(summary.outputTokens)} output tokens`),
-  );
-  if (summary.apiEquivalentSpendUsd > 0) {
-    elements.lede.append(text(" for an API-equivalent value of "), strong(money(summary.apiEquivalentSpendUsd), "value"), text(". "));
-    const ranked = ["claude", "codex"].map((provider) => ({ provider, value: valueByProvider[provider] })).filter(({ value }) => value > 0).sort((left, right) => right.value - left.value);
-    if (ranked.length === 2) elements.lede.append(text(`${providerLabels[ranked[0].provider]} carried `), strong(share(ranked[0].value / summary.apiEquivalentSpendUsd)), text(` of that value and ${providerLabels[ranked[1].provider]} `), strong(share(ranked[1].value / summary.apiEquivalentSpendUsd)));
-    else if (ranked.length === 1) elements.lede.append(text(`${providerLabels[ranked[0].provider]} carried all of it`));
-    if (valueByProvider.cursor > 0) elements.lede.append(text(`; Cursor reported a further ${money(valueByProvider.cursor)} on its own basis`));
-    elements.lede.append(text(". "));
-  } else if (summary.providerReportedSpendUsd > 0) {
-    elements.lede.append(text("; Cursor reported "), strong(money(summary.providerReportedSpendUsd), "value"), text(" of provider-measured value. "));
-  } else {
-    elements.lede.append(text(" with no priced activity. "));
-  }
-  const busiest = [...view.repositories].sort((left, right) => right.summary.sessions - left.summary.sessions)[0];
-  const peakDay = [...view.spendByDay].sort((left, right) => right.value - left.value)[0];
-  const clauses = [];
-  if (!selected && view.repositories.length > 1 && busiest) clauses.push([strong(busiest.repository.name), text(` was the busiest repository with ${integer.format(busiest.summary.sessions)} ${plural(busiest.summary.sessions, "session")}`)]);
-  if (peakDay && peakDay.value > 0) clauses.push([text(`${clauses.length ? "the" : "The"} busiest day was `), strong(longDate(peakDay.name)), text(` at ${money(peakDay.value)}`)]);
-  clauses.forEach((clause, index) => {
-    if (index > 0) elements.lede.append(text(", and "));
-    elements.lede.append(...clause);
+  const busiest = !selected && view.repositories.length > 1 ? [...view.repositories].sort((left, right) => right.summary.sessions - left.summary.sessions)[0] : null;
+  const parts = ledeParts({
+    summary: view.summary,
+    selectedName: selected?.repository.name ?? null,
+    phrase: currentWindowPhrase(),
+    valueByProvider,
+    providerLabels,
+    busiest: busiest && busiest.summary.sessions > 0 ? { name: busiest.repository.name, sessions: busiest.summary.sessions } : null,
+    peak: peakDay(dailyItems, providerOrder),
   });
-  if (clauses.length) elements.lede.append(text("."));
+  clear(elements.lede);
+  for (const part of parts) elements.lede.append(part.text !== undefined ? document.createTextNode(part.text) : node("strong", part.strong, part.className));
 }
 
 function renderSummary(view) {
   const summary = view.summary;
-  renderLede(view);
+  const dailyItems = dailyProviderSpend(view.dailySessions);
+  renderLede(view, dailyItems);
   elements.spend.textContent = money(summary.estimatedSpendUsd); elements.spendNote.textContent = `${money(summary.apiEquivalentSpendUsd)} API-equivalent · ${money(summary.providerReportedSpendUsd)} provider-reported · not an invoice`;
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions in window`;
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`;
   elements.input.textContent = compact.format(summary.totalInputTokens); elements.cache.textContent = `${percent(summary.cacheReadRatio)} cached · repeated context included`;
   elements.output.textContent = compact.format(summary.outputTokens); elements.tools.textContent = compact.format(summary.toolCalls); elements.compactions.textContent = integer.format(summary.compactions); elements.live.textContent = integer.format(summary.workingSnapshots);
-  renderLine(dailyProviderSpend(view.dailySessions)); renderProviderShare(view.sessions);
+  renderLine(dailyItems); renderProviderShare(view.sessions);
   renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
   renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
   renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd }) => ({ name: model, value: totalUsd, provider })), money, 8);
@@ -980,8 +985,19 @@ function renderView() {
 }
 
 function render(data) {
+  // A refresh keeps the reader's repository and window when they still apply to the new snapshot.
+  const previous = snapshot ? { repository: elements.repositoryFilter.value, preset: elements.windowPreset.value, start: elements.windowStart.value, end: elements.windowEnd.value } : null;
   snapshot = data; elements.generated.textContent = `Snapshot ${dateTime(data.generatedAt)}`; elements.rateCardDate.textContent = `Rate card ${data.rateCard.effectiveDate}`;
-  populateRepositories(); configureWindow(); renderRateCards(data.rateCard); ensureDistributionRepositories();
+  populateRepositories(); configureWindow(); renderRateCards(data.rateCard);
+  if (previous) {
+    if ([...elements.repositoryFilter.options].some(({ value }) => value === previous.repository)) elements.repositoryFilter.value = previous.repository;
+    if (previous.preset === "custom" && previous.start >= elements.windowStart.min && previous.end <= elements.windowEnd.max) {
+      elements.windowPreset.value = "custom"; elements.windowStart.value = previous.start; elements.windowEnd.value = previous.end;
+    } else if (previous.preset !== "all" && previous.preset !== "custom") {
+      elements.windowPreset.value = previous.preset; applyWindowPreset(); return;
+    }
+  }
+  ensureDistributionRepositories();
   if (pendingRepositoryName) {
     const option = [...elements.repositoryFilter.options].find(({ textContent }) => textContent === pendingRepositoryName);
     if (option) elements.repositoryFilter.value = option.value;
@@ -1025,7 +1041,8 @@ const requestedView = urlParameters.get("view"), requestedTheme = urlParameters.
 pendingRepositoryName = urlParameters.get("repository");
 const storedView = localStorage.getItem("session-analytics-view");
 const viewExists = (name) => viewPanels.some(({ dataset }) => dataset.viewPanel === name);
-switchView(viewExists(requestedView) ? requestedView : viewExists(storedView) ? storedView : "summary");
+if (viewExists(requestedView)) switchView(requestedView, false);
+else switchView(viewExists(storedView) ? storedView : "summary");
 if (requestedTheme === "dark" || requestedTheme === "light") setTheme(requestedTheme, false);
 else setTheme(localStorage.getItem("session-analytics-theme") || "light");
 void load(false);
