@@ -1,5 +1,5 @@
 import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
-import { localDay } from "./velocity-data.js";
+import { localDay, sessionStartWindow } from "./velocity-data.js";
 
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -92,14 +92,6 @@ function velocityContext() {
   return { start: elements.windowStart.value || elements.windowStart.min, end: elements.windowEnd.value || elements.windowEnd.max, timeZone: snapshot?.velocity?.timeZone || "UTC", generatedAt: snapshot.generatedAt };
 }
 
-function sessionsInWindow(sessions) {
-  const { start, end, timeZone } = velocityContext();
-  return sessions.filter(({ createdAt }) => {
-    const day = localDay(createdAt, timeZone);
-    return day && (!start || day >= start) && (!end || day <= end);
-  });
-}
-
 function summarize(sessions) {
   const totals = { inputTokens: 0, outputTokens: 0, uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0 };
   let pricedTokens = 0, observedTokens = 0;
@@ -166,12 +158,13 @@ function repositoryAggregate(item, sessions) {
 function activeView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? snapshot.sessions.filter(({ repositoryId }) => repositoryId === selected.repository.id) : snapshot.sessions;
-  const windowSessions = sessionsInWindow(scopeSessions);
+  const { sessions: windowSessions, undatedStarts } = sessionStartWindow(scopeSessions, velocityContext());
   const sourceRepositories = selected ? [selected] : snapshot.repositories;
   const repositories = sourceRepositories.map((item) => repositoryAggregate(item, windowSessions.filter(({ repositoryId }) => repositoryId === item.repository.id)));
   const sessions = windowSessions;
   const summary = summarize(sessions);
   return {
+    undatedStarts,
     dailySessions: scopeSessions, repositories, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions),
     summary: { ...summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter(({ summary: item }) => item.sessions > 0).length, workingSnapshots: sessions.filter(({ transcript }) => transcript.snapshotWhileWorking).length },
   };
@@ -702,7 +695,7 @@ function renderSummary(view) {
   const summary = view.summary;
   elements.spend.textContent = money(summary.estimatedSpendUsd); elements.spendNote.textContent = `${money(summary.apiEquivalentSpendUsd)} API-equivalent · ${money(summary.providerReportedSpendUsd)} provider-reported · not an invoice`;
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
-  elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`;
+  elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent${view.undatedStarts ? ` · ${view.undatedStarts} undated starts excluded` : ""}`;
   elements.input.textContent = compact.format(summary.totalInputTokens); elements.cache.textContent = `${percent(summary.cacheReadRatio)} cached · repeated context included`;
   elements.output.textContent = compact.format(summary.outputTokens); elements.tools.textContent = compact.format(summary.toolCalls); elements.compactions.textContent = integer.format(summary.compactions); elements.live.textContent = integer.format(summary.workingSnapshots);
   renderSummaryVelocity(elements.dailySpend, view.dailySessions.filter(({ provider }) => activeProviders().includes(provider)), velocityContext()); renderDonut(view.sessions);

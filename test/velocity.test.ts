@@ -3,12 +3,15 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
+import { analyzeMachineSessionsIsolated } from "../src/analysis-process.ts";
 import { claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed, localClock, VelocityAccumulator, velocityDimension, velocityEffort, zeroVelocity } from "../src/metrics/velocity.ts";
 import { buildVelocity, calendarDays, guardedDelta, localDay, metricDefinitions, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
 import type { SessionAnalytics, SessionVelocity, VelocityValues } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { addUnsafeVelocityModels, unsafeVelocityModels } from "./velocity-fixtures.ts";
 
 const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-8 * Math.max(1, Math.abs(b)), `${a} != ${b}`);
 const sumCells = (velocity: SessionVelocity): number[] => {
@@ -17,6 +20,81 @@ const sumCells = (velocity: SessionVelocity): number[] => {
   return result;
 };
 const jsonl = (records: unknown[]) => `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
+
+test("invalid model labels cannot cross the isolated projection from usage-free or tool-only sessions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "velocity-model-privacy-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const added = await addUnsafeVelocityModels(fixture);
+    const data = await analyzeMachineSessionsIsolated(fixture);
+    assert.equal(data.sessions.filter((session) => session.models.length === 0).length, added);
+    assert.doesNotMatch(JSON.stringify(data), /velocity-model-SENTINEL/);
+    for (const session of data.sessions.filter((session) => session.models.length === 0)) {
+      assert.ok(session.velocity?.dimensions.every((dimension) => dimension.model === "<unknown>"));
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("every velocity producer validates bounded model IDs, including accumulator fallback dimensions", () => {
+  for (const model of unsafeVelocityModels) {
+    const dimension = velocityDimension("codex", {}, "top-level", model, null);
+    assert.equal(dimension.model, "<unknown>");
+    const accumulator = new VelocityAccumulator();
+    accumulator.tool(null, { ...dimension, model });
+    assert.doesNotMatch(JSON.stringify(accumulator.finish(null, dimension)), /velocity-model-SENTINEL/);
+  }
+  for (const model of ["claude-opus-5", "gpt-6.1-sol", "unpriced-test-model", "model_A-20261003", "<unknown>"]) {
+    assert.equal(velocityDimension("claude", {}, "top-level", model, null).model, model);
+  }
+});
+
+test("invalid usage and Codex fallback model labels stay internal in every provider projection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "velocity-model-usage-"));
+  try {
+    const model = unsafeVelocityModels[0]!;
+    const fixture = await createSessionAnalyticsFixture(root, model);
+    const id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    await writeFile(join(fixture.codexRoot, `rollout-${id}.jsonl`), jsonl([
+      { timestamp: "2026-09-01T12:00:00Z", type: "session_meta", payload: { id, cwd: fixture.repositoryRoot, source: "cli" } },
+      { timestamp: "2026-09-01T12:01:00Z", type: "event_msg", payload: { type: "token_count", info: {
+        total_token_usage: { input_tokens: 3456, output_tokens: 345 }, last_token_usage: { input_tokens: 123, output_tokens: 12 },
+      } } },
+      // The earlier unknown-model request uses this file's sole model as fallback.
+      { type: "turn_context", payload: { model } },
+    ]));
+    const db = new DatabaseSync(fixture.cursorDatabasePath);
+    try {
+      for (const row of db.prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'").all()) {
+        const composer = JSON.parse(String(row.value));
+        composer.usageData = { [model]: { costInCents: 100 } };
+        db.prepare("UPDATE cursorDiskKV SET value = ? WHERE key = ?").run(JSON.stringify(composer), String(row.key));
+      }
+    } finally { db.close(); }
+    const data = await analyzeMachineSessionsIsolated(fixture);
+    assert.doesNotMatch(JSON.stringify(data), /velocity-model-SENTINEL/);
+    for (const provider of ["claude", "codex", "cursor"]) {
+      assert.ok(data.sessions.some((session) => session.provider === provider && session.models.some((item) => item.model === "<unknown>")), `${provider} retains usage under an unknown public model`);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("global start dates reject missing and timezone-free timestamps consistently across browser zones", () => {
+  const source = new URL("../src/public/velocity-data.js", import.meta.url).href;
+  const stamps = ["2026-07-20 23:30:00", "2026-07-20T23:30:00", "2026-07-20", null, "", "invalid", "2026-07-20T23:30:00Z", "2026-07-20T23:30:00+01:00", "2026-07-21T00:30:00+01:00"];
+  for (const TZ of ["Europe/London", "America/Los_Angeles", "Asia/Kathmandu"]) {
+    const code = `import {localDay, sessionStartWindow} from ${JSON.stringify(source)};
+      const stamps = ${JSON.stringify(stamps)}, sessions = [...stamps.map((createdAt, id) => ({createdAt, id})), {id:9}];
+      const options = {start:'2026-07-20', end:'2026-07-20', timeZone:'Europe/London'};
+      console.log(JSON.stringify({days:stamps.map(stamp => localDay(stamp, options.timeZone)),
+        first:sessionStartWindow(sessions, options),
+        second:sessionStartWindow(sessions, {...options, start:'2026-07-21', end:'2026-07-21'})}));`;
+    const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", code], { env: { ...process.env, TZ }, encoding: "utf8" }));
+    assert.deepEqual(result.days, [null, null, null, null, null, null, "2026-07-21", "2026-07-20", "2026-07-21"]);
+    assert.deepEqual(result.first.sessions.map((item: { id: number }) => item.id), [7]);
+    assert.deepEqual(result.second.sessions.map((item: { id: number }) => item.id), [6, 8]);
+    assert.equal(result.first.undatedStarts, 7); assert.equal(result.second.undatedStarts, 7);
+  }
+});
 
 test("velocity reconciles every provider's dated plus undated counters with the existing ledger", async () => {
   const root = await mkdtemp(join(tmpdir(), "velocity-ledger-"));
@@ -261,4 +339,104 @@ test("coverage denominators exclude providers for which a split or API price is 
   const claude = synthetic([["2026-10-01", 4]]);
   const all = buildVelocity([cursor, codex, claude], { start: "2026-10-01", end: "2026-10-01" });
   assert.equal(all.coverage.cacheWriteInput, 400); assert.equal(all.coverage.priceTokens, 840);
+});
+
+test("missing metric evidence cannot become a decline, burn rate, rolling average or forecast", () => {
+  const options = { start: "2026-08-01", end: "2026-09-20" };
+  for (const [metric, numerator, counter] of [["value", 10, 0], ["reasoning", 11, 6], ["cacheRead", 12, 3], ["uncached", 12, 2], ["cacheWrite", 13, 4]] as const) {
+    for (const gap of ["week", "today", "historical"] as const) {
+      const session = synthetic(calendarDays(options.start, options.end).map((day) => [day, 10]));
+      for (const [day,,, values] of session.velocity!.buckets) {
+        if ((gap === "week" && day >= "2026-09-14") || (gap === "today" && day === options.end) || (gap === "historical" && day === "2026-09-02")) {
+          values[numerator] = 0; values[counter] = 0;
+        }
+      }
+      const data = buildVelocity([session], { ...options, metric });
+      const result = velocityIndicators(data, options.end);
+      if (gap === "week") {
+        assert.equal(result.week.delta, null, `${metric}: missing fields are not a 100% decline`);
+        assert.equal(result.burn.ratio, null);
+        assert.equal(data.rolling.at(-1), null);
+        const eligible = metric === "value" ? 7200 : metric === "reasoning" ? 1200 : 6000;
+        assert.deepEqual(result.week.current.evidence, { known: 0, eligible, unsupported: 0, complete: false });
+        assert.deepEqual(result.week.previous.evidence, { known: eligible, eligible, unsupported: 0, complete: true });
+        assert.equal(data.allSeries[0]?.evidence.known, data.evidence.known);
+        assert.equal(data.daily.at(-1)?.evidence.complete, false);
+      }
+      if (gap === "today") assert.equal(result.burn.ratio, null, `${metric}: today's partial evidence also blocks burn`);
+      assert.equal(result.projection, null, `${metric}: ${gap} evidence gap invalidates month-end scenarios`);
+      const workload = velocityIndicators(buildVelocity([session], { ...options, metric: "input" }), options.end);
+      assert.equal(workload.week.delta, 0, "Input workload has not declined");
+    }
+  }
+});
+
+test("movers cannot rank telemetry recovery or partially observed growth as a measured increase", () => {
+  const options = { start: "2026-09-01", end: "2026-09-14" };
+  for (const [metric, numerator, counter] of [["value", 10, 0], ["reasoning", 11, 6], ["cacheRead", 12, 3], ["cacheWrite", 13, 4]] as const) {
+    for (const gap of ["previous", "current"] as const) {
+      const session = synthetic(calendarDays(options.start, options.end).map((day) => [day, day >= "2026-09-08" ? 20 : 10]));
+      for (const [day,,, values] of session.velocity!.buckets) {
+        if ((gap === "previous" && day < "2026-09-08") || (gap === "current" && day === "2026-09-09")) {
+          values[numerator] = 0; values[counter] = 0;
+        }
+      }
+      const movers = topMovers([session], { ...options, metric }, "2026-09-15");
+      assert.equal(movers.rows.length, 0, `${metric}: ${gap} evidence gap must not rank as growth`);
+      assert.equal(movers.excludedGroups, 3);
+    }
+  }
+});
+
+test("observed zeroes and inactive dates can support declines while equal partial coverage cannot", () => {
+  const options = { start: "2026-08-01", end: "2026-09-20" };
+  const measured = synthetic(calendarDays(options.start, options.end).map((day) => [day, 30]));
+  for (const [day,,, values] of measured.velocity!.buckets) if (day >= "2026-09-14") values[6] = 0;
+  const knownZero = velocityIndicators(buildVelocity([measured], { ...options, metric: "reasoning" }), options.end);
+  assert.equal(knownZero.week.delta, -1, "A separately recorded zero is valid evidence");
+  assert.equal(knownZero.burn.ratio, 0);
+  const idle = synthetic(calendarDays(options.start, "2026-09-13").map((day) => [day, 10]));
+  assert.equal(velocityIndicators(buildVelocity([idle], options), options.end).week.delta, -1);
+  const partial = synthetic(calendarDays(options.start, options.end).map((day) => [day, 10]));
+  for (const cell of partial.velocity!.buckets) cell[3][10] /= 2;
+  const result = velocityIndicators(buildVelocity([partial], options), options.end);
+  assert.equal(result.week.delta, null); assert.equal(result.burn.ratio, null); assert.equal(result.projection, null);
+  const cursor = synthetic(calendarDays(options.start, options.end).map((day) => [day, 10])); cursor.provider = "cursor";
+  const unsupported = velocityIndicators(buildVelocity([cursor], { ...options, metric: "uncached" }), options.end);
+  assert.equal(unsupported.week.delta, null); assert.equal(unsupported.burn.ratio, null); assert.equal(unsupported.projection, null);
+});
+
+test("Codex cumulative coverage follows the charged counters and requires both endpoints", async () => {
+  const root = await mkdtemp(join(tmpdir(), "velocity-codex-coverage-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const cases: Array<{ tool: string; knownInput: number; knownOutput: number }> = [];
+    let sequence = 0;
+    for (const last of [undefined, {}, { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, reasoning_output_tokens: 0 }]) {
+      for (const [before, after] of [[false, false], [false, true], [true, false], [true, true]]) {
+        const n = ++sequence;
+        const id = `dddddddd-dddd-4ddd-8ddd-${String(n).padStart(12, "0")}`;
+        const tool = `coverage_probe_${n}`;
+        const record = (step: number, exposed: boolean | undefined) => ({ timestamp: `2026-09-01T12:0${step}:00Z`, type: "event_msg", payload: { type: "token_count", info: {
+          total_token_usage: { input_tokens: n * 1000 + step * 100, output_tokens: n * 100 + step * 10, ...(exposed ? { cached_input_tokens: 0, reasoning_output_tokens: 0 } : {}) },
+          ...(last === undefined ? {} : { last_token_usage: last }),
+        } } });
+        await writeFile(join(fixture.codexRoot, `rollout-${id}.jsonl`), jsonl([
+          { timestamp: "2026-09-01T12:00:00Z", type: "session_meta", payload: { id, cwd: fixture.repositoryRoot, source: "cli" } },
+          { type: "turn_context", payload: { model: "gpt-5.6-sol" } },
+          { type: "response_item", payload: { type: "function_call", call_id: tool, name: tool, arguments: "{}" } },
+          record(1, before), record(2, after),
+        ]));
+        cases.push({ tool, knownInput: before && after ? 100 : 0, knownOutput: before && after ? 10 : 0 });
+      }
+    }
+    const data = await analyzeMachineSessions(fixture);
+    for (const { tool, knownInput, knownOutput } of cases) {
+      const session = data.sessions.find((session) => session.tools[tool])!;
+      const values = sumCells(session.velocity!);
+      assert.equal(values[1], 100); assert.equal(values[5], 10);
+      assert.equal(values[12], knownInput, `${tool}: cache coverage belongs to the cumulative difference`);
+      assert.equal(values[11], knownOutput, `${tool}: reasoning coverage belongs to the cumulative difference`);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

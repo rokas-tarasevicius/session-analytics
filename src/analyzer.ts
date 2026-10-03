@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   VelocityAccumulator, claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed,
-  usageVelocity, velocityDimension, velocityMetadata, zeroVelocity,
+  publicModelId, usageVelocity, velocityDimension, velocityMetadata, zeroVelocity,
 } from "./metrics/velocity.ts";
 
 import type {
@@ -83,8 +83,10 @@ export interface RepositoryRow {
 
 interface TokenEvent {
   dimension: VelocityDimension;
-  reasoningExposed: boolean;
-  cacheReadExposed: boolean;
+  lastReasoningExposed: boolean;
+  lastCacheReadExposed: boolean;
+  totalReasoningExposed: boolean;
+  totalCacheReadExposed: boolean;
   executionKind: SessionAnalytics["executionKind"];
   fingerprint: string | null;
   last: TokenUsage | null;
@@ -317,7 +319,7 @@ function addModelUsage(
       ...zeroTokens(),
       ...zeroCost(),
       calls: 0,
-      model,
+      model: publicModelId(model),
       priced: Boolean(rateCard.models[model]),
     };
     session.models.set(model, aggregate);
@@ -693,8 +695,10 @@ async function analyzeCodex(
           );
           tokenEvents.push({
             dimension: velocityDimension("codex", currentIdentity, state.executionKind, currentModel, state.effort),
-            reasoningExposed: counterExposed((last ?? total)["reasoning_output_tokens"]),
-            cacheReadExposed: counterExposed((last ?? total)["cached_input_tokens"]),
+            lastReasoningExposed: counterExposed(last?.["reasoning_output_tokens"]),
+            lastCacheReadExposed: counterExposed(last?.["cached_input_tokens"]),
+            totalReasoningExposed: counterExposed(total["reasoning_output_tokens"]),
+            totalCacheReadExposed: counterExposed(total["cached_input_tokens"]),
             executionKind: state.executionKind,
             fingerprint: codexCounterFingerprint(total, last),
             inputForRequest,
@@ -740,6 +744,7 @@ async function analyzeCodex(
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
   const finalTokens = zeroTokens();
   let previous = zeroTokens();
+  let previousReasoningExposed = false, previousCacheReadExposed = false;
   let baselined = false;
   let counterResets = 0;
   let sharedSnapshots = 0;
@@ -757,7 +762,14 @@ async function analyzeCodex(
     const attributableDelta = baselined && !reset
       ? tokenDelta(event.total, previous)
       : zeroTokens();
+    // A difference has a known breakdown only if both endpoints expose it.
+    let exposure = {
+      reasoning: baselined && !reset && previousReasoningExposed && event.totalReasoningExposed,
+      cacheRead: baselined && !reset && previousCacheReadExposed && event.totalCacheReadExposed,
+    };
     previous = event.total;
+    previousReasoningExposed = event.totalReasoningExposed;
+    previousCacheReadExposed = event.totalCacheReadExposed;
     baselined = true;
     let observed = attributableDelta;
     const owner = event.fingerprint ? counterLedger?.get(event.fingerprint) : undefined;
@@ -771,6 +783,7 @@ async function analyzeCodex(
       }
       claimedCounters.add(event.fingerprint);
       observed = event.last;
+      exposure = { reasoning: event.lastReasoningExposed, cacheRead: event.lastCacheReadExposed };
     } else {
       missingLastUsage += 1;
       if (tokenCount(attributableDelta) === 0 && tokenCount(event.total) > 0) {
@@ -791,7 +804,7 @@ async function analyzeCodex(
         event.timestamp,
         row.updated_at,
         event.executionKind,
-        { dimension: { ...event.dimension, model }, reasoning: event.reasoningExposed, cacheRead: event.cacheReadExposed, cacheWrite: false },
+        { dimension: { ...event.dimension, model }, ...exposure, cacheWrite: false },
       );
     }
   }
@@ -1521,7 +1534,7 @@ function addCursorReportedCost(
       ...zeroTokens(),
       ...zeroCost(),
       calls: 0,
-      model,
+      model: publicModelId(model),
       priced: true,
       totalUsd: value,
       upperEstimateUsd: value,

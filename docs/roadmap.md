@@ -44,6 +44,7 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 - [x] Local date/hour activity buckets for value, token classes, calls and starts, preserving per-event agent, model, execution and effort.
 - [x] Velocity view by agent, provider, model, repository, execution and effort: day/week/month/hour, stacked/line/cumulative charts, rolling daily average, guarded comparisons, burn, scenario projection and movers.
 - [x] Summary daily chart shares the agent velocity ledger; coverage and missing timestamps remain explicit.
+- [x] Validate all public velocity model labels; gate inferences on metric evidence, select Codex coverage with charged counters, reject ambiguous start timestamps, and keep agent chart encodings stable across filters.
 - [ ] Distinguish custom agent identities through an opt-in reviewed taxonomy without exposing free-text attribution.
 
 ### Limits, cache, and context economics

@@ -47,10 +47,16 @@ export function velocityAgent(provider: SessionProvider, identity: AgentIdentity
 }
 export function velocityDimension(provider: SessionProvider, identity: AgentIdentity, execution: ExecutionKind, model: string, effort: unknown): VelocityDimension {
   return {
-    agent: velocityAgent(provider, identity, execution), model,
+    agent: velocityAgent(provider, identity, execution), model: publicModelId(model),
     executionKind: execution === "top-level" || execution === "subagent" ? execution : "unknown",
     effort: velocityEffort(effort),
   };
+}
+
+/** Public IDs are bounded ASCII tokens, never paths, URLs or executable/free text.
+ * Raw labels may still be used privately for pricing lookups. */
+export function publicModelId(value: unknown): string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value) ? value : "<unknown>";
 }
 
 export function counterExposed(value: unknown): boolean {
@@ -93,6 +99,8 @@ export class VelocityAccumulator {
   private undated = new Map<number, VelocityValues>();
 
   add(timestamp: string | null, dimension: VelocityDimension, values: VelocityValues): void {
+    // Final boundary also covers dimensions amended by parser model fallbacks.
+    dimension = { ...dimension, model: publicModelId(dimension.model) };
     const key = JSON.stringify([dimension.agent, dimension.model, dimension.executionKind, dimension.effort]);
     let id = this.dimensionIds.get(key);
     if (id === undefined) {

@@ -112,6 +112,8 @@ The server binds to `127.0.0.1` only and answers read-only `GET` requests. **Ref
 
 Velocity follows **activity dates**, even when the session began before the selected window. Other totals select sessions by start date. The analysis timezone is shown in the view; set `TZ` before launching to choose a different one. Cursor value and other activity without timestamps stay undated. Projection bands are workload scenarios, not confidence intervals or invoices. See the [velocity definitions](docs/metrics.md#velocity-snapshot-version-1) for denominators and attribution rules.
 
+Missing or timezone-free session starts are counted as undated and excluded from dated totals. Velocity comparisons show current/prior evidence beside each percentage; gaps in pricing or token detail make changes, burn and projections unavailable. Agent colors and patterns stay attached to the same identity as filters change.
+
 ### Terminal report
 
 ```bash

@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { addUnsafeVelocityModels } from "./velocity-fixtures.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -73,6 +74,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   let child: ChildProcess | null = null;
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    const unsafeModelSessions = await addUnsafeVelocityModels(fixture);
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
@@ -115,7 +117,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
     const serialized = await response.text();
-    assert.match(serialized, /"analyzedSessions":5/);
+    assert.equal(JSON.parse(serialized).summary.analyzedSessions, 5 + unsafeModelSessions);
     assert.match(serialized, /"providerReportedSpendUsd":1\.48/);
     assert.match(serialized, /"repositories":3/);
     assert.match(serialized, /"skills":\{"frontend-design":1\}/);
@@ -123,6 +125,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(serialized, /"skillEvidence":"explicit"/);
     assert.match(serialized, /"skillEvidence":"inferred"/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
+    assert.doesNotMatch(serialized, /velocity-model-SENTINEL/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);

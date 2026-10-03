@@ -9,7 +9,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 **Returned:** allowlisted counters and identifiers only.
 
 - Token counters by class, cost figures, counts of events, durations, and ISO timestamps.
-- Model IDs and reasoning-effort labels as the provider recorded them.
+- Model IDs matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` (otherwise `<unknown>`) and reasoning-effort labels as the provider recorded them.
 - Tool names, and skill identifiers that match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
@@ -30,7 +30,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 
 - **Allowlist projection.** Parsers accumulate counters into an internal session state, and `finalizeSession` in `src/analyzer.ts` builds each public object field by field. Raw provider records are never spread into an output, so a new field in a provider's format cannot reach an output without a code change.
 - **Internal-only types.** `SessionDatabaseRow` and `AnalyzeOptions` in `src/types.ts` carry paths, titles, branches, and IDs for correlation. They are used inside the analysis process and are not part of any public type.
-- **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
+- **Bounded derived names.** Model IDs must pass the bounded ASCII pattern above; separators for paths, URLs, commands and whitespace are not accepted. Raw model lookup keys stay internal. Both the dimension constructor and accumulator enforce this boundary, including usage-free starts, tool-only records and model fallbacks. Model summaries and their warnings use the same public label. Skill identifiers must match their pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
 - **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded, so local paths in exceptions cannot reach the dashboard.
 - **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
@@ -212,7 +212,7 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
-| `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
+| `model` | Bounded model ID matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; `<unknown>` when missing or invalid | P0 |
 | `calls` | Requests attributed to this model | P0 |
 | `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
 
@@ -224,12 +224,16 @@ region. Repository and session keys are inherited from the enclosing P1 session 
 not repeated inside cells. No event ID, agent ID, parent ID, command, nickname or custom
 agent name is exported. Synthetic sentinel tests cover metadata, streamed content, tool
 inputs, invalid timestamps and spawned-agent objects on the same API/JSON projection.
+Usage-free and tool-only Claude/Codex fixtures also plant forbidden model labels and
+assert their absence through both the capped isolated worker and HTTP API; usage and
+fallback fixtures cover all three providers. No new snapshot fields are needed for
+the browser's daily, period and group evidence guards.
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `dimensions[]` | Per-session dictionary of observed dimension combinations | P0 |
 | `dimensions[].agent` | Fixed enum: `claude-cli`, `claude-sdk`, `claude-desktop`, `claude-unknown`, `claude-general-purpose`, `claude-explore`, `claude-plan`, `claude-subagent`, `codex-cli`, `codex-exec`, `codex-vscode`, `codex-desktop`, `codex-subagent`, `codex-review`, `codex-unknown`, `cursor` | P0 |
-| `dimensions[].model` | Existing model ID or `<unknown>`; never inferred from text | P0 |
+| `dimensions[].model` | Bounded model ID matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`, otherwise `<unknown>`; never inferred from text | P0 |
 | `dimensions[].executionKind` | `top-level`, `subagent`, or `unknown`; no mixed cells | P0 |
 | `dimensions[].effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, or `unknown` | P0 |
 | `buckets[][0]` | Local `YYYY-MM-DD` date of evidenced activity | P0 |
@@ -249,8 +253,8 @@ inputs, invalid timestamps and spawned-agent objects on the same API/JSON projec
 | `values[8]` | Effective tool calls | P0 |
 | `values[9]` | Public sessions started | P0 |
 | `values[10]` | Tokens assigned to a model price; coverage numerator | P0 |
-| `values[11]` | Output tokens with separately recorded reasoning; coverage numerator | P0 |
-| `values[12]` | Input tokens with a cache-read counter; coverage numerator | P0 |
+| `values[11]` | Output with reasoning exposed by the charged usage; a cumulative difference requires both endpoints; coverage numerator | P0 |
+| `values[12]` | Input with cache reads exposed by the charged usage; a cumulative difference requires both endpoints; coverage numerator | P0 |
 | `values[13]` | Input tokens with a cache-write counter; coverage numerator | P0 |
 
 `values` means the tuple in `buckets[][3]` or `undated[][1]`; it is not another JSON key.

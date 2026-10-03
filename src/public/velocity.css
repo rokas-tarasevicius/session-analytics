@@ -21,7 +21,7 @@
 .velocity-main-panel, .velocity-projection, .velocity-movers { margin-top: 1rem; min-height: auto; }
 #velocity-view h3 { margin: 0; font-size: 1.35rem; font-weight: 550; letter-spacing: -.025em; }
 .velocity-chart { min-width: 0; }
-.velocity-chart svg { display: block; width: 100%; height: auto; max-height: none; touch-action: pan-y; }
+.velocity-chart > svg { display: block; width: 100%; height: auto; max-height: none; touch-action: pan-y; }
 .velocity-chart svg:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .velocity-line { stroke-width: 2.2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .velocity-area { stroke-width: 1; fill-opacity: .65; stroke-linejoin: round; }
@@ -29,7 +29,7 @@
 .velocity-marker { stroke: var(--muted); stroke-dasharray: 2 4; pointer-events: none; }
 .velocity-legend { display: flex; flex-wrap: wrap; gap: .65rem 1.25rem; margin: .8rem 0; font: .7rem var(--font-utility); }
 .velocity-legend > span { display: inline-flex; align-items: center; gap: .45rem; overflow-wrap: anywhere; }
-.velocity-legend i { flex: 0 0 9px; width: 9px; height: 9px; }
+.velocity-legend .velocity-swatch { display: block; flex: 0 0 28px; width: 28px; height: 14px; }
 .velocity-legend strong { color: var(--muted); font-weight: 500; }
 .velocity-average-key { color: var(--muted); }
 .velocity-inspection { display: flex; flex-wrap: wrap; gap: .5rem 1rem; padding-block: .85rem; border-block: 1px solid var(--line); color: var(--muted); font: .7rem/1.6 var(--font-utility); }
@@ -43,9 +43,10 @@
 .velocity-movers td:first-child { text-transform: capitalize; color: var(--muted); }
 .velocity-movers td:not(:nth-child(2)) { white-space: nowrap; }
 .velocity-movers td:nth-child(n+3) { font-family: var(--font-utility); }
+.velocity-movers td:last-child { min-width: 220px; white-space: normal; font-size: .75rem; }
 #daily-spend.velocity-chart { height: auto; }
 @media (max-width: 760px) {
-  .velocity-chart svg { min-height: 180px; }
+  .velocity-chart > svg { min-height: 180px; }
   .velocity-totals .metric-card { min-height: 150px; }
   .velocity-legend { font-size: .65rem; }
   .velocity-inspection { max-height: 200px; overflow: auto; }

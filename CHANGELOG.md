@@ -14,6 +14,14 @@ All notable changes to this project are documented here. The format follows [Kee
 - Summary daily usage chart now shows agents using the same velocity data. Global date filters use the analysis timezone; legacy JSON `spendByDay` remains UTC.
 - A usage-free Claude parent placeholder no longer assigns a subagent response to the parent timestamp; total usage/value is unchanged, but day attribution can move.
 
+### Fixed
+
+- Model labels now pass a bounded ID validator before entering velocity cells, model summaries or warnings. Paths, URLs and command-like labels become `<unknown>`, including usage-free contexts, tool-only sessions and Codex model fallbacks.
+- Velocity comparisons, burn, rolling averages, projections and movers require complete metric evidence; missing pricing or token detail no longer looks like a measured decline or recovery. Current/prior known and eligible counters appear beside comparisons.
+- Codex cache/reasoning coverage follows the usage actually counted. Cumulative differences require both endpoints to expose the breakdown; coverage can decrease, while token/value accounting is unchanged.
+- Global date filtering leaves missing and timezone-free session starts undated and reports their excluded count, consistently across browser timezones.
+- All 16 supported agents have stable color/pattern or color/dash encodings, reproduced in chart legends and preserved across date/provider filters.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

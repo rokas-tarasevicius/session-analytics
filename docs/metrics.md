@@ -142,6 +142,8 @@ the velocity view asks for a refresh instead of reconstructing activity from ses
   moved to the session creation time, file modification time or last update. Undated totals
   are labeled as **all-time for the selected repository/provider scope**: a date window
   cannot assign them honestly. Dated plus undated counters reconcile with session totals.
+  Global session-start filtering follows the same rule: missing or timezone-free starts
+  are excluded from dated totals and counted as undated in the Summary session note.
 - Claude prices the final streamed usage once at the first positive-usage snapshot's
   timestamp in the owning execution kind. A usage-free parent placeholder cannot assign a
   subagent's usage to the parent's date. Tools use their first deduplicated call timestamp.
@@ -186,6 +188,11 @@ custom attribution strings never leave the parser. Cursor has a provider-level a
 identity. Velocity effort is restricted to `none`, `minimal`, `low`, `medium`, `high`,
 `xhigh`, `max`, `ultra`, or `unknown`, independently of the legacy session effort field.
 
+Public model IDs match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; missing or invalid labels
+become `<unknown>`. Paths, URLs, whitespace and command punctuation are rejected, including
+usage-free start dimensions and tool-only records. Raw model keys remain internal for
+pricing lookup; the same validated label is used by model summaries and warnings.
+
 ### Compact counters and coverage
 
 `session.velocity.dimensions` is a per-session dictionary. `buckets` entries are
@@ -218,12 +225,22 @@ reasoning shares or cache-hit rates. Missing provider fields remain missing evid
 even when the underlying legacy counter is zero. Token classes overlap: reasoning is
 inside output, and uncached/read/write are inside input. Do not add all selectors together.
 
+Codex exposure is selected alongside the usage actually charged: a positive per-request
+`last_token_usage` uses that record's fields. When last usage is absent, empty or has zero
+input/output, the cumulative difference uses only breakdowns evidenced at **both**
+endpoints. Each field must be a finite, non-negative number; an observed zero is valid.
+An unused last-usage object cannot certify a cumulative difference. Reset baselines remain
+excluded. This changes coverage, not existing token/value accounting.
+
 Counters aggregate on the server before serialization. There are no public per-request
 records, no IDs in cells, and no duplicate daily/hour or six-dimensional marginal payloads.
 Model/repository charts show the largest seven series plus an exact Other remainder; agent,
 provider, execution and effort charts retain every evidenced group. This cap changes only
 presentation, never totals. All chart modes share a text readout, pointer inspection, and
 one keyboard focus stop with Left/Right, Home/End navigation.
+All 16 supported agents have fixed identity slots: eight theme-aware colors, each with
+solid/diagonal area fills or solid/dashed lines. Legends reproduce the actual SVG encoding.
+Agent colors and patterns do not change when date/provider filters change spend rankings.
 
 ### Change, burn and projection guardrails
 
@@ -236,17 +253,33 @@ observed calendar days / required calendar days for each period. It does not pro
 provider retained all historical transcripts. A range clipped by the global window or the
 first observed date is not a complete comparison.
 
+Calendar coverage and **metric evidence** are separate. Known/eligible counters are retained
+per day, period and mover group, including groups with zero measured value. Pricing,
+reasoning, cache-read/uncached and cache-write inferences require 100% evidence over their
+eligible tokens on both sides. Even equally partial coverage is insufficient. Known and
+eligible counts for current/prior periods are displayed beside percentages; incomplete
+evidence returns N/A. Recorded zeroes and inactive dates remain valid observations, but
+0/0 evidence coverage is labeled N/A, never 100%. Unsupported providers have no eligible
+denominator; a numeric unsupported contribution (Cursor's legacy uncached input) also
+blocks inference. Sessions without any velocity data block comparisons. Observed totals
+remain visible and are labeled partial when applicable.
+
 Percent changes require a previous value of at least $0.01, 100 tokens, 3 sessions/model
 calls, or 5 tool calls. Value/token percentages also require at least 3 prior model calls.
 A zero or tiny baseline produces N/A, never an infinite percentage or a fabricated 0%.
 Top movers rank absolute increases separately for repository, model and agent over the
 last seven completed days versus the preceding seven. Percent guards use each group's
 own prior calls; new groups can have a positive absolute increase with an N/A percentage.
+Groups with incomplete evidence in either period are excluded from mover rankings; their
+count is displayed. Ranked rows show each period's known/eligible counts. This prevents a
+return of pricing or token telemetry from being described as a workload increase.
 
 Burn is today's partial value divided by the median of the previous 14 full calendar
 days. It needs all 14 dates, at least 3 active dates, and the same minimum-activity guard.
 The full denominator and its coverage are displayed. **This is not a same-hour comparison**
 and will usually rise during the day. Historical windows do not show a “today” ratio.
+Both today's evidence and all baseline evidence must be complete, with their known/eligible
+counters shown alongside the ratio. Rolling averages also return N/A over any evidence gap.
 
 The end-of-month projection uses the observed total through the last complete date plus
 remaining calendar days at the median of up to 14 trailing complete daily values. The
@@ -254,8 +287,11 @@ low/high scenarios use their 10th/90th percentiles. If today is partial, its pro
 contribution is the larger of the observed value and the scenario daily rate; a busy
 today does not consume the projection for future full days. It requires the month
 from its start inside the selected/observed range, at least 7 complete sample dates,
-at least 3 active dates, and a minimum-activity guard. Zero dates count. The band is a
-**rate scenario, not a confidence interval**: no normality, independence or probability
+at least 3 active dates, and a minimum-activity guard. Zero dates count. Metric evidence
+must be complete for the whole observed month
+(including today) and every sampled day. Gaps are not zero samples and are not silently
+dropped. Month/sample evidence counts stay visible even when the projection is unavailable.
+The band is a **rate scenario, not a confidence interval**: no normality, independence or probability
 of future usage is claimed. It assumes the workload continues and cannot anticipate
 project changes. API-equivalent value is not an invoice; activity counters do not prove
 success, quality, human time saved or value delivered.

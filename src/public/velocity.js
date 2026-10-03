@@ -1,4 +1,4 @@
-import { buildVelocity, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
+import { agentLabels, buildVelocity, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
   const result = document.createElement(tag);
@@ -20,7 +20,20 @@ export function formatMetric(value, metric, short = false) {
   return (short ? compact : number).format(value);
 }
 const deltaLabel = (value) => value === null ? "N/A" : `${value > 0 ? "+" : ""}${number.format(value * 100)}%`;
-const color = (index) => `var(--velocity-${index % 8})`;
+const evidenceLabels = { value: "priced tokens", reasoning: "output with reasoning detail", uncached: "input with cache-read detail", cacheRead: "input with cache-read detail", cacheWrite: "input with cache-write detail" };
+function evidenceText(evidence, metric) {
+  if (!evidenceLabels[metric]) return "Recorded counters";
+  const ratio = evidence.eligible > 0 ? `${number.format(evidence.known)}/${number.format(evidence.eligible)} ${evidenceLabels[metric]} (${number.format(100 * evidence.known / evidence.eligible)}%)` : "N/A · no eligible tokens";
+  return `${ratio}${evidence.unsupported ? `; ${number.format(evidence.unsupported)} without an applicable breakdown` : ""}`;
+}
+// Sixteen supported identities: eight colors × solid/striped area (or solid/
+// dashed line). Slots belong to identity, never spend rank or visible position.
+const agentSlots = new Map(Object.keys(agentLabels).map((id, index) => [id, index]));
+let chartSequence = 0;
+function seriesEncoding(series, index, group) {
+  const slot = group === "agent" ? agentSlots.get(series.id) ?? 15 : index;
+  return { color: `var(--velocity-${slot % 8})`, pattern: slot >= 8 ? "diagonal" : "solid", dash: slot >= 8 ? "6 3" : "none" };
+}
 const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : granularity === "week" ? `Week of ${key}` : key;
 
 /** One focus stop, arrow-key inspection, and a text equivalent for every plotted bucket. */
@@ -41,6 +54,20 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   const x = (index) => left + (data.keys.length === 1 ? plotWidth / 2 : index / (data.keys.length - 1) * plotWidth);
   const y = (value) => top + (1 - value / axisMaximum) * plotHeight;
   const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, tabindex: 0, role: "group", "aria-label": `${metricDefinitions[data.metric].label}, ${data.granularity}, ${data.mode}. Use Left and Right arrows, Home and End to inspect each bucket.` });
+  const chartId = ++chartSequence;
+  const definitions = svgElement("defs", {});
+  const encodings = data.series.map((series, index) => {
+    const encoding = seriesEncoding(series, index, data.group);
+    let fill = encoding.color;
+    if (stacked && encoding.pattern === "diagonal") {
+      const id = `velocity-pattern-${chartId}-${index}`;
+      const pattern = svgElement("pattern", { id, patternUnits: "userSpaceOnUse", width: 8, height: 8 });
+      pattern.append(svgElement("rect", { width: 8, height: 8, fill: encoding.color }), svgElement("path", { d: "M-2 2 L2 -2 M0 8 L8 0 M6 10 L10 6", stroke: "var(--surface)", "stroke-width": 2, "stroke-opacity": 0.75 }));
+      definitions.append(pattern); fill = `url(#${id})`;
+    }
+    return { ...encoding, fill };
+  });
+  svg.append(definitions);
   for (let tick = 0; tick <= 4; tick += 1) {
     const value = axisMaximum * tick / 4;
     svg.append(svgElement("line", { x1: left, x2: width - right, y1: y(value), y2: y(value), class: "grid-line" }));
@@ -50,11 +77,12 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   for (const index of ticks) svg.append(svgElement("text", { x: x(index), y: height - 12, "text-anchor": index === 0 ? "start" : index === data.keys.length - 1 ? "end" : "middle", class: "axis-label" }, caption(data.keys[index], data.granularity)));
   let floor = data.keys.map(() => 0);
   data.series.forEach((series, seriesIndex) => {
+    const encoding = encodings[seriesIndex];
     const upper = series.values.map((value, i) => value + (stacked ? floor[i] : 0));
-    const path = svgElement("path", { d: upper.map((value, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(value)}`).join(" ") + (stacked ? ` ${floor.map((_, i) => { const j = floor.length - i - 1; return `L${x(j)},${y(floor[j])}`; }).join(" ")} Z` : ""), class: stacked ? "velocity-area" : "velocity-line", stroke: color(seriesIndex), fill: stacked ? color(seriesIndex) : "none" });
-    if (!stacked && seriesIndex >= 8) path.setAttribute("stroke-dasharray", "6 3");
+    const path = svgElement("path", { d: upper.map((value, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(value)}`).join(" ") + (stacked ? ` ${floor.map((_, i) => { const j = floor.length - i - 1; return `L${x(j)},${y(floor[j])}`; }).join(" ")} Z` : ""), class: stacked ? "velocity-area" : "velocity-line", stroke: encoding.color, fill: stacked ? encoding.fill : "none", "data-series": series.id, "data-pattern": encoding.pattern });
+    if (!stacked) path.setAttribute("stroke-dasharray", encoding.dash);
     svg.append(path);
-    if (upper.length === 1) svg.append(svgElement("circle", { cx: x(0), cy: y(upper[0]), r: 4, fill: color(seriesIndex) }));
+    if (upper.length === 1) svg.append(svgElement("circle", { cx: x(0), cy: y(upper[0]), r: 4, stroke: encoding.color, "stroke-width": 2, fill: stacked ? encoding.fill : encoding.pattern === "solid" ? encoding.color : "var(--surface)" }));
     if (stacked) floor = upper;
   });
   if (overlay) {
@@ -66,7 +94,13 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   svg.append(marker);
   const legend = element("div", undefined, "velocity-legend");
   data.series.forEach((series, index) => {
-    const item = element("span"), swatch = element("i"); swatch.style.backgroundColor = color(index);
+    const encoding = encodings[index];
+    const item = element("span"), swatch = svgElement("svg", { viewBox: "0 0 28 14", "aria-hidden": "true", class: "velocity-swatch" });
+    item.setAttribute("data-series", series.id);
+    swatch.append(stacked
+      ? svgElement("rect", { x: 1, y: 1, width: 26, height: 12, fill: encoding.fill, stroke: encoding.color, "fill-opacity": 0.65 })
+      : svgElement("line", { x1: 0, x2: 28, y1: 7, y2: 7, stroke: encoding.color, "stroke-width": 2.2, "stroke-dasharray": encoding.dash }));
+    if (!stacked && data.keys.length === 1) swatch.append(svgElement("circle", { cx: 14, cy: 7, r: 3, stroke: encoding.color, "stroke-width": 2, fill: encoding.pattern === "solid" ? encoding.color : "var(--surface)" }));
     item.append(swatch, element("span", series.label), element("strong", formatMetric(series.total, data.metric, true)));
     legend.append(item);
   });
@@ -159,17 +193,17 @@ export function renderVelocity(container, sessions, context) {
       subtitle.textContent = `${current.start} → ${current.end} · ${current.timeZone} · ${options.granularity === "hour" ? "Totals for each local clock hour; repeated DST hours combine." : options.granularity === "week" || options.granularity === "month" ? "Boundary periods include only selected dates." : "Inactive calendar dates are included."} ${options.mode === "cumulative" ? "Accumulation restarts at the selected start date." : ""}`;
       renderVelocityChart(chart, data, { rolling: rolling.checked && !rolling.disabled });
       coverage.textContent = coverageText(data);
-      const comparisonNote = (item) => `${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} and ${item.previous.coveredDays}/${item.previous.days} calendar days covered. ${item.delta === null ? "N/A: incomplete window or small baseline." : "Same elapsed days; today excluded."}`;
+      const comparisonNote = (item) => `Observed ${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} and ${item.previous.coveredDays}/${item.previous.days} calendar days covered. ${evidenceLabels[options.metric] ? `Evidence current: ${evidenceText(item.current.evidence, options.metric)}; prior: ${evidenceText(item.previous.evidence, options.metric)}. ` : ""}${item.delta === null ? "N/A: incomplete evidence/window or small baseline." : "Same elapsed days; today excluded."}`;
       totals.replaceChildren(
-        card("Selected period", formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric), `${data.daily.length} calendar days · ${metricDefinitions[options.metric].unit}. Activity counters do not prove quality or value delivered.`),
+        card("Selected period", formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric), `${data.daily.length} calendar days · ${metricDefinitions[options.metric].unit}${data.evidence.complete ? "" : " · partially observed"}. Activity counters do not prove quality or value delivered.`),
         card("This week vs last", deltaLabel(indicators.week.delta), comparisonNote(indicators.week)),
         card("Month to date vs prior", deltaLabel(indicators.month.delta), comparisonNote(indicators.month)),
-        card("Today / 14-day median", indicators.burn.ratio === null ? "N/A" : `${number.format(indicators.burn.ratio)}×`, `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered. Today is partial; this is not a same-hour comparison.`),
+        card("Today / 14-day median", indicators.burn.ratio === null ? "N/A" : `${number.format(indicators.burn.ratio)}×`, `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered. ${evidenceLabels[options.metric] ? `Evidence today: ${evidenceText(indicators.burn.todayEvidence, options.metric)}; baseline: ${evidenceText(indicators.burn.baselineEvidence, options.metric)}. ` : ""}Today is partial; this is not a same-hour comparison.`),
       );
       projection.replaceChildren(element("p", "END-OF-MONTH SCENARIO", "kicker"));
       const forecast = indicators.projection;
       if (!forecast) {
-        projection.append(element("h3", "More complete history needed"), element("p", "Select the month from its start, with at least 7 completed days and 3 active days. A small baseline or a clipped time window is not enough to project.", "chart-note"));
+        projection.append(element("h3", "More complete history needed"), element("p", "Select the month from its start, with at least 7 completed days and 3 active days. Complete metric evidence is required for the month, today and every sampled day. Missing pricing or token detail, a small baseline or a clipped time window cannot support a projection.", "chart-note"));
       } else {
         projection.append(element("h3", `${formatMetric(forecast.value, options.metric)} projected by ${forecast.monthEnd}`));
         const band = svgElement("svg", { viewBox: "0 0 960 60", role: "img", "aria-label": `Scenario range ${formatMetric(forecast.low, options.metric)} to ${formatMetric(forecast.high, options.metric)}, median ${formatMetric(forecast.value, options.metric)}`, class: "velocity-band" });
@@ -177,16 +211,18 @@ export function renderVelocity(container, sessions, context) {
         band.append(svgElement("line", { x1: 24, x2: 934, y1: 30, y2: 30, class: "velocity-band-base" }), svgElement("line", { x1: scale(forecast.low), x2: scale(forecast.high), y1: 30, y2: 30, class: "velocity-band-range" }), svgElement("circle", { cx: scale(forecast.value), cy: 30, r: 7, class: "velocity-band-point" }));
         projection.append(band, element("p", `${formatMetric(forecast.low, options.metric)}–${formatMetric(forecast.high, options.metric)} scenario range · ${forecast.sampleDays} complete days sampled, ${forecast.activeDays} active · ${forecast.remainingDays} days to project.`, "chart-note"), element("p", "Completed month-to-date plus remaining days at the trailing daily median, with today never below its observed value; range uses the daily 10th–90th percentiles. This is a rate scenario, not a confidence interval. It assumes the recent workload continues, includes inactive days, and cannot predict changes in work. API-equivalent value is not an invoice.", "chart-note"));
       }
+      if (evidenceLabels[options.metric]) projection.append(element("p", `Evidence month to date: ${evidenceText(indicators.projectionEvidence.observed, options.metric)}; sample: ${evidenceText(indicators.projectionEvidence.sample, options.metric)}.`, "chart-note"));
       const movement = topMovers(scoped, options, today);
       movers.replaceChildren(element("p", "LARGEST INCREASES", "kicker"), element("h3", "Top movers"), element("p", `${movement.start}–${movement.end} vs ${movement.previousStart}–${movement.previousEnd} · last 7 completed days versus preceding 7 · ${metricDefinitions[options.metric].label.toLowerCase()}.`, "chart-note"));
-      if (!movement.available || !movement.rows.length) movers.append(element("p", !movement.available ? "Select at least 14 completed days of observed history to compare movers." : "No increases in this window.", "empty-state"));
+      if (movement.excludedGroups) movers.append(element("p", `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.`, "chart-note"));
+      if (!movement.available || !movement.rows.length) movers.append(element("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
       else {
         const wrap = element("div", undefined, "table-wrap"), table = element("table"), head = element("thead"), body = element("tbody"), row = element("tr");
-        for (const title of ["Dimension", "Name", "Previous 7 days", "Last 7 days", "Increase", "Change"]) { const th = element("th", title); th.scope = "col"; row.append(th); }
+        for (const title of ["Dimension", "Name", "Previous 7 days", "Last 7 days", "Increase", "Change", "Evidence · previous → current"]) { const th = element("th", title); th.scope = "col"; row.append(th); }
         head.append(row);
         for (const item of movement.rows) {
           const row = element("tr");
-          for (const value of [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? "N/A · small baseline" : deltaLabel(item.delta)]) row.append(element("td", value));
+          for (const value of [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? "N/A · small baseline" : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]) row.append(element("td", value));
           body.append(row);
         }
         table.append(head, body); wrap.append(table); movers.append(wrap);
