@@ -2,6 +2,7 @@ import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisValueFlags, analyzeOptionsFrom } from "./options.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
+import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
 
 const valueFlags = new Set(analysisValueFlags);
 const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--json", "--version", "--no-additional-providers"]);
@@ -76,6 +77,7 @@ function dollars(value: number): string {
 const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
 
 const analytics = await analyzeMachineSessionsIsolated(analyzeOptions);
+const metricValue = (value: number, metric: Metric, format = compactNumber, sessions = analytics.sessions): string => coveredValue(value, metricCoverage(sessions, metric), format);
 
 if (process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);
@@ -92,34 +94,37 @@ if (process.argv.includes("--json")) {
   const activitySessions = analytics.sessions.filter((session) => session.evidence?.fidelity === "activity-only").length;
   const fileDates = analytics.sessions.filter((session) => session.evidence?.timing === "file-mtime").length;
   if (summarySessions || activitySessions) process.stdout.write(`Evidence: ${summarySessions}/${analytics.summary.sessions} summary-only, ${activitySessions}/${analytics.summary.sessions} activity-only; ${fileDates} file-modification dates (start unknown). Unavailable metrics are N/A.\n`);
+  const partial = analytics.sessions.filter((session) => session.evidence?.accounting === "partial").length;
+  if (partial) process.stdout.write(`Accounting: ${partial}/${analytics.sessions.length} sessions have partial retained totals.\n`);
   process.stdout.write("\nRepository comparison\n");
   for (const repository of [...analytics.repositories].sort(
     (left, right) => right.summary.estimatedSpendUsd - left.summary.estimatedSpendUsd,
   )) {
+    const sessions = analytics.sessions.filter((s) => s.repositoryId === repository.repository.id);
     process.stdout.write(
-      `${dollars(repository.summary.estimatedSpendUsd).padStart(10)}  ` +
+      `${metricValue(repository.summary.estimatedSpendUsd, "cost", dollars, sessions).padStart(10)}  ` +
         `${String(repository.summary.sessions).padStart(4)} sessions  ` +
-        `${compactNumber(repository.summary.totalInputTokens).padStart(7)} input  ` +
+        `${metricValue(repository.summary.totalInputTokens, "tokens", compactNumber, sessions).padStart(7)} input  ` +
         `${repository.repository.name}\n`,
     );
   }
   process.stdout.write(
-    `Priced usage value: ${dollars(analytics.summary.estimatedSpendUsd)} (not an invoice)\n` +
-      `  API list-price equivalent: ${dollars(analytics.summary.apiEquivalentSpendUsd)}\n` +
-      `  Provider-reported local value: ${dollars(analytics.summary.providerReportedSpendUsd)}\n` +
-      `  Sub-agent contribution: ${dollars(analytics.summary.subagentSpendUsd)}\n`,
+    `Priced usage value: ${metricValue(analytics.summary.estimatedSpendUsd, "cost", dollars)} (not an invoice)\n` +
+      `  API list-price equivalent: ${metricValue(analytics.summary.apiEquivalentSpendUsd, "apiCost", dollars)}\n` +
+      `  Provider-reported local value: ${metricValue(analytics.summary.providerReportedSpendUsd, "reportedCost", dollars)}\n` +
+      `  Sub-agent contribution: ${metricValue(analytics.summary.subagentSpendUsd, "cost", dollars, analytics.sessions.filter((s) => ["subagent", "mixed"].includes(s.executionKind)))}\n`,
   );
   process.stdout.write(
-    `Tokens: ${compactNumber(analytics.summary.totalInputTokens)} input, ` +
-      `${compactNumber(analytics.summary.outputTokens)} output\n`,
+    `Tokens: ${metricValue(analytics.summary.totalInputTokens, "tokens")} input, ` +
+      `${metricValue(analytics.summary.outputTokens, "tokens")} output\n`,
   );
   process.stdout.write(
-    `Cache reads: ${analytics.summary.totalInputTokens ? `${(analytics.summary.cacheReadRatio * 100).toFixed(1)}%` : "N/A"}; ` +
-      `tools: ${compactNumber(analytics.summary.toolCalls)}; ` +
-      `compactions: ${analytics.summary.compactions}\n`,
+    `Cache reads: ${analytics.summary.totalInputTokens ? metricValue(analytics.summary.cacheReadRatio, "tokens", (value) => `${(value * 100).toFixed(1)}%`) : "N/A"}; ` +
+      `tools: ${metricValue(analytics.summary.toolCalls, "tools")}; ` +
+      `compactions: ${metricValue(analytics.sessions.filter((s) => metricEligible(s, "compactions")).reduce((n, s) => n + s.metrics.compactions, 0), "compactions")}\n`,
   );
   process.stdout.write("\nTop sessions by priced usage value\n");
-  for (const session of [...analytics.sessions]
+  for (const session of analytics.sessions.filter((s) => metricEligible(s, "cost"))
     .sort((left, right) => right.cost.totalUsd - left.cost.totalUsd)
     .slice(0, 15)) {
     const model = session.models.map(({ model: name }) => name).join(", ") || "unknown model";

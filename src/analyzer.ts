@@ -26,6 +26,7 @@ import type {
 
 import { createClaudeAdapter } from "./providers/claude.ts";
 import { additionalProviderSessions } from "./providers/index.ts";
+import { modelName, name as safeName, effortName, safeTime, statusName } from "./providers/common.ts";
 import { conductorFallback } from "./providers/conductor.ts";
 
 const toolRoot = new URL(".", import.meta.url);
@@ -148,7 +149,8 @@ function stringValue(value: unknown): string | null {
 }
 
 function increment(target: Record<string, number>, key: string, amount = 1): void {
-  target[key] = (target[key] ?? 0) + amount;
+  key = safeName(key) ?? "unknown_tool";
+  target[key] = (Object.hasOwn(target, key) ? target[key]! : 0) + amount;
 }
 
 function sumTokens(target: TokenUsage, source: TokenUsage): void {
@@ -168,12 +170,12 @@ function tokenCount(usage: TokenUsage): number {
 }
 
 function isoDay(timestamp: string | null, fallback: string): string {
-  const date = new Date(timestamp ?? fallback);
-  return Number.isNaN(date.valueOf()) ? fallback.slice(0, 10) : date.toISOString().slice(0, 10);
+  const date = new Date(safeTime(timestamp) ?? safeTime(fallback) ?? "2000-01-01T00:00:00Z");
+  return date.toISOString().slice(0, 10);
 }
 
 function trackTimestamp(session: MutableSession, timestamp: string | null): void {
-  if (!timestamp) return;
+  if (!timestamp || !safeTime(timestamp)) return;
   if (!session.firstEventAt || timestamp < session.firstEventAt) session.firstEventAt = timestamp;
   if (!session.lastEventAt || timestamp > session.lastEventAt) session.lastEventAt = timestamp;
 }
@@ -302,6 +304,7 @@ function addModelUsage(
   fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
 ): void {
+  model = modelName(model);
   let aggregate = session.models.get(model);
   if (!aggregate) {
     aggregate = {
@@ -640,7 +643,7 @@ async function analyzeCodex(
 
     if (type === "turn_context") {
       currentModel = stringValue(payload?.["model"]) ?? currentModel;
-      state.effort = stringValue(payload?.["effort"]) ?? state.effort;
+      state.effort = effortName(payload?.["effort"]) ?? state.effort;
       return;
     }
     if (type === "compacted") {
@@ -873,7 +876,7 @@ function finalizeSession(
         : "api-list-price-equivalent",
     costByExecution: { ...state.costByExecution },
     costComplete: pricedTokenCoverage === null || pricedTokenCoverage === 1,
-    createdAt: row.created_at,
+    createdAt: safeTime(row.created_at) ?? state.firstEventAt ?? safeTime(row.updated_at) ?? "2000-01-01T00:00:00Z",
     effort: state.effort,
     executionKind,
     firstEventAt: state.firstEventAt,
@@ -893,7 +896,7 @@ function finalizeSession(
           : "unavailable",
     skills: state.skills,
     spendByDay: state.spendByDay,
-    status: row.status,
+    status: statusName(row.status),
     tokens,
     tools: state.tools,
     transcript: {
@@ -903,7 +906,7 @@ function finalizeSession(
       warnings: [...new Set(state.warnings)],
     },
     transportTools: state.transportTools,
-    updatedAt: row.updated_at,
+    updatedAt: safeTime(row.updated_at) ?? state.lastEventAt ?? safeTime(row.created_at) ?? "2000-01-01T00:00:00Z",
   };
 }
 
@@ -1299,19 +1302,15 @@ function addCursorReportedCost(
 ): number {
   const usageData = asRecord(data["usageData"]);
   let total = 0;
-  for (const [model, rawUsage] of Object.entries(usageData ?? {})) {
+  for (const [rawModel, rawUsage] of Object.entries(usageData ?? {})) {
+    const model = modelName(rawModel);
     const usage = asRecord(rawUsage);
     const value = Math.max(0, numberValue(usage?.["costInCents"]) / 100);
     if (value === 0) continue;
-    const aggregate: ModelUsage = {
-      ...zeroTokens(),
-      ...zeroCost(),
-      calls: 0,
-      model,
-      priced: true,
-      totalUsd: value,
-      upperEstimateUsd: value,
+    const aggregate: ModelUsage = state.models.get(model) ?? {
+      ...zeroTokens(), ...zeroCost(), calls: 0, model, priced: true,
     };
+    aggregate.totalUsd += value; aggregate.upperEstimateUsd += value;
     state.models.set(model, aggregate);
     if (state.executionKind === "subagent") state.costByExecution.subagentUsd += value;
     else if (state.executionKind === "top-level") state.costByExecution.topLevelUsd += value;
@@ -1893,13 +1892,7 @@ async function analyzeSelectedRepositories(
     const claudeIndex = mergeTranscriptIndexes(claudeIndexes);
     const [codexCandidates, claudeCandidates] = await Promise.all([
       transcriptCandidates(codexIndex.paths, "codex"),
-      (async () => {
-        const unique = new Map<string, TranscriptCandidate>();
-        for (const root of claudeRoots) for await (const candidate of claudeAdapter.identify(root)) {
-          if (!unique.has(candidate.id)) unique.set(candidate.id, candidate);
-        }
-        return [...unique.values()];
-      })(),
+      transcriptCandidates(claudeIndex.paths, "claude"),
     ]);
     const codexCounterLedger = await buildCodexCounterLedger(
       codexCandidates.map(({ path }) => path),
@@ -2006,20 +1999,21 @@ async function analyzeSelectedRepositories(
     });
     allSessions.push(...additional.sessions);
     const canonicalIdentities = new Set([...candidates.map((c) => `${c.provider}:${c.id}`), ...additional.identities]);
-    const fallback = conductorFallback(database, canonicalIdentities);
     const analyzedKeys = new Set(allSessions.map((s) => s.sessionKey));
-    for (const row of rows) {
-      if (analyzedKeys.has(createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12))) continue;
+    const eligibleRows = rows.filter((row) => {
+      if (analyzedKeys.has(createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12))) return false;
       const identity = `${row.agent_type}:${row.provider_session_id}`;
-      const cursorKey = createHash("sha256").update(identity).digest("hex").slice(0, 12);
-      if (row.provider_session_id && (canonicalIdentities.has(identity) || analyzedKeys.has(cursorKey))) continue;
-      const repository = repositoryById.get(row.repository_id);
-      if (!repository) continue;
-      try {
-        const session = fallback(row, { repository, ...pricing });
-        if (session) { allSessions.push(session); analyzedKeys.add(session.sessionKey); canonicalIdentities.add(identity); }
-      } catch { additional.warnings.push("A provider evidence fallback could not be read; canonical sessions were retained."); }
-    }
+      return !row.provider_session_id || (!canonicalIdentities.has(identity) && !analyzedKeys.has(createHash("sha256").update(identity).digest("hex").slice(0, 12)));
+    });
+    try {
+      for (const session of conductorFallback(database, eligibleRows, canonicalIdentities, pricing)) {
+        allSessions.push(session);
+        if (!repositoryById.has(session.repositoryId)) {
+          const root = `unassigned:${session.repositoryId}`;
+          discovered.set(root, { id: session.repositoryId, name: session.repositoryName, root_path: root, remote_url: null, default_branch: "" });
+        }
+      }
+    } catch { additional.warnings.push("A provider evidence fallback could not be read; canonical sessions were retained."); }
     const allRepositories = [...availableRepositories, ...discovered.values()].sort((left, right) => left.name.localeCompare(right.name));
     const selectedRepositories = selectRepositories(allRepositories, options);
     const selectedIds = new Set(selectedRepositories.map(({ id }) => id));

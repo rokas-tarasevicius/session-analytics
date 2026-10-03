@@ -1,4 +1,4 @@
-import { providerIds, providerLabels, providerColors, providerMark, renderProviderEvidence, dailySpendByProvider } from "./providers.js";
+import { providerIds, providerLabels, providerColors, providerMark, renderProviderEvidence, dailySpendByProvider, metricEligible, metricCoverage, coveredValue } from "./providers.js";
 
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -79,6 +79,11 @@ function node(tag, value, className) {
 
 function clear(element) { element.replaceChildren(); }
 
+function renderMetricValue(element, value, coverage, format) {
+  element.textContent = coverage.eligible ? format(value) : "N/A";
+  if (coverage.eligible && coverage.eligible < coverage.selected) element.append(node("small", ` · ${coverage.eligible}/${coverage.selected} sessions`));
+}
+
 function selectedRepository() {
   const id = elements.repositoryFilter.value;
   return id === "all" ? null : snapshot.repositories.find(({ repository }) => repository.id === id) || null;
@@ -102,23 +107,24 @@ function sessionsInWindow(sessions) {
 function summarize(sessions) {
   const totals = { inputTokens: 0, outputTokens: 0, uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0 };
   let pricedTokens = 0, observedTokens = 0;
-  const summary = { analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: null, compactions: 0, estimatedSpendUsd: 0, estimatedUpperSpendUsd: 0, missingTranscripts: 0, outputTokens: 0, pricedTokenCoverage: null, providerReportedSpendUsd: 0, sessions: sessions.length, subagentSessions: 0, subagentSpendUsd: 0, toolCalls: 0, topLevelSessions: 0, topLevelSpendUsd: 0, totalInputTokens: 0, unpricedSessions: 0 };
+  const summary = { coverage: Object.fromEntries(["tokens", "tools", "compactions", "cost", "apiCost", "reportedCost"].map((metric) => [metric, metricCoverage(sessions, metric)])), analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: null, compactions: 0, estimatedSpendUsd: 0, estimatedUpperSpendUsd: 0, missingTranscripts: 0, outputTokens: 0, pricedTokenCoverage: null, providerReportedSpendUsd: 0, sessions: sessions.length, subagentSessions: 0, subagentSpendUsd: 0, toolCalls: 0, topLevelSessions: 0, topLevelSpendUsd: 0, totalInputTokens: 0, unpricedSessions: 0 };
   for (const session of sessions) {
     summary.analyzedSessions += session.transcript.status === "ok" ? 1 : 0;
     summary.missingTranscripts += session.transcript.status === "missing" ? 1 : 0;
-    summary.compactions += session.metrics.compactions; summary.toolCalls += session.metrics.toolCalls;
-    summary.estimatedSpendUsd += session.cost.totalUsd; summary.estimatedUpperSpendUsd += session.cost.upperEstimateUsd;
-    summary.apiEquivalentSpendUsd += session.costBasis === "api-list-price-equivalent" ? session.cost.totalUsd : 0;
-    summary.providerReportedSpendUsd += session.costBasis === "provider-reported" ? session.cost.totalUsd : 0;
+    if (metricEligible(session, "compactions")) summary.compactions += session.metrics.compactions;
+    if (metricEligible(session, "tools")) summary.toolCalls += session.metrics.toolCalls;
+    if (metricEligible(session, "cost")) { summary.estimatedSpendUsd += session.cost.totalUsd; summary.estimatedUpperSpendUsd += session.cost.upperEstimateUsd; }
+    summary.apiEquivalentSpendUsd += metricEligible(session, "apiCost") ? session.cost.totalUsd : 0;
+    summary.providerReportedSpendUsd += metricEligible(session, "reportedCost") ? session.cost.totalUsd : 0;
     summary.subagentSessions += session.executionKind === "subagent" || session.executionKind === "mixed" ? 1 : 0;
     summary.topLevelSessions += session.executionKind === "top-level" || session.executionKind === "mixed" ? 1 : 0;
     summary.subagentSpendUsd += session.costByExecution?.subagentUsd || 0;
     summary.topLevelSpendUsd += session.costByExecution?.topLevelUsd || 0;
-    summary.totalInputTokens += session.tokens.inputTokens; summary.outputTokens += session.tokens.outputTokens;
+    if (metricEligible(session, "tokens")) { summary.totalInputTokens += session.tokens.inputTokens; summary.outputTokens += session.tokens.outputTokens; }
     summary.unpricedSessions += !session.costComplete && session.pricedTokenCoverage !== null ? 1 : 0;
-    for (const key of Object.keys(totals)) totals[key] += session.tokens[key] || 0;
+    if (metricEligible(session, "tokens")) for (const key of Object.keys(totals)) totals[key] += session.tokens[key] || 0;
     const count = session.tokens.inputTokens + session.tokens.outputTokens;
-    if (session.pricedTokenCoverage !== null) {
+    if (session.pricedTokenCoverage !== null && metricEligible(session, "tokens")) {
       observedTokens += count; pricedTokens += count * session.pricedTokenCoverage;
     }
   }
@@ -132,8 +138,14 @@ function mergeModels(sessions) {
   const models = new Map();
   for (const session of sessions) for (const source of session.models) {
     const key = `${session.provider}:${source.model}`;
-    const target = models.get(key) || { model: source.model, provider: session.provider, calls: 0, priced: true };
-    for (const key of [...tokenFields, ...costFields, "calls"]) target[key] = (target[key] || 0) + (source[key] || 0);
+    const target = models.get(key) || { model: source.model, provider: session.provider, calls: 0, priced: true, selected: 0, eligible: { calls: 0, input: 0, output: 0, value: 0 } };
+    target.selected++;
+    for (const [metric, eligibility] of Object.entries({ calls: "calls", input: "tokens", output: "tokens", value: "cost" })) if (metricEligible(session, eligibility)) target.eligible[metric]++;
+    for (const key of [...tokenFields, ...costFields, "calls"]) {
+      const metric = key === "calls" ? "calls" : tokenFields.includes(key) ? "tokens" : "cost";
+      if (metricEligible(session, metric)) target[key] = (target[key] || 0) + (source[key] || 0);
+      else target[key] ||= 0;
+    }
     target.priced = target.priced && source.priced; models.set(key, target);
   }
   return [...models.values()].sort((left, right) => right.totalUsd - left.totalUsd);
@@ -141,7 +153,7 @@ function mergeModels(sessions) {
 
 function namedTotals(sessions, field) {
   const totals = new Map();
-  for (const session of sessions) for (const [name, value] of Object.entries(session[field])) totals.set(name, (totals.get(name) || 0) + value);
+  for (const session of sessions.filter((s) => !["tools", "skills"].includes(field) || metricEligible(s, field))) for (const [name, value] of Object.entries(session[field])) totals.set(name, (totals.get(name) || 0) + value);
   return [...totals].map(([name, value]) => ({ name, value })).sort((left, right) => right.value - left.value);
 }
 
@@ -152,6 +164,8 @@ function coverageWarnings(sessions) {
   const legacy = missing.filter(({ transcript }) => transcript.warnings.includes("Conductor has no provider session ID.")).length;
   const unmatched = missing.length - legacy, unpriced = sessions.filter(({ costComplete, pricedTokenCoverage }) => !costComplete && pricedTokenCoverage !== null).length;
   const warnings = [];
+  const partial = sessions.filter((s) => s.evidence?.accounting === "partial").length;
+  if (partial) warnings.push(`${partial}/${sessions.length} sessions have partial accounting; retained totals do not prove complete history.`);
   if (legacy) warnings.push(`${legacy} legacy session${legacy === 1 ? "" : "s"} cannot be correlated because Conductor recorded no provider session ID.`);
   if (unmatched) warnings.push(`${unmatched} session${unmatched === 1 ? "" : "s"} have a provider ID but no validated local transcript.`);
   const activityOnly = sessions.filter((s) => s.evidence?.tokens === "unavailable").length;
@@ -199,12 +213,12 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
       row.addEventListener("click", () => onSelect(item));
     }
     const label = node("div", null, "bar-label");
-    label.append(node("span", item.name), node("strong", formatter(item.value)));
+    label.append(node("span", item.name), node("strong", item.coverage ? coveredValue(item.value, item.coverage, formatter) : formatter(item.value)));
     const track = node("div", null, "bar-track");
     const fill = node("i");
     if (item.provider) fill.dataset.provider = item.provider;
-    fill.style.width = `${Math.max(1.5, (item.value / maximum) * 100)}%`;
-    track.append(fill); row.append(label, track); container.append(row);
+    fill.style.width = `${(item.value / maximum) * 100}%`;
+    if (!item.coverage || item.coverage.eligible) track.append(fill); row.append(label, track); container.append(row);
   }
 }
 
@@ -300,14 +314,21 @@ function renderDistributionChart(container, series, accessor, formatter, logarit
     ...item,
     values: item.sessions.map(accessor).filter((value) => typeof value === "number" && Number.isFinite(value) && value >= 0),
   }));
-  const allValues = valuesBySeries.flatMap(({ values }) => values);
-  if (allValues.length === 0) { container.append(node("p", "No eligible sessions in this comparison.", "muted")); return; }
-  const bins = 10, maximum = Math.max(1, ...allValues), width = 680, height = 245;
+  const minimum = 5;
+  for (const item of valuesBySeries) {
+    const count = `${item.values.length}/${item.sessions.length} eligible sessions`;
+    const label = item.values.length === 0 ? `N/A · ${count}` : item.values.length < minimum ? `${count} · minimum ${minimum} to draw a distribution` : count;
+    container.append(node("p", `${item.name} · ${label}`, "muted"));
+  }
+  const drawable = valuesBySeries.filter((item) => item.values.length >= minimum);
+  const allValues = drawable.flatMap(({ values }) => values);
+  if (allValues.length === 0) return;
+  const bins = 10, maximum = allValues.reduce((max, value) => Math.max(max, value), 1), width = 680, height = 245;
   const left = 42, right = 12, top = 14, bottom = 34, plotWidth = width - left - right, plotHeight = height - top - bottom;
   const position = logarithmic ? (value) => Math.log1p(value) : (value) => value;
   const valueAtPosition = logarithmic ? (value) => Math.expm1(value) : (value) => value;
   const maximumPosition = Math.max(1, position(maximum));
-  const distributions = valuesBySeries.map((item) => {
+  const distributions = drawable.map((item) => {
     const counts = Array.from({ length: bins }, () => 0);
     for (const value of item.values) counts[Math.min(bins - 1, Math.floor((position(value) / maximumPosition) * bins))] += 1;
     return { ...item, shares: counts.map((count) => item.values.length ? count / item.values.length : 0) };
@@ -358,12 +379,12 @@ function renderDistributions() {
   }));
   for (const item of series) {
     const key = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", repositoryColor(item.id));
-    key.append(swatch, document.createTextNode(`${item.name} · ${item.sessions.length}`)); elements.distributionKey.append(key);
+    key.append(swatch, document.createTextNode(item.name)); elements.distributionKey.append(key);
   }
-  renderDistributionChart(elements.distributionDuration, series, ({ metrics, evidence }) => evidence?.timing === "file-mtime" ? null : metrics.durationMilliseconds / 60_000, (value) => `${Math.round(value)}m`, true);
-  renderDistributionChart(elements.distributionCost, series, (session) => session.costBasis === "api-list-price-equivalent" ? session.cost.totalUsd : null, (value) => money(value), true);
-  renderDistributionChart(elements.distributionTools, series, ({ metrics, evidence }) => evidence?.tools === "unavailable" ? null : metrics.toolCalls, (value) => integer.format(value), true);
-  renderDistributionChart(elements.distributionCompactions, series, ({ metrics, evidence }) => evidence && ["conductor-result", "cursor-sdk", "cursor-transcript", "gemini-chat"].includes(evidence.source) ? null : metrics.compactions, (value) => integer.format(value));
+  renderDistributionChart(elements.distributionDuration, series, (s) => metricEligible(s, "duration") ? s.metrics.durationMilliseconds / 60_000 : null, (value) => `${Math.round(value)}m`, true);
+  renderDistributionChart(elements.distributionCost, series, (session) => metricEligible(session, "apiCost") ? session.cost.totalUsd : null, (value) => money(value), true);
+  renderDistributionChart(elements.distributionTools, series, (s) => metricEligible(s, "tools") ? s.metrics.toolCalls : null, (value) => integer.format(value), true);
+  renderDistributionChart(elements.distributionCompactions, series, (s) => metricEligible(s, "compactions") ? s.metrics.compactions : null, (value) => integer.format(value));
 }
 
 function renderActivity(view) {
@@ -440,6 +461,7 @@ function renderActivity(view) {
 function costTotals(sessions) {
   const result = { cached: 0, input: 0, output: 0, reported: 0, total: 0, upper: 0, write: 0 };
   for (const session of sessions) {
+    if (!metricEligible(session, "cost")) continue;
     if (session.costBasis === "provider-reported") result.reported += session.cost.totalUsd;
     if (session.costBasis !== "api-list-price-equivalent") continue;
     result.cached += session.cost.cachedInputUsd; result.input += session.cost.inputUsd;
@@ -453,16 +475,14 @@ function renderCostRows(container, groups) {
   clear(container); const list = node("div", null, "cost-stack-list");
   for (const group of groups) {
     const total = group.cost.total + group.cost.reported;
-    if (total <= 0) continue;
+    if (total <= 0 && !group.coverage) continue;
     const row = node("div", null, "cost-stack-row"); row.append(node("strong", group.name));
     const stack = node("div", null, "cost-stack");
-    const components = group.cost.reported > 0 && group.cost.total === 0
-      ? [["reported", group.cost.reported]]
-      : [["input", group.cost.input], ["cached", group.cost.cached], ["write", group.cost.write], ["output", group.cost.output]];
+    const components = [["input", group.cost.input], ["cached", group.cost.cached], ["write", group.cost.write], ["output", group.cost.output], ["reported", group.cost.reported]];
     for (const [name, value] of components) {
       if (value <= 0) continue; const bar = node("i"); bar.dataset.component = name; bar.style.width = `${(value / total) * 100}%`; stack.append(bar);
     }
-    row.append(stack, node("strong", money(total))); list.append(row);
+    row.append(stack, node("strong", group.coverage ? coveredValue(total, group.coverage, money) : money(total))); list.append(row);
   }
   if (list.childElementCount === 0) list.append(node("p", "No priced activity in this view.", "muted"));
   container.append(list);
@@ -475,13 +495,13 @@ function renderCostRows(container, groups) {
 
 function renderCosts(view) {
   const cost = costTotals(view.sessions);
-  elements.costApiTotal.textContent = money(cost.total); elements.costUpperTotal.textContent = money(cost.upper);
-  elements.costProviderTotal.textContent = money(cost.reported); elements.costCoverage.textContent = percent(view.summary.pricedTokenCoverage);
+  renderMetricValue(elements.costApiTotal, cost.total, metricCoverage(view.sessions, "apiCost"), money); renderMetricValue(elements.costUpperTotal, cost.upper, metricCoverage(view.sessions, "apiCost"), money);
+  renderMetricValue(elements.costProviderTotal, cost.reported, metricCoverage(view.sessions, "reportedCost"), money); elements.costCoverage.textContent = percent(view.summary.pricedTokenCoverage);
   renderCostRows(elements.providerCostComponents, providerIds.map((provider) => ({
-    name: providerLabels[provider], cost: costTotals(view.sessions.filter((session) => session.provider === provider)),
+    name: providerLabels[provider], coverage: metricCoverage(view.sessions.filter((session) => session.provider === provider), "cost"), cost: costTotals(view.sessions.filter((session) => session.provider === provider)),
   })));
   renderCostRows(elements.repositoryCostComponents, view.repositories.map(({ repository }) => ({
-    name: repository.name, cost: costTotals(view.sessions.filter(({ repositoryId }) => repositoryId === repository.id)),
+    name: repository.name, coverage: metricCoverage(view.sessions.filter(({ repositoryId }) => repositoryId === repository.id), "cost"), cost: costTotals(view.sessions.filter(({ repositoryId }) => repositoryId === repository.id)),
   })).sort((left, right) => (right.cost.total + right.cost.reported) - (left.cost.total + left.cost.reported)).slice(0, 12));
 }
 
@@ -509,8 +529,8 @@ function renderModels(view) {
     const maximum = Math.max(1, ...providerModels.map(metric.value));
     for (const model of providerModels.sort((left, right) => metric.value(right) - metric.value(left))) {
       const row = node("div", null, "model-row"); row.append(node("span", model.model));
-      const track = node("div", null, "model-track"), fill = node("i"); fill.style.width = `${Math.max(1, (metric.value(model) / maximum) * 100)}%`; track.append(fill);
-      const suffix = `${metric.format(metric.value(model))} · ${sessionsPerModel.get(`${provider}:${model.model}`) || 0} sessions${model.priced ? "" : " · unpriced"}`;
+      const track = node("div", null, "model-track"), fill = node("i"); fill.style.width = `${(metric.value(model) / maximum) * 100}%`; if (model.eligible[modelMetric]) track.append(fill);
+      const suffix = `${coveredValue(metric.value(model), { eligible: model.eligible[modelMetric], selected: model.selected }, metric.format)} · ${model.selected} selected sessions${model.priced ? "" : " · unpriced"}`;
       row.append(track, node("strong", suffix)); group.append(row);
     }
     elements.modelsByProvider.append(group);
@@ -533,10 +553,11 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
   const header = node("div", null, "distribution-row header-row");
   header.append(node("span", "Repository"), node("span", "Distribution"), node("span", field === "skills" ? "Observed" : "Calls"), node("span", skillMode ? "Coverage" : "Top")); tableContainer.append(header);
   const rows = view.repositories.map(({ repository }) => {
-    const repositorySessions = sessions.filter(({ repositoryId }) => repositoryId === repository.id);
+    const selected = sessions.filter(({ repositoryId }) => repositoryId === repository.id);
+    const repositorySessions = selected.filter((s) => metricEligible(s, field));
     const totals = new Map(namedTotals(repositorySessions, field).map(({ name, value }) => [name, value]));
-    return { repository, sessions: repositorySessions, total: [...totals.values()].reduce((sum, value) => sum + value, 0), totals };
-  }).filter(({ total }) => total > 0).sort((left, right) => right.total - left.total);
+    return { repository, selected, sessions: repositorySessions, total: [...totals.values()].reduce((sum, value) => sum + value, 0), totals };
+  }).filter(({ selected }) => selected.length > 0).sort((left, right) => right.total - left.total);
   for (const item of rows) {
     const row = node("div", null, "distribution-row"); const open = node("button", item.repository.name);
     open.type = "button"; open.addEventListener("click", () => {
@@ -553,7 +574,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
       const other = node("i"); other.dataset.other = "true"; other.style.width = `${((item.total - represented) / item.total) * 100}%`; stack.append(other);
     }
     const top = [...item.totals.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "—";
-    row.append(stack, node("strong", integer.format(item.total)), node("span", skillMode ? evidenceLabel(item.sessions) : top)); tableContainer.append(row);
+    row.append(stack, node("strong", coveredValue(item.total, { eligible: item.sessions.length, selected: item.selected.length }, (v) => integer.format(v))), node("span", skillMode ? evidenceLabel(item.sessions) : top)); tableContainer.append(row);
   }
   if (rows.length === 0) tableContainer.append(node("p", skillMode ? "No observed skill invocations in this view." : "No tool activity in this view.", "muted"));
   for (const [index, { name }] of names.entries()) {
@@ -568,6 +589,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
   const selectedRow = rows.find(({ repository }) => repository.id === selectedId);
   detailTitle.textContent = selectedRow?.repository.name || "No repository selected";
   renderBars(detailContainer, selectedRow ? namedTotals(selectedRow.sessions, field) : [], (value) => integer.format(value), 10);
+  if (selectedRow && !selectedRow.sessions.length) { clear(detailContainer); detailContainer.append(node("p", `N/A · 0/${selectedRow.selected.length} sessions with ${field} evidence`, "muted")); }
 }
 
 function clearInactiveAnalyticsViews(activeName) {
@@ -728,7 +750,7 @@ function renderRepositoryTable(repositories) {
     row.tabIndex = 0; row.setAttribute("role", "link"); row.setAttribute("aria-label", `Open metrics for ${item.repository.name}`);
     row.addEventListener("click", () => selectRepository(item.repository.id));
     row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectRepository(item.repository.id); } });
-    row.append(tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`), tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), tableCell(money(summary.estimatedSpendUsd), `${money(summary.subagentSpendUsd)} sub-agent`, "money"), tableCell(compact.format(summary.totalInputTokens)), tableCell(compact.format(summary.outputTokens)), tableCell(compact.format(summary.toolCalls)), tableCell(percent(summary.cacheReadRatio)), tableCell(percent(summary.pricedTokenCoverage), summary.missingTranscripts ? `${summary.missingTranscripts} missing` : "complete"));
+    row.append(tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`), tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), tableCell(coveredValue(summary.estimatedSpendUsd, summary.coverage.cost, money), null, "money"), tableCell(coveredValue(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v))), tableCell(coveredValue(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v))), tableCell(coveredValue(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v))), tableCell(coveredValue(summary.cacheReadRatio, summary.coverage.tokens, percent)), tableCell(percent(summary.pricedTokenCoverage), `${summary.analyzedSessions}/${summary.sessions} parsed; metric coverage varies`));
     elements.repositoryRows.append(row);
   }
 }
@@ -788,16 +810,17 @@ function renderSharedView(view) {
 
 function renderSummary(view) {
   const summary = view.summary;
-  elements.spend.textContent = money(summary.estimatedSpendUsd); elements.spendNote.textContent = `${money(summary.apiEquivalentSpendUsd)} API-equivalent · ${money(summary.providerReportedSpendUsd)} provider-reported · not an invoice`;
+  renderMetricValue(elements.spend, summary.estimatedSpendUsd, summary.coverage.cost, money); elements.spendNote.textContent = `${coveredValue(summary.apiEquivalentSpendUsd, summary.coverage.apiCost, money)} API-equivalent · ${coveredValue(summary.providerReportedSpendUsd, summary.coverage.reportedCost, money)} provider-reported · not an invoice`;
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`;
-  elements.input.textContent = compact.format(summary.totalInputTokens); elements.cache.textContent = `${percent(summary.cacheReadRatio)} cached · repeated context included`;
-  elements.output.textContent = compact.format(summary.outputTokens); elements.tools.textContent = compact.format(summary.toolCalls); elements.compactions.textContent = integer.format(summary.compactions); elements.live.textContent = integer.format(summary.workingSnapshots);
+  renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v)); elements.cache.textContent = `${coveredValue(summary.cacheReadRatio, summary.coverage.tokens, percent)} cached · repeated context included`;
+  renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v)); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v)); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v)); elements.live.textContent = integer.format(summary.workingSnapshots);
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
-  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
-  renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
-  renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd }) => ({ name: model, value: totalUsd, provider })), money, 8);
-  renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
+  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd, coverage: item.summary.coverage.cost })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
+  renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
+  renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd, eligible, selected }) => ({ name: model, value: totalUsd, provider, coverage: { eligible: eligible.value, selected } })), money, 8);
+  renderBars(elements.toolCalls, view.topTools.map((item) => ({ ...item, coverage: summary.coverage.tools })), (value) => integer.format(value), 10);
+  if (!summary.coverage.tools.eligible) { clear(elements.toolCalls); elements.toolCalls.append(node("p", "N/A · no eligible tool evidence", "muted")); }
   renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.subagentSpendUsd })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
   renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
   renderProviderEvidence($("#provider-evidence-rows"), view.sessions);

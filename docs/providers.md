@@ -168,15 +168,17 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 - A result-only session cannot recover missing tools, skills, user messages, request counts, execution kind, or request times. Result `num_turns` counts SDK loop turns, not human turns.
 - Missing/malformed messages, unrecognized agent types, or results whose provider ID conflicts with the registered row do not become evidence. Ordinary stored assistant/user messages are not parsed as fallback transcripts.
 
-**Result fallback:** canonical Claude/Codex/Cursor evidence wins. After identity matching and unique legacy recovery, a remaining row can use direct `type: result` envelopes. Records are deduplicated by result UUID (database message ID when absent), and duplicated provider identities do not create another session. Local validation found result envelopes in `content`; older stores may use `full_message`. Both are optional, and a missing `session_messages` table preserves native-provider behavior.
+**Result fallback:** canonical native evidence wins. All remaining rows are collected before grouping by the result's provider identity, including legacy rows without a registered ID. UUIDs (message IDs when absent) deduplicate receipt copies; they do not identify independent accounting periods. Rows that disagree about repository attribution use an explicit unassigned group. This parser supports verified Claude SDK results; other providers' superficially similar result envelopes require separate scope verification.
 
-Allowlisted result fields are `total_cost_usd`, `usage`, `modelUsage`, `num_turns`, `duration_ms`, `duration_api_ms`, `permission_denials.length`, `is_error`, and a bounded `terminal_reason`/`subtype` enum. `modelUsage` counters take precedence over `usage`; they are never added together. Top-level reported USD controls the session total. A model-allocation mismatch receives a fixed warning. Values are **Reported**, with `evidence.fidelity: summary`; no rates, component allocation, per-day costs, or outcome verdicts are invented. See the [result metric definitions](metrics.md#additional-provider-evidence).
+Cumulative totals use the final valid snapshot per proven interval, not the sum of receipts. `system/init` UUIDs and `claude_code_version` establish supported process/version boundaries; explicit `conversation_reset` links admit changed identities. Older verified process intervals can be disjoint; restored resumes overlap earlier totals. Unknown or conflicting histories retain a partial observed snapshot. Zeroed crash results preserve earlier evidence. Counter decreases alone never prove a reset. The [official SDK scope guide](https://code.claude.com/docs/en/agent-sdk/cost-tracking#accumulate-costs-across-multiple-calls) documents version-dependent resume behavior.
+
+Only scalar counters, bounded model IDs, and fixed enums leave the parser. Turn-local `usage` is separate from cumulative `modelUsage`. SDK turn/duration/denial counters become null across multiple receipts because their scopes are not established. Receipt/error/terminal-reason counts remain independent of accounting. There is no inferred request count, tool count, daily spend, or task-success verdict. See [metric definitions](metrics.md#additional-provider-evidence).
 
 ## Cursor SDK through Conductor
 
 **Where:** `~/Library/Application Support/com.conductor.app/cursor-sdk-store`, or `--cursor-sdk-root`. Format verified read-only against local store shapes; fixtures contain only synthetic records.
 
-**Identity:** `agents.ndjson` supplies `agentId`, `cwd`, and created/updated timestamps. Latest agent/run snapshots are retained; raw identities and SDK metadata never reach output.
+**Identity:** `agents.ndjson` supplies `agentId`, `cwd`, and created/updated timestamps. Each directory is traversed once for runs and once for events. Identity-scoped projections retain only compact counters, bounded model/tool labels, and private correlation IDs; rescans rebuild them. Latest run snapshots are retained; raw event bodies and SDK metadata are discarded.
 
 | Store | Fields retained for analytics |
 | --- | --- |
@@ -236,3 +238,9 @@ Every added store has its own explicit option and `SESSION_ANALYTICS_*` variable
 ## Adding a provider
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-provider) for the checklist. A new source needs a discovery rule with an explicit override option, an identity check, a parser that only accumulates allowlisted counters, fixtures with sentinel content, and a section on this page.
+
+### Review hardening and resource limits
+
+OpenCode forks copy old messages/parts under fresh IDs. The adapter uses retained message timestamps and compact stable evidence fingerprints to identify inherited ownership before pricing; inherited requests are counted only at their original session/date. If original ownership is missing or timestamps are absent, copied usage is excluded and accounting is partial. New requests after fork creation remain eligible. Namespaced models retain their exact identity for rate lookup.
+
+Gemini partial reorder patches preserve the unmentioned prefix before the explicitly ordered suffix, matching the pinned replay implementation. Legacy JSON is read/projected once. Legacy files larger than **4 MiB**, replays exceeding **20,000 retained messages** or **50,000 tool references**, and oversized individual projections are rejected with fixed warnings. JSONL line buffering is bounded before parsing (4 Mi characters for Gemini); skipped malformed/oversized records mark accounting partial. Large unsupported histories need a streaming/disk-backed replay implementation before these limits can be raised. The synthetic memory probe reserves earlier-provider heap and checks budget rejection under the production 256 MiB cap; this does not establish total-worker heap headroom.

@@ -122,15 +122,15 @@ Repository summaries and the machine summary share these fields.
 | `provider` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, or `gemini` | P0 |
 | `repositoryId` | Repository key, as in `repository.id` | P1 |
 | `repositoryName` | Repository display name, as in `repository.name` | P1 |
-| `status` | Legacy session status, or a normalized new-source label (`unknown`, `working`, `idle`, `completed`, `failed`, `cancelled`, `archived`, `queued`) | P0 |
+| `status` | Validated session status label (`unknown`, `working`, `idle`, `completed`, `failed`, `cancelled`, `archived`, `queued`, `running`) | P0 |
 | `createdAt` | Provider session start time; file modification time only when `evidence.timing` is `file-mtime` | P0 |
 | `updatedAt` | Recorded session update/end time when available; otherwise the session start time. File modification time for `file-mtime` evidence | P0 |
 | `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
 | `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
-| `effort` | Reasoning-effort label as recorded, or `null` | P0 |
+| `effort` | Validated reasoning-effort enum (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, `auto`, `unknown`), or `null` | P0 |
 | `executionKind` | `top-level`, `subagent`, `mixed`, or `unknown` | P0 |
 | `costBasis` | `api-list-price-equivalent`, `provider-reported`, or `unavailable` | P0 |
-| `costComplete` | Legacy semantics unchanged. For added sources: all observed tokens priced, or every retained Conductor result has reported USD. Activity-only evidence is incomplete; this field never proves complete historical retention | P0 |
+| `costComplete` | For added sources: all owned observed tokens priced, or supported Conductor accounting intervals with cost for every selected snapshot. Partial accounting forces false. Activity-only evidence is incomplete; this field never proves complete historical retention | P0 |
 | `pricedTokenCoverage` | Share of this session's tokens with a known rate, or `null` | P0 |
 | `cost` | Cost breakdown; see [Cost breakdown](#cost-breakdown-costbreakdown) | P0 |
 | `costByExecution.topLevelUsd` | Value attributed to top-level execution | P0 |
@@ -149,6 +149,7 @@ Repository summaries and the machine summary share these fields.
 | `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
 | `evidence` | Optional source fidelity and availability; absent on the original native-provider projections | P0 |
+| `evidence.accounting` | Optional `complete` or `partial` for retained accounting; no promise of complete historical retention | P0 |
 | `evidence.source` | `conductor-result`, `cursor-sdk`, `cursor-transcript`, `copilot-events`, `opencode-db`, or `gemini-chat` | P0 |
 | `evidence.fidelity` | `message`, `summary`, or `activity-only`; describes the retained source, not task quality | P0 |
 | `evidence.tokens` | `reported` or `unavailable`; distinguishes observed counters (including recorded zero) from missing evidence | P0 |
@@ -157,13 +158,25 @@ Repository summaries and the machine summary share these fields.
 | `evidence.timing` | `provider` or `file-mtime`; file dates cannot establish start time, duration, or active hours | P0 |
 | `evidence.usageUnit` | `request`, `run`, `session`, or `unavailable`; identifies the granularity of token evidence | P0 |
 | `conductor` | Optional result-only SDK counters, populated only for Conductor fallback sessions | P0 |
+| `conductor.turnLocalTokens` | Deduplicated turn-local receipt counters in the nine-field `TokenUsage` shape below; separate from cumulative session/model totals; null if no usage counters are recorded | P0 |
+| `conductor.turnLocalTokens.inputTokens` | Same inputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.uncachedInputTokens` | Same uncachedInputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.cachedInputTokens` | Same cachedInputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.cacheWriteInputTokens` | Same cacheWriteInputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.cacheWrite5mInputTokens` | Same cacheWrite5mInputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.cacheWrite1hInputTokens` | Same cacheWrite1hInputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.outputTokens` | Same outputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.reasoningOutputTokens` | Same reasoningOutputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
+| `conductor.turnLocalTokens.nonReasoningOutputTokens` | Same nonReasoningOutputTokens semantics as TokenUsage, scoped to deduplicated turn-local receipts only | P0 |
 | `conductor.resultRecords` | Distinct retained terminal SDK result records after UUID/message-ID deduplication | P0 |
-| `conductor.reportedTurns` | Sum of available SDK `num_turns`, or `null` if absent; not human turns | P0 |
-| `conductor.durationMilliseconds` | Sum of available result `duration_ms`, or `null` if absent; SDK run duration, distinct from the session wall span | P0 |
-| `conductor.apiDurationMilliseconds` | Sum of available `duration_api_ms`, or `null` if absent | P0 |
-| `conductor.permissionDenials` | Sum of recorded denial-array lengths, or `null` if no arrays were recorded; no denial objects escape | P0 |
+| `conductor.reportedTurns` | A single receipt's SDK `num_turns`; null when absent or multiple receipts; not human turns | P0 |
+| `conductor.durationMilliseconds` | A single receipt's `duration_ms`; null when absent or multiple receipts; distinct from the session wall span | P0 |
+| `conductor.apiDurationMilliseconds` | A single receipt's `duration_api_ms`; null when absent or multiple receipts | P0 |
+| `conductor.permissionDenials` | A single receipt's denial-array length; null when absent or multiple receipts; no denial objects escape | P0 |
 | `conductor.errorResults` | Count of results with `is_error === true`; not a task-failure verdict | P0 |
 | `conductor.terminalReasons` | Counts keyed only by `success`, `error_during_execution`, `error_max_turns`, `error_max_budget_usd`, `error_max_structured_output_retries`, `completed`, `cancelled`, `interrupted`, or `unknown`; all other values map to `unknown` | P0 |
+
+Structured metadata is validated before aggregation and warning construction. Model IDs use a separate bounded grammar that preserves namespaces (including `org/model` and `@cf/vendor/model`) and exact rate keys, while rejecting filesystem, URL, whitespace/control, and credential shapes. Tool/skill identifiers exclude prototype keys. Rejected model/tool values become fixed unknown labels; timestamps must parse as bounded ISO date-time forms. Private correlation IDs and ownership fingerprints remain inside the worker.
 
 ### Session metrics (`SessionMetrics`)
 

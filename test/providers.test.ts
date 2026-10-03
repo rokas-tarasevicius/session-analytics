@@ -80,7 +80,7 @@ test("Conductor recovers deduplicated result-only sessions and never adds fallba
     assert.equal(s.metrics.userTurns, 0);
     assert.equal(s.metrics.modelCalls, 0);
     assert.deepEqual(s.tools, {}); assert.deepEqual(s.spendByDay, {});
-    assert.deepEqual(s.conductor, { resultRecords: 1, reportedTurns: 3, durationMilliseconds: 1234, apiDurationMilliseconds: 1000, permissionDenials: 1, errorResults: 1, terminalReasons: { unknown: 1 } });
+    assert.deepEqual(s.conductor, { resultRecords: 1, reportedTurns: 3, durationMilliseconds: 1234, apiDurationMilliseconds: 1000, permissionDenials: 1, errorResults: 1, terminalReasons: { unknown: 1 }, turnLocalTokens: tokens(999999, 0, 0, 999999) });
     const manifest = await readFile(new URL("../docs/privacy.md", import.meta.url), "utf8");
     for (const [namespace, value] of [["evidence", s.evidence], ["conductor", s.conductor]] as const) {
       for (const key of Object.keys(value!)) assert.ok(manifest.includes(`\`${namespace}.${key}\``), `Undocumented public field ${namespace}.${key}`);
@@ -270,6 +270,9 @@ test("Copilot counts only persisted activity, validates identity, and never inte
     assert.equal(report.status, 0, report.stderr);
     assert.match(report.stdout, /Evidence: 0\/1 summary-only, 1\/1 activity-only/);
     assert.match(report.stdout, /Cache reads: N\/A;/);
+    assert.match(report.stdout, /Priced usage value: N\/A/);
+    assert.match(report.stdout, /Tokens: N\/A input, N\/A output/);
+    assert.doesNotMatch(report.stdout, /\$0\.00|Session [a-f0-9]{12}/);
     privateOutput(report.stdout, root);
   });
 });

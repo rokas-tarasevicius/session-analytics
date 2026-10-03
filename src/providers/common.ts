@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import type { CostBreakdown, ModelUsage, ProviderEvidence, SessionAnalytics, SessionProvider, TokenUsage } from "../types.ts";
 import type { ProviderContext, ProviderSession } from "./adapter.ts";
 
@@ -13,11 +12,23 @@ export const finite = (value: unknown): number | null => typeof value === "numbe
 export const hasCounters = (value: RecordValue | null, keys: string[]): boolean => value !== null && keys.some((key) => finite(value[key]) !== null);
 export const count = (value: unknown): number => Math.min(Number.MAX_SAFE_INTEGER, Math.floor(finite(value) ?? 0));
 export const name = (value: unknown): string | null => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) && !["__proto__", "constructor", "prototype"].includes(value) ? value : null;
-export const modelName = (value: unknown): string => name(value) ?? "<unknown>";
+/** Model namespaces are part of identity, never aliases. Reject filesystem/URL/secret shapes. */
+export function modelName(value: unknown): string {
+  if (typeof value !== "string" || value.length > 192 || /^(?:sk-|gh[pousr]_|AKIA|Bearer|token[:_-])/i.test(value)) return "<unknown>";
+  const parts = value.split("/");
+  if (parts.length > 3 || parts.some((part, index) => !(index === 0 && part === "@cf") && !name(part))) return "<unknown>";
+  if (parts.some((part) => part === "." || part === ".." || /\.(?:jsonl?|sqlite|db|txt|md|py|tsx?|pem|key)$/i.test(part))) return "<unknown>";
+  if (parts.length > 1 && /^(?:Users|home|private|tmp|var|etc|usr|opt|mnt|Volumes|Library|C:|D:)$/i.test(parts[0]!)) return "<unknown>";
+  return value;
+}
+export const effortName = (value: unknown): string | null => typeof value === "string" ? (["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "auto"].includes(value) ? value : "unknown") : null;
+export const statusName = (value: unknown): string => typeof value === "string" && ["working", "idle", "completed", "failed", "cancelled", "archived", "queued", "running"].includes(value) ? value : "unknown";
+/** Preserve valid legacy timestamp spelling for parity; reject arbitrary suffixes. */
+export const safeTime = (value: unknown): string | null => typeof value === "string" && timestamp(value) ? value : null;
 export const hash = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 12);
 export function timestamp(value: unknown): string | null {
   if (typeof value !== "string" && typeof value !== "number") return null;
-  if (typeof value === "string" && !/^\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d/.test(value)) return null;
+  if (typeof value === "string" && !/^\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)?$/.test(value)) return null;
   const date = new Date(value);
   return Number.isFinite(date.valueOf()) && date.valueOf() >= 946684800000 ? date.toISOString() : null;
 }
@@ -62,21 +73,37 @@ export async function* files(root: string, accepts: (file: string) => boolean, d
 
 export async function readJson(path: string): Promise<RecordValue | null> {
   try {
-    // Monolithic legacy stores must fit comfortably within the analysis heap.
+    // Generic file allowance; memory-sensitive adapters impose a smaller source-specific budget.
     if ((await stat(path)).size > 32 * 1024 * 1024) return null;
     return parse(await readFile(path, "utf8"));
   } catch { return null; }
 }
 
 /** Null means a malformed/truncated line; raw parse errors never leave the reader. */
-export async function* jsonLines(path: string): AsyncGenerator<RecordValue | null> {
+export async function* jsonLines(path: string, maxLineLength = 16 * 1024 * 1024): AsyncGenerator<RecordValue | null> {
   const input = createReadStream(path, { encoding: "utf8" });
-  const reader = createInterface({ input, crlfDelay: Infinity });
+  let parts: string[] = [], length = 0, oversized = false;
   try {
-    for await (const line of reader) {
-      if (line.trim()) yield line.length <= 16 * 1024 * 1024 ? parse(line) : null;
+    for await (const raw of input) {
+      const chunk = String(raw);
+      let start = 0;
+      while (start < chunk.length) {
+        const newline = chunk.indexOf("\n", start), end = newline < 0 ? chunk.length : newline;
+        const piece = chunk.slice(start, end);
+        if (!oversized) {
+          length += piece.length;
+          if (length > maxLineLength) { oversized = true; parts = []; }
+          else parts.push(piece);
+        }
+        if (newline < 0) break;
+        if (oversized) yield null;
+        else { const line = parts.join(""); if (line.trim()) yield parse(line); }
+        parts = []; length = 0; oversized = false; start = newline + 1;
+      }
     }
-  } finally { reader.close(); input.destroy(); }
+    if (oversized) yield null;
+    else { const line = parts.join(""); if (line.trim()) yield parse(line); }
+  } finally { input.destroy(); }
 }
 
 export function emptySession(identity: ProviderSession, provider: SessionProvider, context: ProviderContext, evidence: ProviderEvidence): SessionAnalytics {

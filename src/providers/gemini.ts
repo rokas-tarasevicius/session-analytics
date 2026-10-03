@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { ProviderAdapter } from "./adapter.ts";
+import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
 import { addUsage, count, emptySession, files, finish, increment, jsonLines, modelName, name, observeTime, readJson, record, text, timestamp, tokens, type RecordValue } from "./common.ts";
 
 interface Message {
@@ -15,15 +15,29 @@ function projectMessage(raw: unknown): Message | null {
   if (!message || !id || !["user", "gemini"].includes(String(message["type"]))) return null;
   const usage = record(message["tokens"]);
   const calls = Array.isArray(message["toolCalls"]) ? message["toolCalls"] : [];
+  if (calls.length > 1_000 || id.length > 512) throw new Error("Gemini message projection exceeds the memory budget.");
   return { id, type: String(message["type"]), at: timestamp(message["timestamp"]), model: modelName(message["model"]),
     // Gemini candidatesTokenCount excludes thoughtsTokenCount; output pricing includes both.
     usage: usage ? tokens(usage["input"], usage["cached"], 0, count(usage["output"]) + count(usage["thoughts"]), usage["thoughts"], true) : null,
-    tools: calls.flatMap((raw) => { const c = record(raw), tool = name(c?.["name"]), id = text(c?.["id"]); return tool && id ? [{ name: tool, id }] : []; }) };
+    tools: calls.flatMap((raw) => { const c = record(raw), tool = name(c?.["name"]), id = text(c?.["id"]); return tool && id && id.length <= 512 ? [{ name: tool, id }] : []; }) };
 }
 
+const legacyByteLimit = 4 * 1024 * 1024;
+const messageLimit = 20_000;
+type Legacy = { metadata: RecordValue; messages: Message[] };
+const legacyProjections = new WeakMap<ProviderSession, Legacy>();
+async function legacyProjection(path: string): Promise<Legacy | null> {
+  if ((await stat(path)).size > legacyByteLimit) throw new Error("Gemini legacy store exceeds the memory budget.");
+  const data = await readJson(path);
+  if (!data || !Array.isArray(data["messages"])) return null;
+  if (data["messages"].length > messageLimit) throw new Error("Gemini replay exceeds the memory budget.");
+  const metadata = Object.fromEntries(["sessionId", "projectHash", "startTime", "lastUpdated", "kind"].map((key) => [key, data[key]]));
+  const messages = data["messages"].flatMap((raw) => { const message = projectMessage(raw); return message ? [message] : []; });
+  if (messages.reduce((n, m) => n + m.tools.length, 0) > 50_000) throw new Error("Gemini tool projection exceeds the memory budget.");
+  return { metadata, messages };
+}
 async function header(path: string): Promise<RecordValue | null> {
-  if (path.endsWith(".json")) return readJson(path);
-  for await (const row of jsonLines(path)) if (text(row?.["sessionId"]) && text(row?.["projectHash"])) return row;
+  for await (const row of jsonLines(path, legacyByteLimit)) if (text(row?.["sessionId"]) && text(row?.["projectHash"])) return row;
   return null;
 }
 
@@ -46,7 +60,8 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
       paths.sort((a, b) => Number(b.endsWith(".jsonl")) - Number(a.endsWith(".jsonl")) || a.localeCompare(b));
       const checkedMarkers = new Set<string>();
       for (const path of paths) {
-        const metadata = await header(path), id = text(metadata?.["sessionId"]), project = text(metadata?.["projectHash"]);
+        const legacy = path.endsWith(".json") ? await legacyProjection(path) : null;
+        const metadata = legacy?.metadata ?? (path.endsWith(".json") ? null : await header(path)), id = text(metadata?.["sessionId"]), project = text(metadata?.["projectHash"]);
         const createdAt = timestamp(metadata?.["startTime"]);
         if (!id || !project || !createdAt) continue;
         const projectDirectory = dirname(dirname(path)), key = basename(projectDirectory);
@@ -65,38 +80,49 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
         // Old directories carry the project hash; new slugs need the primary-source registry mapping.
         if (/^[0-9a-f]{64}$/.test(key) && key !== project) continue;
         if (cwd && createHash("sha256").update(cwd).digest("hex") !== project) continue;
-        yield { id, path, cwd, createdAt, updatedAt: timestamp(metadata?.["lastUpdated"]) ?? createdAt, group: project };
+        const identity = { id, path, cwd, createdAt, updatedAt: timestamp(metadata?.["lastUpdated"]) ?? createdAt, group: project };
+        if (legacy) legacyProjections.set(identity, legacy);
+        yield identity;
       }
     },
     async analyze(identity, context) {
       const session = emptySession(identity, "gemini", context, { source: "gemini-chat", fidelity: "message", tokens: "unavailable", tools: "observed", turns: "observed", timing: "provider", usageUnit: "request" });
       const messages = new Map<string, Message>();
-      const replace = (raw: unknown): void => { const message = projectMessage(raw); if (message) messages.set(message.id, message); };
+      let retainedTools = 0;
+      const remove = (id: string): void => { retainedTools -= messages.get(id)?.tools.length ?? 0; messages.delete(id); };
+      const insert = (message: Message): void => {
+        retainedTools += message.tools.length - (messages.get(message.id)?.tools.length ?? 0);
+        messages.set(message.id, message);
+        if (messages.size > messageLimit || retainedTools > 50_000) throw new Error("Gemini replay exceeds the memory budget.");
+      };
+      const replace = (raw: unknown): void => { const message = projectMessage(raw); if (message) insert(message); };
       const applyMetadata = (metadata: RecordValue): void => {
         const at = timestamp(metadata["lastUpdated"]); if (at) session.updatedAt = at;
         if (metadata["kind"] === "subagent") session.executionKind = "subagent";
         else if (metadata["kind"] === "main") session.executionKind = "top-level";
-        if (Array.isArray(metadata["messages"])) { messages.clear(); metadata["messages"].forEach(replace); }
+        if (Array.isArray(metadata["messages"])) { messages.clear(); retainedTools = 0; metadata["messages"].forEach(replace); }
       };
       if (identity.path.endsWith(".json")) {
-        const data = await readJson(identity.path);
-        if (data?.["sessionId"] !== identity.id || !Array.isArray(data["messages"])) return null;
-        applyMetadata(data);
+        const legacy = legacyProjections.get(identity) ?? await legacyProjection(identity.path);
+        if (!legacy || legacy.metadata["sessionId"] !== identity.id) return null;
+        applyMetadata(legacy.metadata);
+        for (const message of legacy.messages) insert(message);
       } else {
-        for await (const row of jsonLines(identity.path)) {
-          if (!row) { session.transcript.warnings.push("Malformed Gemini records were skipped."); continue; }
+        for await (const row of jsonLines(identity.path, legacyByteLimit)) {
+          if (!row) { session.evidence!.accounting = "partial"; session.transcript.warnings.push("Malformed or oversized Gemini records were skipped; accounting is partial."); continue; }
           if (row["sessionId"] === identity.id) applyMetadata(row);
           else if (record(row["$set"])) applyMetadata(record(row["$set"])!);
           else if (typeof row["$rewindTo"] === "string") {
             const keys = [...messages.keys()], index = keys.indexOf(row["$rewindTo"]);
-            for (const id of index < 0 ? keys : keys.slice(index)) messages.delete(id);
+            for (const id of index < 0 ? keys : keys.slice(index)) remove(id);
           } else if (record(row["$patch"])) {
             const patch = record(row["$patch"])!;
-            if (Array.isArray(patch["removeIds"])) for (const id of patch["removeIds"]) if (typeof id === "string") messages.delete(id);
+            if (Array.isArray(patch["removeIds"])) for (const id of patch["removeIds"]) if (typeof id === "string") remove(id);
             if (Array.isArray(patch["orderIds"])) {
               const ordered = new Map<string, Message>();
-              for (const id of patch["orderIds"]) if (typeof id === "string" && messages.has(id)) ordered.set(id, messages.get(id)!);
-              for (const [id, message] of messages) if (!ordered.has(id)) ordered.set(id, message);
+              const requested = new Set(patch["orderIds"].filter((id): id is string => typeof id === "string"));
+              for (const [id, message] of messages) if (!requested.has(id)) ordered.set(id, message);
+              for (const id of requested) if (messages.has(id)) ordered.set(id, messages.get(id)!);
               messages.clear(); for (const [id, message] of ordered) messages.set(id, message);
             }
             // Content/tool-result patches have no metric fields.
@@ -112,7 +138,9 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
         for (const tool of message.tools) if (!seenTools.has(tool.id)) { seenTools.add(tool.id); increment(session.tools, tool.name); }
       }
       session.transcript.warnings.push("Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced.");
-      return finish(session);
+      const finalized = finish(session);
+      if (session.evidence!.accounting === "partial") finalized.costComplete = false;
+      return finalized;
     },
   };
 }

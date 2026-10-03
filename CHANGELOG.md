@@ -16,6 +16,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Sessions with unavailable token evidence are no longer described as missing a model price. Unknown observed models still reduce pricing coverage.
 
+### Fixed
+
+- Conductor recovery groups all rows before accounting, replaces cumulative snapshots, separates turn-local usage, and marks ambiguous resets/resumes partial.
+- OpenCode forked history cannot charge inherited requests again; Gemini partial-order rewinds preserve the retained prefix.
+- Structured Claude metadata is validated at the output boundary; valid namespaced models keep exact pricing identity.
+- Terminal/dashboard consumers share metric eligibility, N/A values, partial denominators, and a five-observation distribution guard. Mixed cost stacks include reported value.
+- Cursor SDK directories are projected once, redundant Claude indexing is removed, and Gemini legacy/replay memory has explicit limits.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

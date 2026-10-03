@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, rm } from "node:fs/promises";
 import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
@@ -73,6 +74,11 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   let child: ChildProcess | null = null;
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    const secret = "/private/API-STRUCTURED-SECRET command --token=credential";
+    const path = join(fixture.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", "22222222-2222-4222-8222-222222222222.jsonl");
+    await appendFile(path, JSON.stringify({ type: "assistant", timestamp: secret, effort: secret, message: { id: "bad-metadata", model: secret, usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: "tool_use", id: "bad-tool", name: secret }] } }) + "\n");
+    const db = new DatabaseSync(fixture.databasePath);
+    db.prepare("UPDATE sessions SET status=?,created_at=? WHERE agent_type='claude'").run(secret, secret); db.close();
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
@@ -124,7 +130,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(serialized, /"skillEvidence":"explicit"/);
     assert.match(serialized, /"skillEvidence":"inferred"/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
-    assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
+    assert.doesNotMatch(serialized, /rollout-|transcriptPath|API-STRUCTURED-SECRET/);
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);

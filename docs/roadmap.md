@@ -17,7 +17,10 @@ Status: `[x]` shipped, `[ ]` not yet shipped. Milestones are not dated.
 - [ ] Codex: parse `token_usage_record` events and the paginated rollout format.
 - [x] Cursor: read workspace and sub-agent mappings from the `composerHeaders` table.
 - [x] Cursor: read agent CLI transcripts and sessions run through Conductor's Cursor integration, with source-specific fidelity.
-- [x] Conductor: use per-session result records as fallback evidence when a provider transcript has been deleted.
+- [x] Conductor: recover verified Claude result evidence with grouped identities, cumulative accounting, and explicit partial-history labels.
+- [x] Prevent OpenCode fork recounting, replay Gemini partial order correctly, and validate structured provider metadata.
+- [x] Apply metric-specific availability and eligible/selected denominators across terminal and dashboard consumers.
+- [ ] Stream or spill oversized Gemini legacy/replay stores beyond the documented memory limits.
 - [x] Regression tests for streamed Claude usage, current Codex rollouts, profile discovery, and Cursor headers.
 - [ ] Golden-fixture parity tests for each supported provider format version.
 - [x] Provider adapter interface and exact synthetic legacy-session parity for the Claude migration.

@@ -1,7 +1,7 @@
 import type { MutableSession } from "../analyzer.ts";
 import type { RateCard, SessionAnalytics, SessionDatabaseRow, TokenUsage } from "../types.ts";
 import type { ProviderAdapter, ProviderEnvironment } from "./adapter.ts";
-import { record as asRecord, text as stringValue, finite, zeroTokens, sum as sumTokens, type RecordValue as JsonRecord } from "./common.ts";
+import { record as asRecord, text as stringValue, finite, modelName, name as safeName, effortName, safeTime, zeroTokens, sum as sumTokens, type RecordValue as JsonRecord } from "./common.ts";
 
 export interface ClaudeCandidate {
   cwd: string; id: string; path: string; provider: "claude" | "codex"; timestamp: string | null;
@@ -23,7 +23,7 @@ function increment(target: Record<string, number>, key: string, amount = 1): voi
 function normalizedSkillName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const name = value.trim();
-  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(name) ? name : null;
+  return safeName(name);
 }
 
 /** Existing Claude parser, moved without changing its projection or accounting. */
@@ -115,7 +115,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
           parseErrors += 1;
           return;
         }
-        const timestamp = stringValue(record["timestamp"]);
+        const timestamp = safeTime(record["timestamp"]);
         trackTimestamp(state, timestamp);
         const type = stringValue(record["type"]) ?? "";
         const subtype = stringValue(record["subtype"]) ?? "";
@@ -129,7 +129,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
         if (type === "assistant" && message) {
           const messageId =
             stringValue(message["id"]) ?? stringValue(record["uuid"]) ?? `${path}:${line}`;
-          const recordedEffort = stringValue(record["effort"]);
+          const recordedEffort = effortName(record["effort"]);
           if (recordedEffort) {
             const candidate = { executionKind, timestamp: timestamp ?? "", value: recordedEffort };
             const current = effort.current;
@@ -143,7 +143,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
           const usage = usageRecord ? claudeUsage(usageRecord) : zeroTokens();
           const snapshot = {
             executionKind,
-            model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
+            model: modelName(message["model"] ?? row.database_model),
             reasoningExposed: Boolean(asRecord(usageRecord?.["output_tokens_details"])),
             timestamp,
             usage,
@@ -171,7 +171,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
             const toolId = stringValue(block["id"]) ?? `${path}:${line}`;
             if (seenToolCalls.has(toolId)) continue;
             seenToolCalls.add(toolId);
-            const name = stringValue(block["name"]) ?? "tool_use";
+            const name = safeName(block["name"]) ?? "unknown_tool";
             increment(state.tools, name);
             increment(state.transportTools, name);
             if (name === "Skill") {

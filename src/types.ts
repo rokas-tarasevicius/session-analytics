@@ -227,6 +227,8 @@ export interface AnalyzeOptions {
 }
 
 export interface ProviderEvidence {
+  /** Partial means retained usage does not prove a complete, disjoint accounting interval. */
+  accounting?: "complete" | "partial";
   source: "conductor-result" | "cursor-sdk" | "cursor-transcript" | "copilot-events" | "opencode-db" | "gemini-chat";
   fidelity: "message" | "summary" | "activity-only";
   tokens: "reported" | "unavailable";
@@ -238,6 +240,8 @@ export interface ProviderEvidence {
 
 export type ConductorTerminalReason = "success" | "error_during_execution" | "error_max_turns" | "error_max_budget_usd" | "error_max_structured_output_retries" | "completed" | "cancelled" | "interrupted" | "unknown";
 export interface ConductorResultMetrics {
+  /** Deduplicated turn-local receipt usage, never added to cumulative model totals. */
+  turnLocalTokens?: TokenUsage | null;
   resultRecords: number;
   reportedTurns: number | null;
   durationMilliseconds: number | null;
