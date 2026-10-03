@@ -16,17 +16,21 @@
 
 The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
 
-Palette, shared with the dashboard's light and dark themes:
+Palette, shared with the dashboard's light and dark themes ("Ink & Signal"; every token lives in `src/public/styles.css`):
 
-| Role | Color |
-| --- | --- |
-| Ink (tile, light-theme text) | `#181a16` |
-| Paper (light background) | `#efeee7` |
-| Coral (top-level span, accent) | `#d66b55`, text accent `#c85b45` |
-| Sage (sub-agent span) | `#7eb7a7` |
-| Ochre (sub-agent span) | `#d4aa70` |
-| Connector | `#62665c` |
-| Heatmap ramp | `#e0ece5` to `#1f5b49` |
+| Role | Dark | Light (ink on warm paper) |
+| --- | --- | --- |
+| Page / panel / raised surface | `#121410` / `#181a16` (the tile) / `#1e211c` | `#ebe8df` / `#f4f2ec` / `#e9e6dd` |
+| Text / secondary / muted | `#ecebe3` / `#b9bbb1` / `#8c8f86` | `#181a16` / `#43463f` / `#5f625a` |
+| Coral — priced value, primary signal | `#d66b55` | mark `#c85b45`, text `#a94533` |
+| Sage — cache, efficiency, success | `#7eb7a7` | mark `#3f8a77`, text `#2c6e5d` |
+| Ochre — sub-agents, warnings | `#d4aa70` | mark `#a9792c`, text `#83601f` |
+| Connector — rules, elbows, tree lines | `#62665c` | `#62665c` |
+| Providers: Codex / Claude / Cursor | `#c6c5ba` / `#d66b55` / `#6796c7` | `#2a2c27` / `#c4553f` / `#32669a` |
+| Repository series 1–6 | `#cc6859 #5488ca #879947 #ab6da6 #b7893b #3d9d80` | `#b54c3d #3164a3 #6a7b27 #8c5087 #a17003 #0c7b60` |
+| Heatmap (sage ramp, 7 steps) | `#135742` to `#9bd6bf` | `#7db8a1` to `#004532` |
+
+The series and heatmap steps were chosen with the `dataviz` palette validator (adjacent colour-vision ΔE ≥ 8.5, normal-vision ΔE ≥ 15, marks ≥ 3:1 on their surface); regenerate them the same way rather than by eye.
 
 ### Regenerating images
 
@@ -35,7 +39,7 @@ rsvg-convert -w 512 -h 512 assets/logo.svg -o assets/logo.png
 rsvg-convert -w 1280 -h 640 assets/social-preview.svg -o assets/social-preview.png
 ```
 
-Screenshots come from the demo dataset only. Start it with `npm run demo -- --no-open`, then capture `http://127.0.0.1:4175` at 1440 × 1100 in a headless browser. Never capture a dashboard that is reading real history.
+Screenshots come from the demo dataset only. Start it with `npm run demo -- --no-open`, then capture `http://127.0.0.1:4175` at 1440 × 1100 in a headless browser. The dashboard reads `?view=<summary|distributions|activity|costs|models|tools|skills>&theme=<dark|light>&repository=<name>` once on load, so every view and theme can be captured without clicking. Never capture a dashboard that is reading real history.
 
 ## Renaming the product
 

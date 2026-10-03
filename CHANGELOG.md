@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Changed
+
+- Dashboard theme "Ink & Signal": the visual system is derived from the logo. Surfaces step up from the ink tile (`#181a16`), coral marks priced value, sage marks cache and efficiency, ochre marks sub-agents and warnings, and the logo's connector elbow recurs as section rules, drill-down crumbs, and indented sub-agent spans. Light mode is the same system printed as ink on warm paper. The real mark replaces the placeholder in the top bar.
+- Summary view leads with a hero priced-value figure and six supporting tiles; the comparison table gains sticky headers, right-aligned tabular numerals, and sub-agent value as a child span.
+- Charts use 2px strokes, hairline grids, direct end labels, a crosshair with a single all-provider tooltip on the daily chart, surface gaps between stacked segments and donut slices, and a validated sage heatmap ramp in both themes. Repository series colours are stepped separately per theme and checked for colour-vision separation.
+- Dashboard URL hooks `?view=<name>&theme=<dark|light>&repository=<name>` select the initial view, theme, and repository once on load (useful for deep links and screenshots).
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

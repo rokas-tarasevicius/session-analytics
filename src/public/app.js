@@ -11,7 +11,7 @@ const elements = {
   distributionRepositoryOptions: $("#distribution-repository-options"), distributionTools: $("#distribution-tools"),
   error: $("#error-banner"),
   generated: $("#generated-at"), input: $("#metric-input"),
-  live: $("#metric-live"), modelSpend: $("#model-spend"), output: $("#metric-output"),
+  live: $("#metric-live"), liveSignal: $("#live-signal"), main: $("main"), modelSpend: $("#model-spend"), output: $("#metric-output"),
   modelsByProvider: $("#models-by-provider"), modelMetricSwitch: $("#model-metric-switch"),
   providerCostComponents: $("#provider-cost-components"),
   providerDonut: $("#provider-donut"), providerLegend: $("#provider-legend"),
@@ -48,7 +48,12 @@ const viewProviderFilters = {
   skills: new Set(["codex", "claude", "cursor"]),
   tools: new Set(["codex", "claude", "cursor"]),
 };
-const seriesColors = ["#181a16", "#c85b45", "#2d6a5a", "#9a6329", "#49697a", "#786f93"];
+// Series slots are CSS custom properties so light and dark modes step the same hues separately
+// (each mode's set is validated for colour-vision separation in styles.css).
+const seriesColors = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
+// Optional one-shot URL hooks (`?view=costs&theme=dark&repository=<name>`) for deep links and screenshots.
+const urlParameters = new URLSearchParams(window.location.search);
+let pendingRepository = urlParameters.get("repository");
 const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
 const integer = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 const currency = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
@@ -177,14 +182,14 @@ function activeView() {
 function selectRepository(id) {
   elements.repositoryFilter.value = id;
   renderView();
-  document.querySelector(".metric-grid").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(".hero").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderBars(container, items, formatter, limit = 9, onSelect = null) {
   clear(container);
   const visible = items.slice(0, limit);
   const maximum = Math.max(1, ...visible.map(({ value }) => value));
-  if (!visible.length) { container.append(node("p", "No activity in this view.", "muted")); return; }
+  if (!visible.length) { container.append(node("p", "No activity in this view.", "empty-state")); return; }
   for (const item of visible) {
     const row = node(onSelect ? "button" : "div", null, `bar-row${onSelect ? " repository-link" : ""}`);
     if (onSelect) {
@@ -232,7 +237,7 @@ function sessionsForProviders(sessions, scope) {
 function renderViewProviderFilters(container, scope) {
   clear(container);
   for (const provider of ["codex", "claude", "cursor"]) {
-    const label = node("label", null, "provider-toggle");
+    const label = node("label", null, "provider-toggle"); label.dataset.provider = provider;
     const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider);
     const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
     input.addEventListener("change", () => {
@@ -295,7 +300,7 @@ function renderDistributionChart(container, series, accessor, formatter, logarit
     values: item.sessions.map(accessor).filter((value) => typeof value === "number" && Number.isFinite(value) && value >= 0),
   }));
   const allValues = valuesBySeries.flatMap(({ values }) => values);
-  if (allValues.length === 0) { container.append(node("p", "No eligible sessions in this comparison.", "muted")); return; }
+  if (allValues.length === 0) { container.append(node("p", "No eligible sessions in this comparison.", "empty-state")); return; }
   const bins = 10, maximum = Math.max(1, ...allValues), width = 680, height = 245;
   const left = 42, right = 12, top = 14, bottom = 34, plotWidth = width - left - right, plotHeight = height - top - bottom;
   const position = logarithmic ? (value) => Math.log1p(value) : (value) => value;
@@ -335,7 +340,7 @@ function renderDistributionChart(container, series, accessor, formatter, logarit
     polyline.setAttribute("class", "distribution-line"); polyline.style.setProperty("--series-color", color); svg.append(polyline);
     for (const point of points) {
       const dot = document.createElementNS(svg.namespaceURI, "circle");
-      dot.setAttribute("cx", String(point.x)); dot.setAttribute("cy", String(point.y)); dot.setAttribute("r", "3");
+      dot.setAttribute("cx", String(point.x)); dot.setAttribute("cy", String(point.y)); dot.setAttribute("r", "2.5");
       dot.setAttribute("class", "distribution-dot"); dot.style.setProperty("--series-color", color); svg.append(dot);
     }
   }
@@ -456,7 +461,7 @@ function renderCostRows(container, groups) {
     }
     row.append(stack, node("strong", money(total))); list.append(row);
   }
-  if (list.childElementCount === 0) list.append(node("p", "No priced activity in this view.", "muted"));
+  if (list.childElementCount === 0) list.append(node("p", "No priced activity in this view.", "empty-state"));
   container.append(list);
   const legend = node("div", null, "cost-legend");
   for (const [name, label] of [["input", "Input"], ["cached", "Cache read"], ["write", "Cache write"], ["output", "Output"], ["reported", "Provider-reported"]]) {
@@ -506,7 +511,7 @@ function renderModels(view) {
     }
     elements.modelsByProvider.append(group);
   }
-  if (elements.modelsByProvider.childElementCount === 0) elements.modelsByProvider.append(node("p", "No model activity in this view.", "muted"));
+  if (elements.modelsByProvider.childElementCount === 0) elements.modelsByProvider.append(node("p", "No model activity in this view.", "empty-state"));
 }
 
 function evidenceLabel(sessions) {
@@ -546,7 +551,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
     const top = [...item.totals.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "—";
     row.append(stack, node("strong", integer.format(item.total)), node("span", skillMode ? evidenceLabel(item.sessions) : top)); tableContainer.append(row);
   }
-  if (rows.length === 0) tableContainer.append(node("p", skillMode ? "No observed skill invocations in this view." : "No tool activity in this view.", "muted"));
+  if (rows.length === 0) tableContainer.append(node("p", skillMode ? "No observed skill invocations in this view." : "No tool activity in this view.", "empty-state"));
   for (const [index, { name }] of names.entries()) {
     const item = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", seriesColors[index]); item.append(swatch, document.createTextNode(name)); keyContainer.append(item);
   }
@@ -616,6 +621,16 @@ function activeProviders() {
 
 const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" };
 
+function dayLabel(name) {
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(`${name}T00:00:00`));
+}
+
+function svgElement(svg, tag, attributes) {
+  const element = document.createElementNS(svg.namespaceURI, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));
+  return element;
+}
+
 function renderLine(items) {
   clear(elements.dailySpend);
   const selectedProviders = activeProviders();
@@ -626,9 +641,9 @@ function renderLine(items) {
       : selectedProviders.length === 1 && selectedProviders[0] === "cursor"
         ? "Cursor has no trustworthy daily cost timestamps in the local store; its provider-reported total remains in the usage-value summaries."
         : "No daily priced activity in this view.";
-    elements.dailySpend.append(node("p", message, "muted")); return;
+    elements.dailySpend.append(node("p", message, "empty-state")); return;
   }
-  const width = 900, height = 270, left = 96, right = 22, top = 18, bottom = 46;
+  const width = 900, height = 270, left = 64, right = 62, top = 16, bottom = 40;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
   const roughTick = maximum / 4;
@@ -640,77 +655,107 @@ function renderLine(items) {
   svg.setAttribute("aria-label", "Daily priced usage value in US dollars by provider");
   const tooltip = node("div", null, "chart-tooltip"); tooltip.hidden = true;
   const addText = (value, x, y, className, anchor = "start") => {
-    const label = document.createElementNS(svg.namespaceURI, "text");
-    label.setAttribute("x", String(x)); label.setAttribute("y", String(y));
-    label.setAttribute("class", className); label.setAttribute("text-anchor", anchor);
+    const label = svgElement(svg, "text", { x, y, class: className, "text-anchor": anchor });
     label.textContent = value; svg.append(label);
   };
+  const xAt = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
+  const yAt = (value) => top + (1 - value / axisMaximum) * plotHeight;
   for (let index = 0; index < 5; index += 1) {
-    const y = top + (index / 4) * plotHeight;
-    const value = axisMaximum * (1 - index / 4);
-    const line = document.createElementNS(svg.namespaceURI, "line");
-    line.setAttribute("x1", String(left)); line.setAttribute("x2", String(width - right));
-    line.setAttribute("y1", String(y)); line.setAttribute("y2", String(y)); line.setAttribute("class", "grid-line"); svg.append(line);
-    addText(money(value), left - 10, y + 4, "axis-label", "end");
+    const value = axisMaximum * (1 - index / 4), y = yAt(value);
+    svg.append(svgElement(svg, "line", { x1: left, x2: width - right, y1: y, y2: y, class: "grid-line" }));
+    addText(Number.isInteger(value) ? `$${integer.format(value)}` : money(value), left - 10, y + 4, "axis-label", "end");
   }
   const tickIndexes = [...new Set([0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
-  for (const index of tickIndexes) {
-    const x = items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
-    const date = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(`${items[index].name}T00:00:00`));
-    addText(date, x, height - 16, "axis-label", index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
+  for (const index of tickIndexes) addText(dayLabel(items[index].name), xAt(index), height - 14, "axis-label", index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
+  const crosshair = svgElement(svg, "line", { x1: left, x2: left, y1: top, y2: top + plotHeight, class: "crosshair" });
+  svg.append(crosshair);
+  const series = providers.map((provider) => ({
+    provider,
+    points: items.map((item, index) => ({ index, value: item[provider], x: xAt(index), y: yAt(item[provider]) })),
+  }));
+  for (const { provider, points } of series) {
+    svg.append(svgElement(svg, "polyline", { points: points.map(({ x, y }) => `${x},${y}`).join(" "), class: `trend-line ${provider}` }));
   }
-  for (const provider of providers) {
-    const points = items.map((item, index) => ({
-      item,
-      x: items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth,
-      y: top + (1 - item[provider] / axisMaximum) * plotHeight,
-    }));
-    const line = document.createElementNS(svg.namespaceURI, "polyline");
-    line.setAttribute("points", points.map(({ x, y }) => `${x},${y}`).join(" "));
-    line.setAttribute("class", `trend-line ${provider}`); svg.append(line);
-    for (const point of points) {
-      // Zero-value dates stay in the polyline so missing calendar days are
-      // represented, but they do not become hundreds of redundant controls.
-      if (point.item[provider] <= 0) continue;
-      const group = document.createElementNS(svg.namespaceURI, "g");
-      group.setAttribute("class", `chart-point ${provider}`); group.setAttribute("tabindex", "0");
-      group.setAttribute("role", "button");
-      group.setAttribute("aria-label", `${providerLabels[provider]}, ${point.item.name}, ${money(point.item[provider])}`);
-      const dot = document.createElementNS(svg.namespaceURI, "circle");
-      dot.setAttribute("cx", String(point.x)); dot.setAttribute("cy", String(point.y)); dot.setAttribute("r", "4"); dot.setAttribute("class", "trend-dot");
-      const hit = document.createElementNS(svg.namespaceURI, "circle");
-      hit.setAttribute("cx", String(point.x)); hit.setAttribute("cy", String(point.y)); hit.setAttribute("r", "13"); hit.setAttribute("class", "trend-hit");
-      group.append(dot, hit); svg.append(group);
-      const show = () => {
-        group.classList.add("active"); tooltip.hidden = false;
-        tooltip.textContent = `${providerLabels[provider]} · ${point.item.name} · ${money(point.item[provider])}`;
-        tooltip.style.left = `${Math.min(82, Math.max(12, (point.x / width) * 100))}%`;
-        tooltip.style.top = `${Math.max(8, (point.y / height) * 100 - 8)}%`;
-      };
-      const hide = () => { group.classList.remove("active"); tooltip.hidden = true; };
-      group.addEventListener("pointerenter", show); group.addEventListener("pointerleave", hide);
-      group.addEventListener("focus", show); group.addEventListener("blur", hide); group.addEventListener("click", show);
+  // Direct labels at the line ends stand in for a legend; they are nudged apart when the series converge.
+  const endLabels = series.map(({ provider, points }) => ({ provider, y: points.at(-1).y })).sort((a, b) => a.y - b.y);
+  for (let index = 1; index < endLabels.length; index += 1) endLabels[index].y = Math.max(endLabels[index].y, endLabels[index - 1].y + 14);
+  for (const label of endLabels) addText(providerLabels[label.provider], width - right + 10, Math.min(top + plotHeight, label.y) + 4, `series-label ${label.provider}`);
+  const pointGroups = new Map();
+  const place = (x, y) => {
+    const bounds = svg.getBoundingClientRect(), scale = bounds.width / width;
+    const offsetY = (bounds.height - height * scale) / 2;
+    tooltip.style.left = `${Math.min(bounds.width - 90, Math.max(90, x * scale))}px`;
+    tooltip.style.top = `${offsetY + y * scale}px`;
+  };
+  const hide = () => {
+    crosshair.classList.remove("active"); tooltip.hidden = true;
+    for (const group of svg.querySelectorAll(".chart-point.active")) group.classList.remove("active");
+  };
+  // One readout for every series at the chosen day; the value leads, the provider follows.
+  const showAt = (index) => {
+    const x = xAt(index);
+    crosshair.setAttribute("x1", String(x)); crosshair.setAttribute("x2", String(x)); crosshair.classList.add("active");
+    for (const group of svg.querySelectorAll(".chart-point.active")) group.classList.remove("active");
+    for (const group of pointGroups.get(index) || []) group.classList.add("active");
+    clear(tooltip); tooltip.append(node("strong", dayLabel(items[index].name)));
+    for (const provider of providers) {
+      const row = node("div"); const key = node("i"); key.style.background = `var(--tip-${provider})`;
+      row.append(key, node("b", money(items[index][provider])), node("span", providerLabels[provider])); tooltip.append(row);
     }
+    tooltip.hidden = false;
+    place(x, Math.min(...providers.map((provider) => yAt(items[index][provider]))));
+  };
+  for (const { provider, points } of series) for (const point of points) {
+    // Zero-value dates stay in the polyline so missing calendar days are
+    // represented, but they do not become hundreds of redundant controls.
+    if (point.value <= 0) continue;
+    const group = svgElement(svg, "g", { class: `chart-point ${provider}`, tabindex: "0", role: "button", "aria-label": `${providerLabels[provider]}, ${items[point.index].name}, ${money(point.value)}` });
+    group.append(svgElement(svg, "circle", { cx: point.x, cy: point.y, r: "3.5", class: "trend-dot" }));
+    group.addEventListener("focus", () => showAt(point.index)); group.addEventListener("blur", hide);
+    svg.append(group);
+    if (!pointGroups.has(point.index)) pointGroups.set(point.index, []);
+    pointGroups.get(point.index).push(group);
   }
+  // The crosshair finds the X: the pointer only has to be nearest a day, never on a 2px line.
+  const overlay = svgElement(svg, "rect", { x: left, y: top, width: plotWidth, height: plotHeight, class: "chart-overlay" });
+  overlay.addEventListener("pointermove", (event) => {
+    const bounds = svg.getBoundingClientRect();
+    const pointer = ((event.clientX - bounds.left) / bounds.width) * width;
+    const index = items.length === 1 ? 0 : Math.round(((pointer - left) / plotWidth) * (items.length - 1));
+    showAt(Math.max(0, Math.min(items.length - 1, index)));
+  });
+  overlay.addEventListener("pointerleave", hide);
+  svg.append(overlay);
   elements.dailySpend.append(svg, tooltip);
 }
 
 function renderDonut(sessions) {
   const counts = { codex: 0, claude: 0, cursor: 0 };
   for (const session of sessions) counts[session.provider] = (counts[session.provider] || 0) + 1;
-  const total = sessions.length || 1, codex = (counts.codex / total) * 100, claude = codex + (counts.claude / total) * 100;
-  elements.providerDonut.style.background = `conic-gradient(var(--codex) 0 ${codex}%, var(--claude) ${codex}% ${claude}%, var(--cursor) ${claude}% 100%)`;
+  const total = sessions.length || 1;
+  const segments = ["codex", "claude", "cursor"].map((provider) => ({ provider, share: (counts[provider] / total) * 100 })).filter(({ share }) => share > 0);
+  // Adjacent segments are separated by a sliver of the surface colour rather than a stroke.
+  const gap = segments.length > 1 ? 0.8 : 0;
+  const stops = []; let cursor = 0;
+  for (const { provider, share } of segments) {
+    const start = cursor + gap / 2, end = Math.max(start, cursor + share - gap / 2);
+    stops.push(`var(--surface) ${cursor}% ${start}%`, `var(--${provider}) ${start}% ${end}%`, `var(--surface) ${end}% ${cursor + share}%`);
+    cursor += share;
+  }
+  elements.providerDonut.style.background = segments.length ? `conic-gradient(${stops.join(", ")})` : "var(--surface-2)";
   elements.providerDonut.dataset.label = String(sessions.length);
   clear(elements.providerLegend);
   [["Codex", counts.codex, "codex"], ["Claude", counts.claude, "claude"], ["Cursor", counts.cursor, "cursor"]].forEach(([label, value, provider]) => {
-    const row = node("div", null, "legend-row"); const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
-    row.append(logo, node("span", label), node("strong", String(value))); elements.providerLegend.append(row);
+    const row = node("div", null, "legend-row"); row.dataset.provider = provider;
+    const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
+    row.append(logo, node("span", label), node("strong", integer.format(value)), node("small", sessions.length ? `${Math.round((value / sessions.length) * 100)}%` : "—"));
+    elements.providerLegend.append(row);
   });
 }
 
-function tableCell(primary, secondary, className) {
-  const cell = node("td"); cell.append(node("span", primary, className));
-  if (secondary) cell.append(node("small", secondary)); return cell;
+function tableCell(primary, secondary, className, numeric = false, secondaryClassName = null) {
+  const cell = node("td", null, numeric ? "num" : null); cell.append(node("span", primary, className));
+  if (secondary) cell.append(node("small", secondary, secondaryClassName)); return cell;
 }
 
 function repositoryKey(id) {
@@ -730,7 +775,16 @@ function renderRepositoryTable(repositories) {
     row.tabIndex = 0; row.setAttribute("role", "link"); row.setAttribute("aria-label", `Open metrics for ${item.repository.name}`);
     row.addEventListener("click", () => selectRepository(item.repository.id));
     row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectRepository(item.repository.id); } });
-    row.append(tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`), tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), tableCell(money(summary.estimatedSpendUsd), `${money(summary.subagentSpendUsd)} sub-agent`, "money"), tableCell(compact.format(summary.totalInputTokens)), tableCell(compact.format(summary.outputTokens)), tableCell(compact.format(summary.toolCalls)), tableCell(percent(summary.cacheReadRatio)), tableCell(percent(summary.pricedTokenCoverage), summary.missingTranscripts ? `${summary.missingTranscripts} missing` : "complete"));
+    row.append(
+      tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`),
+      tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`, null, true),
+      tableCell(money(summary.estimatedSpendUsd), `${money(summary.subagentSpendUsd)} sub-agent`, "money", true, "child-span"),
+      tableCell(compact.format(summary.totalInputTokens), null, null, true),
+      tableCell(compact.format(summary.outputTokens), null, null, true),
+      tableCell(compact.format(summary.toolCalls), null, null, true),
+      tableCell(percent(summary.cacheReadRatio), null, summary.cacheReadRatio === null ? null : "cache", true),
+      tableCell(percent(summary.pricedTokenCoverage), summary.missingTranscripts ? `${summary.missingTranscripts} missing` : "complete", null, true, summary.missingTranscripts ? "status-warning" : "status-ok"),
+    );
     elements.repositoryRows.append(row);
   }
 }
@@ -785,6 +839,7 @@ function windowCaption() {
 
 function renderSharedView(view) {
   const selected = selectedRepository(); const summary = view.summary;
+  elements.main.dataset.scope = selected ? "repository" : "all";
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.`;
 }
 
@@ -795,6 +850,7 @@ function renderSummary(view) {
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`;
   elements.input.textContent = compact.format(summary.totalInputTokens); elements.cache.textContent = `${percent(summary.cacheReadRatio)} cached · repeated context included`;
   elements.output.textContent = compact.format(summary.outputTokens); elements.tools.textContent = compact.format(summary.toolCalls); elements.compactions.textContent = integer.format(summary.compactions); elements.live.textContent = integer.format(summary.workingSnapshots);
+  elements.liveSignal.dataset.live = summary.workingSnapshots > 0 ? "active" : "idle";
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
   renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
   renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
@@ -817,13 +873,21 @@ function renderView() {
 
 function render(data) {
   snapshot = data; elements.generated.textContent = dateTime(data.generatedAt); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
-  populateRepositories(); configureWindow(); renderRateCards(data.rateCard); ensureDistributionRepositories(); renderView();
+  populateRepositories();
+  if (pendingRepository) {
+    const match = snapshot.repositories.find(({ repository }) => repository.name === pendingRepository);
+    if (match) elements.repositoryFilter.value = match.repository.id;
+    pendingRepository = null;
+  }
+  configureWindow(); renderRateCards(data.rateCard); ensureDistributionRepositories(); renderView();
 }
 
 async function load(refresh = false) {
   elements.error.hidden = true; elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = refresh ? "Refreshing local snapshot" : "Mapping local sessions"; elements.refresh.disabled = true;
-  try { const response = await fetch(`/api/analytics${refresh ? "?refresh=1" : ""}`); const body = await response.json(); if (!response.ok) throw new Error(body.error || `Analysis failed with ${response.status}.`); render(body); elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready"; }
-  catch (error) { elements.sync.dataset.state = "error"; elements.syncLabel.textContent = "Analysis failed"; elements.error.textContent = error instanceof Error ? error.message : "Unknown analysis failure."; elements.error.hidden = false; }
+  // The previous render holds at reduced opacity while a refresh runs, so there is no skeleton flash or layout jump.
+  document.body.dataset.state = "loading";
+  try { const response = await fetch(`/api/analytics${refresh ? "?refresh=1" : ""}`); const body = await response.json(); if (!response.ok) throw new Error(body.error || `Analysis failed with ${response.status}.`); render(body); elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready"; document.body.dataset.state = "live"; }
+  catch (error) { elements.sync.dataset.state = "error"; elements.syncLabel.textContent = "Analysis failed"; elements.error.textContent = error instanceof Error ? error.message : "Unknown analysis failure."; elements.error.hidden = false; document.body.dataset.state = "error"; }
   finally { elements.refresh.disabled = false; }
 }
 
@@ -843,6 +907,7 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
   });
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
-const storedView = localStorage.getItem("session-analytics-view");
+const requestedView = urlParameters.get("view"), requestedTheme = urlParameters.get("theme");
+const storedView = viewPanels.some(({ dataset }) => dataset.viewPanel === requestedView) ? requestedView : localStorage.getItem("session-analytics-view");
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
-setTheme(localStorage.getItem("session-analytics-theme") || "light"); void load(false);
+setTheme(requestedTheme === "dark" || requestedTheme === "light" ? requestedTheme : localStorage.getItem("session-analytics-theme") || "light"); void load(false);
