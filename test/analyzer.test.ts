@@ -364,7 +364,7 @@ test("never charges an unobserved process-wide counter baseline to a session or 
     });
     const session = result.sessions.find(
       ({ firstEventAt, provider }) =>
-        provider === "codex" && firstEventAt === "2026-07-20T11:00:00Z",
+        provider === "codex" && firstEventAt === "2026-07-20T11:00:00.000Z",
     );
     assert.ok(session);
     assert.equal(session.tokens.inputTokens, 120_000);

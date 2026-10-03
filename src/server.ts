@@ -110,6 +110,8 @@ const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
   ["/export-data.js", join(publicRoot, "export-data.js")],
+  ["/evidence.js", join(publicRoot, "evidence.js")],
+  ["/timestamps.js", join(publicRoot, "timestamps.js")],
   ["/export-menu.js", join(publicRoot, "export-menu.js")],
   ["/shared-view.js", join(publicRoot, "shared-view.js")],
   ["/styles.css", join(publicRoot, "styles.css")],
@@ -162,6 +164,7 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/health") {
       sendJson(response, 200, {
         service: serviceId,
+        dataSource: snapshotFile ? "snapshot" : "live",
         snapshot: snapshotReady ? "ready" : analyticsPending ? "building" : "not-started",
         status: "ok",
       });
@@ -219,8 +222,8 @@ async function compatibleDashboardIsRunning(): Promise<boolean> {
       signal: AbortSignal.timeout(2_000),
     });
     if (!response.ok) return false;
-    const body = await response.json() as { service?: unknown; status?: unknown };
-    return body.service === serviceId && body.status === "ok";
+    const body = await response.json() as { service?: unknown; status?: unknown; dataSource?: unknown };
+    return body.service === serviceId && body.status === "ok" && body.dataSource === "live";
   } catch {
     return false;
   }

@@ -1,4 +1,5 @@
-export type SessionProvider = "claude" | "codex" | "cursor";
+export type SessionProvider = "claude" | "codex" | "cursor" | "unsupported";
+export type SessionStatus = "idle" | "working" | "completed" | "failed" | "error" | "interrupted" | "cancelled" | "pending" | "unknown";
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
 export type SkillEvidence = "explicit" | "inferred" | "unavailable";
@@ -106,7 +107,7 @@ export interface SessionAnalytics {
   skillEvidence: SkillEvidence;
   skills: Record<string, number>;
   spendByDay: Record<string, number>;
-  status: string;
+  status: SessionStatus;
   tokens: TokenUsage;
   tools: Record<string, number>;
   transcript: TranscriptHealth;

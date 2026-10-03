@@ -11,6 +11,15 @@ All notable changes to this project are documented here. The format follows [Kee
 - Aggregate-only `report --share` preview with minimum-session suppression, private keyed repository pseudonyms, optional aliases, and duplicate-source-safe shared snapshot merge.
 - Dashboard downloads of filtered JSON and CSV, plus an aggregate view for shared snapshots.
 
+### Fixed
+
+- Reject raw repository IDs, arbitrary warning/status text, malformed metadata, unsafe counters, and contradictory daily/model/tool evidence at the import/export boundary.
+- Normalize provider timestamps to UTC and share numeric date selection between dashboard and exports; offsets and missing milliseconds no longer drop valid sessions.
+- Retain unknown agents with a fixed privacy-safe `unsupported` provider so their snapshots can be reopened and exported.
+- Preserve discovery failures through filtered downloads and label shared totals as potentially running/partial observed lower bounds.
+- Prevent live dashboards from reusing saved-file servers and invalidate download previews on refresh or scope changes.
+- Reconcile Claude cache-write aggregates with recorded disjoint TTL buckets, correcting understated input totals without discarding known writes.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

@@ -8,24 +8,30 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
+import { aggregateSessions } from "./public/export-data.js";
+import { normalizeTimestamp, timestampMilliseconds } from "./public/timestamps.js";
+import { modelPattern, metadataPattern, sessionStatuses, scanWarnings } from "./public/evidence.js";
+
 import type {
   AnalyzeOptions,
   CostBreakdown,
   ModelRate,
   ModelUsage,
   MachineAnalytics,
-  NamedMetric,
   RateCard,
   RepositoryAnalytics,
   SessionAnalytics,
   SessionDatabaseRow,
   SessionMetrics,
   SessionProvider,
+  SessionStatus,
   TokenUsage,
 } from "./types.ts";
 
 const toolRoot = new URL(".", import.meta.url);
 const defaultRateCardPath = new URL("../data/rate-cards.json", toolRoot);
+const publicModelName = new RegExp(modelPattern);
+const publicMetadataName = new RegExp(metadataPattern);
 const zeroTokens = (): TokenUsage => ({
   cacheWrite1hInputTokens: 0,
   cacheWrite5mInputTokens: 0,
@@ -164,11 +170,12 @@ function tokenCount(usage: TokenUsage): number {
 }
 
 function isoDay(timestamp: string | null, fallback: string): string {
-  const date = new Date(timestamp ?? fallback);
+  const date = new Date(timestampMilliseconds(timestamp ?? fallback));
   return Number.isNaN(date.valueOf()) ? fallback.slice(0, 10) : date.toISOString().slice(0, 10);
 }
 
 function trackTimestamp(session: MutableSession, timestamp: string | null): void {
+  // Callers normalize provider timestamps before retaining event evidence.
   if (!timestamp) return;
   if (!session.firstEventAt || timestamp < session.firstEventAt) session.firstEventAt = timestamp;
   if (!session.lastEventAt || timestamp > session.lastEventAt) session.lastEventAt = timestamp;
@@ -185,8 +192,8 @@ function normalizeRemote(value: string): string {
 
 function durationMilliseconds(start: string | null, end: string | null): number {
   if (!start || !end) return 0;
-  const startValue = new Date(start).valueOf();
-  const endValue = new Date(end).valueOf();
+  const startValue = timestampMilliseconds(start);
+  const endValue = timestampMilliseconds(end);
   return Number.isFinite(startValue) && Number.isFinite(endValue)
     ? Math.max(0, endValue - startValue)
     : 0;
@@ -298,6 +305,10 @@ function addModelUsage(
   fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
 ): void {
+  if (publicModelName.exec(model)?.[0] !== model) {
+    model = "<unknown>";
+    session.warnings.push("Some provider metadata was omitted because it was not a bounded public identifier.");
+  }
   let aggregate = session.models.get(model);
   if (!aggregate) {
     aggregate = {
@@ -391,12 +402,12 @@ async function transcriptIdentity(
     if (!record) continue;
     if (provider === "codex" && record["type"] === "session_meta") {
       const payload = asRecord(record["payload"]);
-      return { cwd: stringValue(payload?.["cwd"]), id: stringValue(payload?.["id"]), timestamp: stringValue(record["timestamp"]) };
+      return { cwd: stringValue(payload?.["cwd"]), id: stringValue(payload?.["id"]), timestamp: normalizeTimestamp(record["timestamp"]) };
     }
     if (provider === "claude") {
       claudeId ??= stringValue(record["sessionId"]);
       claudeCwd ??= stringValue(record["cwd"]);
-      claudeTimestamp ??= stringValue(record["timestamp"]);
+      claudeTimestamp ??= normalizeTimestamp(record["timestamp"]);
       if (claudeId && claudeCwd) {
         return { cwd: claudeCwd, id: claudeId, timestamp: claudeTimestamp };
       }
@@ -548,7 +559,7 @@ async function buildCodexCounterLedger(paths: string[]): Promise<Map<string, Cod
     modelsByPath.set(path, models);
     await visitJsonLines(path, (record) => {
       const payload = asRecord(record["payload"]);
-      const timestamp = stringValue(record["timestamp"]);
+      const timestamp = normalizeTimestamp(record["timestamp"]);
       if (record["type"] === "turn_context") {
         const model = stringValue(payload?.["model"]);
         if (model) models.add(model);
@@ -620,7 +631,7 @@ async function analyzeCodex(
       parseErrors += 1;
       return;
     }
-    const timestamp = stringValue(record["timestamp"]);
+    const timestamp = normalizeTimestamp(record["timestamp"]);
     trackTimestamp(state, timestamp);
     const type = stringValue(record["type"]);
     const payload = asRecord(record["payload"]);
@@ -797,7 +808,7 @@ async function analyzeCodex(
 function claudeUsage(raw: JsonRecord): TokenUsage {
   const input = nonNegativeNumberValue(raw["input_tokens"]);
   const cacheRead = nonNegativeNumberValue(raw["cache_read_input_tokens"]);
-  const cacheWrite = nonNegativeNumberValue(raw["cache_creation_input_tokens"]);
+  let cacheWrite = nonNegativeNumberValue(raw["cache_creation_input_tokens"]);
   const output = nonNegativeNumberValue(raw["output_tokens"]);
   const thinking = Math.min(
     output,
@@ -806,6 +817,9 @@ function claudeUsage(raw: JsonRecord): TokenUsage {
   const cacheCreation = asRecord(raw["cache_creation"]);
   let cacheWrite5m = nonNegativeNumberValue(cacheCreation?.["ephemeral_5m_input_tokens"]);
   const cacheWrite1h = nonNegativeNumberValue(cacheCreation?.["ephemeral_1h_input_tokens"]);
+  // TTL buckets are disjoint observed writes. Some records omit/understate the
+  // aggregate even though they contain the breakdown already used for pricing.
+  cacheWrite = Math.max(cacheWrite, cacheWrite5m + cacheWrite1h);
   if (cacheWrite > 0 && cacheWrite5m + cacheWrite1h === 0) cacheWrite5m = cacheWrite;
   return {
     cacheWrite1hInputTokens: cacheWrite1h,
@@ -880,7 +894,7 @@ async function analyzeClaude(
         parseErrors += 1;
         return;
       }
-      const timestamp = stringValue(record["timestamp"]);
+      const timestamp = normalizeTimestamp(record["timestamp"]);
       trackTimestamp(state, timestamp);
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
@@ -906,6 +920,9 @@ async function analyzeClaude(
         }
         const usageRecord = asRecord(message["usage"]);
         const usage = usageRecord ? claudeUsage(usageRecord) : zeroTokens();
+        if (usage.cacheWriteInputTokens > nonNegativeNumberValue(usageRecord?.["cache_creation_input_tokens"])) {
+          state.warnings.push("Cache-write totals were reconciled from the recorded TTL breakdown.");
+        }
         const snapshot = {
           executionKind,
           model: stringValue(message["model"]) ?? row.database_model ?? "<unknown>",
@@ -982,6 +999,18 @@ function finalizeSession(
   tokens: TokenUsage,
   files: number,
 ): SessionAnalytics {
+  const publicStatus: SessionStatus = sessionStatuses.find((status) => status === row.status) ?? "unknown";
+  const publicProvider: SessionProvider = row.agent_type === "claude" || row.agent_type === "codex" || row.agent_type === "cursor" ? row.agent_type : "unsupported";
+  const createdAt = normalizeTimestamp(row.created_at) ?? state.firstEventAt;
+  const updatedAt = normalizeTimestamp(row.updated_at) ?? state.lastEventAt ?? createdAt;
+  if (!createdAt || !updatedAt) throw new Error("Provider timestamps are unavailable.");
+  for (const names of [state.tools, state.transportTools, state.skills]) {
+    for (const name of Object.keys(names)) if (publicMetadataName.exec(name)?.[0] !== name) {
+      const count = names[name]!; delete names[name];
+      increment(names, "unknown", count);
+      state.warnings.push("Some provider metadata was omitted because it was not a bounded public identifier.");
+    }
+  }
   const models = [...state.models.values()].sort((left, right) => right.totalUsd - left.totalUsd);
   const cost = zeroCost();
   let pricedTokens = 0;
@@ -1029,7 +1058,7 @@ function finalizeSession(
   };
   return {
     cost,
-    costBasis:
+    costBasis: publicProvider === "unsupported" ? "unavailable" :
       row.agent_type === "cursor"
         ? cost.totalUsd > 0
           ? "provider-reported"
@@ -1037,15 +1066,15 @@ function finalizeSession(
         : "api-list-price-equivalent",
     costByExecution: { ...state.costByExecution },
     costComplete: pricedTokenCoverage === null || pricedTokenCoverage === 1,
-    createdAt: row.created_at,
-    effort: state.effort,
+    createdAt,
+    effort: state.effort && publicMetadataName.exec(state.effort)?.[0] === state.effort ? state.effort : null,
     executionKind,
     firstEventAt: state.firstEventAt,
     lastEventAt: state.lastEventAt,
     metrics,
     models,
     pricedTokenCoverage,
-    provider: row.agent_type as SessionProvider,
+    provider: publicProvider,
     repositoryId: row.repository_id,
     repositoryName: row.repository_name,
     sessionKey: createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12),
@@ -1057,7 +1086,7 @@ function finalizeSession(
           : "unavailable",
     skills: state.skills,
     spendByDay: state.spendByDay,
-    status: row.status,
+    status: publicStatus,
     tokens,
     tools: state.tools,
     transcript: {
@@ -1067,7 +1096,7 @@ function finalizeSession(
       warnings: [...new Set(state.warnings)],
     },
     transportTools: state.transportTools,
-    updatedAt: row.updated_at,
+    updatedAt,
   };
 }
 
@@ -1463,19 +1492,21 @@ function addCursorReportedCost(
 ): number {
   const usageData = asRecord(data["usageData"]);
   let total = 0;
-  for (const [model, rawUsage] of Object.entries(usageData ?? {})) {
+  for (const [rawModel, rawUsage] of Object.entries(usageData ?? {})) {
     const usage = asRecord(rawUsage);
     const value = Math.max(0, numberValue(usage?.["costInCents"]) / 100);
     if (value === 0) continue;
-    const aggregate: ModelUsage = {
+    const model = publicModelName.exec(rawModel)?.[0] === rawModel ? rawModel : "<unknown>";
+    if (model !== rawModel) state.warnings.push("Some provider metadata was omitted because it was not a bounded public identifier.");
+    const aggregate: ModelUsage = state.models.get(model) ?? {
       ...zeroTokens(),
       ...zeroCost(),
       calls: 0,
       model,
       priced: true,
-      totalUsd: value,
-      upperEstimateUsd: value,
     };
+    aggregate.totalUsd += value;
+    aggregate.upperEstimateUsd += value;
     state.models.set(model, aggregate);
     if (state.executionKind === "subagent") state.costByExecution.subagentUsd += value;
     else if (state.executionKind === "top-level") state.costByExecution.topLevelUsd += value;
@@ -1859,82 +1890,11 @@ function selectRepositories(
   return repositories;
 }
 
-function mergeModelUsage(target: Map<string, ModelUsage>, source: ModelUsage): void {
-  let aggregate = target.get(source.model);
-  if (!aggregate) {
-    aggregate = { ...zeroTokens(), ...zeroCost(), calls: 0, model: source.model, priced: true };
-    target.set(source.model, aggregate);
-  }
-  aggregate.calls += source.calls;
-  aggregate.priced = aggregate.priced && source.priced;
-  sumTokens(aggregate, source);
-  sumCost(aggregate, source);
-}
-
 function aggregate(
   repository: RepositoryRow,
   sessions: SessionAnalytics[],
   rateCard: RateCard,
 ): RepositoryAnalytics {
-  const totalTokens = zeroTokens();
-  const spendByDay: Record<string, number> = {};
-  const tools: Record<string, number> = {};
-  const models = new Map<string, ModelUsage>();
-  let estimatedSpendUsd = 0;
-  let estimatedUpperSpendUsd = 0;
-  let apiEquivalentSpendUsd = 0;
-  let providerReportedSpendUsd = 0;
-  let subagentSpendUsd = 0;
-  let topLevelSpendUsd = 0;
-  let pricedTokens = 0;
-  let allTokens = 0;
-  let compactions = 0;
-  for (const session of sessions) {
-    sumTokens(totalTokens, session.tokens);
-    estimatedSpendUsd += session.cost.totalUsd;
-    estimatedUpperSpendUsd += session.cost.upperEstimateUsd;
-    if (session.costBasis === "api-list-price-equivalent") apiEquivalentSpendUsd += session.cost.totalUsd;
-    if (session.costBasis === "provider-reported") providerReportedSpendUsd += session.cost.totalUsd;
-    subagentSpendUsd += session.costByExecution.subagentUsd;
-    topLevelSpendUsd += session.costByExecution.topLevelUsd;
-    compactions += session.metrics.compactions;
-    if (session.pricedTokenCoverage !== null) {
-      allTokens += tokenCount(session.tokens);
-      pricedTokens += tokenCount(session.tokens) * session.pricedTokenCoverage;
-    }
-    for (const [day, value] of Object.entries(session.spendByDay)) increment(spendByDay, day, value);
-    for (const [name, value] of Object.entries(session.tools)) increment(tools, name, value);
-    for (const model of session.models) mergeModelUsage(models, model);
-  }
-  const analyzedSessions = sessions.filter(({ transcript }) => transcript.status === "ok").length;
-  const missingTranscripts = sessions.filter(({ transcript }) => transcript.status === "missing").length;
-  const inputDenominator =
-    totalTokens.uncachedInputTokens +
-    totalTokens.cachedInputTokens +
-    totalTokens.cacheWriteInputTokens;
-  const named = (record: Record<string, number>): NamedMetric[] =>
-    Object.entries(record)
-      .map(([name, value]) => ({ name, value }))
-      .sort((left, right) => right.value - left.value);
-  const warnings: string[] = [];
-  const missingProviderIds = sessions.filter(
-    ({ transcript }) =>
-      transcript.status === "missing" &&
-      transcript.warnings.includes("Conductor has no provider session ID."),
-  ).length;
-  const unmatchedTranscripts = missingTranscripts - missingProviderIds;
-  if (missingProviderIds > 0) {
-    warnings.push(
-      `${missingProviderIds} legacy session${missingProviderIds === 1 ? "" : "s"} cannot be correlated because Conductor recorded no provider session ID.`,
-    );
-  }
-  if (unmatchedTranscripts > 0) {
-    warnings.push(
-      `${unmatchedTranscripts} session${unmatchedTranscripts === 1 ? "" : "s"} have a provider ID but no validated local transcript.`,
-    );
-  }
-  const unpricedSessions = sessions.filter(({ costComplete }) => !costComplete).length;
-  if (unpricedSessions > 0) warnings.push(`${unpricedSessions} sessions include models without a rate card.`);
   return {
     generatedAt: new Date().toISOString(),
     schemaVersion: 1,
@@ -1943,36 +1903,9 @@ function aggregate(
       effectiveDate: rateCard.effectiveDate,
       models: Object.entries(rateCard.models).map(([model, { source }]) => ({ model, source })),
     },
-    repository: {
-      id: repository.id,
-      name: repository.name,
-    },
+    repository: { id: repository.id, name: repository.name },
     sessions,
-    spendByDay: named(spendByDay).sort((left, right) => left.name.localeCompare(right.name)),
-    spendByModel: [...models.values()].sort((left, right) => right.totalUsd - left.totalUsd),
-    summary: {
-      analyzedSessions,
-      apiEquivalentSpendUsd,
-      cacheReadRatio:
-        inputDenominator === 0 ? 0 : totalTokens.cachedInputTokens / inputDenominator,
-      compactions,
-      estimatedSpendUsd,
-      estimatedUpperSpendUsd,
-      missingTranscripts,
-      outputTokens: totalTokens.outputTokens,
-      pricedTokenCoverage: allTokens === 0 ? null : pricedTokens / allTokens,
-      providerReportedSpendUsd,
-      sessions: sessions.length,
-      subagentSessions: sessions.filter(({ executionKind }) => executionKind === "subagent" || executionKind === "mixed").length,
-      subagentSpendUsd,
-      topLevelSessions: sessions.filter(({ executionKind }) => executionKind === "top-level" || executionKind === "mixed").length,
-      topLevelSpendUsd,
-      toolCalls: Object.values(tools).reduce((sum, value) => sum + value, 0),
-      totalInputTokens: totalTokens.inputTokens,
-      unpricedSessions,
-    },
-    topTools: named(tools),
-    warnings,
+    ...aggregateSessions(sessions),
   };
 }
 
@@ -2077,7 +2010,7 @@ async function analyzeSelectedRepositories(
     const analyzedRows = await mapConcurrent(registeredRows, 1, async (row) => {
       if (row.agent_type !== "codex" && row.agent_type !== "claude") {
         return unavailableSession(row, "unsupported", [
-          `Unsupported Conductor agent type: ${row.agent_type || "unknown"}.`,
+          "Unsupported Conductor agent type.",
         ]);
       }
       const provider = row.agent_type as SessionProvider;
@@ -2112,7 +2045,7 @@ async function analyzeSelectedRepositories(
       const matches = candidates.filter((candidate) => {
         if (candidate.provider !== row.agent_type || claimed.has(`${candidate.provider}:${candidate.id}`)) return false;
         if (resolve(candidate.cwd) !== resolve(row.workspace_path) || !candidate.timestamp) return false;
-        return Math.abs(Date.parse(candidate.timestamp) - Date.parse(row.created_at)) <= 15 * 60_000;
+        return Math.abs(timestampMilliseconds(candidate.timestamp) - timestampMilliseconds(row.created_at)) <= 15 * 60_000;
       });
       if (matches.length !== 1 || !matches[0]) return null;
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
@@ -2174,7 +2107,7 @@ async function analyzeSelectedRepositories(
             (warning): warning is string => Boolean(warning),
           ),
         );
-        result.warnings = [...new Set(result.warnings)];
+        result.warnings = [...new Set([...result.warnings.filter((warning) => !warning.startsWith("A provider transcript root")), ...scanWarnings(result.warnings)])];
         return result;
       }),
     };
@@ -2227,7 +2160,7 @@ function aggregateMachine(
       ...new Set([
         ...combined.warnings,
         ...repositories.flatMap(({ warnings }) =>
-          warnings.filter((warning) => warning.startsWith("A provider transcript root")),
+          scanWarnings(warnings),
         ),
       ]),
     ],

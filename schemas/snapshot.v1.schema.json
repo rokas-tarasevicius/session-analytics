@@ -9,40 +9,49 @@
       "type": "object",
       "properties": {
         "inputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "uncachedInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cachedInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cacheWriteInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cacheWrite5mInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cacheWrite1hInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "outputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "reasoningOutputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "nonReasoningOutputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -100,40 +109,49 @@
       "type": "object",
       "properties": {
         "inputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "uncachedInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cachedInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cacheWriteInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cacheWrite5mInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cacheWrite1hInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "outputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "reasoningOutputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "nonReasoningOutputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "cachedInputUsd": {
           "type": "number",
@@ -160,11 +178,13 @@
           "minimum": 0
         },
         "model": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^(<unknown>|[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127})?)$"
         },
         "calls": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "priced": {
           "type": "boolean"
@@ -213,8 +233,9 @@
       "type": "object",
       "properties": {
         "analyzedSessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "apiEquivalentSpendUsd": {
           "type": "number",
@@ -225,8 +246,9 @@
           "minimum": 0
         },
         "compactions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "estimatedSpendUsd": {
           "type": "number",
@@ -237,12 +259,14 @@
           "minimum": 0
         },
         "missingTranscripts": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "outputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "pricedTokenCoverage": {
           "anyOf": [
@@ -260,36 +284,42 @@
           "minimum": 0
         },
         "sessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "subagentSessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "subagentSpendUsd": {
           "type": "number",
           "minimum": 0
         },
         "topLevelSessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "topLevelSpendUsd": {
           "type": "number",
           "minimum": 0
         },
         "toolCalls": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "totalInputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "unpricedSessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -318,10 +348,14 @@
       "type": "object",
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^(conductor|discovered)-[a-f0-9]{20}$"
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$"
         }
       },
       "required": [
@@ -345,7 +379,8 @@
             "type": "object",
             "properties": {
               "model": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(<unknown>|[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127})?)$"
               },
               "source": {
                 "type": "string",
@@ -371,12 +406,14 @@
       "type": "object",
       "properties": {
         "assistantMessages": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "compactions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "contextUtilizationPeak": {
           "anyOf": [
@@ -390,8 +427,9 @@
           ]
         },
         "delegatedAgents": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "durationMilliseconds": {
           "type": "number",
@@ -402,44 +440,54 @@
           "minimum": 0
         },
         "maxContextWindow": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "maxInputTokensPerCall": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "modelCalls": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "queueOperations": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "summaries": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "taskCompletions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "taskStarts": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "toolCalls": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "transportToolCalls": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "userTurns": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -466,8 +514,9 @@
       "type": "object",
       "properties": {
         "files": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "snapshotWhileWorking": {
           "type": "boolean"
@@ -491,7 +540,108 @@
         "warnings": {
           "type": "array",
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "const": "A provider transcript root is missing."
+              },
+              {
+                "const": "A provider transcript root could not be read."
+              },
+              {
+                "const": "Cursor local session history could not be read."
+              },
+              {
+                "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
+              },
+              {
+                "const": "Transcript ID matched, but its recorded working directory did not."
+              },
+              {
+                "const": "Transcript filename matched, but provider metadata validation failed."
+              },
+              {
+                "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
+              },
+              {
+                "const": "Some Claude responses do not expose thinking tokens separately; they remain included in output."
+              },
+              {
+                "const": "Provider history did not record a stable model ID; those tokens are excluded from API-equivalent spend coverage."
+              },
+              {
+                "const": "Discovered directly from the machine-wide provider transcript store."
+              },
+              {
+                "const": "Recovered from a unique working-directory and start-time match in the provider transcript store."
+              },
+              {
+                "const": "Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card."
+              },
+              {
+                "const": "Cursor retained session metadata without a provider-reported local cost record; no usage value is inferred."
+              },
+              {
+                "const": "Cursor retained the session header and usage summary, but not detailed local conversation metrics."
+              },
+              {
+                "const": "Conductor has no provider session ID."
+              },
+              {
+                "const": "Unsupported Conductor agent type."
+              },
+              {
+                "const": "Transcript parsing failed without exposing local error details."
+              },
+              {
+                "const": "Some provider metadata was omitted because it was not a bounded public identifier."
+              },
+              {
+                "const": "Cache-write totals were reconciled from the recorded TTL breakdown."
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} malformed JSONL records were skipped\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} cumulative token counter reset(?: was|s were) re-baselined as a new observed segment\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} repeated process-wide token snapshot(?: was|s were) excluded from this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} token event(?: lacks|s lack) per-request usage; only deltas between snapshots this session observed were counted\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} process-wide counter baseline(?: was|s were) excluded because the requests inside it were not observed by this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} legacy sessions? cannot be correlated because Conductor recorded no provider session ID\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have a provider ID but no validated local transcript\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? include models without a rate card\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have unsupported provider evidence\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^No rate card is configured for (<unknown>|[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127})?)\\.$"
+              }
+            ]
           }
         }
       },
@@ -554,7 +704,8 @@
         "effort": {
           "anyOf": [
             {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
             },
             {
               "type": "null"
@@ -627,17 +778,22 @@
             },
             {
               "const": "cursor"
+            },
+            {
+              "const": "unsupported"
             }
           ]
         },
         "repositoryId": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^(conductor|discovered)-[a-f0-9]{20}$"
         },
         "repositoryName": {
           "type": "string"
         },
         "sessionKey": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-f0-9]{12}$"
         },
         "skillEvidence": {
           "anyOf": [
@@ -655,8 +811,13 @@
         "skills": {
           "type": "object",
           "additionalProperties": {
-            "type": "number",
-            "minimum": 0
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           }
         },
         "spendByDay": {
@@ -667,7 +828,35 @@
           }
         },
         "status": {
-          "type": "string"
+          "anyOf": [
+            {
+              "const": "idle"
+            },
+            {
+              "const": "working"
+            },
+            {
+              "const": "completed"
+            },
+            {
+              "const": "failed"
+            },
+            {
+              "const": "error"
+            },
+            {
+              "const": "interrupted"
+            },
+            {
+              "const": "cancelled"
+            },
+            {
+              "const": "pending"
+            },
+            {
+              "const": "unknown"
+            }
+          ]
         },
         "tokens": {
           "$ref": "#/$defs/TokenUsage"
@@ -675,8 +864,13 @@
         "tools": {
           "type": "object",
           "additionalProperties": {
-            "type": "number",
-            "minimum": 0
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           }
         },
         "transcript": {
@@ -685,8 +879,13 @@
         "transportTools": {
           "type": "object",
           "additionalProperties": {
-            "type": "number",
-            "minimum": 0
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
           }
         },
         "updatedAt": {
@@ -752,7 +951,108 @@
         "warnings": {
           "type": "array",
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "const": "A provider transcript root is missing."
+              },
+              {
+                "const": "A provider transcript root could not be read."
+              },
+              {
+                "const": "Cursor local session history could not be read."
+              },
+              {
+                "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
+              },
+              {
+                "const": "Transcript ID matched, but its recorded working directory did not."
+              },
+              {
+                "const": "Transcript filename matched, but provider metadata validation failed."
+              },
+              {
+                "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
+              },
+              {
+                "const": "Some Claude responses do not expose thinking tokens separately; they remain included in output."
+              },
+              {
+                "const": "Provider history did not record a stable model ID; those tokens are excluded from API-equivalent spend coverage."
+              },
+              {
+                "const": "Discovered directly from the machine-wide provider transcript store."
+              },
+              {
+                "const": "Recovered from a unique working-directory and start-time match in the provider transcript store."
+              },
+              {
+                "const": "Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card."
+              },
+              {
+                "const": "Cursor retained session metadata without a provider-reported local cost record; no usage value is inferred."
+              },
+              {
+                "const": "Cursor retained the session header and usage summary, but not detailed local conversation metrics."
+              },
+              {
+                "const": "Conductor has no provider session ID."
+              },
+              {
+                "const": "Unsupported Conductor agent type."
+              },
+              {
+                "const": "Transcript parsing failed without exposing local error details."
+              },
+              {
+                "const": "Some provider metadata was omitted because it was not a bounded public identifier."
+              },
+              {
+                "const": "Cache-write totals were reconciled from the recorded TTL breakdown."
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} malformed JSONL records were skipped\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} cumulative token counter reset(?: was|s were) re-baselined as a new observed segment\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} repeated process-wide token snapshot(?: was|s were) excluded from this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} token event(?: lacks|s lack) per-request usage; only deltas between snapshots this session observed were counted\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} process-wide counter baseline(?: was|s were) excluded because the requests inside it were not observed by this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} legacy sessions? cannot be correlated because Conductor recorded no provider session ID\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have a provider ID but no validated local transcript\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? include models without a rate card\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have unsupported provider evidence\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^No rate card is configured for (<unknown>|[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127})?)\\.$"
+              }
+            ]
           }
         }
       },
@@ -811,7 +1111,108 @@
         "warnings": {
           "type": "array",
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "const": "A provider transcript root is missing."
+              },
+              {
+                "const": "A provider transcript root could not be read."
+              },
+              {
+                "const": "Cursor local session history could not be read."
+              },
+              {
+                "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
+              },
+              {
+                "const": "Transcript ID matched, but its recorded working directory did not."
+              },
+              {
+                "const": "Transcript filename matched, but provider metadata validation failed."
+              },
+              {
+                "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
+              },
+              {
+                "const": "Some Claude responses do not expose thinking tokens separately; they remain included in output."
+              },
+              {
+                "const": "Provider history did not record a stable model ID; those tokens are excluded from API-equivalent spend coverage."
+              },
+              {
+                "const": "Discovered directly from the machine-wide provider transcript store."
+              },
+              {
+                "const": "Recovered from a unique working-directory and start-time match in the provider transcript store."
+              },
+              {
+                "const": "Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card."
+              },
+              {
+                "const": "Cursor retained session metadata without a provider-reported local cost record; no usage value is inferred."
+              },
+              {
+                "const": "Cursor retained the session header and usage summary, but not detailed local conversation metrics."
+              },
+              {
+                "const": "Conductor has no provider session ID."
+              },
+              {
+                "const": "Unsupported Conductor agent type."
+              },
+              {
+                "const": "Transcript parsing failed without exposing local error details."
+              },
+              {
+                "const": "Some provider metadata was omitted because it was not a bounded public identifier."
+              },
+              {
+                "const": "Cache-write totals were reconciled from the recorded TTL breakdown."
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} malformed JSONL records were skipped\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} cumulative token counter reset(?: was|s were) re-baselined as a new observed segment\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} repeated process-wide token snapshot(?: was|s were) excluded from this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} token event(?: lacks|s lack) per-request usage; only deltas between snapshots this session observed were counted\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} process-wide counter baseline(?: was|s were) excluded because the requests inside it were not observed by this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} legacy sessions? cannot be correlated because Conductor recorded no provider session ID\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have a provider ID but no validated local transcript\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? include models without a rate card\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have unsupported provider evidence\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^No rate card is configured for (<unknown>|[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127})?)\\.$"
+              }
+            ]
           }
         }
       },
@@ -869,8 +1270,9 @@
           "type": "object",
           "properties": {
             "analyzedSessions": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "apiEquivalentSpendUsd": {
               "type": "number",
@@ -881,8 +1283,9 @@
               "minimum": 0
             },
             "compactions": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "estimatedSpendUsd": {
               "type": "number",
@@ -893,12 +1296,14 @@
               "minimum": 0
             },
             "missingTranscripts": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "outputTokens": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "pricedTokenCoverage": {
               "anyOf": [
@@ -916,48 +1321,57 @@
               "minimum": 0
             },
             "sessions": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "subagentSessions": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "subagentSpendUsd": {
               "type": "number",
               "minimum": 0
             },
             "topLevelSessions": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "topLevelSpendUsd": {
               "type": "number",
               "minimum": 0
             },
             "toolCalls": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "totalInputTokens": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "unpricedSessions": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "repositories": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "repositoriesWithSessions": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "workingSnapshots": {
-              "type": "number",
-              "minimum": 0
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -994,7 +1408,108 @@
         "warnings": {
           "type": "array",
           "items": {
-            "type": "string"
+            "anyOf": [
+              {
+                "const": "A provider transcript root is missing."
+              },
+              {
+                "const": "A provider transcript root could not be read."
+              },
+              {
+                "const": "Cursor local session history could not be read."
+              },
+              {
+                "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
+              },
+              {
+                "const": "Transcript ID matched, but its recorded working directory did not."
+              },
+              {
+                "const": "Transcript filename matched, but provider metadata validation failed."
+              },
+              {
+                "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
+              },
+              {
+                "const": "Some Claude responses do not expose thinking tokens separately; they remain included in output."
+              },
+              {
+                "const": "Provider history did not record a stable model ID; those tokens are excluded from API-equivalent spend coverage."
+              },
+              {
+                "const": "Discovered directly from the machine-wide provider transcript store."
+              },
+              {
+                "const": "Recovered from a unique working-directory and start-time match in the provider transcript store."
+              },
+              {
+                "const": "Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card."
+              },
+              {
+                "const": "Cursor retained session metadata without a provider-reported local cost record; no usage value is inferred."
+              },
+              {
+                "const": "Cursor retained the session header and usage summary, but not detailed local conversation metrics."
+              },
+              {
+                "const": "Conductor has no provider session ID."
+              },
+              {
+                "const": "Unsupported Conductor agent type."
+              },
+              {
+                "const": "Transcript parsing failed without exposing local error details."
+              },
+              {
+                "const": "Some provider metadata was omitted because it was not a bounded public identifier."
+              },
+              {
+                "const": "Cache-write totals were reconciled from the recorded TTL breakdown."
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} malformed JSONL records were skipped\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} cumulative token counter reset(?: was|s were) re-baselined as a new observed segment\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} repeated process-wide token snapshot(?: was|s were) excluded from this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} token event(?: lacks|s lack) per-request usage; only deltas between snapshots this session observed were counted\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} process-wide counter baseline(?: was|s were) excluded because the requests inside it were not observed by this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} legacy sessions? cannot be correlated because Conductor recorded no provider session ID\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have a provider ID but no validated local transcript\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? include models without a rate card\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have unsupported provider evidence\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^No rate card is configured for (<unknown>|[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127})?)\\.$"
+              }
+            ]
           }
         }
       },

@@ -96,6 +96,7 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 - [x] OpenTelemetry GenAI attributes in OTLP/JSON session aggregate logs, pinned to a Development specification commit, with explicit opt-in collector delivery.
 - [x] Team sharing: aggregate-only preview, keyed repository pseudonyms or aliases, minimum-session suppression, disjoint-source merge, and a snapshot dashboard. Session thresholds do not guarantee person-level anonymity.
 - [x] Versioned JSON Schemas, CSV/NDJSON exports, and browser downloads of the filtered view.
+- [x] Enforce interchange identifier/warning allowlists, reconcile rollups, preserve coverage caveats, normalize UTC date selection, and prevent stale export previews or cross-source dashboard reuse.
 
 ## Architecture direction
 

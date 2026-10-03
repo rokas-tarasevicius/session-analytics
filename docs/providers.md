@@ -166,7 +166,7 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 **Known gaps:**
 
 - Conductor's per-session result records (turns, durations, reported cost) are not yet used as fallback evidence when a provider transcript has been deleted.
-- Agent types other than Claude Code and Codex are reported as unsupported.
+- Agent types other than Claude Code and Codex in Conductor are reported as unsupported evidence. Unknown agent names use the fixed public provider `unsupported`; raw names are omitted. These rows round-trip through interchange and remain outside sharing eligibility.
 
 ## Adding a provider
 

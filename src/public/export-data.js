@@ -1,9 +1,22 @@
+// @ts-check
+/** @typedef {import("../types.ts").SessionAnalytics} SessionAnalytics */
+/** @typedef {import("../types.ts").MachineAnalytics} MachineAnalytics */
+/** @typedef {import("../types.ts").ModelUsage} ModelUsage */
+/** @typedef {{repositoryId?: string | null, start?: string | null, end?: string | null, providers?: string[] | null, repositoryIds?: string[] | null}} SessionFilters */
+/** @typedef {{schemaVersion: number, repositoryId: string, repositoryName: string, provider: string}} CsvBase */
 // Pure interchange helpers shared by the browser and Node; no transcript access.
+import { coverageWarnings, filteredWarning, scanWarnings } from "./evidence.js";
+import { timestampMilliseconds } from "./timestamps.js";
+/** @type {Array<keyof import("../types.ts").TokenUsage>} */
 const tokenFields = ["inputTokens", "uncachedInputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "outputTokens", "reasoningOutputTokens", "nonReasoningOutputTokens"];
+/** @type {Array<keyof import("../types.ts").CostBreakdown>} */
 const costFields = ["cachedInputUsd", "cacheWriteUsd", "inputUsd", "outputUsd", "totalUsd", "upperEstimateUsd"];
-const zeroFields = (keys) => Object.fromEntries(keys.map((key) => [key, 0]));
+/** @template {string} K @param {K[]} keys @returns {Record<K, number>} */
+const zeroFields = (keys) => /** @type {Record<K, number>} */ (Object.fromEntries(keys.map((key) => [key, 0])));
 
+/** @param {object[]} rows @param {string[]} columns */
 export function csv(rows, columns) {
+  /** @param {unknown} value */
   const cell = (value) => {
     if (value === null || value === undefined) return "";
     let text = String(value);
@@ -11,9 +24,10 @@ export function csv(rows, columns) {
     if (typeof value === "string" && /^[\s\u0000-\u001f]*[=+@-]|^[\t\r\n]/.test(text)) text = `'${text}`;
     return `"${text.replaceAll('"', '""')}"`;
   };
-  return `${[columns.map(cell).join(","), ...rows.map((row) => columns.map((column) => cell(row[column])).join(","))].join("\r\n")}\r\n`;
+  return `${[columns.map(cell).join(","), ...rows.map((row) => columns.map((column) => cell(/** @type {Record<string, unknown>} */ (row)[column])).join(","))].join("\r\n")}\r\n`;
 }
 
+/** @param {MachineAnalytics} snapshot @returns {Record<string, string>} */
 export function csvTables(snapshot) {
   const sessions = snapshot.sessions.map((s) => ({
     schemaVersion: 1, sessionKey: s.sessionKey, repositoryId: s.repositoryId, repositoryName: s.repositoryName,
@@ -25,7 +39,12 @@ export function csvTables(snapshot) {
     toolCalls: s.metrics.toolCalls, modelCalls: s.metrics.modelCalls, userTurns: s.metrics.userTurns,
     compactions: s.metrics.compactions, durationMilliseconds: s.metrics.durationMilliseconds,
   }));
-  const days = new Map(), models = new Map(), tools = new Map();
+  /** @type {Map<string, CsvBase & {day: string, contributingSessions: number, apiEquivalentSpendUsd: number, providerReportedSpendUsd: number}>} */
+  const days = new Map();
+  /** @type {Map<string, CsvBase & ModelUsage & {costBasis: string, contributingSessions: number}>} */
+  const models = new Map();
+  /** @type {Map<string, CsvBase & {tool: string, contributingSessions: number, calls: number}>} */
+  const tools = new Map();
   for (const s of snapshot.sessions) {
     const base = { schemaVersion: 1, repositoryId: s.repositoryId, repositoryName: s.repositoryName, provider: s.provider };
     for (const [day, amount] of Object.entries(s.spendByDay)) {
@@ -49,6 +68,7 @@ export function csvTables(snapshot) {
       row.contributingSessions++; row.calls += calls; tools.set(key, row);
     }
   }
+  /** @template T @param {Map<string, T>} map @returns {T[]} */
   const sorted = (map) => [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row);
   const base = ["schemaVersion", "repositoryId", "repositoryName", "provider"];
   return {
@@ -59,7 +79,9 @@ export function csvTables(snapshot) {
   };
 }
 
-function aggregate(sessions) {
+/** @param {SessionAnalytics[]} sessions @returns {Omit<import("../types.ts").RepositoryRollup, "repository">} */
+export function aggregateSessions(sessions) {
+  /** @type {import("../types.ts").RepositoryAnalytics["summary"]} */
   const summary = {
     analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: 0, compactions: 0,
     estimatedSpendUsd: 0, estimatedUpperSpendUsd: 0, missingTranscripts: 0, outputTokens: 0,
@@ -67,7 +89,12 @@ function aggregate(sessions) {
     subagentSpendUsd: 0, topLevelSessions: 0, topLevelSpendUsd: 0, toolCalls: 0, totalInputTokens: 0, unpricedSessions: 0,
   };
   let priced = 0, priceable = 0, cached = 0, cacheDenominator = 0;
-  const models = new Map(), days = new Map(), tools = new Map();
+  /** @type {Map<string, ModelUsage>} */
+  const models = new Map();
+  /** @type {Map<string, number>} */
+  const days = new Map();
+  /** @type {Map<string, number>} */
+  const tools = new Map();
   for (const s of sessions) {
     summary.analyzedSessions += s.transcript.status === "ok" ? 1 : 0;
     summary.missingTranscripts += s.transcript.status === "missing" ? 1 : 0;
@@ -87,20 +114,45 @@ function aggregate(sessions) {
     for (const [name, amount] of Object.entries(s.tools)) tools.set(name, (tools.get(name) || 0) + amount);
     for (const source of s.models) {
       const row = models.get(source.model) || { model: source.model, calls: 0, priced: true, ...zeroFields([...tokenFields, ...costFields]) };
-      for (const key of [...tokenFields, ...costFields, "calls"]) row[key] += source[key];
+      for (const key of [...tokenFields, ...costFields]) row[key] += source[key];
+      row.calls += source.calls;
       row.priced = row.priced && source.priced; models.set(source.model, row);
     }
   }
   summary.cacheReadRatio = cacheDenominator ? cached / cacheDenominator : 0;
   summary.pricedTokenCoverage = priceable ? priced / priceable : null;
+  /** @param {Map<string, number>} map */
   const named = (map) => [...map].map(([name, value]) => ({ name, value }));
-  return { summary, spendByDay: named(days).sort((a, b) => a.name.localeCompare(b.name)), spendByModel: [...models.values()].sort((a, b) => b.totalUsd - a.totalUsd), topTools: named(tools).sort((a, b) => b.value - a.value), warnings: [] };
+  return { summary, spendByDay: named(days).sort((a, b) => a.name.localeCompare(b.name)), spendByModel: [...models.values()].sort((a, b) => b.totalUsd - a.totalUsd), topTools: named(tools).sort((a, b) => b.value - a.value), warnings: coverageWarnings(sessions) };
 }
 
-/** Date filtering follows dashboard semantics: whole sessions selected by start date. */
-export function filterSnapshot(snapshot, { repositoryId = null, start = null, end = null, providers = null, repositoryIds = null } = {}) {
-  const sessions = snapshot.sessions.filter((s) => (!repositoryId || s.repositoryId === repositoryId) && (!start || s.createdAt >= start) && (!end || s.createdAt <= end) && (!providers || providers.includes(s.provider)) && (!repositoryIds || repositoryIds.includes(s.repositoryId)));
-  const repositories = snapshot.repositories.filter((r) => (!repositoryId || r.repository.id === repositoryId) && (!repositoryIds || repositoryIds.includes(r.repository.id))).map((r) => ({ repository: { id: r.repository.id, name: r.repository.name }, ...aggregate(sessions.filter((s) => s.repositoryId === r.repository.id)) }));
-  const combined = aggregate(sessions);
-  return { schemaVersion: 1, generatedAt: snapshot.generatedAt, rateCard: snapshot.rateCard, repositories, sessions, ...combined, summary: { ...combined.summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter((r) => r.summary.sessions > 0).length, workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking).length }, warnings: ["Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."] };
+/** Whole sessions selected by numeric start instant; end is EXCLUSIVE.
+ * @param {SessionAnalytics[]} sessions @param {SessionFilters} filters */
+export function selectSessions(sessions, { repositoryId = null, start = null, end = null, providers = null, repositoryIds = null } = {}) {
+  const first = start === null ? -Infinity : timestampMilliseconds(start);
+  const last = end === null ? Infinity : timestampMilliseconds(end);
+  if (Number.isNaN(first) || Number.isNaN(last)) throw new Error("Invalid selection timestamp.");
+  return sessions.filter((s) => {
+    const time = timestampMilliseconds(s.createdAt);
+    return (!repositoryId || s.repositoryId === repositoryId) && time >= first && time < last && (!providers || providers.includes(s.provider)) && (!repositoryIds || repositoryIds.includes(s.repositoryId));
+  });
+}
+
+/** @param {MachineAnalytics} snapshot @param {SessionFilters} filters @returns {MachineAnalytics} */
+export function filterSnapshot(snapshot, filters = {}) {
+  const { repositoryId = null, repositoryIds = null } = filters;
+  const sessions = selectSessions(snapshot.sessions, filters);
+  /** @type {Map<string, SessionAnalytics[]>} */
+  const byRepository = new Map();
+  for (const s of sessions) {
+    const rows = byRepository.get(s.repositoryId) || [];
+    rows.push(s); byRepository.set(s.repositoryId, rows);
+  }
+  const repositories = snapshot.repositories.filter((r) => (!repositoryId || r.repository.id === repositoryId) && (!repositoryIds || repositoryIds.includes(r.repository.id))).map((r) => {
+    const rollup = aggregateSessions(byRepository.get(r.repository.id) || []);
+    return { repository: { id: r.repository.id, name: r.repository.name }, ...rollup, warnings: [...new Set([...scanWarnings(r.warnings), ...rollup.warnings])] };
+  });
+  const combined = aggregateSessions(sessions);
+  const discovery = scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]);
+  return { schemaVersion: 1, generatedAt: snapshot.generatedAt, rateCard: snapshot.rateCard, repositories, sessions, ...combined, summary: { ...combined.summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter((r) => r.summary.sessions > 0).length, workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking).length }, warnings: [...new Set([...discovery, ...combined.warnings, filteredWarning])] };
 }

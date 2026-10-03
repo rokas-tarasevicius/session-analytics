@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promise
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
@@ -66,7 +67,7 @@ test("v1 schema validates real-shape fixtures and has no drift from checked fiel
     (s: any) => { s.sessions[0].tools = { secret: "content-is-not-returned" }; },
     (s: any) => { s.sessions[0].tokens.inputTokens = -1; },
     (s: any) => { delete s.sessions[0].cost; },
-    (s: any) => { s.sessions[0].provider = "unsupported"; },
+    (s: any) => { s.sessions[0].provider = "synthetic-future-agent"; },
     (s: any) => { s.rateCard.models[0].source = "javascript:alert(1)"; },
     (s: any) => { s.sessions[0].pricedTokenCoverage = 2; },
     (s: any) => { s.sessions[0].createdAt = "invalid"; },
@@ -122,7 +123,7 @@ test("NDJSON frames every row with schemaVersion and reconstructs the snapshot e
 test("filtered JSON recomputes every rollup and preserves zero and N/A semantics", () => {
   const original = JSON.stringify(snapshot);
   const source = snapshot.sessions.find((s) => s.provider === "claude")!;
-  const filtered = filterSnapshot(snapshot, { providers: ["claude"], repositoryId: source.repositoryId, start: source.createdAt, end: source.createdAt });
+  const filtered = filterSnapshot(snapshot, { providers: ["claude"], repositoryId: source.repositoryId, start: source.createdAt, end: new Date(Date.parse(source.createdAt) + 1).toISOString() });
   assert.equal(filtered.sessions.length, 1);
   assert.equal(filtered.summary.estimatedSpendUsd, source.cost.totalUsd);
   assert.equal(filtered.repositories[0]!.summary.toolCalls, source.metrics.toolCalls);
@@ -246,6 +247,13 @@ test("OTLP delivery posts the saved bytes only on opt-in and refuses redirects a
     const output = join(directory, "otlp-cli");
     await run(process.execPath, [bin, "export", "--snapshot", input, "--format", "otlp-json", "--out", output, "--otlp-endpoint", endpoint]);
     assert.equal(received.length, 1); assert.equal(received[0], await readFile(join(output, "otlp-logs.json"), "utf8"));
+    const invalid = structuredClone(snapshot);
+    const oldId = invalid.repositories[0]!.repository.id;
+    invalid.repositories[0]!.repository.id = "11111111-2222-4333-8444-555555555555";
+    for (const session of invalid.sessions) if (session.repositoryId === oldId) session.repositoryId = invalid.repositories[0]!.repository.id;
+    const invalidPath = join(directory, "collector-invalid.json"); await writeFile(invalidPath, JSON.stringify(invalid));
+    await assert.rejects(run(process.execPath, [bin, "export", "--snapshot", invalidPath, "--format", "otlp-json", "--out", join(directory, "invalid-out"), "--otlp-endpoint", endpoint]));
+    assert.equal(received.length, 1, "invalid imports never reach the collector");
     responseBody = JSON.stringify({ partialSuccess: { rejectedLogRecords: "1", errorMessage: "secret-path" } });
     await assert.rejects(postOtlp(otlpEndpoint(endpoint), received[0]!), /not fully acknowledged/);
     responseCode = 307; await assert.rejects(postOtlp(otlpEndpoint(endpoint), received[0]!)); assert.equal(received.length, 3);
@@ -304,4 +312,156 @@ test("non-regular snapshot and key files fail without blocking on a FIFO", { ski
   `;
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", script, path], { encoding: "utf8", timeout: 2000 });
   assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout, "rejected\nrejected\n");
+});
+
+test("review: typed private strings cannot cross the import/export boundary", async () => {
+  const mutations: Array<(s: MachineAnalytics) => void> = [
+    (s) => { const old = s.sessions[0]!.repositoryId; const id = "11111111-2222-4333-8444-555555555555"; s.repositories.find((r) => r.repository.id === old)!.repository.id = id; for (const row of s.sessions) if (row.repositoryId === old) row.repositoryId = id; },
+    (s) => { s.warnings = ["EACCES /private/secret-path"]; },
+    (s) => { s.repositories[0]!.warnings = ["EACCES /private/secret-path"]; },
+    (s) => { s.sessions[0]!.transcript.warnings = ["EACCES /private/secret-path"]; },
+    (s) => { Object.assign(s.sessions[0]!, { status: "secret-command --token=secret" }); },
+    (s) => { s.sessions[0]!.models[0]!.model = "/private/secret-path"; },
+    (s) => { s.sessions[0]!.tools = { "secret-command --token=secret": s.sessions[0]!.metrics.toolCalls }; },
+    (s) => { s.sessions[0]!.skills = { "/private/secret-path": 1 }; },
+  ];
+  for (const [index, mutate] of mutations.entries()) {
+    const bad = structuredClone(snapshot); mutate(bad);
+    const path = join(directory, `private-${index}.json`); await writeFile(path, JSON.stringify(bad));
+    await assert.rejects(loadSnapshot(path), /Snapshot file is invalid/);
+    for (const format of ["csv", "ndjson", "otlp-json"] as const) assert.throws(() => exportFiles(bad, format), /Snapshot is invalid/);
+    const report = spawnSync(process.execPath, [bin, "report", "--snapshot", path, "--json"], { encoding: "utf8" });
+    assert.notEqual(report.status, 0); assert.equal(report.stdout, ""); assert.doesNotMatch(report.stderr, /secret|11111111-2222/);
+  }
+});
+
+test("review: date selection compares instants and uses an exclusive next-day bound", () => {
+  for (const createdAt of ["2026-07-20 14:00:00", "2026-07-21T00:30:00+02:00", "2026-07-20T23:59:59Z", "2026-07-20T23:59:59.999999Z", "2026-07-20T00:00:00Z", "2026-07-19T20:00:00-04:00"]) {
+    const source = cohort(1); source.sessions[0]!.createdAt = createdAt;
+    validateSnapshot(source);
+    const result = filterSnapshot(source, { start: "2026-07-20T00:00:00.000Z", end: "2026-07-21T00:00:00.000Z" });
+    assert.equal(result.summary.sessions, 1, createdAt);
+    assert.equal(result.summary.totalInputTokens, source.summary.totalInputTokens);
+  }
+  const source = cohort(1); source.sessions[0]!.createdAt = "2026-07-21T00:00:00Z";
+  assert.equal(filterSnapshot(source, { end: "2026-07-21T00:00:00.000Z" }).sessions.length, 0);
+});
+
+test("review: unsupported Conductor agents and database timestamps round-trip safely", async () => {
+  const root = await mkdtemp(join(directory, "unsupported-"));
+  const fixture = await createSessionAnalyticsFixture(root);
+  const database = new DatabaseSync(fixture.databasePath);
+  try {
+    database.exec("UPDATE sessions SET agent_type = 'synthetic-future-agent', status = 'secret-command --token=secret', created_at = '2026-07-20 14:00:00', updated_at = '2026-07-20 15:00:00' WHERE agent_type = 'claude'");
+  } finally { database.close(); }
+  const { repositoryRoot, remote, ...options } = fixture;
+  const result = await analyzeMachineSessions(options);
+  const unsupported = result.sessions.find((s) => s.transcript.status === "unsupported")!;
+  assert.equal(unsupported.provider, "unsupported");
+  assert.equal(unsupported.status, "unknown");
+  assert.equal(unsupported.createdAt, "2026-07-20T14:00:00.000Z");
+  assert.equal(unsupported.costBasis, "unavailable");
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-future-agent|secret-command/);
+  validateSnapshot(result);
+  const path = join(root, "snapshot.json"); await writeFile(path, JSON.stringify(result));
+  assert.deepEqual(await loadMachineSnapshot(path), result);
+  for (const format of ["csv", "ndjson", "otlp-json"] as const) assert.ok(Object.keys(exportFiles(result, format)).length);
+  assert.equal(shareSnapshot(result, secret, 2).summary.sessions, result.summary.analyzedSessions);
+});
+
+test("review: contradictory rollups and session breakdowns are rejected across formats", () => {
+  const mutations: Array<(s: MachineAnalytics) => void> = [
+    (s) => { s.spendByDay = [{ name: "2026-07-20", value: 999999 }]; s.repositories[0]!.spendByDay = s.spendByDay; },
+    (s) => { s.spendByModel[0]!.totalUsd++; },
+    (s) => { s.repositories[0]!.topTools[0]!.value++; },
+    (s) => { s.topTools.push(s.topTools[0]!); },
+    (s) => { s.sessions.find((r) => r.provider === "claude")!.models[0]!.inputTokens += 100000; },
+    (s) => { s.sessions[0]!.tokens.inputTokens += 0.5; },
+    (s) => { s.sessions[0]!.tokens.nonReasoningOutputTokens++; },
+    (s) => { s.sessions[0]!.costByExecution.unknownUsd++; },
+    (s) => { s.sessions[0]!.spendByDay["2026-07-20"] = 999999; },
+    (s) => { s.sessions[0]!.metrics.toolCalls++; },
+    (s) => { s.sessions[0]!.pricedTokenCoverage = 0.5; },
+  ];
+  for (const [index, mutate] of mutations.entries()) {
+    const bad = structuredClone(snapshot); mutate(bad);
+    for (const format of ["csv", "ndjson", "otlp-json"] as const) assert.throws(() => exportFiles(bad, format), /Snapshot is invalid/, `mutation ${index}, ${format}`);
+  }
+  const cursor = filterSnapshot(snapshot, { providers: ["cursor"] });
+  assert.ok(cursor.sessions.some((s) => s.tokens.inputTokens > 0 && s.models.every((m) => m.inputTokens === 0)));
+  validateSnapshot(cursor);
+});
+
+test("review: filtered snapshots retain scan-wide caveats and regenerate selection warnings", () => {
+  const source = structuredClone(snapshot), warning = "A provider transcript root could not be read.";
+  source.warnings.push(warning); source.repositories[0]!.warnings.push(warning);
+  for (const providers of [null, ["cursor"], []]) {
+    const filtered = filterSnapshot(source, { providers });
+    assert.ok(filtered.warnings.includes(warning));
+    assert.ok(filtered.repositories[0]!.warnings.includes(warning));
+    assert.ok(filtered.warnings.some((w) => w.startsWith("Filtered export:")));
+    validateSnapshot(filtered);
+    assert.equal(filterSnapshot(filtered).warnings.filter((w) => w === warning).length, 1);
+  }
+  const missing = structuredClone(source.sessions[0]!);
+  missing.transcript.status = "missing";
+  missing.transcript.warnings = ["Conductor has no provider session ID."];
+  const withMissing = filterSnapshot({ ...source, sessions: [missing] });
+  assert.ok(withMissing.warnings.some((w) => w.startsWith("1 legacy session")));
+  assert.ok(!filterSnapshot(withMissing, { providers: [] }).warnings.some((w) => w.startsWith("1 legacy session")));
+});
+
+test("review: shared active and malformed evidence stays thresholded without small-group disclosure", async () => {
+  const root = await mkdtemp(join(directory, "partial-"));
+  const { repositoryRoot, remote, ...options } = await createSessionAnalyticsFixture(root);
+  const database = new DatabaseSync(options.databasePath);
+  try { database.exec("UPDATE sessions SET status = 'working' WHERE agent_type = 'claude'"); } finally { database.close(); }
+  const path = join(options.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", "22222222-2222-4222-8222-222222222222.jsonl");
+  await writeFile(path, `${await readFile(path, "utf8")}broken secret-content\n{\ntruncated secret-content\n`);
+  const parsed = await analyzeMachineSessions(options);
+  const session = parsed.sessions.find((s) => s.provider === "claude")!;
+  assert.equal(session.transcript.snapshotWhileWorking, true);
+  assert.ok(session.transcript.warnings.includes("3 malformed JSONL records were skipped."));
+  const active = cohort(5);
+  active.sessions = active.sessions.map((s) => ({ ...structuredClone(session), sessionKey: s.sessionKey }));
+  const shared = shareSnapshot(active, secret);
+  assert.equal(shared.summary.sessions, 5);
+  assert.equal(shared.summary.pricedTokens, shared.summary.priceableTokens);
+  assert.doesNotMatch(JSON.stringify(shared), /working|malformed|secret-content|partial/);
+  assert.equal(shareSnapshot({ ...active, sessions: active.sessions.slice(1) }, secret).summary.sessions, 0);
+});
+
+test("review: Claude cache-write totals include the recorded disjoint TTL counts", async () => {
+  const root = await mkdtemp(join(directory, "cache-shape-"));
+  const { repositoryRoot, remote, ...options } = await createSessionAnalyticsFixture(root);
+  const path = join(options.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", "22222222-2222-4222-8222-222222222222.jsonl");
+  const records = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  for (const record of records) if (record.message?.usage?.cache_creation) record.message.usage.cache_creation_input_tokens = 100;
+  await writeFile(path, records.map((record) => JSON.stringify(record)).join("\n"));
+  const result = await analyzeMachineSessions(options);
+  const claude = result.sessions.find((session) => session.provider === "claude")!;
+  assert.equal(claude.tokens.cacheWriteInputTokens, 200);
+  assert.equal(claude.tokens.inputTokens, 750);
+  assert.ok(claude.transcript.warnings.includes("Cache-write totals were reconciled from the recorded TTL breakdown."));
+  validateSnapshot(result);
+});
+
+test("review: malformed provider model/tool labels are replaced before any public output", async () => {
+  const root = await mkdtemp(join(directory, "metadata-"));
+  const { repositoryRoot, remote, ...options } = await createSessionAnalyticsFixture(root);
+  const path = join(options.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", "22222222-2222-4222-8222-222222222222.jsonl");
+  const records = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  for (const record of records) if (record.type === "assistant") {
+    record.message.model = "/private/secret-path";
+    record.message.content[0].name = "secret-command --token=secret";
+  }
+  await writeFile(path, records.map((record) => JSON.stringify(record)).join("\n"));
+  const result = await analyzeMachineSessions(options);
+  validateSnapshot(result);
+  const session = result.sessions.find((s) => s.provider === "claude")!;
+  assert.equal(session.tools.unknown, 1);
+  assert.equal(session.metrics.toolCalls, 3);
+  assert.ok(session.models.some((model) => model.model === "<unknown>" && !model.priced));
+  assert.doesNotMatch(JSON.stringify(result), /secret-path|secret-command/);
+  for (const format of ["csv", "ndjson", "otlp-json"] as const) for (const content of Object.values(exportFiles(result, format))) assert.doesNotMatch(content, /secret-path|secret-command/);
 });

@@ -1,3 +1,4 @@
+import { sharedEvidenceCaveat } from "./evidence.js";
 const node = (tag, text, className) => {
   const element = document.createElement(tag); if (text !== undefined) element.textContent = text;
   if (className) element.className = className; return element;
@@ -14,6 +15,7 @@ export function renderSharedSnapshot(snapshot) {
   const panel = document.querySelector("#shared-snapshot"); panel.hidden = false; panel.replaceChildren();
   panel.append(node("p", "SHARED SNAPSHOT", "kicker"), node("h1", "Repository aggregates"));
   panel.append(node("p", `${number.format(snapshot.summary.sessions)} sessions across ${snapshot.repositories.length} repositories from ${snapshot.sources.length} disjoint sources. Every source bucket met the minimum of ${snapshot.minimumSessions} sessions.`));
+  panel.append(node("p", sharedEvidenceCaveat, "chart-note"));
   panel.append(node("p", "Only included repositories contribute to these totals. Session timestamps, names, model and tool breakdowns are unavailable. The threshold counts sessions, not people, and does not guarantee anonymity.", "chart-note"));
   const wrap = node("div", undefined, "table-scroll");
   const table = node("table"); table.setAttribute("aria-label", "Shared repository aggregates");

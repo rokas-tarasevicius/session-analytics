@@ -8,6 +8,7 @@ import { otlpEndpoint, postOtlp } from "./otlp.ts";
 import { loadMachineSnapshot } from "./snapshot.ts";
 import { defaultShareKeyPath, loadShareKey, mergeSharedSnapshots, readAliases, shareSnapshot } from "./sharing.ts";
 import type { SharedSnapshot } from "../types.ts";
+import { sharedEvidenceCaveat } from "../public/evidence.js";
 
 export const shareValueFlags = ["--snapshot", "--min-sessions", "--share-key-file", "--share-aliases"];
 
@@ -28,6 +29,7 @@ export async function reportShare(argv: string[]): Promise<void> {
   const snapshot = path ? await loadMachineSnapshot(path) : await analyzeMachineSessionsIsolated(analyzeOptionsFrom(argv, process.env));
   const shared = shareSnapshot(snapshot, secret, minimum, aliases);
   process.stderr.write("Share preview: stdout is the entire aggregate payload. No data has been sent. Review aliases and counts before sharing this file.\n");
+  process.stderr.write(`${sharedEvidenceCaveat}\n`);
   process.stdout.write(`${JSON.stringify(shared, null, 2)}\n`);
 }
 

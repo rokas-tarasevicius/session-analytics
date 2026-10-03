@@ -9,7 +9,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 **Returned:** allowlisted counters and identifiers only.
 
 - Token counters by class, cost figures, counts of events, durations, and ISO timestamps.
-- Model IDs and reasoning-effort labels as the provider recorded them.
+- Bounded model IDs and reasoning-effort labels from structured provider metadata; malformed identifiers are replaced or omitted.
 - Tool names, and skill identifiers that match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
@@ -120,11 +120,11 @@ Repository summaries and the machine summary share these fields.
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `sessionKey` | First 12 hex characters of SHA-256 of `<provider>:<session ID>` (or of the Conductor session ID for Conductor-registered sessions). It is not keyed with a secret, so it is stable across runs; someone who already holds the raw ID can recompute it, but the key does not reveal the ID | P1 |
-| `provider` | `claude`, `codex`, or `cursor` | P0 |
+| `provider` | `claude`, `codex`, `cursor`, or the fixed `unsupported` fallback for unknown agents (raw agent names are omitted) | P0 |
 | `repositoryId` | Repository key, as in `repository.id` | P1 |
 | `repositoryName` | Repository display name, as in `repository.name` | P1 |
-| `status` | Session status label: Conductor's status when registered there, Cursor's composer status, otherwise `idle` | P0 |
-| `createdAt` | Session start time | P0 |
+| `status` | Fixed label: `idle`, `working`, `completed`, `failed`, `error`, `interrupted`, `cancelled`, `pending`, or `unknown`; unrecognized source text becomes `unknown` | P0 |
+| `createdAt` | Session start as UTC ISO with milliseconds; offset-free source/database timestamps mean UTC | P0 |
 | `updatedAt` | Conductor's or Cursor's last-updated time when available; otherwise the session start time | P0 |
 | `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
 | `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
@@ -237,7 +237,7 @@ Fields in P2 or P3 additionally need an explicit opt-in that is off by default.
 
 ### Interchange metadata and export fields
 
-All formats remain inside P0/P1. These fields extend the manifest above; the complete contracts and wire mappings are in [interop.md](interop.md). The two published schemas reject unknown nested fields. Snapshot import is structural validation, not proof that a hand-edited string is safe; use snapshots from trusted sources.
+All formats remain inside P0/P1. These fields extend the manifest above; the complete contracts and wire mappings are in [interop.md](interop.md). The two published schemas reject unknown nested fields. Snapshot import enforces hashed key syntax, fixed status labels, approved warning templates, bounded model/tool/skill names, and numeric reconciliation. Repository names and otherwise valid identifiers still require trusted provenance: syntax cannot certify their meaning. Arbitrary warning/error/status text and raw repository UUIDs are rejected.
 
 | Field / surface | Meaning | Tier |
 | --- | --- | --- |
@@ -248,7 +248,8 @@ All formats remain inside P0/P1. These fields extend the manifest above; the com
 | CSV `contributingSessions` | Sessions contributing an entry to a daily/model/tool row | P0 |
 | Other CSV columns | Flattened existing session/token/cost/metric fields, with original units and cost basis | P0/P1 as above |
 | NDJSON `kind` | `snapshot`, `repository`, or `session`; remaining fields are existing public fields | P0 |
-| Filtered JSON `warnings[]` | Fixed text explaining session-start filtering and cost interpretation | P0 |
+| Filtered JSON `warnings[]` | Preserved fixed discovery caveats, regenerated selection coverage notes, and an appended filtering explanation | P0 |
+| `/api/health.dataSource` | Fixed `live` or `snapshot` label used to prevent cross-source server reuse; never the snapshot filename | P0 |
 | Shared JSON `kind`, `minimumSessions` | `shared`; minimum distinct session count required for every released bucket | P0 |
 | Shared `sources[]` | Domain-separated HMAC installation identities, 128 bits; used to reject repeated contributions | P1 |
 | Shared `repositories[].repository` | `repo-<128-bit HMAC>` or `alias-<explicit user alias>`; no original ID/name | P1 |
@@ -271,3 +272,5 @@ The HMAC key, alias-file lookup keys, snapshot/input/output paths, collector URL
 A private 32-byte random sharing key is the only new persistent secret. Its default location is `$XDG_STATE_HOME/session-analytics/sharing.key` or `~/.local/state/session-analytics/sharing.key`; an explicit file option/environment override is supported. It is created with mode 0600, never exported, and symlink/public-permission keys are rejected. Files are opened exclusively to prevent overwrite. Existing output directories should be private and user-controlled. CSV neutralizes spreadsheet formulas in text cells. Browser downloads use local Blobs, no upload endpoint and no extra browser storage.
 
 Only `export --format otlp-json --otlp-endpoint URL` can POST telemetry. It first saves the exact allowlisted payload locally. It requires HTTPS except loopback HTTP, rejects embedded credentials, does not follow redirects, and does not retry or print collector text. OTLP remains a P0/P1 **session-level** export, not the thresholded sharing format. It includes local pseudonymous session/repository keys and possibly model IDs. The CLI flag authorizes that delivery; normal analysis, sharing previews, merge, the dashboard, and file-only exports never send it. This is a deliberate exception to the default offline guarantee, not background telemetry.
+
+Shared totals always carry a CLI/dashboard caveat that they are observed lower bounds and may include running and partially parsed sessions. Pricing coverage does not establish evidence completeness. No new completeness flags, rare subgroup counts, or suppressed totals enter shared files. New fixed parser warnings cover omitted malformed metadata and cache-write totals reconciled from recorded TTL buckets.

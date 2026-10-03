@@ -11,7 +11,17 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["bin/**/*.ts", "src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+  "include": [
+    "bin/**/*.ts",
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "src/public/export-data.js",
+    "src/public/evidence.js",
+    "src/public/timestamps.js"
+  ]
 }

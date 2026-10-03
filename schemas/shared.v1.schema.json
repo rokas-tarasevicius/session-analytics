@@ -9,24 +9,28 @@
       "type": "object",
       "properties": {
         "sessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "inputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "outputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "pricedTokens": {
           "type": "number",
           "minimum": 0
         },
         "priceableTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "apiEquivalentSpendUsd": {
           "type": "number",
@@ -41,12 +45,14 @@
           "minimum": 0
         },
         "toolCalls": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "compactions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -67,24 +73,28 @@
       "type": "object",
       "properties": {
         "sessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "inputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "outputTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "pricedTokens": {
           "type": "number",
           "minimum": 0
         },
         "priceableTokens": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "apiEquivalentSpendUsd": {
           "type": "number",
@@ -99,12 +109,14 @@
           "minimum": 0
         },
         "toolCalls": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "compactions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "repository": {
           "type": "string",
@@ -136,8 +148,9 @@
           "const": "shared"
         },
         "minimumSessions": {
-          "type": "number",
-          "minimum": 0
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "sources": {
           "type": "array",

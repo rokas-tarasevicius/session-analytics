@@ -1,4 +1,6 @@
-import { filterSnapshot } from "./export-data.js";
+import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
+import { coverageWarnings, scanWarnings } from "./evidence.js";
+import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu } from "./export-menu.js";
 import { renderSharedSnapshot } from "./shared-view.js";
 
@@ -48,9 +50,9 @@ let toolsDetailRepositoryId = null;
 let skillsDetailRepositoryId = null;
 const distributionRepositories = new Set();
 const viewProviderFilters = {
-  activity: new Set(["codex", "claude", "cursor"]),
-  skills: new Set(["codex", "claude", "cursor"]),
-  tools: new Set(["codex", "claude", "cursor"]),
+  activity: new Set(["codex", "claude", "cursor", "unsupported"]),
+  skills: new Set(["codex", "claude", "cursor", "unsupported"]),
+  tools: new Set(["codex", "claude", "cursor", "unsupported"]),
 };
 const seriesColors = ["#181a16", "#c85b45", "#2d6a5a", "#9a6329", "#49697a", "#786f93"];
 const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
@@ -69,7 +71,7 @@ function duration(milliseconds) {
 
 function dateTime(value) {
   if (!value) return "Unknown time";
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(normalizeTimestamp(value)));
 }
 
 function node(tag, value, className) {
@@ -90,15 +92,11 @@ const tokenFields = ["cacheWrite1hInputTokens", "cacheWrite5mInputTokens", "cach
 const costFields = ["cacheWriteUsd", "cachedInputUsd", "inputUsd", "outputUsd", "totalUsd", "upperEstimateUsd"];
 
 function selectedWindow() {
-  return {
-    start: elements.windowStart.value ? `${elements.windowStart.value}T00:00:00.000Z` : null,
-    end: elements.windowEnd.value ? `${elements.windowEnd.value}T23:59:59.999Z` : null,
-  };
+  return utcDayBounds(elements.windowStart.value, elements.windowEnd.value);
 }
 
 function sessionsInWindow(sessions) {
-  const { start, end } = selectedWindow();
-  return sessions.filter(({ createdAt }) => (!start || createdAt >= start) && (!end || createdAt <= end));
+  return selectSessions(sessions, selectedWindow());
 }
 
 function summarize(sessions) {
@@ -149,19 +147,8 @@ function namedTotals(sessions, field) {
 
 function spendDays(sessions) { return namedTotals(sessions, "spendByDay").sort((left, right) => left.name.localeCompare(right.name)); }
 
-function coverageWarnings(sessions) {
-  const missing = sessions.filter(({ transcript }) => transcript.status === "missing");
-  const legacy = missing.filter(({ transcript }) => transcript.warnings.includes("Conductor has no provider session ID.")).length;
-  const unmatched = missing.length - legacy, unpriced = sessions.filter(({ costComplete }) => !costComplete).length;
-  const warnings = [];
-  if (legacy) warnings.push(`${legacy} legacy session${legacy === 1 ? "" : "s"} cannot be correlated because Conductor recorded no provider session ID.`);
-  if (unmatched) warnings.push(`${unmatched} session${unmatched === 1 ? "" : "s"} have a provider ID but no validated local transcript.`);
-  if (unpriced) warnings.push(`${unpriced} session${unpriced === 1 ? "" : "s"} include models without a rate card.`);
-  return warnings;
-}
-
 function repositoryAggregate(item, sessions) {
-  return { repository: item.repository, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), summary: summarize(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions) };
+  return { repository: item.repository, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), summary: summarize(sessions), topTools: namedTotals(sessions, "tools"), warnings: [...new Set([...scanWarnings(item.warnings), ...coverageWarnings(sessions)])] };
 }
 
 function activeView() {
@@ -173,7 +160,7 @@ function activeView() {
   const sessions = windowSessions;
   const summary = summarize(sessions);
   return {
-    dailySessions: scopeSessions, repositories, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions),
+    dailySessions: scopeSessions, repositories, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: [...new Set([...scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]), ...coverageWarnings(sessions)])],
     summary: { ...summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter(({ summary: item }) => item.sessions > 0).length, workingSnapshots: sessions.filter(({ transcript }) => transcript.snapshotWhileWorking).length },
   };
 }
@@ -235,16 +222,19 @@ function sessionsForProviders(sessions, scope) {
 
 function renderViewProviderFilters(container, scope) {
   clear(container);
-  for (const provider of ["codex", "claude", "cursor"]) {
+  for (const provider of ["codex", "claude", "cursor", "unsupported"]) {
+    if (provider === "unsupported" && !snapshot.sessions.some((session) => session.provider === provider)) continue;
     const label = node("label", null, "provider-toggle");
     const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider);
-    const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
+    const logo = provider === "unsupported" ? null : node("img");
+    if (logo) { logo.src = `/brands/${provider}.svg`; logo.alt = ""; }
     input.addEventListener("change", () => {
       if (input.checked) viewProviderFilters[scope].add(provider);
       else viewProviderFilters[scope].delete(provider);
       renderActiveAnalyticsView(activeView());
     });
-    label.append(input, logo, document.createTextNode(providerLabels[provider])); container.append(label);
+    label.append(input); if (logo) label.append(logo);
+    label.append(document.createTextNode(providerLabels[provider])); container.append(label);
   }
 }
 
@@ -347,6 +337,7 @@ function renderDistributionChart(container, series, accessor, formatter, logarit
 }
 
 function renderDistributions() {
+  resetExportMenu();
   renderDistributionRepositoryOptions(); clear(elements.distributionKey);
   const windowSessions = sessionsInWindow(snapshot.sessions);
   const series = snapshot.repositories.filter(({ repository }) => distributionRepositories.has(repository.id)).map(({ repository }) => ({
@@ -370,7 +361,7 @@ function renderActivity(view) {
   const sessions = sessionsForProviders(view.sessions, "activity");
   const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
   for (const session of sessions) {
-    const date = new Date(session.createdAt); if (Number.isNaN(date.valueOf())) continue;
+    const date = new Date(normalizeTimestamp(session.createdAt)); if (Number.isNaN(date.valueOf())) continue;
     grid[(date.getDay() + 6) % 7][date.getHours()] += 1;
   }
   const maximum = Math.max(1, ...grid.flat()); clear(elements.activityHeatmap);
@@ -581,6 +572,7 @@ function clearInactiveAnalyticsViews(activeName) {
 }
 
 function renderActiveAnalyticsView(view) {
+  resetExportMenu();
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
   if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
@@ -618,7 +610,7 @@ function activeProviders() {
   return providerFilters.filter(({ checked }) => checked).map(({ dataset }) => dataset.providerFilter);
 }
 
-const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" };
+const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor", unsupported: "Unsupported" };
 
 function renderLine(items) {
   clear(elements.dailySpend);
@@ -755,7 +747,7 @@ function populateRepositories() {
 }
 
 function configureWindow() {
-  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay)]).sort();
+  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay }) => [normalizeTimestamp(createdAt)?.slice(0, 10), ...Object.keys(spendByDay)]).filter(Boolean).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10), maximum = dates.at(-1) || minimum;
   for (const input of [elements.windowStart, elements.windowEnd]) { input.min = minimum; input.max = maximum; }
   elements.windowStart.value = minimum; elements.windowEnd.value = maximum; elements.windowPreset.value = "all";
@@ -809,6 +801,7 @@ function renderSummary(view) {
 }
 
 function renderView() {
+  resetExportMenu();
   const view = activeView();
   renderSharedView(view);
   if (currentViewName() === "summary") {
@@ -820,16 +813,19 @@ function renderView() {
 }
 
 function render(data) {
+  resetExportMenu();
   if (data.kind === "shared") { snapshot = data; renderSharedSnapshot(data); return; }
   $("#shared-snapshot").hidden = true;
   $(".filters-bar").hidden = false; $(".view-tabs").hidden = false;
   $(".skip-link").href = "#repository-comparison";
   for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== currentViewName();
+  for (const control of document.querySelectorAll("[data-unsupported-provider]")) control.hidden = !data.sessions.some((session) => session.provider === "unsupported");
   snapshot = data; elements.generated.textContent = dateTime(data.generatedAt); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
   populateRepositories(); configureWindow(); renderRateCards(data.rateCard); ensureDistributionRepositories(); renderView();
 }
 
 async function load(refresh = false) {
+  resetExportMenu();
   elements.error.hidden = true; elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = refresh ? "Refreshing local snapshot" : "Mapping local sessions"; elements.refresh.disabled = true;
   try { const response = await fetch(`/api/analytics${refresh ? "?refresh=1" : ""}`); const body = await response.json(); if (!response.ok) throw new Error(body.error || `Analysis failed with ${response.status}.`); render(body); elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready"; }
   catch (error) { elements.sync.dataset.state = "error"; elements.syncLabel.textContent = "Analysis failed"; elements.error.textContent = error instanceof Error ? error.message : "Unknown analysis failure."; elements.error.hidden = false; }
@@ -853,7 +849,8 @@ for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-me
 }
 elements.theme.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 const storedView = localStorage.getItem("session-analytics-view");
-installExportMenu(() => {
+const resetExportMenu = installExportMenu(() => {
+  if (elements.sync.dataset.state === "loading") return null;
   if (!snapshot || snapshot.kind === "shared") return snapshot;
   const view = currentViewName();
   const { start, end } = selectedWindow();

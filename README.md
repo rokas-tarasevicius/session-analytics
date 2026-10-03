@@ -86,7 +86,7 @@ npm link      # puts the session-analytics command on your PATH
 session-analytics
 ```
 
-The command scans local history, starts the dashboard on `http://127.0.0.1:4174`, and opens it in your browser. Running it again reuses a dashboard that is already serving on that port.
+The command scans local history, starts the dashboard on `http://127.0.0.1:4174`, and opens it in your browser. Running it again reuses a live dashboard already serving on that port; saved-file dashboards are kept separate.
 
 To try it without touching your own history, run the demo. It generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory, and deletes it on exit:
 
@@ -137,7 +137,7 @@ session-analytics merge alice-shared.json bob-shared.json --out team.json
 session-analytics --snapshot team.json --no-open
 ```
 
-CSV exports sessions, daily value, models, and tools. **Export view** in the dashboard downloads the filtered JSON or CSV locally. `report --share` removes session details, uses keyed repository pseudonyms or explicit aliases, and suppresses repository buckets with fewer than five distinct sessions by default. This threshold counts sessions, not people, and does not guarantee anonymity. Merge rejects repeated contributing sources. A full or shared snapshot can be opened without scanning provider history.
+CSV exports sessions, daily value, models, and tools. **Export view** in the dashboard downloads the filtered JSON or CSV locally. `report --share` removes session details, uses keyed repository pseudonyms or explicit aliases, and suppresses repository buckets with fewer than five distinct sessions by default. This threshold counts sessions, not people, and does not guarantee anonymity. Merge rejects repeated contributing sources. A full or shared snapshot can be opened without scanning provider history. Imports enforce hashed identifiers, fixed warnings/status labels, and reconciled accounting. Filtered downloads preserve discovery caveats and use UTC session-start dates. Shared totals may include running and partially parsed sessions; pricing coverage does not establish evidence completeness.
 
 See [schemas, exports, and sharing](docs/interop.md) for field definitions, aliases, threshold controls, the pinned OpenTelemetry mapping, and optional `--otlp-endpoint` delivery. Export files never overwrite existing files; network delivery happens only with that explicit flag.
 
