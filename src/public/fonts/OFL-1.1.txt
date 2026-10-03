@@ -1,8 +1,4 @@
-Space Grotesk
-Copyright 2020 The Space Grotesk Project Authors
-(https://github.com/floriankarsten/space-grotesk)
-
-Geist Mono
+Geist (Sans) and Geist Mono
 Copyright 2024 The Geist Project Authors
 (https://github.com/vercel/geist-font.git)
 

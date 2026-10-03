@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Changed
+
+- Dashboard redesigned as a "Control Room" product shell: a left sidebar with the logo mark, view navigation, and a repository list with sparklines and usage value; a top bar with a time-window segmented control, provider chips, snapshot status, refresh, and theme toggle. The provider chips now scope every view, replacing the per-view provider filters.
+- Visual system derived from the logo: layered near-black neutrals in dark mode and clean white/zinc in light mode, 1px borders, 8px radius, Geist Sans for text and Geist Mono for figures. Coral, sage, and ochre are the only saturated colors; chart series use lightness-tiered steps of those hues that pass the data-viz palette validator, and the activity heatmap uses a single sage ramp.
+- Charts: KPI cards carry sparklines and period-over-period deltas (hidden for the all-time window); the daily usage chart and the distribution charts have a hover crosshair with one tooltip for every series, keyboard navigation (arrow keys), and synchronized markers on every sparkline; stacked bars use 2px surface gaps; the provider mix is an SVG donut with a legend that highlights slices.
+- The repository comparison table is sortable from its headers (`aria-sort`), keeps a sticky header, highlights the focused repository, and shows inline value bars.
+- Loading skeletons on first load, held previous render at reduced opacity on refresh, and consistent empty states.
+- The theme now follows the system preference when nothing is stored; the `session-analytics-theme` and `session-analytics-view` keys are unchanged. A `session-analytics-density` key stores the compact/comfortable density.
+
+### Added
+
+- Command palette (`⌘K` / `Ctrl+K`, `/`) with combobox and listbox semantics to jump to any view or repository, toggle providers, change the time window, switch theme or density, refresh, or open the shortcuts overlay.
+- Keyboard shortcuts: `g s`, `g d`, `g a`, `g c`, `g m`, `g t`, `g k` for views, `[` / `]` to step views, `1`–`4` for time windows, `p 1`–`p 3` for providers, `t` theme, `d` density, `r` refresh, `Esc` to clear the repository focus, and `?` for the help overlay.
+- URL hooks read once on load: `?view=`, `theme=`, `density=`, `window=`, `repo=`, and `open=palette|help`, used for screenshots and deep links.
+- Geist Sans (variable, latin subset) bundled under the SIL Open Font License; Space Grotesk removed.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.
