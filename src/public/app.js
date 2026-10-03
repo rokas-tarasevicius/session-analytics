@@ -1,8 +1,15 @@
+import {
+  clampWindow, costTotals, coverageWarnings, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample,
+  evidenceLabel, groupByRepository, heatLevel, matchesQuery, mergeModels, namedTotals, percent, previousPeriod, providerLabels,
+  providerOrder, repositoryKey, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, spendDays, summarize, tickScale,
+  windowStartFor,
+} from "./view-model.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
-  activityHeatmap: $("#activity-heatmap"), activityRepositories: $("#activity-repositories"),
-  activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
-  cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"), dailyLegend: $("#daily-legend"),
+  activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
+  activityRepositories: $("#activity-repositories"), activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
+  cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
   costApiTotal: $("#cost-api-total"), costCoverage: $("#cost-coverage"),
   costProviderTotal: $("#cost-provider-total"), costUpperTotal: $("#cost-upper-total"),
@@ -22,19 +29,20 @@ const elements = {
   repositories: $("#metric-repositories"), repositorySubagentSpend: $("#repository-subagent-spend"),
   repositoryCostComponents: $("#repository-cost-components"),
   repositoryFilter: $("#repository-filter"), repositoryList: $("#repository-list"), repositoryNote: $("#metric-repository-note"),
-  repositoryNavCount: $("#repo-nav-count"),
+  repositoryNav: $(".repo-nav"), repositoryNavCount: $("#repo-nav-count"),
   repositoryRows: $("#repository-rows"), repositorySpend: $("#repository-spend"),
   repositoryTokens: $("#repository-tokens"), scope: $("#scope-description"),
   scopeChip: $("#scope-chip"), scopeChipLabel: $("#scope-chip-label"),
   sessionNote: $("#metric-session-note"), sessions: $("#metric-sessions"),
+  shortcutsToggle: $("#shortcuts-toggle"),
   spend: $("#metric-spend"), spendNote: $("#metric-spend-note"),
   skillsByRepository: $("#skills-by-repository"), skillsDetail: $("#skills-detail"),
-  skillsDetailTitle: $("#skills-detail-title"), skillsKey: $("#skills-key"),
+  skillsDetailTitle: $("#skills-detail-title"), skillsKey: $("#skills-key"), skillsProviderFilters: $("#skills-provider-filters"),
   sync: $("#sync-context"), syncLabel: $("#sync-label"),
   theme: $("#theme-switch"), themeLabel: $("#theme-label"), toolCalls: $("#tool-calls"),
   toolsByRepository: $("#tools-by-repository"), toolsDetail: $("#tools-detail"),
-  toolsDetailTitle: $("#tools-detail-title"), toolsKey: $("#tools-key"),
-  tools: $("#metric-tools"), version: $("#snapshot-version"), warning: $("#warning-banner"), warningList: $("#warning-list"),
+  toolsDetailTitle: $("#tools-detail-title"), toolsKey: $("#tools-key"), toolsProviderFilters: $("#tools-provider-filters"),
+  tools: $("#metric-tools"), warning: $("#warning-banner"), warningList: $("#warning-list"),
   windowEnd: $("#window-end"), windowSegment: $("#window-segment"), windowStart: $("#window-start"),
 };
 const providerFilters = [...document.querySelectorAll("[data-provider-filter]")];
@@ -46,41 +54,36 @@ const sortButtons = [...document.querySelectorAll("th .sort[data-sort]")];
 const viewOrder = ["summary", "distributions", "activity", "costs", "models", "tools", "skills"];
 const viewLabels = { activity: "Activity", costs: "Costs", distributions: "Distributions", models: "Models", skills: "Skills", summary: "Summary", tools: "Tools" };
 const viewChords = { a: "activity", c: "costs", d: "distributions", k: "skills", m: "models", s: "summary", t: "tools" };
-const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" };
-const providerOrder = ["codex", "claude", "cursor"];
+const providerScopedViews = ["activity", "tools", "skills"];
 const windowPresets = ["7", "30", "90", "all", "custom"];
 const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", all: "All observed time", custom: "Custom range" };
 const seriesSlots = 6;
 
 let snapshot = null;
+let sessionsByRepository = new Map();
 let modelMetric = "value";
 let toolsDetailRepositoryId = null;
 let skillsDetailRepositoryId = null;
 let windowPreset = "all";
 let tableSort = { direction: "descending", key: "value" };
+let shortcutsEnabled = true;
+let navCache = { key: null };
+let navDirty = false;
 const distributionRepositories = new Set();
+// Per-view provider filters are independent of each other and of the daily chart toggles (master semantics).
+const viewProviderFilters = {
+  activity: new Set(providerOrder),
+  skills: new Set(providerOrder),
+  tools: new Set(providerOrder),
+};
 const hoverListeners = new Set();
+const navHoverListeners = new Set();
 const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
 const integer = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 const currency = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
 const money = (value) => currency.format(value || 0);
-const percent = (value) => value === null || value === undefined ? "N/A" : `${(value * 100).toFixed(1)}%`;
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-function shortMoney(value) {
-  const amount = value || 0;
-  if (amount >= 1000) return `$${compact.format(amount)}`;
-  if (amount >= 100) return `$${amount.toFixed(0)}`;
-  return `$${amount.toFixed(amount >= 10 ? 1 : 2).replace(/\.0$/, "")}`;
-}
-
-function duration(milliseconds) {
-  if (!milliseconds) return "—";
-  const hours = milliseconds / 3_600_000;
-  if (hours >= 24) return `${(hours / 24).toFixed(1)}d`;
-  if (hours >= 1) return `${hours.toFixed(1)}h`;
-  return `${Math.max(1, Math.round(milliseconds / 60_000))}m`;
-}
+const wideLayout = window.matchMedia("(min-width: 1121px)");
 
 function dateTime(value) {
   if (!value) return "Unknown time";
@@ -119,89 +122,30 @@ function emptyState(container, message, title = null) {
   container.append(box);
 }
 
+/** Captures the focused control's key before a re-render and restores focus to its replacement afterwards. */
+function rememberFocus() {
+  const active = document.activeElement;
+  const key = active instanceof HTMLElement ? active.dataset.focusKey : null;
+  if (!key) return () => {};
+  return () => {
+    const current = document.activeElement;
+    if (current && current !== document.body && current.isConnected) return;
+    document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+  };
+}
+
 function selectedRepository() {
   const id = elements.repositoryFilter.value;
   return id === "all" ? null : snapshot.repositories.find(({ repository }) => repository.id === id) || null;
 }
 
-const tokenFields = ["cacheWrite1hInputTokens", "cacheWrite5mInputTokens", "cacheWriteInputTokens", "cachedInputTokens", "inputTokens", "nonReasoningOutputTokens", "outputTokens", "reasoningOutputTokens", "uncachedInputTokens"];
-const costFields = ["cacheWriteUsd", "cachedInputUsd", "inputUsd", "outputUsd", "totalUsd", "upperEstimateUsd"];
-
-function selectedWindow() {
-  return {
-    start: elements.windowStart.value ? `${elements.windowStart.value}T00:00:00.000Z` : null,
-    end: elements.windowEnd.value ? `${elements.windowEnd.value}T23:59:59.999Z` : null,
-  };
-}
-
-function sessionsInRange(sessions, startDay, endDay) {
-  const start = startDay ? `${startDay}T00:00:00.000Z` : null, end = endDay ? `${endDay}T23:59:59.999Z` : null;
-  return sessions.filter(({ createdAt }) => (!start || createdAt >= start) && (!end || createdAt <= end));
-}
+function repositorySessions(id) { return sessionsByRepository.get(id) || []; }
 
 function sessionsInWindow(sessions) {
-  const { start, end } = selectedWindow();
-  return sessions.filter(({ createdAt }) => (!start || createdAt >= start) && (!end || createdAt <= end));
+  return sessionsInRange(sessions, elements.windowStart.value || null, elements.windowEnd.value || null);
 }
 
-function summarize(sessions) {
-  const totals = { inputTokens: 0, outputTokens: 0, uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0 };
-  let pricedTokens = 0, observedTokens = 0;
-  const summary = { analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: null, compactions: 0, estimatedSpendUsd: 0, estimatedUpperSpendUsd: 0, missingTranscripts: 0, outputTokens: 0, pricedTokenCoverage: null, providerReportedSpendUsd: 0, sessions: sessions.length, subagentSessions: 0, subagentSpendUsd: 0, toolCalls: 0, topLevelSessions: 0, topLevelSpendUsd: 0, totalInputTokens: 0, unpricedSessions: 0 };
-  for (const session of sessions) {
-    summary.analyzedSessions += session.transcript.status === "ok" ? 1 : 0;
-    summary.missingTranscripts += session.transcript.status === "missing" ? 1 : 0;
-    summary.compactions += session.metrics.compactions; summary.toolCalls += session.metrics.toolCalls;
-    summary.estimatedSpendUsd += session.cost.totalUsd; summary.estimatedUpperSpendUsd += session.cost.upperEstimateUsd;
-    summary.apiEquivalentSpendUsd += session.costBasis === "api-list-price-equivalent" ? session.cost.totalUsd : 0;
-    summary.providerReportedSpendUsd += session.costBasis === "provider-reported" ? session.cost.totalUsd : 0;
-    summary.subagentSessions += session.executionKind === "subagent" || session.executionKind === "mixed" ? 1 : 0;
-    summary.topLevelSessions += session.executionKind === "top-level" || session.executionKind === "mixed" ? 1 : 0;
-    summary.subagentSpendUsd += session.costByExecution?.subagentUsd || 0;
-    summary.topLevelSpendUsd += session.costByExecution?.topLevelUsd || 0;
-    summary.totalInputTokens += session.tokens.inputTokens; summary.outputTokens += session.tokens.outputTokens;
-    summary.unpricedSessions += session.costComplete ? 0 : 1;
-    for (const key of Object.keys(totals)) totals[key] += session.tokens[key] || 0;
-    const count = session.tokens.inputTokens + session.tokens.outputTokens;
-    if (session.pricedTokenCoverage !== null) {
-      observedTokens += count; pricedTokens += count * session.pricedTokenCoverage;
-    }
-  }
-  const cacheDenominator = totals.uncachedInputTokens + totals.cachedInputTokens + totals.cacheWriteInputTokens;
-  summary.cacheReadRatio = cacheDenominator ? totals.cachedInputTokens / cacheDenominator : null;
-  summary.pricedTokenCoverage = observedTokens ? pricedTokens / observedTokens : null;
-  return summary;
-}
-
-function mergeModels(sessions) {
-  const models = new Map();
-  for (const session of sessions) for (const source of session.models) {
-    const key = `${session.provider}:${source.model}`;
-    const target = models.get(key) || { model: source.model, provider: session.provider, calls: 0, priced: true };
-    for (const key of [...tokenFields, ...costFields, "calls"]) target[key] = (target[key] || 0) + (source[key] || 0);
-    target.priced = target.priced && source.priced; models.set(key, target);
-  }
-  return [...models.values()].sort((left, right) => right.totalUsd - left.totalUsd);
-}
-
-function namedTotals(sessions, field) {
-  const totals = new Map();
-  for (const session of sessions) for (const [name, value] of Object.entries(session[field])) totals.set(name, (totals.get(name) || 0) + value);
-  return [...totals].map(([name, value]) => ({ name, value })).sort((left, right) => right.value - left.value);
-}
-
-function spendDays(sessions) { return namedTotals(sessions, "spendByDay").sort((left, right) => left.name.localeCompare(right.name)); }
-
-function coverageWarnings(sessions) {
-  const missing = sessions.filter(({ transcript }) => transcript.status === "missing");
-  const legacy = missing.filter(({ transcript }) => transcript.warnings.includes("Conductor has no provider session ID.")).length;
-  const unmatched = missing.length - legacy, unpriced = sessions.filter(({ costComplete }) => !costComplete).length;
-  const warnings = [];
-  if (legacy) warnings.push(`${legacy} legacy session${legacy === 1 ? "" : "s"} cannot be correlated because Conductor recorded no provider session ID.`);
-  if (unmatched) warnings.push(`${unmatched} session${unmatched === 1 ? "" : "s"} have a provider ID but no validated local transcript.`);
-  if (unpriced) warnings.push(`${unpriced} session${unpriced === 1 ? "" : "s"} include models without a rate card.`);
-  return warnings;
-}
+function windowDays() { return daysBetween(elements.windowStart.value, elements.windowEnd.value); }
 
 function repositoryAggregate(item, sessions) {
   return { repository: item.repository, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), summary: summarize(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions) };
@@ -211,18 +155,17 @@ function activeProviders() {
   return providerFilters.filter(({ checked }) => checked).map(({ dataset }) => dataset.providerFilter);
 }
 
-function sessionsForProviders(sessions) {
-  const selected = new Set(activeProviders());
+function sessionsForProviders(sessions, scope) {
+  const selected = viewProviderFilters[scope];
   return sessions.filter(({ provider }) => selected.has(provider));
 }
 
 function activeView() {
   const selected = selectedRepository();
-  const repositorySessions = selected ? snapshot.sessions.filter(({ repositoryId }) => repositoryId === selected.repository.id) : snapshot.sessions;
-  const scopeSessions = sessionsForProviders(repositorySessions);
+  const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
   const sourceRepositories = selected ? [selected] : snapshot.repositories;
-  const repositories = sourceRepositories.map((item) => repositoryAggregate(item, windowSessions.filter(({ repositoryId }) => repositoryId === item.repository.id)));
+  const repositories = sourceRepositories.map((item) => repositoryAggregate(item, sessionsInWindow(repositorySessions(item.repository.id))));
   const sessions = windowSessions;
   const summary = summarize(sessions);
   return {
@@ -232,37 +175,11 @@ function activeView() {
 }
 
 function selectRepository(id, { scroll = true } = {}) {
+  if (!snapshot) return;
+  if (![...elements.repositoryFilter.options].some((option) => option.value === id)) return;
   elements.repositoryFilter.value = id;
   renderView();
   if (scroll) elements.main.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
-}
-
-function windowDays() {
-  const days = [];
-  if (!elements.windowStart.value || !elements.windowEnd.value) return days;
-  const first = new Date(`${elements.windowStart.value}T00:00:00Z`), last = new Date(`${elements.windowEnd.value}T00:00:00Z`);
-  for (let day = first, count = 0; day <= last && count < 3660; day = new Date(day.valueOf() + 86_400_000), count += 1) days.push(day.toISOString().slice(0, 10));
-  return days;
-}
-
-function dailySpendSeries(sessions, days) {
-  const index = new Map(days.map((day, position) => [day, position]));
-  const values = days.map(() => 0);
-  for (const session of sessions) for (const [day, value] of Object.entries(session.spendByDay)) {
-    const position = index.get(day);
-    if (position !== undefined) values[position] += value;
-  }
-  return values;
-}
-
-function dailyCountSeries(sessions, days, accessor) {
-  const index = new Map(days.map((day, position) => [day, position]));
-  const values = days.map(() => 0);
-  for (const session of sessions) {
-    const position = index.get(session.createdAt.slice(0, 10));
-    if (position !== undefined) values[position] += accessor(session);
-  }
-  return values;
 }
 
 // --------------------------------------------------------------------- bars
@@ -276,6 +193,7 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
     const row = node(onSelect ? "button" : "div", null, `bar-row${onSelect ? " repository-link" : ""}`);
     if (onSelect) {
       row.type = "button";
+      row.dataset.focusKey = `bar:${container.id}:${item.id ?? item.name}`;
       row.setAttribute("aria-label", `Open metrics for ${item.name}`);
       row.addEventListener("click", () => onSelect(item));
     }
@@ -293,11 +211,21 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
 
 function syncHover(day) {
   for (const listener of hoverListeners) listener(day);
+  for (const listener of navHoverListeners) listener(day);
 }
 
-function renderSparkline(svg, values, days, { width = 84, height = 30 } = {}) {
+function renderSparkline(svg, rawValues, days, { width = 84, height = 30, label = null, format = null, listeners = hoverListeners } = {}) {
   clear(svg);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  if (label && format) {
+    svg.removeAttribute("aria-hidden");
+    svg.setAttribute("role", "img");
+    const summary = sparklineSummary(label, rawValues, days, format);
+    svg.setAttribute("aria-label", summary);
+    const title = svgNode("title"); title.textContent = summary; svg.append(title);
+  }
+  // Downsample to the drawn resolution: one point per device pixel is all a sparkline can show.
+  const { indexFor, values } = downsample(rawValues, width);
   const maximum = Math.max(0.000001, ...values);
   const count = values.length;
   if (count === 0) return;
@@ -313,8 +241,8 @@ function renderSparkline(svg, values, days, { width = 84, height = 30 } = {}) {
   const marker = svgNode("line", { class: "sync", y1: 0, y2: height, x1: 0, x2: 0 }); marker.style.display = "none";
   const dot = svgNode("circle", { class: "sync", r: 2.5, cx: 0, cy: 0 }); dot.style.display = "none";
   svg.append(marker, dot);
-  hoverListeners.add((day) => {
-    const index = day === null ? -1 : days.indexOf(day);
+  listeners.add((day) => {
+    const index = indexFor(day === null ? -1 : days.indexOf(day));
     const visible = index >= 0 && points[index];
     marker.style.display = visible ? "" : "none"; dot.style.display = visible ? "" : "none";
     if (!visible) return;
@@ -334,10 +262,11 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
   const tooltip = node("div", null, "chart-tooltip"); tooltip.hidden = true;
   container.append(tooltip);
   svg.tabIndex = 0;
-  svg.setAttribute("aria-label", `${label}. Use the arrow keys to read each point.`);
+  svg.setAttribute("aria-label", `${label}. Use the arrow keys to read each point; Escape dismisses the readout.`);
   let current = null;
   const show = (index) => {
-    if (index === null || index === undefined || !xs[index] && xs[index] !== 0) return hide();
+    if (index === null || index === undefined || xs[index] === undefined) return hide();
+    if (index === current) return;
     current = index;
     crosshair.style.display = ""; crosshair.setAttribute("x1", xs[index]); crosshair.setAttribute("x2", xs[index]);
     clear(tooltip); tooltip.hidden = false;
@@ -356,6 +285,7 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
     elements.announcer.textContent = `${title(index)}: ${rows(index).map((row) => `${row.label} ${row.value}`).join(", ")}`;
   };
   const hide = () => {
+    if (current === null && tooltip.hidden) return;
     current = null; crosshair.style.display = "none"; tooltip.hidden = true;
     if (onIndex) onIndex(null);
   };
@@ -369,8 +299,12 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
   hit.addEventListener("pointermove", (event) => show(nearest(event.clientX)));
   hit.addEventListener("pointerleave", hide);
   svg.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      // Consume Escape only when a readout is open so the global scope shortcut does not also run.
+      if (current !== null) { event.preventDefault(); event.stopPropagation(); hide(); }
+      return;
+    }
     const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
-    if (event.key === "Escape") { hide(); return; }
     if (event.key === "Home") { event.preventDefault(); show(0); return; }
     if (event.key === "End") { event.preventDefault(); show(xs.length - 1); return; }
     if (!step) return;
@@ -388,6 +322,7 @@ function switchView(name) {
     else button.removeAttribute("aria-current");
   }
   for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== name;
+  elements.activityTooltip.hidden = true;
   elements.pageTitle.textContent = viewLabels[name] || "Summary";
   document.title = `${viewLabels[name] || "Summary"} · Session Analytics`;
   localStorage.setItem("session-analytics-view", name);
@@ -413,14 +348,28 @@ function repositoryColor(id) {
   return seriesColor(index);
 }
 
+function renderViewProviderFilters(container, scope) {
+  clear(container);
+  for (const provider of providerOrder) {
+    const label = node("label", null, "chip"); label.dataset.provider = provider;
+    const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider);
+    input.dataset.focusKey = `filter:${scope}:${provider}`;
+    input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
+    const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
+    input.addEventListener("change", () => {
+      if (input.checked) viewProviderFilters[scope].add(provider);
+      else viewProviderFilters[scope].delete(provider);
+      renderActiveAnalyticsView(activeView());
+    });
+    label.append(input, logo, node("span", providerLabels[provider])); container.append(label);
+  }
+}
+
 function ensureDistributionRepositories() {
   if (distributionRepositories.size > 0) return;
   const selected = selectedRepository();
   if (selected) distributionRepositories.add(selected.repository.id);
-  const counts = snapshot.repositories.map((item) => ({
-    id: item.repository.id,
-    sessions: snapshot.sessions.filter(({ repositoryId }) => repositoryId === item.repository.id).length,
-  })).sort((left, right) => right.sessions - left.sessions);
+  const counts = snapshot.repositories.map((item) => ({ id: item.repository.id, sessions: repositorySessions(item.repository.id).length })).sort((left, right) => right.sessions - left.sessions);
   for (const { id, sessions } of counts) {
     if (sessions > 0 && distributionRepositories.size < 3) distributionRepositories.add(id);
   }
@@ -428,8 +377,7 @@ function ensureDistributionRepositories() {
 
 function renderDistributionRepositoryOptions() {
   ensureDistributionRepositories(); clear(elements.distributionRepositoryOptions);
-  const sessionCounts = new Map();
-  for (const { repositoryId } of snapshot.sessions) sessionCounts.set(repositoryId, (sessionCounts.get(repositoryId) || 0) + 1);
+  const sessionCounts = new Map([...sessionsByRepository].map(([id, sessions]) => [id, sessions.length]));
   const repositories = snapshot.repositories.filter(({ repository }) => sessionCounts.has(repository.id)).sort((left, right) => {
     const selectedOrder = Number(distributionRepositories.has(right.repository.id)) - Number(distributionRepositories.has(left.repository.id));
     if (selectedOrder !== 0) return selectedOrder;
@@ -440,6 +388,7 @@ function renderDistributionRepositoryOptions() {
     const label = node("label", null, "compare-option");
     label.style.setProperty("--series-color", repositoryColor(repository.id));
     const input = node("input"); input.type = "checkbox"; input.checked = distributionRepositories.has(repository.id);
+    input.dataset.focusKey = `compare:${repository.id}`;
     input.disabled = !input.checked && distributionRepositories.size >= seriesSlots;
     input.addEventListener("change", () => {
       if (input.checked) distributionRepositories.add(repository.id);
@@ -504,12 +453,12 @@ function renderDistributionChart(container, series, accessor, formatter, logarit
 }
 
 function renderDistributions() {
+  const restoreFocus = rememberFocus();
   renderDistributionRepositoryOptions(); clear(elements.distributionKey);
-  const windowSessions = sessionsInWindow(sessionsForProviders(snapshot.sessions));
   const series = snapshot.repositories.filter(({ repository }) => distributionRepositories.has(repository.id)).map(({ repository }) => ({
     id: repository.id,
     name: repository.name,
-    sessions: windowSessions.filter(({ repositoryId }) => repositoryId === repository.id),
+    sessions: sessionsInWindow(repositorySessions(repository.id)),
   }));
   for (const item of series) {
     const key = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", repositoryColor(item.id));
@@ -519,11 +468,13 @@ function renderDistributions() {
   renderDistributionChart(elements.distributionCost, series, (session) => session.costBasis === "api-list-price-equivalent" ? session.cost.totalUsd : null, (value) => money(value), true, "usage value");
   renderDistributionChart(elements.distributionTools, series, ({ metrics }) => metrics.toolCalls, (value) => integer.format(value), true, "tool call");
   renderDistributionChart(elements.distributionCompactions, series, ({ metrics }) => metrics.compactions, (value) => integer.format(value), false, "compaction");
+  restoreFocus();
 }
 
 function renderActivity(view) {
+  renderViewProviderFilters(elements.activityProviderFilters, "activity");
   elements.activityTooltip.hidden = true;
-  const sessions = view.sessions;
+  const sessions = sessionsForProviders(view.sessions, "activity");
   const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
   for (const session of sessions) {
     const date = new Date(session.createdAt); if (Number.isNaN(date.valueOf())) continue;
@@ -540,10 +491,11 @@ function renderActivity(view) {
     for (let hour = 0; hour < 24; hour += 1) {
       const value = grid[day][hour], cell = node("span", null, "heat-cell");
       const hourLabel = `${String(hour).padStart(2, "0")}:00–${String(hour).padStart(2, "0")}:59`;
-      cell.dataset.level = value === 0 ? "0" : String(Math.max(1, Math.ceil((Math.log1p(value) / Math.log1p(maximum)) * 7)));
+      cell.dataset.level = String(heatLevel(value, maximum));
       cell.dataset.day = String(day);
       cell.dataset.hour = String(hour);
       cell.dataset.value = String(value);
+      cell.dataset.focusKey = `heat:${day}:${hour}`;
       cell.tabIndex = day === 0 && hour === 0 ? 0 : -1;
       cell.setAttribute("role", "img");
       cell.setAttribute("aria-label", `${integer.format(value)} session${value === 1 ? "" : "s"}, ${days[day]}, ${hourLabel}`);
@@ -572,6 +524,7 @@ function renderActivity(view) {
       cell.addEventListener("focus", showTooltip);
       cell.addEventListener("blur", hideTooltip);
       cell.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !elements.activityTooltip.hidden) { event.preventDefault(); event.stopPropagation(); hideTooltip(); return; }
         const movement = { ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0] }[event.key];
         if (!movement) return;
         const nextDay = day + movement[0], nextHour = hour + movement[1];
@@ -587,18 +540,6 @@ function renderActivity(view) {
     value: sessions.filter(({ repositoryId }) => repositoryId === repository.id).length,
   })).filter(({ value }) => value > 0).sort((left, right) => right.value - left.value);
   renderBars(elements.activityRepositories, repositories, (value) => integer.format(value), 12);
-}
-
-function costTotals(sessions) {
-  const result = { cached: 0, input: 0, output: 0, reported: 0, total: 0, upper: 0, write: 0 };
-  for (const session of sessions) {
-    if (session.costBasis === "provider-reported") result.reported += session.cost.totalUsd;
-    if (session.costBasis !== "api-list-price-equivalent") continue;
-    result.cached += session.cost.cachedInputUsd; result.input += session.cost.inputUsd;
-    result.output += session.cost.outputUsd; result.write += session.cost.cacheWriteUsd;
-    result.total += session.cost.totalUsd; result.upper += session.cost.upperEstimateUsd;
-  }
-  return result;
 }
 
 const componentLabels = { cached: "Cache read", input: "Input", output: "Output", reported: "Provider-reported", write: "Cache write" };
@@ -675,16 +616,8 @@ function renderModels(view) {
   if (elements.modelsByProvider.childElementCount === 0) emptyState(elements.modelsByProvider, "No model activity in this view.");
 }
 
-function evidenceLabel(sessions) {
-  const evidence = new Set(sessions.map(({ skillEvidence }) => skillEvidence));
-  if (evidence.has("explicit") && evidence.has("inferred")) return "Explicit + lower bound";
-  if (evidence.has("explicit")) return "Explicit";
-  if (evidence.has("inferred")) return "Lower bound";
-  return "N/A";
-}
-
-function renderNamedDistribution({ view, field, keyContainer, tableContainer, detailContainer, detailTitle, skillMode = false }) {
-  const sessions = view.sessions;
+function renderNamedDistribution({ view, field, keyContainer, tableContainer, detailContainer, detailTitle, providerScope, skillMode = false }) {
+  const sessions = sessionsForProviders(view.sessions, providerScope);
   const names = namedTotals(sessions, field).slice(0, seriesSlots);
   clear(tableContainer); clear(keyContainer);
   const header = node("div", null, "distribution-row header-row");
@@ -700,7 +633,8 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
   for (const item of rows) {
     const row = node("div", null, "distribution-row"); const open = node("button", item.repository.name);
     if (item.repository.id === selectedId) row.setAttribute("aria-current", "true");
-    open.type = "button"; open.setAttribute("aria-label", `Show ${field} for ${item.repository.name}`); open.addEventListener("click", () => {
+    open.type = "button"; open.dataset.focusKey = `${field}:${item.repository.id}`;
+    open.setAttribute("aria-label", `Show ${field} for ${item.repository.name}`); open.addEventListener("click", () => {
       if (field === "skills") skillsDetailRepositoryId = item.repository.id; else toolsDetailRepositoryId = item.repository.id;
       renderActiveAnalyticsView(view);
     }); row.append(open);
@@ -734,27 +668,37 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
 
 function clearInactiveAnalyticsViews(activeName) {
   const containers = {
-    activity: [elements.activityHeatmap, elements.activityRepositories],
+    activity: [elements.activityProviderFilters, elements.activityHeatmap, elements.activityRepositories],
     costs: [elements.providerCostComponents, elements.repositoryCostComponents],
     distributions: [elements.distributionRepositoryOptions, elements.distributionKey, elements.distributionDuration, elements.distributionCost, elements.distributionTools, elements.distributionCompactions],
     models: [elements.modelsByProvider],
-    skills: [elements.skillsByRepository, elements.skillsKey, elements.skillsDetail],
-    tools: [elements.toolsByRepository, elements.toolsKey, elements.toolsDetail],
+    skills: [elements.skillsProviderFilters, elements.skillsByRepository, elements.skillsKey, elements.skillsDetail],
+    tools: [elements.toolsProviderFilters, elements.toolsByRepository, elements.toolsKey, elements.toolsDetail],
   };
   for (const [name, elementsForView] of Object.entries(containers)) {
     if (name === activeName) continue;
     for (const element of elementsForView) clear(element);
   }
+  // The heatmap tooltip lives outside the Activity panel, so it is reset explicitly whenever Activity is not active.
+  if (activeName !== "activity") elements.activityTooltip.hidden = true;
 }
 
 function renderActiveAnalyticsView(view) {
+  const restoreFocus = rememberFocus();
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
   if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
   if (name === "costs") renderCosts(view);
   if (name === "models") renderModels(view);
-  if (name === "tools") renderNamedDistribution({ view, field: "tools", keyContainer: elements.toolsKey, tableContainer: elements.toolsByRepository, detailContainer: elements.toolsDetail, detailTitle: elements.toolsDetailTitle });
-  if (name === "skills") renderNamedDistribution({ view, field: "skills", keyContainer: elements.skillsKey, tableContainer: elements.skillsByRepository, detailContainer: elements.skillsDetail, detailTitle: elements.skillsDetailTitle, skillMode: true });
+  if (name === "tools") {
+    renderViewProviderFilters(elements.toolsProviderFilters, "tools");
+    renderNamedDistribution({ view, field: "tools", keyContainer: elements.toolsKey, tableContainer: elements.toolsByRepository, detailContainer: elements.toolsDetail, detailTitle: elements.toolsDetailTitle, providerScope: "tools" });
+  }
+  if (name === "skills") {
+    renderViewProviderFilters(elements.skillsProviderFilters, "skills");
+    renderNamedDistribution({ view, field: "skills", keyContainer: elements.skillsKey, tableContainer: elements.skillsByRepository, detailContainer: elements.skillsDetail, detailTitle: elements.skillsDetailTitle, providerScope: "skills", skillMode: true });
+  }
+  restoreFocus();
 }
 
 function dailyProviderSpend(sessions) {
@@ -772,7 +716,7 @@ function dailyProviderSpend(sessions) {
 }
 
 function renderLine(items) {
-  clear(elements.dailySpend); clear(elements.dailyLegend);
+  clear(elements.dailySpend);
   const selectedProviders = activeProviders();
   const providers = selectedProviders.filter((provider) => items.some((item) => item[provider] > 0));
   if (!items.length || !selectedProviders.length || !providers.length) {
@@ -786,10 +730,7 @@ function renderLine(items) {
   const width = 900, height = 272, left = 52, right = 14, top = 14, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
-  const roughTick = maximum / 4;
-  const tickMagnitude = 10 ** Math.floor(Math.log10(roughTick));
-  const tick = Math.ceil(roughTick / tickMagnitude) * tickMagnitude;
-  const axisMaximum = tick * 4;
+  const { axisMaximum } = tickScale(maximum);
   const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
   for (let index = 0; index < 5; index += 1) {
     const y = top + (index / 4) * plotHeight;
@@ -806,12 +747,12 @@ function renderLine(items) {
   for (const provider of providers) {
     const points = items.map((item, index) => ({ x: xs[index], y: top + (1 - item[provider] / axisMaximum) * plotHeight }));
     const path = points.map(({ x, y }, index) => `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-    svg.append(svgNode("path", { class: `trend-area ${provider}`, d: `${path} L${points.at(-1).x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z` }));
+    if (items.length > 1) svg.append(svgNode("path", { class: `trend-area ${provider}`, d: `${path} L${points.at(-1).x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z` }));
     svg.append(svgNode("path", { class: `trend-line ${provider}`, d: path }));
+    // A one- or two-day window has no visible line length, so the data points themselves are drawn.
+    if (items.length <= 2) for (const point of points) svg.append(svgNode("circle", { class: `trend-point ${provider}`, cx: point.x.toFixed(1), cy: point.y.toFixed(1), r: 4.5 }));
     const dot = svgNode("circle", { class: `hover-dot ${provider}`, r: 4, cx: 0, cy: 0 }); dot.style.display = "none";
     dots[provider] = { dot, points }; svg.append(dot);
-    const key = node("span"); const swatch = node("i"); swatch.style.setProperty("--key-color", `var(--${provider})`);
-    key.append(swatch, document.createTextNode(providerLabels[provider])); elements.dailyLegend.append(key);
   }
   elements.dailySpend.append(svg);
   attachCrosshair(elements.dailySpend, svg, {
@@ -863,7 +804,6 @@ function renderDonut(sessions) {
   for (const provider of providerOrder) {
     const value = counts[provider];
     const row = node("div", null, "legend-row"); const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
-    const swatch = node("i"); swatch.style.setProperty("--key-color", `var(--${provider})`);
     row.append(logo, node("span", providerLabels[provider]), node("strong", integer.format(value)), node("small", total ? percent(value / total) : "—"));
     row.addEventListener("pointerenter", () => { elements.providerDonut.dataset.hover = provider; for (const path of paths[provider] || []) path.classList.add("active"); });
     row.addEventListener("pointerleave", () => { delete elements.providerDonut.dataset.hover; for (const path of paths[provider] || []) path.classList.remove("active"); });
@@ -876,36 +816,10 @@ function tableCell(primary, secondary, className) {
   if (secondary) cell.append(node("small", secondary)); return cell;
 }
 
-function repositoryKey(id) {
-  return id.startsWith("discovered-") ? id.slice(-8) : id.slice(0, 8);
-}
-
-function cacheRatio(value) {
-  const tokens = value.tokens || value;
-  const denominator = tokens.uncachedInputTokens + tokens.cachedInputTokens + tokens.cacheWriteInputTokens;
-  return denominator ? tokens.cachedInputTokens / denominator : 0;
-}
-
-const tableAccessors = {
-  cache: (item) => item.summary.cacheReadRatio ?? -1,
-  coverage: (item) => item.summary.pricedTokenCoverage ?? -1,
-  input: (item) => item.summary.totalInputTokens,
-  name: (item) => item.repository.name.toLowerCase(),
-  output: (item) => item.summary.outputTokens,
-  sessions: (item) => item.summary.sessions,
-  tools: (item) => item.summary.toolCalls,
-  value: (item) => item.summary.estimatedSpendUsd,
-};
-
 function renderRepositoryTable(repositories) {
+  const restoreFocus = rememberFocus();
   clear(elements.repositoryRows);
-  const accessor = tableAccessors[tableSort.key] || tableAccessors.value;
-  const direction = tableSort.direction === "ascending" ? 1 : -1;
-  const sorted = [...repositories].sort((a, b) => {
-    const left = accessor(a), right = accessor(b);
-    const order = typeof left === "string" ? left.localeCompare(right) : left - right;
-    return order !== 0 ? order * direction : a.repository.name.localeCompare(b.repository.name);
-  });
+  const sorted = sortRepositories(repositories, tableSort.key, tableSort.direction);
   for (const button of sortButtons) {
     const header = button.closest("th");
     if (button.dataset.sort === tableSort.key) header.setAttribute("aria-sort", tableSort.direction);
@@ -916,6 +830,7 @@ function renderRepositoryTable(repositories) {
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
     row.tabIndex = 0; row.setAttribute("role", "link"); row.setAttribute("aria-label", `Open metrics for ${item.repository.name}`);
+    row.dataset.focusKey = `table:${item.repository.id}`;
     if (item.repository.id === selectedId) row.setAttribute("aria-current", "true");
     row.addEventListener("click", () => selectRepository(item.repository.id));
     row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectRepository(item.repository.id); } });
@@ -928,6 +843,7 @@ function renderRepositoryTable(repositories) {
   if (sorted.length === 0) {
     const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories in this view."); row.append(cell); elements.repositoryRows.append(row);
   }
+  restoreFocus();
 }
 
 function renderWarnings(warnings) {
@@ -947,100 +863,98 @@ function populateRepositories() {
   if ([...elements.repositoryFilter.options].some((option) => option.value === previous)) elements.repositoryFilter.value = previous;
 }
 
-function renderRepositoryNav(view) {
-  clear(elements.repositoryList);
-  const days = windowDays();
+/**
+ * Sidebar repository list. Values and sparklines depend only on the snapshot and the window, so they are cached and
+ * the DOM is reused across view and scope changes (only aria-pressed moves). Hidden (icon-rail) layouts skip the work.
+ */
+function renderRepositoryNav() {
+  if (!wideLayout.matches) { navDirty = true; return; }
+  navDirty = false;
+  const start = elements.windowStart.value, end = elements.windowEnd.value;
+  const key = `${snapshot.generatedAt}|${start}|${end}`;
+  if (navCache.key !== key) {
+    const days = daysBetween(start, end);
+    const windowSessions = sessionsInWindow(snapshot.sessions);
+    const rows = snapshot.repositories.map((item) => {
+      const sessions = sessionsInWindow(repositorySessions(item.repository.id));
+      return { id: item.repository.id, name: item.repository.name, series: dailySpendSeries(sessions, days), value: summarize(sessions).estimatedSpendUsd };
+    }).sort((left, right) => right.value - left.value || left.name.localeCompare(right.name));
+    navCache = { days, key, rows, total: summarize(windowSessions).estimatedSpendUsd };
+    const scrollTop = elements.repositoryList.scrollTop;
+    navHoverListeners.clear();
+    clear(elements.repositoryList);
+    const allRow = node("button", null, "repo-row all-row"); allRow.type = "button";
+    allRow.dataset.repository = "all"; allRow.dataset.focusKey = "repo:all";
+    allRow.append(icon("summary"), node("span", "All repositories", "repo-name"), node("span", shortMoney(navCache.total), "repo-value"));
+    allRow.addEventListener("click", () => selectRepository("all", { scroll: false }));
+    elements.repositoryList.append(allRow);
+    for (const row of rows) {
+      const button = node("button", null, "repo-row"); button.type = "button";
+      button.dataset.repository = row.id; button.dataset.focusKey = `repo:${row.id}`;
+      const spark = svgNode("svg", { class: "spark" });
+      renderSparkline(spark, row.series, days, { format: money, height: 16, label: `${row.name} daily usage value`, listeners: navHoverListeners, width: 44 });
+      button.append(node("span", row.name, "repo-name"), spark, node("span", shortMoney(row.value), "repo-value"));
+      button.addEventListener("click", () => selectRepository(button.getAttribute("aria-pressed") === "true" ? "all" : row.id, { scroll: false }));
+      elements.repositoryList.append(button);
+    }
+    elements.repositoryList.scrollTop = scrollTop;
+    elements.repositoryNavCount.textContent = String(rows.length);
+  }
   const selectedId = elements.repositoryFilter.value;
-  const windowSessions = sessionsInWindow(sessionsForProviders(snapshot.sessions));
-  const total = summarize(windowSessions).estimatedSpendUsd;
-  const allRow = node("button", null, "repo-row all-row"); allRow.type = "button";
-  allRow.setAttribute("aria-pressed", String(selectedId === "all"));
-  allRow.setAttribute("aria-label", `All repositories, ${money(total)} in the selected window`);
-  allRow.append(icon("summary"), node("span", "All repositories", "repo-name"), node("span", shortMoney(total), "repo-value"));
-  allRow.addEventListener("click", () => selectRepository("all", { scroll: false }));
-  elements.repositoryList.append(allRow);
-  const rows = snapshot.repositories.map((item) => {
-    const sessions = windowSessions.filter(({ repositoryId }) => repositoryId === item.repository.id);
-    return { item, sessions, value: summarize(sessions).estimatedSpendUsd };
-  }).sort((left, right) => right.value - left.value || left.item.repository.name.localeCompare(right.item.repository.name));
-  elements.repositoryNavCount.textContent = String(rows.length);
-  for (const { item, sessions, value } of rows) {
-    const row = node("button", null, "repo-row"); row.type = "button";
-    const active = item.repository.id === selectedId;
-    row.setAttribute("aria-pressed", String(active));
-    row.setAttribute("aria-label", `${active ? "Clear focus on" : "Focus"} ${item.repository.name}, ${money(value)} in the selected window`);
-    const spark = svgNode("svg", { class: "spark", "aria-hidden": "true" });
-    renderSparkline(spark, dailySpendSeries(sessions, days), days, { width: 44, height: 16 });
-    row.append(node("span", item.repository.name, "repo-name"), spark, node("span", shortMoney(value), "repo-value"));
-    row.addEventListener("click", () => selectRepository(active ? "all" : item.repository.id, { scroll: false }));
-    elements.repositoryList.append(row);
+  const values = new Map([["all", navCache.total], ...navCache.rows.map((row) => [row.id, row.value])]);
+  const names = new Map([["all", "All repositories"], ...navCache.rows.map((row) => [row.id, row.name])]);
+  for (const button of elements.repositoryList.querySelectorAll("[data-repository]")) {
+    const id = button.dataset.repository, active = id === selectedId;
+    button.setAttribute("aria-pressed", String(active));
+    button.setAttribute("aria-label", `${id === "all" ? "" : active ? "Clear focus on " : "Focus "}${names.get(id)}, ${money(values.get(id))} in the selected window`);
   }
 }
 
-function windowLength() {
-  if (!elements.windowStart.value || !elements.windowEnd.value) return 0;
-  return Math.round((new Date(`${elements.windowEnd.value}T00:00:00Z`) - new Date(`${elements.windowStart.value}T00:00:00Z`)) / 86_400_000) + 1;
-}
-
-function previousPeriodSessions(sessions) {
-  const length = windowLength();
-  if (windowPreset === "all" || length <= 0 || !elements.windowStart.min) return null;
-  const end = new Date(`${elements.windowStart.value}T00:00:00Z`); end.setUTCDate(end.getUTCDate() - 1);
-  const start = new Date(end); start.setUTCDate(start.getUTCDate() - length + 1);
-  const endDay = end.toISOString().slice(0, 10), startDay = start.toISOString().slice(0, 10);
-  if (endDay < elements.windowStart.min) return null;
-  return { length, sessions: sessionsInRange(sessions, startDay, endDay) };
-}
-
-function renderDelta(element, current, previous, length) {
-  if (previous === null || previous === undefined) { element.hidden = true; return; }
-  if (previous === 0 && current === 0) { element.hidden = true; return; }
-  element.hidden = false;
-  const label = `vs previous ${length}d`;
-  if (previous === 0) { element.dataset.direction = "up"; element.textContent = `new · ${label}`; element.setAttribute("aria-label", `No activity in the previous ${length} days`); return; }
-  const change = (current - previous) / previous;
-  const direction = Math.abs(change) < 0.0005 ? "flat" : change > 0 ? "up" : "down";
-  element.dataset.direction = direction;
-  element.textContent = `${direction === "up" ? "▲" : direction === "down" ? "▼" : "▬"} ${Math.abs(change * 100).toFixed(1)}% ${label}`;
-  element.setAttribute("aria-label", `${direction === "up" ? "Up" : direction === "down" ? "Down" : "Unchanged"} ${Math.abs(change * 100).toFixed(1)} percent versus the previous ${length} days`);
-}
+wideLayout.addEventListener("change", () => { if (snapshot && navDirty) renderRepositoryNav(); });
 
 function windowCaption() {
   if (elements.windowStart.value === elements.windowStart.min && elements.windowEnd.value === elements.windowEnd.max) return "all observed dates";
   return `${elements.windowStart.value} through ${elements.windowEnd.value}`;
 }
 
-function renderSharedView(view) {
+function renderSharedView() {
   const selected = selectedRepository();
-  const providers = activeProviders();
-  const providerCaption = providers.length === providerOrder.length ? "" : providers.length === 0 ? " No providers selected." : ` Providers: ${providers.map((provider) => providerLabels[provider]).join(", ")}.`;
-  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.${providerCaption}`;
+  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.`;
   elements.scopeChip.hidden = !selected;
   elements.scopeChipLabel.textContent = selected ? selected.repository.name : "";
-  renderRepositoryNav(view);
+  renderRepositoryNav();
+}
+
+function renderDelta(element, delta) {
+  element.hidden = !delta;
+  if (!delta) return;
+  element.dataset.direction = delta.direction;
+  element.textContent = delta.text;
+  element.setAttribute("aria-label", delta.label);
 }
 
 function renderSummary(view) {
   const summary = view.summary;
   const days = windowDays();
-  const previous = previousPeriodSessions(view.scopeSessions);
-  const previousSummary = previous ? summarize(previous.sessions) : null;
+  // Deltas compare against the equal-length period immediately before the window, only when that period is fully observed.
+  const previous = windowPreset === "all" ? null : previousPeriod({ end: elements.windowEnd.value, min: elements.windowStart.min, start: elements.windowStart.value });
+  const previousSummary = previous ? summarize(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay)) : null;
   elements.spend.textContent = money(summary.estimatedSpendUsd); elements.spendNote.textContent = `${money(summary.apiEquivalentSpendUsd)} API-equivalent · ${money(summary.providerReportedSpendUsd)} provider-reported · not an invoice`;
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`;
   elements.input.textContent = compact.format(summary.totalInputTokens); elements.cache.textContent = `${percent(summary.cacheReadRatio)} cached · repeated context included`;
   elements.output.textContent = compact.format(summary.outputTokens); elements.tools.textContent = compact.format(summary.toolCalls); elements.compactions.textContent = integer.format(summary.compactions); elements.live.textContent = integer.format(summary.workingSnapshots);
   const metrics = [
-    ["spend", summary.estimatedSpendUsd, previousSummary?.estimatedSpendUsd, dailySpendSeries(view.sessions, days)],
-    ["sessions", summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
-    ["input", summary.totalInputTokens, previousSummary?.totalInputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.inputTokens)],
-    ["output", summary.outputTokens, previousSummary?.outputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.outputTokens)],
-    ["tools", summary.toolCalls, previousSummary?.toolCalls, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.toolCalls)],
-    ["compactions", summary.compactions, previousSummary?.compactions, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.compactions)],
+    ["spend", "Daily priced usage value", money, summary.estimatedSpendUsd, previousSummary?.estimatedSpendUsd, dailySpendSeries(view.sessions, days)],
+    ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
+    ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.inputTokens)],
+    ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.outputTokens)],
+    ["tools", "Effective tool calls per session-start day", integer.format, summary.toolCalls, previousSummary?.toolCalls, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.toolCalls)],
+    ["compactions", "Compactions per session-start day", integer.format, summary.compactions, previousSummary?.compactions, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.compactions)],
   ];
-  for (const [name, current, before, series] of metrics) {
-    renderDelta($(`#metric-${name}-delta`), current, previousSummary ? before : null, previous?.length);
-    renderSparkline($(`#metric-${name}-spark`), series, days);
+  for (const [name, label, format, current, before, series] of metrics) {
+    renderDelta($(`#metric-${name}-delta`), previousSummary ? deltaDescription(current, before, previous.length) : null);
+    renderSparkline($(`#metric-${name}-spark`), series, days, { format, label });
   }
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
   renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
@@ -1052,15 +966,17 @@ function renderSummary(view) {
 }
 
 function renderView() {
+  const restoreFocus = rememberFocus();
   hoverListeners.clear();
   const view = activeView();
-  renderSharedView(view);
+  renderSharedView();
   if (currentViewName() === "summary") {
     clearInactiveAnalyticsViews("summary");
     renderSummary(view);
   } else {
     renderActiveAnalyticsView(view);
   }
+  restoreFocus();
 }
 
 // --------------------------------------------------------------------- window controls
@@ -1071,13 +987,20 @@ function setWindowPreset(preset) {
   elements.dateRange.hidden = windowPreset !== "custom";
 }
 
-function configureWindow() {
+function observedRange() {
   const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay)]).sort();
-  const minimum = dates[0] || new Date().toISOString().slice(0, 10), maximum = dates.at(-1) || minimum;
+  const minimum = dates[0] || new Date().toISOString().slice(0, 10);
+  return { maximum: dates.at(-1) || minimum, minimum };
+}
+
+function configureWindow() {
+  const { maximum, minimum } = observedRange();
   for (const input of [elements.windowStart, elements.windowEnd]) { input.min = minimum; input.max = maximum; }
-  if (windowPreset === "custom" && elements.windowStart.value && elements.windowEnd.value) {
-    elements.windowStart.value = elements.windowStart.value < minimum ? minimum : elements.windowStart.value;
-    elements.windowEnd.value = elements.windowEnd.value > maximum ? maximum : elements.windowEnd.value;
+  if (windowPreset === "custom") {
+    // A refreshed snapshot may cover a different range: keep the custom range inside it and ordered.
+    const clamped = clampWindow({ end: elements.windowEnd.value, max: maximum, min: minimum, start: elements.windowStart.value });
+    elements.windowStart.value = clamped.start; elements.windowEnd.value = clamped.end;
+    setWindowPreset("custom");
     return;
   }
   applyWindowPreset(windowPreset, { render: false });
@@ -1085,27 +1008,27 @@ function configureWindow() {
 
 function applyWindowPreset(preset, { render = true } = {}) {
   setWindowPreset(preset);
-  if (windowPreset === "all") elements.windowStart.value = elements.windowStart.min;
-  else if (windowPreset !== "custom") {
-    const start = new Date(`${elements.windowEnd.max}T00:00:00Z`);
-    start.setUTCDate(start.getUTCDate() - Number(windowPreset) + 1);
-    elements.windowStart.value = start.toISOString().slice(0, 10) < elements.windowStart.min ? elements.windowStart.min : start.toISOString().slice(0, 10);
+  if (!snapshot) return;
+  if (windowPreset !== "custom") {
+    elements.windowStart.value = windowStartFor(windowPreset, elements.windowStart.min, elements.windowEnd.max);
+    elements.windowEnd.value = elements.windowEnd.max;
+  } else if (!elements.windowStart.value || !elements.windowEnd.value) {
+    elements.windowStart.value = elements.windowStart.min; elements.windowEnd.value = elements.windowEnd.max;
   }
-  if (windowPreset !== "custom") elements.windowEnd.value = elements.windowEnd.max;
-  if (windowPreset === "custom" && !elements.windowStart.value) { elements.windowStart.value = elements.windowStart.min; elements.windowEnd.value = elements.windowEnd.max; }
-  if (render && snapshot) renderView();
+  if (render) renderView();
 }
 
 function applyCustomWindow(changed) {
   setWindowPreset("custom");
+  if (!snapshot) return;
   if (elements.windowStart.value > elements.windowEnd.value) {
     if (changed === "start") elements.windowEnd.value = elements.windowStart.value;
     else elements.windowStart.value = elements.windowEnd.value;
   }
-  if (snapshot) renderView();
+  renderView();
 }
 
-// --------------------------------------------------------------------- appearance
+// --------------------------------------------------------------------- appearance & preferences
 
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -1126,60 +1049,75 @@ function setDensity(density) {
 
 function toggleDensity() { setDensity(document.documentElement.dataset.density === "comfortable" ? "compact" : "comfortable"); }
 
+/** Single-character shortcuts can be switched off (WCAG 2.1.4); modifier shortcuts and buttons keep working. */
+function setShortcuts(enabled) {
+  shortcutsEnabled = Boolean(enabled);
+  document.documentElement.dataset.shortcuts = shortcutsEnabled ? "on" : "off";
+  elements.shortcutsToggle.checked = shortcutsEnabled;
+  localStorage.setItem("session-analytics-shortcuts", shortcutsEnabled ? "on" : "off");
+}
+
+/** Provider toggles are scoped: the daily chart on Summary, or the active view's own filter on Activity, Tools, and Skills. */
+function providerScope() {
+  const view = currentViewName();
+  if (view === "summary") return "chart";
+  return providerScopedViews.includes(view) ? view : null;
+}
+
 function toggleProvider(provider) {
-  const input = providerFilters.find(({ dataset }) => dataset.providerFilter === provider);
-  if (!input) return;
-  input.checked = !input.checked;
-  if (snapshot) renderView();
+  if (!snapshot) return;
+  const scope = providerScope();
+  if (scope === "chart") {
+    const input = providerFilters.find(({ dataset }) => dataset.providerFilter === provider);
+    if (!input) return;
+    input.checked = !input.checked;
+    renderLine(dailyProviderSpend(activeView().dailySessions));
+  } else if (scope) {
+    if (viewProviderFilters[scope].has(provider)) viewProviderFilters[scope].delete(provider);
+    else viewProviderFilters[scope].add(provider);
+    renderActiveAnalyticsView(activeView());
+  }
 }
 
 // --------------------------------------------------------------------- command palette
 
 let paletteActive = 0;
 let paletteOptions = [];
+let paletteItemsShown = [];
 
 function paletteItems() {
   const items = [];
   const selectedId = elements.repositoryFilter.value;
   for (const name of viewOrder) {
     const chord = Object.entries(viewChords).find(([, view]) => view === name)?.[0] || "";
-    items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: `g ${chord}`, keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
+    items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? `g ${chord}` : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
   }
-  items.push({ group: "Repositories", icon: "repo", label: "All repositories", keywords: "repo clear focus everything", state: selectedId === "all", run: () => selectRepository("all") });
-  for (const item of snapshot?.repositories ?? []) {
-    items.push({ group: "Repositories", icon: "repo", label: `Focus ${item.repository.name}`, keywords: `repo repository ${item.repository.name}`, state: selectedId === item.repository.id, run: () => selectRepository(item.repository.id) });
-  }
-  for (const provider of providerOrder) {
-    const input = providerFilters.find(({ dataset }) => dataset.providerFilter === provider);
-    items.push({ group: "Providers", icon: "models", label: `${input?.checked ? "Hide" : "Show"} ${providerLabels[provider]}`, hint: `p ${providerOrder.indexOf(provider) + 1}`, keywords: `provider toggle ${provider} filter`, state: Boolean(input?.checked), run: () => toggleProvider(provider) });
-  }
-  for (const preset of ["7", "30", "90", "all"]) {
-    items.push({ group: "Time window", icon: "activity", label: windowLabels[preset], hint: String(["7", "30", "90", "all"].indexOf(preset) + 1), keywords: `window days range ${preset}`, state: windowPreset === preset, run: () => applyWindowPreset(preset) });
-  }
-  items.push({ group: "Time window", icon: "activity", label: "Custom range", keywords: "window custom dates", state: windowPreset === "custom", run: () => { applyWindowPreset("custom"); elements.windowStart.focus(); } });
-  const dark = document.documentElement.dataset.theme === "dark";
-  items.push({ group: "Appearance", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: "t", keywords: "theme dark light mode appearance", run: toggleTheme });
-  const comfortable = document.documentElement.dataset.density === "comfortable";
-  items.push({ group: "Appearance", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: "d", keywords: "density spacing compact comfortable", run: toggleDensity });
-  items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: "r", keywords: "reload rescan refresh", run: () => load(true) });
-  items.push({ group: "Snapshot", icon: "help", label: "Keyboard shortcuts", hint: "?", keywords: "help keys shortcuts", run: openHelp });
-  return items;
-}
-
-function matches(item, query) {
-  if (!query) return true;
-  const haystack = `${item.label} ${item.keywords || ""} ${item.group}`.toLowerCase();
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return terms.every((term) => {
-    if (haystack.includes(term)) return true;
-    let position = 0;
-    for (const character of term) {
-      position = haystack.indexOf(character, position);
-      if (position < 0) return false;
-      position += 1;
+  if (snapshot) {
+    items.push({ group: "Repositories", icon: "repo", label: "All repositories", keywords: "repo clear focus everything", state: selectedId === "all", run: () => selectRepository("all") });
+    for (const item of snapshot.repositories) {
+      items.push({ group: "Repositories", icon: "repo", label: `Focus ${item.repository.name}`, keywords: `repo repository ${item.repository.name}`, state: selectedId === item.repository.id, run: () => selectRepository(item.repository.id) });
     }
-    return true;
-  });
+    const scope = providerScope();
+    if (scope) {
+      const where = scope === "chart" ? "in the daily chart" : `in ${viewLabels[scope]}`;
+      for (const provider of providerOrder) {
+        const on = scope === "chart" ? Boolean(providerFilters.find(({ dataset }) => dataset.providerFilter === provider)?.checked) : viewProviderFilters[scope].has(provider);
+        items.push({ group: "Providers", icon: "models", label: `${on ? "Hide" : "Show"} ${providerLabels[provider]} ${where}`, hint: shortcutsEnabled ? `p ${providerOrder.indexOf(provider) + 1}` : "", keywords: `provider toggle ${provider} filter`, state: on, run: () => toggleProvider(provider) });
+      }
+    }
+    for (const preset of ["7", "30", "90", "all"]) {
+      items.push({ group: "Time window", icon: "activity", label: windowLabels[preset], hint: shortcutsEnabled ? String(["7", "30", "90", "all"].indexOf(preset) + 1) : "", keywords: `window days range ${preset}`, state: windowPreset === preset, run: () => applyWindowPreset(preset) });
+    }
+    items.push({ group: "Time window", icon: "activity", label: "Custom range", keywords: "window custom dates", state: windowPreset === "custom", run: () => { applyWindowPreset("custom"); elements.windowStart.focus(); } });
+  }
+  const dark = document.documentElement.dataset.theme === "dark";
+  items.push({ group: "Appearance", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: shortcutsEnabled ? "t" : "", keywords: "theme dark light mode appearance", run: toggleTheme });
+  const comfortable = document.documentElement.dataset.density === "comfortable";
+  items.push({ group: "Appearance", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? "d" : "", keywords: "density spacing compact comfortable", run: toggleDensity });
+  items.push({ group: "Keyboard", icon: "help", label: `${shortcutsEnabled ? "Disable" : "Enable"} single-key shortcuts`, keywords: "keyboard shortcuts keys toggle character", state: shortcutsEnabled, run: () => setShortcuts(!shortcutsEnabled) });
+  items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? "?" : "", keywords: "help keys shortcuts", run: openHelp });
+  items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? "r" : "", keywords: "reload rescan refresh", run: () => load(true) });
+  return items;
 }
 
 function setPaletteActive(index) {
@@ -1193,9 +1131,9 @@ function setPaletteActive(index) {
 
 function renderPalette(query) {
   clear(elements.commandList); paletteOptions = [];
-  const items = paletteItems().filter((item) => matches(item, query));
+  paletteItemsShown = paletteItems().filter((item) => matchesQuery(item, query));
   let group = null, position = 0;
-  for (const item of items) {
+  for (const item of paletteItemsShown) {
     if (item.group !== group) { group = item.group; elements.commandList.append(node("div", group, "palette-group")); }
     const option = node("div", null, "palette-option");
     option.id = `command-option-${position}`; option.setAttribute("role", "option"); option.setAttribute("aria-selected", "false");
@@ -1207,9 +1145,7 @@ function renderPalette(query) {
     option.addEventListener("click", () => runPaletteItem(item));
     elements.commandList.append(option); paletteOptions.push(option); position += 1;
   }
-  elements.commandList.dataset.items = JSON.stringify(items.map((item) => item.label));
-  elements.commandList._items = items;
-  if (!items.length) elements.commandList.append(node("div", "No matching command.", "palette-empty"));
+  if (!paletteItemsShown.length) elements.commandList.append(node("div", "No matching command.", "palette-empty"));
   setPaletteActive(0);
 }
 
@@ -1243,7 +1179,7 @@ elements.commandInput.addEventListener("keydown", (event) => {
   else if (event.key === "End") { event.preventDefault(); setPaletteActive(paletteOptions.length - 1); }
   else if (event.key === "Enter") {
     event.preventDefault();
-    const item = elements.commandList._items?.[paletteActive];
+    const item = paletteItemsShown[paletteActive];
     if (item) runPaletteItem(item);
   }
 });
@@ -1253,6 +1189,7 @@ for (const dialog of [elements.palette, elements.help]) {
 elements.commandButton.addEventListener("click", openPalette);
 elements.helpButton.addEventListener("click", openHelp);
 elements.helpClose.addEventListener("click", closeHelp);
+elements.shortcutsToggle.addEventListener("change", () => setShortcuts(elements.shortcutsToggle.checked));
 
 // --------------------------------------------------------------------- keyboard shortcuts
 
@@ -1273,6 +1210,11 @@ document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const target = event.target;
   if (target instanceof HTMLElement && target.matches("input, select, textarea, [contenteditable]")) return;
+  if (key === "Escape") {
+    if (snapshot && elements.repositoryFilter.value !== "all") selectRepository("all", { scroll: false });
+    return;
+  }
+  if (!shortcutsEnabled) return;
   if (pendingChord) {
     const chord = pendingChord; pendingChord = null; window.clearTimeout(chordTimer);
     if (chord === "g" && viewChords[key]) { event.preventDefault(); switchView(viewChords[key]); }
@@ -1288,8 +1230,7 @@ document.addEventListener("keydown", (event) => {
   if (key === "d") { toggleDensity(); return; }
   if (key === "r") { if (!elements.refresh.disabled) load(true); return; }
   if (key === "[") { stepView(-1); return; }
-  if (key === "]") { stepView(1); return; }
-  if (key === "Escape" && snapshot && elements.repositoryFilter.value !== "all") selectRepository("all", { scroll: false });
+  if (key === "]") stepView(1);
 });
 
 // --------------------------------------------------------------------- loading
@@ -1309,7 +1250,8 @@ function applyUrlAfterRender() {
 }
 
 function render(data) {
-  snapshot = data; elements.generated.textContent = dateTime(data.generatedAt); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
+  snapshot = data; sessionsByRepository = groupByRepository(data.sessions);
+  elements.generated.textContent = dateTime(data.generatedAt); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
   populateRepositories(); configureWindow(); renderRateCards(data.rateCard); ensureDistributionRepositories();
   delete elements.main.dataset.state;
   renderView();
@@ -1326,12 +1268,12 @@ async function load(refresh = false) {
 }
 
 elements.refresh.addEventListener("click", () => load(true));
-elements.repositoryFilter.addEventListener("change", renderView);
+elements.repositoryFilter.addEventListener("change", () => { if (snapshot) renderView(); });
 elements.scopeChip.addEventListener("click", () => selectRepository("all", { scroll: false }));
 for (const button of windowButtons) button.addEventListener("click", () => { applyWindowPreset(button.dataset.windowPreset); if (button.dataset.windowPreset === "custom") elements.windowStart.focus(); });
 elements.windowStart.addEventListener("change", () => applyCustomWindow("start"));
 elements.windowEnd.addEventListener("change", () => applyCustomWindow("end"));
-for (const filter of providerFilters) filter.addEventListener("change", () => snapshot && renderView());
+for (const filter of providerFilters) filter.addEventListener("change", () => { if (snapshot) renderLine(dailyProviderSpend(activeView().dailySessions)); });
 for (const button of viewButtons) button.addEventListener("click", () => switchView(button.dataset.viewButton));
 for (const button of sortButtons) button.addEventListener("click", () => {
   const key = button.dataset.sort;
@@ -1359,6 +1301,7 @@ const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? 
 setTheme(["dark", "light"].includes(urlTheme) ? urlTheme : localStorage.getItem("session-analytics-theme") || systemTheme);
 const urlDensity = urlParameters.get("density");
 setDensity(["compact", "comfortable"].includes(urlDensity) ? urlDensity : localStorage.getItem("session-analytics-density") || "compact");
+setShortcuts((localStorage.getItem("session-analytics-shortcuts") || "on") !== "off");
 const urlWindow = urlParameters.get("window");
 setWindowPreset(windowPresets.includes(urlWindow) ? urlWindow : "all");
 void load(false);

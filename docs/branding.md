@@ -29,7 +29,7 @@ Palette, shared with the dashboard's light and dark themes. The exact logo hexes
 | Heatmap ramp (light) | `#eef2ef` to `#005742` (sage, light to dark) |
 | Heatmap ramp (dark) | `#1a1c18` to `#7eddc0` (sage, dark to light) |
 | Chart series (light) | coral `#c15f4b`, sage `#006855`, ochre `#daa75d`, deep coral `#7b2717`, connector `#62665c`, pale sage `#65af9c` |
-| Chart series (dark) | coral `#cf6b57`, sage `#68bea8`, ochre `#dda552`, deep sage `#2c7866`, pale coral `#edab9d`, connector `#62665c` |
+| Chart series (dark) | coral `#cf6b57`, sage `#68bea8`, ochre `#e1ad63`, deep sage `#2c7866`, pale coral `#edab9d`, connector `#62665c` |
 | Providers | Claude = coral, Codex = sage, Cursor = ochre (series steps above) |
 | Dark surfaces | page `#0e0f0d`, card `#151613`, raised `#1b1d19` / `#22241f`, border `#262823` |
 | Light surfaces | page `#f4f4f1`, card `#ffffff`, raised `#f6f6f3` / `#ecece8`, border `#e4e4df` |

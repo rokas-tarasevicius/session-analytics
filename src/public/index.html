@@ -25,14 +25,10 @@
         <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M3 13l1.4-1.4M11.6 4.4 13 3"/></symbol>
         <symbol id="i-moon" viewBox="0 0 16 16"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1z"/></symbol>
         <symbol id="i-help" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M6 6.3a2 2 0 1 1 2.8 1.8c-.6.3-.8.7-.8 1.4"/><circle cx="8" cy="11.7" r=".6" class="fill"/></symbol>
-        <symbol id="i-command" viewBox="0 0 16 16"><path d="M5.5 5.5h5v5h-5z"/><path d="M5.5 5.5H4a2 2 0 1 1 2-2v2M10.5 5.5H12a2 2 0 1 0-2-2v2M5.5 10.5H4a2 2 0 1 0 2 2v-2M10.5 10.5H12a2 2 0 1 1-2 2v-2"/></symbol>
         <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
         <symbol id="i-repo" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.75"/><circle cx="4.5" cy="12.5" r="1.75"/><circle cx="11.5" cy="5.5" r="1.75"/><path d="M4.5 5.25v5.5M11.5 7.25c0 2.5-7 1.5-7 3.5"/></symbol>
-        <symbol id="i-sort" viewBox="0 0 16 16"><path d="M5 2.5v11M2.5 11 5 13.5 7.5 11M11 13.5v-11M8.5 5 11 2.5 13.5 5"/></symbol>
         <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M8 3v10M4 9l4 4 4-4"/></symbol>
-        <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></symbol>
         <symbol id="i-density" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></symbol>
-        <symbol id="i-chevron" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></symbol>
       </defs>
     </svg>
 
@@ -49,7 +45,7 @@
           <span class="wordmark-text">Session <b>Analytics</b></span>
         </a>
 
-        <button class="palette-trigger" id="command-button" type="button" aria-haspopup="dialog" aria-controls="command-palette">
+        <button class="palette-trigger" id="command-button" type="button" data-label="Command palette" aria-haspopup="dialog" aria-controls="command-palette">
           <svg aria-hidden="true"><use href="#i-search"/></svg>
           <span>Jump to…</span>
           <kbd aria-hidden="true"><span class="key-command">⌘</span>K</kbd>
@@ -57,13 +53,13 @@
 
         <nav class="view-nav" aria-label="Analytics views">
           <p class="nav-heading">Views</p>
-          <button type="button" data-view-button="summary" aria-current="page"><svg aria-hidden="true"><use href="#i-summary"/></svg><span>Summary</span><kbd aria-hidden="true">G S</kbd></button>
-          <button type="button" data-view-button="distributions"><svg aria-hidden="true"><use href="#i-distributions"/></svg><span>Distributions</span><kbd aria-hidden="true">G D</kbd></button>
-          <button type="button" data-view-button="activity"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span><kbd aria-hidden="true">G A</kbd></button>
-          <button type="button" data-view-button="costs"><svg aria-hidden="true"><use href="#i-costs"/></svg><span>Costs</span><kbd aria-hidden="true">G C</kbd></button>
-          <button type="button" data-view-button="models"><svg aria-hidden="true"><use href="#i-models"/></svg><span>Models</span><kbd aria-hidden="true">G M</kbd></button>
-          <button type="button" data-view-button="tools"><svg aria-hidden="true"><use href="#i-tools"/></svg><span>Tools</span><kbd aria-hidden="true">G T</kbd></button>
-          <button type="button" data-view-button="skills"><svg aria-hidden="true"><use href="#i-skills"/></svg><span>Skills</span><kbd aria-hidden="true">G K</kbd></button>
+          <button type="button" data-view-button="summary" data-label="Summary" aria-current="page"><svg aria-hidden="true"><use href="#i-summary"/></svg><span>Summary</span><kbd aria-hidden="true">G S</kbd></button>
+          <button type="button" data-view-button="distributions" data-label="Distributions"><svg aria-hidden="true"><use href="#i-distributions"/></svg><span>Distributions</span><kbd aria-hidden="true">G D</kbd></button>
+          <button type="button" data-view-button="activity" data-label="Activity"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span><kbd aria-hidden="true">G A</kbd></button>
+          <button type="button" data-view-button="costs" data-label="Costs"><svg aria-hidden="true"><use href="#i-costs"/></svg><span>Costs</span><kbd aria-hidden="true">G C</kbd></button>
+          <button type="button" data-view-button="models" data-label="Models"><svg aria-hidden="true"><use href="#i-models"/></svg><span>Models</span><kbd aria-hidden="true">G M</kbd></button>
+          <button type="button" data-view-button="tools" data-label="Tools"><svg aria-hidden="true"><use href="#i-tools"/></svg><span>Tools</span><kbd aria-hidden="true">G T</kbd></button>
+          <button type="button" data-view-button="skills" data-label="Skills"><svg aria-hidden="true"><use href="#i-skills"/></svg><span>Skills</span><kbd aria-hidden="true">G K</kbd></button>
         </nav>
 
         <section class="repo-nav" aria-labelledby="repo-nav-title">
@@ -74,7 +70,6 @@
         <div class="sidebar-footer">
           <button class="icon-button" id="help-button" type="button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="help-overlay" title="Keyboard shortcuts (?)"><svg aria-hidden="true"><use href="#i-help"/></svg></button>
           <button class="icon-button" id="density-switch" type="button" aria-label="Switch to comfortable density" aria-pressed="false" title="Density"><svg aria-hidden="true"><use href="#i-density"/></svg></button>
-          <span class="sidebar-version" id="snapshot-version" aria-hidden="true"></span>
         </div>
       </aside>
 
@@ -98,11 +93,6 @@
               <span aria-hidden="true">→</span>
               <input id="window-end" type="date" aria-label="Analysis end date" />
             </div>
-            <div class="provider-chips" role="group" aria-label="Providers">
-              <label class="chip"><input type="checkbox" data-provider-filter="codex" checked /><img src="/brands/codex.svg" alt="" /><span>Codex</span></label>
-              <label class="chip"><input type="checkbox" data-provider-filter="claude" checked /><img src="/brands/claude.svg" alt="" /><span>Claude</span></label>
-              <label class="chip"><input type="checkbox" data-provider-filter="cursor" checked /><img src="/brands/cursor.svg" alt="" /><span>Cursor</span></label>
-            </div>
           </div>
           <div class="topbar-actions">
             <span class="status" id="sync-context" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
@@ -120,19 +110,23 @@
 
           <div class="analytics-view" data-view-panel="summary">
             <section class="kpi-grid" aria-label="Machine totals">
-              <article class="kpi accent"><span class="kpi-label">Priced usage value</span><strong id="metric-spend">—</strong><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark" aria-hidden="true"></svg><small id="metric-spend-note">Usage value, not an invoice</small></article>
+              <article class="kpi accent"><span class="kpi-label">Priced usage value</span><strong id="metric-spend">—</strong><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small id="metric-spend-note">Usage value, not an invoice</small></article>
               <article class="kpi"><span class="kpi-label">Repositories</span><strong id="metric-repositories">—</strong><small id="metric-repository-note">With local evidence</small></article>
-              <article class="kpi"><span class="kpi-label">Sessions analyzed</span><strong id="metric-sessions">—</strong><span class="kpi-delta" id="metric-sessions-delta" hidden></span><svg class="spark" id="metric-sessions-spark" aria-hidden="true"></svg><small id="metric-session-note">Matched evidence</small></article>
-              <article class="kpi"><span class="kpi-label">Request input processed</span><strong id="metric-input">—</strong><span class="kpi-delta" id="metric-input-delta" hidden></span><svg class="spark" id="metric-input-spark" aria-hidden="true"></svg><small id="metric-cache">— cached · repeated context included</small></article>
-              <article class="kpi"><span class="kpi-label">Output tokens</span><strong id="metric-output">—</strong><span class="kpi-delta" id="metric-output-delta" hidden></span><svg class="spark" id="metric-output-spark" aria-hidden="true"></svg><small>Reasoning stays included</small></article>
-              <article class="kpi"><span class="kpi-label">Effective tools</span><strong id="metric-tools">—</strong><span class="kpi-delta" id="metric-tools-delta" hidden></span><svg class="spark" id="metric-tools-spark" aria-hidden="true"></svg><small>Names only</small></article>
-              <article class="kpi"><span class="kpi-label">Compactions</span><strong id="metric-compactions">—</strong><span class="kpi-delta" id="metric-compactions-delta" hidden></span><svg class="spark" id="metric-compactions-spark" aria-hidden="true"></svg><small>Context boundaries</small></article>
+              <article class="kpi"><span class="kpi-label">Sessions analyzed</span><strong id="metric-sessions">—</strong><span class="kpi-delta" id="metric-sessions-delta" hidden></span><svg class="spark" id="metric-sessions-spark"></svg><small id="metric-session-note">Matched evidence</small></article>
+              <article class="kpi"><span class="kpi-label">Request input processed</span><strong id="metric-input">—</strong><span class="kpi-delta" id="metric-input-delta" hidden></span><svg class="spark" id="metric-input-spark"></svg><small id="metric-cache">— cached · repeated context included</small></article>
+              <article class="kpi"><span class="kpi-label">Output tokens</span><strong id="metric-output">—</strong><span class="kpi-delta" id="metric-output-delta" hidden></span><svg class="spark" id="metric-output-spark"></svg><small>Reasoning stays included</small></article>
+              <article class="kpi"><span class="kpi-label">Effective tools</span><strong id="metric-tools">—</strong><span class="kpi-delta" id="metric-tools-delta" hidden></span><svg class="spark" id="metric-tools-spark"></svg><small>Names only</small></article>
+              <article class="kpi"><span class="kpi-label">Compactions</span><strong id="metric-compactions">—</strong><span class="kpi-delta" id="metric-compactions-delta" hidden></span><svg class="spark" id="metric-compactions-spark"></svg><small>Context boundaries</small></article>
               <article class="kpi"><span class="kpi-label">Live snapshots</span><strong id="metric-live">—</strong><small>Totals may still move</small></article>
             </section>
 
             <section class="dashboard-grid" aria-label="Machine analytics">
               <article class="panel span-8">
-                <header><div><p class="kicker">Usage velocity</p><h2>Daily priced usage value</h2></div><div class="legend-inline" id="daily-legend" aria-hidden="true"></div></header>
+                <header><div><p class="kicker">Usage velocity</p><h2>Daily priced usage value</h2></div><div class="provider-key" role="group" aria-label="Filter daily usage by provider">
+                  <label class="chip" data-provider="codex"><input type="checkbox" data-provider-filter="codex" checked aria-label="Codex daily usage" /><img src="/brands/codex.svg" alt="" /><span>Codex</span></label>
+                  <label class="chip" data-provider="claude"><input type="checkbox" data-provider-filter="claude" checked aria-label="Claude daily usage" /><img src="/brands/claude.svg" alt="" /><span>Claude</span></label>
+                  <label class="chip" data-provider="cursor"><input type="checkbox" data-provider-filter="cursor" checked aria-label="Cursor daily usage" /><img src="/brands/cursor.svg" alt="" /><span>Cursor</span></label>
+                </div></header>
                 <div class="line-chart chart-slot" id="daily-spend"></div>
                 <p class="chart-note">Codex and Claude use reviewed API list-price equivalents. Cursor totals use its provider-reported local cost record, but Cursor is not plotted by day because the local store has no per-call cost timestamps. None of these values proves an amount charged.</p>
               </article>
@@ -190,7 +184,7 @@
           </section>
 
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
-            <header class="view-header"><div><p class="kicker">Session starts</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p></div></header>
+            <header class="view-header"><div><p class="kicker">Session starts</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <article class="panel activity-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
             <article class="panel activity-repositories"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list sage chart-slot" id="activity-repositories"></div></article>
           </section>
@@ -215,13 +209,13 @@
           </section>
 
           <section class="analytics-view" data-view-panel="tools" hidden aria-labelledby="tools-title">
-            <header class="view-header"><div><p class="kicker">Repositories</p><h2 id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div></header>
+            <header class="view-header"><div><p class="kicker">Repositories</p><h2 id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
             <article class="panel"><div class="distribution-table chart-slot" id="tools-by-repository"></div><div class="comparison-key" id="tools-key"></div></article>
             <article class="panel detail-panel"><header><div><p class="kicker">Selected repository</p><h2 id="tools-detail-title">—</h2></div></header><div class="bar-list sage chart-slot" id="tools-detail"></div></article>
           </section>
 
           <section class="analytics-view" data-view-panel="skills" hidden aria-labelledby="skills-title">
-            <header class="view-header"><div><p class="kicker">Repositories</p><h2 id="skills-title">Skills</h2><p>Observed skill invocations with provider-specific evidence coverage.</p></div></header>
+            <header class="view-header"><div><p class="kicker">Repositories</p><h2 id="skills-title">Skills</h2><p>Observed skill invocations with provider-specific evidence coverage.</p></div><div class="provider-key" id="skills-provider-filters" role="group" aria-label="Filter skill invocations by provider"></div></header>
             <article class="panel"><div class="distribution-table chart-slot" id="skills-by-repository"></div><div class="comparison-key" id="skills-key"></div></article>
             <div class="view-grid skills-detail-grid">
               <article class="panel"><header><div><p class="kicker">Selected repository</p><h2 id="skills-detail-title">—</h2></div></header><div class="bar-list chart-slot" id="skills-detail"></div></article>
@@ -263,7 +257,7 @@
         <section><h3>Control</h3><dl>
           <div><dt>Command palette</dt><dd><kbd><span class="key-command">⌘</span>K</kbd></dd></div>
           <div><dt>Last 7 · 30 · 90 days · all</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
-          <div><dt>Toggle Codex · Claude · Cursor</dt><dd><kbd>p</kbd> <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></dd></div>
+          <div><dt>Toggle Codex · Claude · Cursor in the current chart or view</dt><dd><kbd>p</kbd> <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></dd></div>
           <div><dt>Clear repository focus</dt><dd><kbd>esc</kbd></dd></div>
           <div><dt>Switch theme</dt><dd><kbd>t</kbd></dd></div>
           <div><dt>Switch density</dt><dd><kbd>d</kbd></dd></div>
@@ -271,7 +265,8 @@
           <div><dt>This overlay</dt><dd><kbd>?</kbd></dd></div>
         </dl></section>
       </div>
-      <p class="help-note">In charts, <kbd>←</kbd><kbd>→</kbd> move the crosshair; in the heatmap, arrow keys move between cells.</p>
+      <p class="help-note">In charts, <kbd>←</kbd><kbd>→</kbd> move the crosshair and <kbd>esc</kbd> closes the readout; in the heatmap, arrow keys move between cells.</p>
+      <label class="help-toggle"><input type="checkbox" id="shortcuts-toggle" checked /><span><strong>Single-key shortcuts</strong><small>Switch off to keep only <kbd><span class="key-command">⌘</span>K</kbd>, <kbd>esc</kbd>, and the buttons. The setting is remembered on this machine.</small></span></label>
     </dialog>
   </body>
 </html>
