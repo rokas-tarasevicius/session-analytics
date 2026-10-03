@@ -32,7 +32,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **Internal-only types.** `SessionDatabaseRow` and `AnalyzeOptions` in `src/types.ts` carry paths, titles, branches, and IDs for correlation. They are used inside the analysis process and are not part of any public type.
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
-- **Generic errors.** Server/report failures use fixed messages. Index failures cross the worker boundary only as an allowlisted code (`index-unavailable`, `index-busy`, `index-incompatible`, `index-integrity`); all other failures use a generic analysis error. The worker's standard error is discarded, so local paths in exceptions cannot reach the dashboard or report.
+- **Generic errors.** Server/report failures use fixed messages. Index failures cross the worker boundary only as an allowlisted code (`index-unavailable`, `index-busy`, `index-incompatible`, `index-integrity`, `index-coordination`); all other failures use a generic analysis error. The worker's standard error is discarded, so local paths in exceptions cannot reach the dashboard or report.
 - **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 - **Explicit disk projection.** `src/store/projection.ts` builds cached session facts field by field on write and read. No provider record, `SessionDatabaseRow`, `AnalyzeOptions`, raw path, or raw identity is persisted. Sentinel tests inspect database rows and bytes, warm snapshots, retained snapshots, and management status.
@@ -43,31 +43,34 @@ Content is held in memory only while a line is being parsed. It is not cached, l
 
 The default content-free index lives in `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (fallback `~/.local/share/session-analytics/`) on Linux. `SESSION_ANALYTICS_DATA_DIR` / `--data-dir` overrides it. Only the derived index is writable; provider stores remain read-only. Use `--no-index` or `SESSION_ANALYTICS_NO_INDEX=1` to bypass every index read/write and analyze only currently present evidence.
 
-The directory is mode `0700`. `index.sqlite`, WAL/SHM/journal files, the SQLite writer-coordination file, and a 32-byte random `index.key` are mode `0600`. Symbolic links, hard-linked files, and foreign ownership are rejected. These permissions and the key protect against other accounts; this is not encryption and does not protect against a process running as your user.
+The directory is mode `0700`. `index.sqlite`, WAL/SHM/journal files, the SQLite writer-coordination file, transient filesystem writer tickets, and a 32-byte random `index.key` are mode `0600`. Symbolic links, hard-linked files, and foreign ownership are rejected. These permissions and the key protect against other accounts; this is not encryption and does not protect against a process running as your user.
 
-The following is the complete disk field manifest. Keys and fingerprints use HMAC-SHA-256 with `index.key`, which is never exported. Rebuild preserves a usable key; deleting the key does not make an existing database safe to reuse. Payload integrity MACs detect unintended changes but are not protection from an attacker who can read the key.
+The following is the complete disk field manifest. Keys and fingerprints use HMAC-SHA-256 with `index.key`, which is never exported. A domain-separated verification MAC binds the database, all scopes, and pruning reservations to that key before scope selection. Legacy migration authenticates existing payloads first; it refuses unverifiable keyed-only state. Rebuild preserves a usable key; deleting or replacing the key does not make an existing database safe to reuse. Integrity MACs detect unintended changes but are not protection from an attacker who can read the key.
 
 | Stored data | Contents | Tier |
 | --- | --- | --- |
 | `sessions.payload` | The explicit `SessionAnalytics` projection listed below, including repository display names; no raw provider rows | P0/P1 |
 | `scope`, `identity_key`, `source_keys`, `root_key`, `remote_key`, `signature` | Keyed hashes of source configuration, provider-qualified identity, paths, roots/remotes, and parser/rate/metadata dependencies | P1 |
 | `payload_mac`, `ledger_mac` | Keyed payload integrity digests | P1 |
-| `source_deleted`, `last_event_at` | Deletion state and last observed event used for retention | P0 |
+| `source_deleted`, `last_event_at`, `retention_verified` | Deletion state, normalized last activity, and whether a current parser verified the retention date; unverifiable legacy dates cannot justify pruning | P0 |
+| `exclusions` | Only keyed scope, identity, signature, and source keys for pruned groups; no removed session payload or usage totals | P1 |
 | `evidence.source_key` | Keyed absolute-path identity; the path is never stored | P1 |
 | `evidence.fingerprint.device`, `.inode` | Filesystem identity numbers encoded losslessly as strings | P1 |
 | `evidence.fingerprint.size`, `.mtime`, `.ctime` | Byte count and nanosecond modification/change times | P0 |
 | `evidence.fingerprint.head`, `.tail` | Keyed first/last 4 KiB digests; bytes are discarded | P1 |
 | `evidence.ledger.observations[]` | Numeric total/last counter fingerprint, activity gap (`null` for unknown), timestamp | P0 |
+| `evidence.ledger.unownedFingerprints[]` | Numeric total/last fingerprints with no event timestamp, used to connect ownership dependencies | P0 |
 | `evidence.ledger.models`, `.lastLocalActivityTimestamp`, `.bytes`, `.newlineTerminated`, `.unownedCounters` | Model IDs, continuation timestamp/byte offset, and boolean checkpoint guards | P0 |
 | `evidence.ledger.prefixHash` | Keyed digest of the complete old prefix; no transcript bytes | P1 |
 | `sessions.owned_counters` | Attributed numeric counter fingerprints, timestamps, and fallback model IDs, for deleted-owner reservations | P0 |
 | `retired_counters.counter_key` | Keyed counter-membership reservations kept after pruning, without usage values or timestamps, solely to prevent rebilling | P1 |
-| `metadata` | Keyed parser/rate revision and the UTC retention floor; no source configuration in plaintext | P0/P1 |
+| `metadata` | Keyed parser/rate revision, domain-separated key-verification MAC, and the UTC retention floor; no source configuration in plaintext | P0/P1 |
 | `scans` | Keyed source scope, completion time, and counters/timing from the status manifest below | P0/P1 |
 | `index.key` | Private random HMAC key, never part of output | Private key |
 | SQLite metadata / `writer.sqlite` | Schema version, transaction metadata, and local writer coordination; no transcript data | P0 |
+| `writer-ticket-*` / `.next` | Transient process ID, random nonce, and numeric mutex order; no provider data, paths, or session IDs; removed on release or dead-process recovery | P0 |
 
-The index retains previously observed history after provider deletion. `index prune --before YYYY-MM-DD` removes old session facts, clears reusable evidence, vacuums the active database, and keeps a retention floor plus keyed anti-rebilling reservations. The cutoff is exclusive UTC midnight; provider files are untouched. Rebuild discards retained history and resets the floor. Corruption recovery places unreadable files in private `.rebuild-*` quarantine files, which are excluded from analysis, status, and prune; remove those separately when no longer needed. Retention is of derived facts, never a raw transcript archive. No P2 or P3 processing is added.
+The index retains previously observed history after provider deletion. `index prune --before YYYY-MM-DD` removes old verified session facts, clears reusable evidence, vacuums the active database, and keeps a retention floor, minimal keyed exclusion checkpoints, and keyed anti-rebilling reservations. Subsequent scans may rebuild ledger evidence from surviving provider files; unchanged exclusion checkpoints skip session parsing without restoring session facts. The cutoff is exclusive UTC midnight; provider files are untouched. Unverified legacy dates are kept until the source can be reparsed. Rebuild discards retained history and resets the floor. Corruption recovery places unreadable main or writer databases in private `.rebuild-*` quarantine files, which are excluded from analysis, status, and prune; remove those separately when no longer needed. Retention is of derived facts, never a raw transcript archive. No P2 or P3 processing is added.
 
 ## Privacy tiers
 
@@ -143,7 +146,7 @@ Repository summaries and the machine summary share these fields.
 | `unpricedSessions` | Sessions with at least one unpriced model | P0 |
 | `repositories` | Machine summary only: repositories in scope | P0 |
 | `repositoriesWithSessions` | Machine summary only: repositories with at least one session | P0 |
-| `workingSnapshots` | Machine summary only: sessions marked working at their last observed snapshot; retained history does not prove they are running now | P0 |
+| `workingSnapshots` | Machine summary only: working observations with present sources; source-deleted or unavailable historical observations are excluded | P0 |
 
 ### Session (`SessionAnalytics`)
 
@@ -156,8 +159,8 @@ Repository summaries and the machine summary share these fields.
 | `status` | Session status label: Conductor's status when registered there, Cursor's composer status, otherwise `idle` | P0 |
 | `createdAt` | Session start time | P0 |
 | `updatedAt` | Conductor's or Cursor's last-updated time when available; otherwise the session start time | P0 |
-| `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
-| `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
+| `firstEventAt` | Earliest valid event instant, normalized to UTC, or `null` | P0 |
+| `lastEventAt` | Latest valid event instant, normalized to UTC, or `null` | P0 |
 | `effort` | Reasoning-effort label as recorded, or `null` | P0 |
 | `executionKind` | `top-level`, `subagent`, `mixed`, or `unknown` | P0 |
 | `costBasis` | `api-list-price-equivalent`, `provider-reported`, or `unavailable` | P0 |
@@ -177,7 +180,7 @@ Repository summaries and the machine summary share these fields.
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
-| `transcript.snapshotWhileWorking` | `true` when the session was still running at scan time | P0 |
+| `transcript.snapshotWhileWorking` | `true` when the session was marked working at its last source observation; a retained observation does not establish current activity | P0 |
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
 | `transcript.sourceDeleted` | Optional `true`: these are last-ingested facts whose source was removed; absent for current evidence and `--no-index` output. Prices/parser results are frozen at last ingest | P0 |
 
@@ -263,9 +266,9 @@ The dashboard stores two values in browser `localStorage`: the selected view (`s
 | `lastScan` | Most recently committed ingest statistics, or `null` | P0 |
 | `lastScan.completedAt` | UTC completion timestamp | P0 |
 | `lastScan.fingerprintedFiles` | Unique transcript files fingerprinted during this ingest | P0 |
-| `lastScan.parsedSessions`, `.reusedSessions` | Claude/Codex composite sessions parsed or reused; Cursor refreshes are excluded | P0 |
+| `lastScan.parsedSessions`, `.reusedSessions` | Claude/Codex composite sessions parsed or reused, including reuse of exclusion checkpoints; Cursor refreshes are excluded | P0 |
 | `lastScan.retainedSessions` | Prior sessions returned after source absence/unavailability | P0 |
-| `lastScan.deferredSessions` | Groups whose files changed during the scan; prior good facts were preserved | P0 |
+| `lastScan.deferredSessions` | Session groups in unstable ownership components; prior facts/exclusions were preserved together | P0 |
 | `lastScan.ledgerReads`, `.ledgerHits`, `.ledgerAppends` | Codex ledger files read, reused, and the read subset continued from a verified prefix | P0 |
 | `lastScan.elapsedMilliseconds` | Ingest wall time after opening the index, excluding process startup | P0 |
 

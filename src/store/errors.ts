@@ -4,6 +4,7 @@ const messages = {
   "index-busy": "The local index is busy; another ingest or maintenance command is running.",
   "index-incompatible": "The local index was created by a newer version; upgrade or use --no-index.",
   "index-integrity": "The local index failed an integrity check; run index rebuild.",
+  "index-coordination": "The local index writer coordination is damaged; run index rebuild or use --no-index.",
 } as const;
 
 export function indexErrorCode(error: unknown): string | null {

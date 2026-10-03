@@ -11,7 +11,7 @@ const elements = {
   distributionRepositoryOptions: $("#distribution-repository-options"), distributionTools: $("#distribution-tools"),
   error: $("#error-banner"),
   generated: $("#generated-at"), input: $("#metric-input"),
-  live: $("#metric-live"), modelSpend: $("#model-spend"), output: $("#metric-output"),
+  live: $("#metric-live"), liveNote: $("#metric-live-note"), retentionNote: $("#retention-note"), modelSpend: $("#model-spend"), output: $("#metric-output"),
   modelsByProvider: $("#models-by-provider"), modelMetricSwitch: $("#model-metric-switch"),
   providerCostComponents: $("#provider-cost-components"),
   providerDonut: $("#provider-donut"), providerLegend: $("#provider-legend"),
@@ -153,7 +153,19 @@ function coverageWarnings(sessions) {
   if (legacy) warnings.push(`${legacy} legacy session${legacy === 1 ? "" : "s"} cannot be correlated because Conductor recorded no provider session ID.`);
   if (unmatched) warnings.push(`${unmatched} session${unmatched === 1 ? "" : "s"} have a provider ID but no validated local transcript.`);
   if (unpriced) warnings.push(`${unpriced} session${unpriced === 1 ? "" : "s"} include models without a rate card.`);
+  const retained = sessions.filter(({ transcript }) => transcript.sourceDeleted).length;
+  if (retained) warnings.push(`${retained} sessions include source-deleted history; facts and prices are from their last successful ingest.`);
+  if (sessions.some(({ transcript }) => transcript.warnings.includes("Source availability could not be checked; showing the last indexed facts."))) warnings.push("Source availability could not be checked; showing the last indexed facts.");
   return warnings;
+}
+
+function scanWarnings() {
+  // Aggregate coverage counts are recomputed for the selection; scan-wide failures still apply.
+  return snapshot.warnings.filter((warning) => !/^\d+ (?:legacy )?sessions? (?:cannot be correlated|have a provider ID|include models|include source-deleted history)/.test(warning));
+}
+
+function historicalSnapshot({ transcript }) {
+  return transcript.sourceDeleted || transcript.warnings.includes("Source availability could not be checked; showing the last indexed facts.");
 }
 
 function repositoryAggregate(item, sessions) {
@@ -169,8 +181,11 @@ function activeView() {
   const sessions = windowSessions;
   const summary = summarize(sessions);
   return {
-    dailySessions: scopeSessions, repositories, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: coverageWarnings(sessions),
-    summary: { ...summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter(({ summary: item }) => item.sessions > 0).length, workingSnapshots: sessions.filter(({ transcript }) => transcript.snapshotWhileWorking).length },
+    dailySessions: scopeSessions, repositories, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: [...new Set([...coverageWarnings(sessions), ...scanWarnings()])],
+    summary: { ...summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter(({ summary: item }) => item.sessions > 0).length,
+      retainedSessions: sessions.filter(({ transcript }) => transcript.sourceDeleted).length,
+      historicalWorkingSnapshots: sessions.filter((session) => session.transcript.snapshotWhileWorking && historicalSnapshot(session)).length,
+      workingSnapshots: sessions.filter((session) => session.transcript.snapshotWhileWorking && !historicalSnapshot(session)).length },
   };
 }
 
@@ -786,11 +801,16 @@ function windowCaption() {
 function renderSharedView(view) {
   const selected = selectedRepository(); const summary = view.summary;
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.`;
+  elements.retentionNote.hidden = !summary.retainedSessions;
+  elements.retentionNote.textContent = `${summary.retainedSessions} source-deleted sessions: totals retain facts and prices from their last successful ingest. Historical working status does not mean a session is still running.`;
+  renderWarnings(view.warnings);
 }
 
 function renderSummary(view) {
   const summary = view.summary;
   elements.spend.textContent = money(summary.estimatedSpendUsd); elements.spendNote.textContent = `${money(summary.apiEquivalentSpendUsd)} API-equivalent · ${money(summary.providerReportedSpendUsd)} provider-reported · not an invoice`;
+  if (summary.retainedSessions) elements.spendNote.textContent += " · retained history uses last-ingest prices";
+  elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`;
   elements.input.textContent = compact.format(summary.totalInputTokens); elements.cache.textContent = `${percent(summary.cacheReadRatio)} cached · repeated context included`;
@@ -801,7 +821,7 @@ function renderSummary(view) {
   renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd }) => ({ name: model, value: totalUsd, provider })), money, 8);
   renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
   renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.subagentSpendUsd })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
-  renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
+  renderRepositoryTable(view.repositories);
 }
 
 function renderView() {

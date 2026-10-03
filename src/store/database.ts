@@ -6,10 +6,12 @@ import { DatabaseSync } from "node:sqlite";
 import { serviceId } from "../brand.ts";
 import type { AnalyzeOptions } from "../types.ts";
 import { keyedHash } from "./fingerprint.ts";
+import { acquireWriterGate, COORDINATION_ERROR } from "./writer-gate.ts";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const INDEX_UNAVAILABLE = "The local index is unavailable; use --no-index or run index rebuild.";
 export const INDEX_BUSY = "The local index is busy; another ingest or maintenance command is running.";
+export const INDEX_INTEGRITY = "The local index failed an integrity check; run index rebuild.";
 
 export function dataDirectory(
   options: Pick<AnalyzeOptions, "dataDir"> = {},
@@ -67,16 +69,46 @@ function connect(path: string): DatabaseSync {
   return database;
 }
 
-/** A separate, tiny SQLite lease survives main-index corruption and releases on process death. */
-export function acquireWriter(options: Pick<AnalyzeOptions, "dataDir"> = {}): { release: () => void; directory: string } {
+function sqliteBusy(error: unknown): boolean {
+  const code = (error as { errcode?: number })?.errcode;
+  return code !== undefined && [5, 6].includes(code & 0xff);
+}
+
+function quarantine(path: string): void {
+  const suffix = `.rebuild-${Date.now()}-${randomBytes(4).toString("hex")}`;
+  for (const ending of ["", "-wal", "-shm", "-journal"]) {
+    secureFile(path + ending);
+    if (existsSync(path + ending)) renameSync(path + ending, path + suffix + ending);
+  }
+}
+
+/** A filesystem gate also protects repair of the SQLite lease, which still coordinates older writers. */
+export function acquireWriter(options: Pick<AnalyzeOptions, "dataDir"> = {}, repair = false): { release: () => void; directory: string } {
   const directory = dataDirectory(options);
   secureDirectory(directory);
   const path = join(directory, "writer.sqlite");
-  const lease = connect(path);
-  try { lease.exec("BEGIN IMMEDIATE"); }
-  catch { lease.close(); throw new Error(INDEX_BUSY); }
-  secureSidecars(path);
-  return { directory, release: () => { lease.exec("ROLLBACK"); lease.close(); } };
+  const releaseGate = acquireWriterGate(directory);
+  let lease: DatabaseSync | undefined;
+  try {
+    try { lease = connect(path); lease.exec("BEGIN IMMEDIATE"); }
+    catch (error) {
+      lease?.close(); lease = undefined;
+      if (sqliteBusy(error)) throw new Error(INDEX_BUSY);
+      if (error instanceof Error && error.message === INDEX_UNAVAILABLE) throw error;
+      if (!repair) throw new Error(COORDINATION_ERROR);
+      quarantine(path);
+      lease = connect(path); lease.exec("BEGIN IMMEDIATE");
+    }
+    secureSidecars(path);
+    const opened = lease;
+    return { directory, release: () => {
+      try { opened.exec("ROLLBACK"); } finally { opened.close(); releaseGate(); }
+    } };
+  } catch (error) {
+    lease?.close(); releaseGate();
+    if (error instanceof Error && error.message.startsWith("The local index")) throw error;
+    throw new Error(COORDINATION_ERROR);
+  }
 }
 
 /** Ordered migrations, committed with the schema version, never downgrade a future schema. */
@@ -105,6 +137,13 @@ export function migrate(database: DatabaseSync): void {
       CREATE TABLE scans (scope TEXT PRIMARY KEY, completed_at TEXT NOT NULL, stats TEXT NOT NULL) STRICT;
       CREATE TABLE retired_counters (scope TEXT NOT NULL, counter_key TEXT NOT NULL, PRIMARY KEY(scope,counter_key)) STRICT;
     `);
+    if (version < 3) database.exec(`
+      ALTER TABLE sessions ADD COLUMN retention_verified INTEGER NOT NULL DEFAULT 0 CHECK(retention_verified IN (0,1));
+      CREATE TABLE exclusions (
+        scope TEXT NOT NULL, identity_key TEXT NOT NULL, signature TEXT NOT NULL,
+        source_keys TEXT NOT NULL, PRIMARY KEY(scope,identity_key)
+      ) STRICT;
+    `);
     database.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT;`);
   } catch (error) { database.exec("ROLLBACK"); throw error; }
 }
@@ -113,6 +152,28 @@ export interface IndexConnection {
   database: DatabaseSync;
   secret: Buffer;
   close: () => void;
+}
+
+/** Bind all scopes and reservations to one key before choosing a scope. Legacy stores need authenticated evidence. */
+function verifyKey(database: DatabaseSync, secret: Buffer, bootstrap = false): void {
+  if (secret.length !== 32) throw new Error(INDEX_INTEGRITY);
+  const expected = keyedHash(secret, "session-analytics:index-key-verifier:v1");
+  const verifier = database.prepare("SELECT value FROM metadata WHERE key='key_verifier'").get()?.["value"];
+  if (verifier !== undefined) {
+    if (verifier !== expected) throw new Error(INDEX_INTEGRITY);
+    return;
+  }
+  let authenticated = false;
+  for (const { payload, mac } of database.prepare(`SELECT payload,payload_mac AS mac FROM sessions
+    UNION ALL SELECT ledger,ledger_mac FROM evidence WHERE ledger IS NOT NULL`).iterate()) {
+    if (typeof payload !== "string" || keyedHash(secret, payload) !== mac) throw new Error(INDEX_INTEGRITY);
+    authenticated = true;
+  }
+  // A pruned legacy store with only keyed membership cannot prove which key created it.
+  const tables = new Set(database.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map((row) => row["name"]));
+  if (!authenticated && ["sessions", "evidence", "retired_counters", "exclusions", "metadata"].filter((table) => tables.has(table)).some((table) =>
+    Number(database.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.["n"]) > 0)) throw new Error(INDEX_INTEGRITY);
+  if (bootstrap) database.prepare("INSERT INTO metadata(key,value) VALUES ('key_verifier',?)").run(expected);
 }
 
 export function openIndexDatabase(options: Pick<AnalyzeOptions, "dataDir"> = {}): IndexConnection {
@@ -131,9 +192,13 @@ export function openIndexDatabase(options: Pick<AnalyzeOptions, "dataDir"> = {})
     if (secret.length !== 32) throw new Error(INDEX_UNAVAILABLE);
     database = connect(path);
     database.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
+    const version = Number(database.prepare("PRAGMA user_version").get()?.["user_version"]);
+    // Authenticate legacy stores before any migration creates new state.
+    if (version > 0 && version <= SCHEMA_VERSION) verifyKey(database, secret, true);
     migrate(database);
     const check = database.prepare("PRAGMA quick_check").get() as { quick_check: string };
     if (check.quick_check !== "ok") throw new Error(INDEX_UNAVAILABLE);
+    verifyKey(database, secret, true);
     secureSidecars(path);
     const opened = database;
     return { database: opened, secret, close: () => { opened.close(); secureSidecars(path); writer.release(); } };
@@ -174,6 +239,14 @@ export function indexStatus(options: Pick<AnalyzeOptions, "dataDir"> = {}): Inde
   if (!existsSync(path)) return result;
   let database: DatabaseSync | undefined;
   try {
+    const writerPath = join(dataDirectory(options), "writer.sqlite");
+    if (existsSync(writerPath)) {
+      const writerInfo = lstatSync(writerPath);
+      if (!writerInfo.isFile() || writerInfo.isSymbolicLink()) throw new Error(COORDINATION_ERROR);
+      const writer = new DatabaseSync(writerPath, { readOnly: true });
+      try { if (writer.prepare("PRAGMA quick_check").get()?.["quick_check"] !== "ok") throw new Error(COORDINATION_ERROR); }
+      finally { writer.close(); }
+    }
     const info = lstatSync(path);
     if (!info.isFile() || info.isSymbolicLink()) throw new Error(INDEX_UNAVAILABLE);
     result.databaseBytes = info.size;
@@ -182,6 +255,7 @@ export function indexStatus(options: Pick<AnalyzeOptions, "dataDir"> = {}): Inde
     result.schemaVersion = Number((database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
     if (result.schemaVersion !== SCHEMA_VERSION) return { ...result, state: "incompatible" };
     if ((database.prepare("PRAGMA quick_check").get() as { quick_check: string }).quick_check !== "ok") throw new Error(INDEX_UNAVAILABLE);
+    verifyKey(database, readFileSync(join(dataDirectory(options), "index.key")));
     const counts = database.prepare("SELECT count(*) AS sessions, coalesce(sum(source_deleted),0) AS deleted, count(DISTINCT scope) AS scopes FROM sessions").get() as { sessions: number; deleted: number; scopes: number };
     result.sessions = counts.sessions; result.sourceDeletedSessions = counts.deleted; result.scopes = counts.scopes;
     result.evidenceFiles = Number(database.prepare("SELECT count(*) AS count FROM evidence").get()?.["count"]);
@@ -217,10 +291,12 @@ export function pruneIndex(before: string, options: Pick<AnalyzeOptions, "dataDi
     db.exec("BEGIN IMMEDIATE");
     // Keep only keyed membership, not old usage values, to prevent surviving broadcasts from rebilling pruned requests.
     const reserve = db.prepare("INSERT OR IGNORE INTO retired_counters(scope,counter_key) VALUES (?,?)");
-    for (const row of db.prepare("SELECT scope,owned_counters FROM sessions WHERE last_event_at <> '' AND last_event_at < ?").all(cutoff) as Array<{ scope: string; owned_counters: string }>) {
+    for (const row of db.prepare("SELECT scope,owned_counters FROM sessions WHERE retention_verified=1 AND last_event_at <> '' AND last_event_at < ?").all(cutoff) as Array<{ scope: string; owned_counters: string }>) {
       for (const [counter] of JSON.parse(row.owned_counters) as Array<[string, string, string | null]>) reserve.run(row.scope, keyedHash(connection.secret, counter));
     }
-    const result = db.prepare("DELETE FROM sessions WHERE last_event_at <> '' AND last_event_at < ?").run(cutoff);
+    db.prepare(`INSERT OR REPLACE INTO exclusions(scope,identity_key,signature,source_keys)
+      SELECT scope,identity_key,signature,source_keys FROM sessions WHERE retention_verified=1 AND last_event_at <> '' AND last_event_at < ?`).run(cutoff);
+    const result = db.prepare("DELETE FROM sessions WHERE retention_verified=1 AND last_event_at <> '' AND last_event_at < ?").run(cutoff);
     // Persist a monotonic retention floor so surviving provider files cannot resurrect pruned history.
     db.prepare("INSERT INTO metadata(key,value) VALUES ('prune_before',?) ON CONFLICT(key) DO UPDATE SET value=max(value,excluded.value)").run(cutoff);
     db.exec("DELETE FROM evidence; DELETE FROM scans; COMMIT; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
@@ -230,7 +306,7 @@ export function pruneIndex(before: string, options: Pick<AnalyzeOptions, "dataDi
 
 /** Explicit rebuild discards caches and retained history; preserve corrupt files for diagnosis. */
 export function resetIndex(options: Pick<AnalyzeOptions, "dataDir"> = {}): void {
-  const writer = acquireWriter(options);
+  const writer = acquireWriter(options, true);
   try {
     const path = join(writer.directory, "index.sqlite");
     secureFile(path);
@@ -242,10 +318,11 @@ export function resetIndex(options: Pick<AnalyzeOptions, "dataDir"> = {}): void 
         if (version > SCHEMA_VERSION) throw new Error("The local index was created by a newer version; upgrade or use --no-index.");
         migrate(healthy);
         if (healthy.prepare("PRAGMA quick_check").get()?.["quick_check"] === "ok") {
-          healthy.exec("BEGIN IMMEDIATE; DELETE FROM sessions; DELETE FROM evidence; DELETE FROM scans; DELETE FROM metadata; DELETE FROM retired_counters; COMMIT; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
+          healthy.exec("BEGIN IMMEDIATE; DELETE FROM sessions; DELETE FROM evidence; DELETE FROM exclusions; DELETE FROM scans; DELETE FROM metadata; DELETE FROM retired_counters; COMMIT; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
           const key = join(writer.directory, "index.key");
           secureFile(key);
           if (!existsSync(key) || readFileSync(key).length !== 32) writeFileSync(key, randomBytes(32), { mode: 0o600 });
+          verifyKey(healthy, readFileSync(key), true);
           return;
         }
       }

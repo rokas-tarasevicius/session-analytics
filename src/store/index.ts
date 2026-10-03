@@ -18,7 +18,9 @@ interface StoredSession {
   owned_counters: string;
   last_event_at: string;
   source_deleted: number;
+  retention_verified: number;
 }
+interface Exclusion { identity_key: string; signature: string; source_keys: string }
 interface StoredEvidence { fingerprint: string; ledger: string | null; ledger_mac: string | null }
 export interface CounterOwner { path: string; timestamp: string; modelFallback: string | null }
 
@@ -45,6 +47,11 @@ export class IndexScan {
   private sessions = new Map<string, StoredSession>();
   private seen = new Set<string>();
   private pending = new Map<string, string[]>();
+  private exclusions = new Map<string, Exclusion>();
+  private pendingRetirements = new Map<string, string[]>();
+  private unverifiedRetention = new Set<string>();
+  private components = new Map<string, string>();
+  private unobservedClaims = new Map<string, string>();
   private retiredCounters: Set<string>;
   private ledgerEvidence = new Map<string, CodexLedgerEvidence>();
   private dependencies = new Map<string, string>();
@@ -67,11 +74,15 @@ export class IndexScan {
     }
     this.pruneBefore = String(connection.database.prepare("SELECT value FROM metadata WHERE key='prune_before'").get()?.["value"] ?? "");
     this.retiredCounters = new Set(connection.database.prepare("SELECT counter_key FROM retired_counters WHERE scope=?").all(scope).map((row) => String(row["counter_key"])));
+    for (const row of connection.database.prepare("SELECT identity_key,signature,source_keys FROM exclusions WHERE scope=?").all(scope) as unknown as Exclusion[]) {
+      this.exclusions.set(row.identity_key, row);
+    }
     for (const row of connection.database.prepare("SELECT * FROM sessions WHERE scope=? ORDER BY rowid").all(scope) as unknown as StoredSession[]) {
       // A damaged payload must never cross the projection boundary or silently erase retained history.
       if (this.hash(row.payload) !== row.payload_mac) throw new Error("The local index failed an integrity check; run index rebuild.");
       const session = projectSession(JSON.parse(row.payload) as SessionAnalytics);
       this.sessions.set(row.identity_key, row);
+      if (!row.retention_verified) this.unverifiedRetention.add(session.sessionKey);
       this.repositories.set(session.repositoryId, { root: row.root_key, remote: row.remote_key });
     }
   }
@@ -82,6 +93,8 @@ export class IndexScan {
     try {
       const source = await readFile(new URL("../analyzer.ts", import.meta.url), "utf8");
       const ledgerSource = await readFile(new URL("./codex-ledger.ts", import.meta.url), "utf8");
+      const storeSource = await readFile(new URL("./index.ts", import.meta.url), "utf8");
+      const projectionSource = await readFile(new URL("./projection.ts", import.meta.url), "utf8");
       const hash = (value: unknown): string => keyedHash(connection.secret, JSON.stringify(value));
       // Filters are projections, not separate datasets. Explicit roots are isolated from machine discovery.
       const scope = hash([
@@ -91,7 +104,7 @@ export class IndexScan {
         options.databasePath ? resolve(options.databasePath) : "default-conductor",
         options.cursorDatabasePath ? resolve(options.cursorDatabasePath) : "default-cursor", includeHidden,
       ]);
-      return new IndexScan(connection, scope, hash(["parser-v1", source, ledgerSource, rateCard]));
+      return new IndexScan(connection, scope, hash(["parser-v2-utc-extrema", source, ledgerSource, storeSource, projectionSource, rateCard]));
     } catch (error) { connection.close(); throw error; }
   }
 
@@ -147,7 +160,23 @@ export class IndexScan {
 
   setCounterDependencies(owners: Map<string, CounterOwner>): void {
     this.ambiguousCounters = [...this.ledgerEvidence.values()].some((evidence) => evidence.unownedCounters);
+    // Connect old owners, new owners and every consumer, even if the old owner stopped
+    // observing a counter. Deferral must restore one whole accounting generation.
+    const counters = new Map<string, string>();
+    const observe = (counter: string, source: string): void => {
+      const previous = counters.get(counter);
+      if (previous) this.joinSources([previous, source]);
+      else counters.set(counter, source);
+    };
+    for (const row of this.sessions.values()) {
+      const sources = JSON.parse(row.source_keys) as string[];
+      this.joinSources(sources);
+      if (sources[0]) for (const [counter] of JSON.parse(row.owned_counters) as Array<[string, string, string | null]>) observe(counter, sources[0]);
+    }
     for (const [path, evidence] of this.ledgerEvidence) {
+      const source = this.sourceKey(path);
+      for (const { fingerprint } of evidence.observations) observe(fingerprint, source);
+      for (const fingerprint of evidence.unownedFingerprints) observe(fingerprint, source);
       this.dependencies.set(path, this.hash(JSON.stringify(evidence.observations.map(({ fingerprint }) => {
         const owner = owners.get(fingerprint);
         return [fingerprint, owner ? this.sourceKey(owner.path) : "", owner?.timestamp, owner?.modelFallback];
@@ -155,12 +184,31 @@ export class IndexScan {
     }
   }
 
+  private component(source: string): string {
+    let root = source;
+    while (this.components.has(root)) root = this.components.get(root)!;
+    while (this.components.has(source)) {
+      const parent = this.components.get(source)!;
+      this.components.set(source, root); source = parent;
+    }
+    return root;
+  }
+
+  private joinSources(sources: string[]): void {
+    if (!sources[0]) return;
+    const root = this.component(sources[0]);
+    for (const source of sources.slice(1)) {
+      const other = this.component(source);
+      if (other !== root) this.components.set(other, root);
+    }
+  }
+
   async session(
     row: SessionDatabaseRow, paths: string[], warnings: string[],
-    analyze: () => Promise<SessionAnalytics>, claimedCounters?: Set<string>,
+    analyze: () => Promise<SessionAnalytics | null>, claimedCounters?: Set<string>,
     owners?: Map<string, CounterOwner> | null,
     attributedCounters?: Set<string>,
-  ): Promise<SessionAnalytics> {
+  ): Promise<SessionAnalytics | null> {
     const mainPath = paths[0] as string;
     const providerId = row.provider_session_id ?? mainPath.match(/([0-9a-f]{8}-[0-9a-f-]{27})\.(?:jsonl|json)$/i)?.[1] ?? row.conductor_session_id;
     const identity = this.identity(row.agent_type, providerId);
@@ -176,41 +224,59 @@ export class IndexScan {
     // A missing-timestamp token record has no ledger owner; preserve the full-scan claimed-counter order.
     const canReuse = row.agent_type !== "codex" || Boolean(this.dependencies.get(mainPath)) &&
       !this.ambiguousCounters;
+    // Exclusion depends on verified activity time, not on which undated request won.
+    // Previously removed ownership is already reserved independently of cache reuse.
+    if (this.exclusions.get(identity)?.signature === signature) {
+      this.stats.reusedSessions += 1;
+      return null;
+    }
     let result: SessionAnalytics;
     let owned: Array<[string, string, string | null]> = [];
-    if (previous?.signature === signature && canReuse) {
+    if (previous?.signature === signature && previous.retention_verified && canReuse) {
       result = projectSession(JSON.parse(previous.payload) as SessionAnalytics);
       owned = JSON.parse(previous.owned_counters) as typeof owned;
       for (const [counter] of owned) claimedCounters?.add(counter);
       delete result.transcript.sourceDeleted;
       this.stats.reusedSessions += 1;
     } else {
-      result = projectSession(await analyze());
+      const analyzed = await analyze();
+      if (!analyzed) return null;
+      result = projectSession(analyzed);
       for (const counter of attributedCounters ?? []) {
         const owner = owners?.get(counter);
         owned.push([counter, owner?.timestamp ?? "", owner?.modelFallback ?? null]);
+        if (!owner) this.unobservedClaims.set(counter, this.sourceKey(mainPath));
       }
       this.stats.parsedSessions += 1;
     }
-    this.save(identity, signature, result, paths.map((path) => this.sourceKey(path)), row.root_path, row.repository_remote, owned);
-    return result;
+    return this.save(identity, signature, result, paths.map((path) => this.sourceKey(path)), row.root_path, row.repository_remote, owned) ? result : null;
   }
 
   private save(
     identity: string, signature: string, session: SessionAnalytics, sourceKeys: string[], root: string, remote: string,
     owned: Array<[string, string, string | null]>,
-  ): void {
+  ): boolean {
     const lastEvent = lastActivityAt(session);
-    if (lastEvent && lastEvent < this.pruneBefore) return;
+    this.unverifiedRetention.delete(session.sessionKey);
+    this.pending.set(identity, sourceKeys);
+    this.joinSources(sourceKeys);
+    if (lastEvent && lastEvent < this.pruneBefore) {
+      this.connection.database.prepare("DELETE FROM sessions WHERE scope=? AND identity_key=?").run(this.scope, identity);
+      this.connection.database.prepare("INSERT OR REPLACE INTO exclusions(scope,identity_key,signature,source_keys) VALUES (?,?,?,?)")
+        .run(this.scope, identity, signature, JSON.stringify(sourceKeys));
+      this.pendingRetirements.set(identity, owned.map(([counter]) => counter));
+      return false;
+    }
+    this.connection.database.prepare("DELETE FROM exclusions WHERE scope=? AND identity_key=?").run(this.scope, identity);
     const rootKey = root ? this.hash(`root:${resolve(root)}`) : "", remoteKey = remote ? this.hash(`remote:${normalizeRemote(remote)}`) : "";
     this.repositories.set(session.repositoryId, { root: rootKey, remote: remoteKey });
     const payload = JSON.stringify(projectSession(session));
-    this.pending.set(identity, sourceKeys);
-    this.connection.database.prepare(`INSERT INTO sessions(scope,identity_key,signature,payload,payload_mac,source_keys,root_key,remote_key,owned_counters,last_event_at,source_deleted)
-      VALUES (?,?,?,?,?,?,?,?,?,?,0) ON CONFLICT(scope,identity_key) DO UPDATE SET signature=excluded.signature,
+    this.connection.database.prepare(`INSERT INTO sessions(scope,identity_key,signature,payload,payload_mac,source_keys,root_key,remote_key,owned_counters,last_event_at,source_deleted,retention_verified)
+      VALUES (?,?,?,?,?,?,?,?,?,?,0,1) ON CONFLICT(scope,identity_key) DO UPDATE SET signature=excluded.signature,
       payload=excluded.payload,payload_mac=excluded.payload_mac,source_keys=excluded.source_keys,root_key=excluded.root_key,
-      remote_key=excluded.remote_key,owned_counters=excluded.owned_counters,last_event_at=excluded.last_event_at,source_deleted=0`)
+      remote_key=excluded.remote_key,owned_counters=excluded.owned_counters,last_event_at=excluded.last_event_at,source_deleted=0,retention_verified=1`)
       .run(this.scope, identity, signature, payload, this.hash(payload), JSON.stringify(sourceKeys), rootKey, remoteKey, JSON.stringify(owned), lastEvent);
+    return true;
   }
 
   /** Cursor is a mutable relational store; always refresh it through its existing isolated reader. */
@@ -229,6 +295,7 @@ export class IndexScan {
       const sourceKeys = JSON.parse(row.source_keys) as string[];
       if (sourceKeys.some((key) => live.has(key))) {
         // Present-but-invalid/mismatched evidence must not resurrect a previously validated session.
+        this.pending.set(identity, sourceKeys);
         this.connection.database.prepare("DELETE FROM sessions WHERE scope=? AND identity_key=?").run(this.scope, identity);
         continue;
       }
@@ -240,6 +307,7 @@ export class IndexScan {
         session.transcript.warnings.push("Source availability could not be checked; showing the last indexed facts.");
       }
       if (session.transcript.sourceDeleted) session.transcript.warnings.push("Source-deleted history retains the pricing and parser results from its last successful ingest.");
+      if (!row.retention_verified) session.transcript.warnings.push("Legacy activity dates could not be verified; history is kept until its source can be read again.");
       retained.push(session);
     }
     this.stats.retainedSessions = retained.length;
@@ -249,24 +317,41 @@ export class IndexScan {
   matchesRoot(repositoryId: string, root: string): boolean { return this.repositories.get(repositoryId)?.root === this.hash(`root:${resolve(root)}`); }
   matchesRemote(repositoryId: string, remote: string): boolean { return this.repositories.get(repositoryId)?.remote === this.hash(`remote:${normalizeRemote(remote)}`); }
   inRetention(session: SessionAnalytics): boolean {
+    if (this.unverifiedRetention.has(session.sessionKey)) return true;
     const timestamp = lastActivityAt(session);
     return !timestamp || timestamp >= this.pruneBefore;
   }
 
   async commit(): Promise<boolean> {
+    // A growing file can reveal a request only during session parsing, after the
+    // ledger pass. Connect such claims to prior owners before choosing deferrals.
+    if (this.unobservedClaims.size) for (const row of this.sessions.values()) {
+      const sources = JSON.parse(row.source_keys) as string[];
+      for (const [counter] of JSON.parse(row.owned_counters) as Array<[string, string, string | null]>) {
+        const claimant = this.unobservedClaims.get(counter);
+        if (claimant) this.joinSources([...sources, claimant]);
+      }
+    }
     const unstable = new Set<string>();
     for (const [key, { path, value }] of this.fingerprints) {
       if (!(await stillMatches(path, value))) unstable.add(key);
     }
+    const unstableComponents = new Set([...unstable].map((source) => this.component(source)));
+    const deferredSources = new Set([...this.fingerprints.keys()].filter((source) => unstableComponents.has(this.component(source))));
     // One active agent must not prevent thousands of stable sessions from ever reaching the index.
     // Keep the prior good facts for unstable groups; their ledger is re-read on the next launch.
     for (const [identity, sources] of this.pending) {
-      if (!sources.some((key) => unstable.has(key))) continue;
+      if (!sources.some((key) => unstableComponents.has(this.component(key)))) continue;
       const previous = this.sessions.get(identity);
       this.connection.database.prepare("DELETE FROM sessions WHERE scope=? AND identity_key=?").run(this.scope, identity);
-      if (previous) this.connection.database.prepare(`INSERT INTO sessions(scope,identity_key,signature,payload,payload_mac,source_keys,root_key,remote_key,owned_counters,last_event_at,source_deleted)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(this.scope, identity, previous.signature, previous.payload, previous.payload_mac,
-          previous.source_keys, previous.root_key, previous.remote_key, previous.owned_counters, previous.last_event_at, previous.source_deleted);
+      if (previous) this.connection.database.prepare(`INSERT INTO sessions(scope,identity_key,signature,payload,payload_mac,source_keys,root_key,remote_key,owned_counters,last_event_at,source_deleted,retention_verified)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(this.scope, identity, previous.signature, previous.payload, previous.payload_mac,
+          previous.source_keys, previous.root_key, previous.remote_key, previous.owned_counters, previous.last_event_at, previous.source_deleted, previous.retention_verified);
+      this.connection.database.prepare("DELETE FROM exclusions WHERE scope=? AND identity_key=?").run(this.scope, identity);
+      const excluded = this.exclusions.get(identity);
+      if (excluded) this.connection.database.prepare("INSERT INTO exclusions(scope,identity_key,signature,source_keys) VALUES (?,?,?,?)")
+        .run(this.scope, identity, excluded.signature, excluded.source_keys);
+      this.pendingRetirements.delete(identity);
       this.stats.deferredSessions += 1;
     }
     const saveFile = this.connection.database.prepare(`INSERT INTO evidence(scope,source_key,fingerprint) VALUES (?,?,?)
@@ -275,9 +360,11 @@ export class IndexScan {
         ledger_mac=CASE WHEN evidence.fingerprint=excluded.fingerprint THEN evidence.ledger_mac ELSE NULL END,
         fingerprint=excluded.fingerprint`);
     for (const [key, { value }] of this.fingerprints) {
-      if (unstable.has(key)) this.connection.database.prepare("DELETE FROM evidence WHERE scope=? AND source_key=?").run(this.scope, key);
+      if (deferredSources.has(key)) this.connection.database.prepare("DELETE FROM evidence WHERE scope=? AND source_key=?").run(this.scope, key);
       else saveFile.run(this.scope, key, JSON.stringify(value));
     }
+    const reserve = this.connection.database.prepare("INSERT OR IGNORE INTO retired_counters(scope,counter_key) VALUES (?,?)");
+    for (const counters of this.pendingRetirements.values()) for (const counter of counters) reserve.run(this.scope, this.hash(counter));
     this.stats.elapsedMilliseconds = Math.round(performance.now() - this.started);
     this.connection.database.prepare(`INSERT INTO scans(scope,completed_at,stats) VALUES (?,?,?)
       ON CONFLICT(scope) DO UPDATE SET completed_at=excluded.completed_at,stats=excluded.stats`)

@@ -38,6 +38,7 @@ export interface CodexLedgerEvidence {
   prefixHash: string | null;
   newlineTerminated: boolean;
   unownedCounters: boolean;
+  unownedFingerprints: string[];
 }
 
 export async function readCodexLedger(
@@ -56,6 +57,7 @@ export async function readCodexLedger(
   for (const observation of appended ? old?.observations ?? [] : []) observations.set(observation.fingerprint, observation);
   let lastLocalActivityTimestamp = appended ? old?.lastLocalActivityTimestamp ?? null : null;
   let unownedCounters = appended ? old?.unownedCounters ?? false : false;
+  const unownedFingerprints = new Set<string>(appended ? old?.unownedFingerprints : []);
   const input = createReadStream(path, { encoding: "utf8", start: appended ? old?.bytes ?? 0 : 0 });
   const lines = createInterface({ input, crlfDelay: Infinity });
   try {
@@ -76,7 +78,7 @@ export async function readCodexLedger(
       }
       const info = record(payload?.["info"]);
       const fingerprint = codexCounterFingerprint(record(info?.["total_token_usage"]), record(info?.["last_token_usage"]));
-      if (fingerprint && !timestamp) unownedCounters = true;
+      if (fingerprint && !timestamp) { unownedCounters = true; unownedFingerprints.add(fingerprint); }
       if (!fingerprint || !timestamp) continue;
       const eventTime = Date.parse(timestamp), activityTime = Date.parse(lastLocalActivityTimestamp ?? "");
       const delta = Number.isFinite(eventTime) && Number.isFinite(activityTime) && eventTime >= activityTime
@@ -101,7 +103,7 @@ export async function readCodexLedger(
     appended,
     evidence: {
       observations: [...observations.values()], models: [...models], lastLocalActivityTimestamp,
-      bytes: current?.size ?? 0, newlineTerminated, unownedCounters,
+      bytes: current?.size ?? 0, newlineTerminated, unownedCounters, unownedFingerprints: [...unownedFingerprints],
       prefixHash: current && secret ? await hashPrefix(path, current.size, secret) : null,
     },
   };

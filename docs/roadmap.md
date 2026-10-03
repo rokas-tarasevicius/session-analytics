@@ -23,6 +23,7 @@ Status: `[x]` shipped, `[ ]` not yet shipped. Milestones are not dated.
 - [ ] Reconciliation report: compare computed totals with provider-reported totals where they exist.
 - [x] Persistent content-free SQLite index with incremental ingest (keyed source identity, device/inode, size, nanosecond modification/change times, keyed head/tail fingerprints), session reuse, verified Codex ledger append checkpoints, migrations, WAL, and private permissions.
 - [x] Retain previously indexed source-deleted sessions, reserve shared counter ownership, and provide `index status|path|rebuild|prune` and `--no-index`; fixture/demo parity tests.
+- [x] Atomic ownership-component deferral, UTC-safe pruning with exclusion checkpoints, undated request reservations, key-bound stores, writer corruption recovery, and filtered dashboard retention caveats.
 - [ ] Incremental Cursor database adapters and resumable session parser checkpoints (the current index refreshes Cursor and reparses changed composite sessions conservatively).
 
 ## M1: Reliability and economics

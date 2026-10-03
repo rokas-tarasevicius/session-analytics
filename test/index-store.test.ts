@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 import { analyzeMachineSessions, analyzeRepositorySessions } from "../src/analyzer.ts";
 import { analyzeOptionsFrom } from "../src/options.ts";
 import { dataDirectory, indexPath, indexStatus, migrate, openIndexDatabase, pruneIndex, resetIndex, SCHEMA_VERSION, validatePruneDate } from "../src/store/database.ts";
@@ -42,6 +43,263 @@ async function withFixture(run: (fixture: SessionAnalyticsFixture, root: string)
   try { await run(await createSessionAnalyticsFixture(root), root); }
   finally { await rm(root, { recursive: true, force: true }); }
 }
+
+async function broadcastPair(fixture: SessionAnalyticsFixture, undated = false) {
+  await rm(fixture.codexRoot, { recursive: true });
+  await rm(fixture.codexArchiveRoot, { recursive: true });
+  await mkdir(fixture.codexRoot);
+  await mkdir(fixture.codexArchiveRoot);
+  const a = join(fixture.codexRoot, `rollout-${codexId}.jsonl`);
+  const b = join(fixture.codexRoot, "rollout-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jsonl");
+  const token = { type: "event_msg", ...(undated ? {} : { timestamp: "2026-07-20T10:00:00Z" }), payload: {
+    type: "token_count", info: { total_token_usage: { input_tokens: 100 }, last_token_usage: { input_tokens: 100 } },
+  } };
+  const records = (id: string, activity: string) => [
+    { type: "session_meta", timestamp: activity, payload: { id, cwd: "/fixtures/workspaces/conductor/codex-workspace" } },
+    { type: "turn_context", payload: { model: "gpt-5.6-sol" } },
+    { type: "event_msg", timestamp: activity, payload: { type: "agent_message" } }, token,
+  ];
+  await writeFile(a, jsonl(records(codexId, "2026-07-20T09:59:59Z")));
+  await writeFile(b, jsonl(records("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "2026-07-20T09:00:00Z")));
+  return { a, b, token };
+}
+
+test("review: ownership transfer defers the entire component before source deletion", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture), { a, b, token } = await broadcastPair(fixture);
+    const initial = await analyzeMachineSessions(opts);
+    assert.deepEqual(initial.sessions.filter((s) => s.provider === "codex").map((s) => s.tokens.inputTokens).sort((a,b) => a-b), [0,100]);
+    await appendFile(b, jsonl([{ type: "event_msg", timestamp: token.timestamp, payload: { type: "agent_message" } }, token]));
+    const commit = IndexScan.prototype.commit;
+    IndexScan.prototype.commit = async function () {
+      await appendFile(a, jsonl([{ type: "event_msg", timestamp: "2026-07-20T11:00:00Z", payload: { type: "task_complete" } }]));
+      return commit.call(this);
+    };
+    try { await analyzeMachineSessions(opts); } finally { IndexScan.prototype.commit = commit; }
+    const deferred = indexStatus(opts).lastScan?.deferredSessions;
+    await rm(a); await rm(b);
+    const retained = await analyzeMachineSessions(opts);
+    assert.equal(retained.summary.workingSnapshots, 0);
+    assert.equal(retained.sessions.filter((s) => s.provider === "codex").reduce((n,s) => n+s.tokens.inputTokens,0), 100);
+    assert.equal(deferred, 2);
+  });
+});
+
+test("review: mixed-offset event extrema survive a UTC prune boundary", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture), path = await transcript(fixture, "claude", claudeId);
+    await appendFile(path, jsonl(["2026-07-21T00:30:00Z", "2026-07-21T01:00:00+02:00"].map((timestamp) => ({ type: "queue-operation", timestamp }))));
+    const before = await analyzeMachineSessions(opts);
+    pruneIndex("2026-07-21", opts);
+    const after = await analyzeMachineSessions(opts);
+    assert.ok(after.sessions.some((s) => s.provider === "claude"));
+    assert.equal(before.sessions.find((s) => s.provider === "claude")?.lastEventAt, "2026-07-21T00:30:00.000Z");
+  });
+});
+
+test("review: legacy retention dates stay conservative until sources are revalidated", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture); const initial = await analyzeMachineSessions(opts);
+    const db = new DatabaseSync(indexPath(opts));
+    db.exec("ALTER TABLE sessions DROP COLUMN retention_verified; DROP TABLE exclusions; DELETE FROM metadata WHERE key='key_verifier'; PRAGMA user_version=2;"); db.close();
+    await rm(fixture.claudeRoot, { recursive: true });
+    assert.equal(pruneIndex("2027-01-01", opts), 0);
+    const after = await analyzeMachineSessions(opts);
+    assert.equal(after.sessions.length, 1);
+    assert.equal(after.sessions[0]?.sessionKey, initial.sessions.find((s) => s.provider === "claude")?.sessionKey);
+    assert.equal(after.sessions[0]?.transcript.sourceDeleted, true);
+    assert.ok(after.sessions[0]?.transcript.warnings.some((warning) => warning.startsWith("Legacy activity dates")));
+    assert.equal(pruneIndex("2028-01-01", opts), 0);
+  });
+});
+
+test("review: legacy key binding authenticates existing payloads before bootstrapping", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture); await analyzeMachineSessions(opts);
+    const db = new DatabaseSync(indexPath(opts));
+    db.exec("ALTER TABLE sessions DROP COLUMN retention_verified; DROP TABLE exclusions; DELETE FROM metadata WHERE key='key_verifier'; PRAGMA user_version=2;"); db.close();
+    const path = join(fixture.dataDir, "index.key"), original = await readFile(path);
+    const changed = Buffer.from(original); changed[0] = changed[0]! ^ 1; await writeFile(path, changed);
+    await assert.rejects(analyzeMachineSessions(opts), /integrity check/);
+    const legacy = new DatabaseSync(indexPath(opts), { readOnly: true });
+    try { assert.equal(legacy.prepare("PRAGMA user_version").get()?.["user_version"], 2); }
+    finally { legacy.close(); }
+    await writeFile(path, original);
+    assert.equal((await analyzeMachineSessions(opts)).sessions.length, 5);
+    const check = new DatabaseSync(indexPath(opts), { readOnly: true });
+    try { assert.ok(check.prepare("SELECT value FROM metadata WHERE key='key_verifier'").get()); }
+    finally { check.close(); }
+  });
+});
+
+test("review: undated pruned sources reuse checkpoints without retaining usage payloads", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture); await broadcastPair(fixture, true);
+    await analyzeMachineSessions(opts); pruneIndex("2027-01-01", opts);
+    await analyzeMachineSessions(opts); await analyzeMachineSessions(opts);
+    assert.equal(indexStatus(opts).lastScan?.parsedSessions, 0);
+    const db = new DatabaseSync(indexPath(opts), { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT count(*) AS n FROM sessions").get()?.["n"], 0);
+      const checkpoints = db.prepare("SELECT * FROM exclusions").all();
+      assert.equal(checkpoints.length, 5);
+      assert.ok(checkpoints.every((row) => Object.keys(row).sort().join(",") === "identity_key,scope,signature,source_keys"));
+      assert.doesNotMatch(JSON.stringify(checkpoints), /secret|input_tokens|fixture|conductor/);
+    } finally { db.close(); }
+  });
+});
+
+test("review: ownership deferral follows a transitive chain including a vanished counter", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture), { a, b, token } = await broadcastPair(fixture);
+    const c = join(fixture.codexRoot, "rollout-bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.jsonl");
+    const second = { ...token, timestamp: "2026-07-20T12:00:00Z", payload: {
+      type: "token_count", info: { total_token_usage: { input_tokens: 200 }, last_token_usage: { input_tokens: 100 } },
+    } };
+    await appendFile(b, jsonl([{ type: "event_msg", timestamp: "2026-07-20T11:59:59Z", payload: { type: "agent_message" } }, second]));
+    await writeFile(c, jsonl([
+      { type: "session_meta", timestamp: "2026-07-20T09:00:00Z", payload: { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", cwd: "/fixtures/workspaces/conductor/codex-workspace" } }, second,
+    ]));
+    await analyzeMachineSessions(opts);
+    // A no longer observes the first request. Its prior ownership must still connect it to B and C.
+    const lines = (await readFile(a, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    await writeFile(a, jsonl(lines.filter((row) => row.payload?.type !== "token_count")));
+    await appendFile(c, jsonl([{ type: "event_msg", timestamp: second.timestamp, payload: { type: "agent_message" } }, second]));
+    const commit = IndexScan.prototype.commit;
+    IndexScan.prototype.commit = async function () { await appendFile(a, "\n"); return commit.call(this); };
+    try { await analyzeMachineSessions(opts); } finally { IndexScan.prototype.commit = commit; }
+    assert.equal(indexStatus(opts).lastScan?.deferredSessions, 3);
+    await rm(a); await rm(b); await rm(c);
+    const retained = await analyzeMachineSessions(opts);
+    assert.equal(retained.sessions.filter((s) => s.provider === "codex").reduce((n,s) => n+s.tokens.inputTokens,0), 200);
+  });
+});
+
+test("review: requests first observed after the ledger pass still connect to their prior owner", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture), { a, b, token } = await broadcastPair(fixture);
+    await analyzeMachineSessions(opts);
+    for (const path of [a,b]) {
+      const rows = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+      await writeFile(path, jsonl(rows.filter((row) => row.payload?.type !== "token_count")));
+    }
+    const ledger = IndexScan.prototype.codexLedger;
+    IndexScan.prototype.codexLedger = async function (path) {
+      const result = await ledger.call(this, path);
+      if (path === b) await appendFile(b, jsonl([token]));
+      return result;
+    };
+    try { await analyzeMachineSessions(opts); } finally { IndexScan.prototype.codexLedger = ledger; }
+    await rm(a); await rm(b);
+    const retained = await analyzeMachineSessions(opts);
+    assert.equal(retained.sessions.filter((s) => s.provider === "codex").reduce((n,s) => n+s.tokens.inputTokens,0), 100);
+  });
+});
+
+for (const prune of [false, true]) test(`review: undated requests stay reserved after ${prune ? "pruning" : "owner deletion"}`, async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture), { a, b } = await broadcastPair(fixture, true);
+    await appendFile(b, jsonl([{ type: "event_msg", timestamp: "2026-07-22T00:00:00Z", payload: { type: "task_complete" } }]));
+    await analyzeMachineSessions(opts); await rm(a);
+    await analyzeMachineSessions(opts);
+    if (prune) pruneIndex("2026-07-21", opts);
+    const after = await analyzeMachineSessions(opts);
+    assert.equal(after.sessions.filter((s) => s.provider === "codex" && !s.transcript.sourceDeleted).reduce((n,s) => n+s.tokens.inputTokens,0), 0);
+  });
+});
+
+test("review: pruned unchanged sources use exclusion checkpoints and new activity re-enters", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture);
+    await analyzeMachineSessions(opts); pruneIndex("2027-01-01", opts);
+    await analyzeMachineSessions(opts);
+    assert.equal((await analyzeMachineSessions(opts)).sessions.length, 0);
+    assert.equal(indexStatus(opts).lastScan?.parsedSessions, 0);
+    await appendFile(await transcript(fixture, "claude", claudeId), jsonl([{ type: "queue-operation", timestamp: "2027-01-02T00:00:00Z" }]));
+    assert.equal((await analyzeMachineSessions(opts)).sessions.length, 1);
+    assert.equal(indexStatus(opts).lastScan?.parsedSessions, 1);
+  });
+});
+
+for (const prune of [false, true]) test(`review: same-length key mismatch fails closed with ${prune ? "retired reservations" : "deleted history"}`, async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture);
+    await analyzeMachineSessions(opts);
+    await rm(await transcript(fixture, "claude", claudeId));
+    await analyzeMachineSessions(opts);
+    if (prune) pruneIndex("2027-01-01", opts);
+    const before = indexStatus(opts);
+    const path = join(fixture.dataDir, "index.key"), key = await readFile(path);
+    key[0] = key[0]! ^ 1; await writeFile(path, key);
+    await assert.rejects(analyzeMachineSessions(opts), /integrity check/);
+    assert.equal(indexStatus(opts).state, "corrupt");
+    key[0] = key[0]! ^ 1; await writeFile(path, key);
+    assert.equal(indexStatus(opts).sessions, before.sessions);
+  });
+});
+
+test("review: corrupt writer coordination is diagnosed and rebuild repairs it", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture); await analyzeMachineSessions(opts);
+    await writeFile(join(fixture.dataDir, "writer.sqlite"), "synthetic-corrupt-coordination-secret");
+    assert.equal(indexStatus(opts).state, "corrupt");
+    assert.throws(() => openIndexDatabase(opts), /coordination.*rebuild/);
+    resetIndex(opts);
+    assert.equal((await analyzeMachineSessions(opts)).sessions.length, 5);
+  });
+});
+
+test("review: default repository projection shares retained machine history", async () => {
+  await withFixture(async (fixture) => {
+    const { includeHidden, ...opts } = options(fixture); void includeHidden;
+    const initial = await analyzeMachineSessions(opts);
+    await rm(fixture.claudeRoot, { recursive: true });
+    const machine = await analyzeMachineSessions(opts);
+    const repository = await analyzeRepositorySessions({ ...opts, repositoryRoot: fixture.repositoryRoot });
+    assert.equal(machine.sessions.length, initial.sessions.length);
+    assert.deepEqual(repository.sessions, machine.sessions.filter((s) => s.repositoryId === repository.repository.id));
+  });
+});
+
+test("review: dashboard retains filtered history caveats and scan warnings without calling history live", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture), db = new DatabaseSync(fixture.databasePath);
+    db.exec("UPDATE sessions SET status='working'"); db.close();
+    await analyzeMachineSessions(opts);
+    await rm(fixture.claudeRoot, { recursive: true }); await rm(fixture.codexRoot, { recursive: true });
+    await rm(fixture.codexArchiveRoot, { recursive: true }); await rm(fixture.cursorDatabasePath);
+    const retained = await analyzeMachineSessions(opts);
+    const deferred = "Evidence changed during analysis; unstable index groups were deferred until the next scan.";
+    assert.equal(retained.summary.workingSnapshots, 0);
+    retained.warnings.push(deferred);
+    const source = await readFile(join(project, "src/public/app.js"), "utf8");
+    const element = () => ({ value: "", textContent: "", dataset: {}, addEventListener() {}, querySelectorAll: () => [], replaceChildren() {}, append() {} });
+    const elements = new Map<string, ReturnType<typeof element>>();
+    const document = { documentElement: { dataset: {} }, querySelectorAll: () => [], createElement: element, querySelector: (selector: string) => {
+      if (!elements.has(selector)) elements.set(selector, { ...element(), value: selector === "#repository-filter" ? "all" : "" });
+      return elements.get(selector);
+    } };
+    const [view, filtered] = runInNewContext(source + `\nsnapshot = fixture;
+      const all = activeView();
+      renderLine = renderDonut = renderBars = renderRepositoryTable = () => {};
+      renderSharedView(all); renderSummary(all);
+      elements.windowStart.value = '2027-01-01';
+      [all, activeView()];`, {
+      fixture: retained, document, localStorage: { getItem: () => null, setItem() {} }, fetch: () => new Promise(() => {}),
+    });
+    assert.ok(view.warnings.some((s: string) => s.includes("source-deleted")));
+    assert.ok(view.warnings.includes(deferred));
+    assert.equal(view.summary.workingSnapshots, 0);
+    assert.equal(view.summary.retainedSessions, 5);
+    assert.match(elements.get("#metric-spend-note")?.textContent ?? "", /last-ingest prices/);
+    assert.match(elements.get("#metric-live-note")?.textContent ?? "", /historical working observations excluded/);
+    assert.match(elements.get("#retention-note")?.textContent ?? "", /5 source-deleted sessions/);
+    assert.equal(filtered.summary.retainedSessions, 0);
+    assert.equal(filtered.warnings.some((warning: string) => warning.includes("source-deleted")), false);
+    assert.ok(filtered.warnings.includes(deferred));
+    assert.doesNotMatch(JSON.stringify({ view, filtered }), /secret-command|secret-path|content-is-not-returned|conductor-claude|\/fixtures\/workspaces/);
+  });
+});
 
 test("cold and warm indexed snapshots exactly match full scans, including filters and warnings", async () => {
   await withFixture(async (fixture) => {

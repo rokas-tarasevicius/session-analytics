@@ -11,6 +11,14 @@ All notable changes to this project are documented here. The format follows [Kee
 - `index status|path|rebuild|prune --before YYYY-MM-DD`, `--data-dir` / `SESSION_ANALYTICS_DATA_DIR`, and `--no-index` / `SESSION_ANALYTICS_NO_INDEX=1`. Versioned migrations, WAL transactions, concurrent writer coordination, integrity checks, and explicit corruption recovery.
 - Indexed/full-scan parity and storage regression tests, plus a numeric-only cold/warm benchmark script.
 
+### Fixed
+
+- Defer complete Codex ownership components when evidence changes during ingest, preventing retained history from committing duplicate owners and overstating tokens/cost.
+- Select event extrema by parsed UTC instants so mixed offsets cannot cause destructive pruning; keep unverifiable legacy dates conservatively.
+- Enforce retired-counter reservations for undated requests, preventing pruned usage from migrating into surviving sessions.
+- Cache pruned source exclusions without retaining session usage; reject mismatched index keys before scope selection; repair corrupt writer coordination under independent mutual exclusion.
+- Preserve retained history under default repository filters and show filtered retention/pricing caveats and scan warnings in the dashboard; historical working observations no longer count as live.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

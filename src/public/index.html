@@ -55,6 +55,7 @@
         <div class="filters-context">
           <p id="scope-description">Showing every repository evidenced by local agent history.</p>
           <p class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></p>
+          <p id="retention-note" hidden></p>
         </div>
       </section>
 
@@ -78,7 +79,7 @@
         <article class="metric-card"><span>Output tokens</span><strong id="metric-output">—</strong><small>Reasoning stays included</small></article>
         <article class="metric-card"><span>Effective tools</span><strong id="metric-tools">—</strong><small>Names only</small></article>
         <article class="metric-card"><span>Compactions</span><strong id="metric-compactions">—</strong><small>Context boundaries</small></article>
-        <article class="metric-card"><span>Live snapshots</span><strong id="metric-live">—</strong><small>Totals may still move</small></article>
+        <article class="metric-card"><span>Live snapshots</span><strong id="metric-live">—</strong><small id="metric-live-note">Present sources; totals may still move</small></article>
       </section>
 
       <section class="dashboard-grid" aria-label="Machine analytics">

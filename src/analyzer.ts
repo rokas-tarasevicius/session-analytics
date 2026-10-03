@@ -172,9 +172,11 @@ function isoDay(timestamp: string | null, fallback: string): string {
 }
 
 function trackTimestamp(session: MutableSession, timestamp: string | null): void {
-  if (!timestamp) return;
-  if (!session.firstEventAt || timestamp < session.firstEventAt) session.firstEventAt = timestamp;
-  if (!session.lastEventAt || timestamp > session.lastEventAt) session.lastEventAt = timestamp;
+  const instant = timestamp ? Date.parse(timestamp) : NaN;
+  if (!Number.isFinite(instant)) return;
+  const normalized = new Date(instant).toISOString();
+  if (!session.firstEventAt || instant < Date.parse(session.firstEventAt)) session.firstEventAt = normalized;
+  if (!session.lastEventAt || instant > Date.parse(session.lastEventAt)) session.lastEventAt = normalized;
 }
 
 function normalizeRemote(value: string): string {
@@ -558,11 +560,12 @@ async function analyzeCodex(
   claimedCounters: Set<string> = new Set<string>(),
   index: IndexScan | null = null,
   attributedCounters: Set<string> | null = null,
-): Promise<SessionAnalytics> {
+  isPrunedCounter: (fingerprint: string) => boolean = () => false,
+): Promise<SessionAnalytics | null> {
   if (index) {
     const attributed = new Set<string>();
     return index.session(row, [path], inheritedWarnings,
-      () => analyzeCodex(row, path, rateCard, inheritedWarnings, counterLedger, claimedCounters, null, attributed),
+      () => analyzeCodex(row, path, rateCard, inheritedWarnings, counterLedger, claimedCounters, null, attributed, (counter) => index.isPrunedCounter(counter)),
       claimedCounters, counterLedger, attributed);
   }
   const state = createMutableSession();
@@ -704,6 +707,7 @@ async function analyzeCodex(
     const owner = event.fingerprint ? counterLedger?.get(event.fingerprint) : undefined;
     if (event.last && tokenCount(event.last) > 0 && event.fingerprint) {
       if (
+        isPrunedCounter(event.fingerprint) ||
         (owner && (owner.path !== path || owner.timestamp !== event.timestamp)) ||
         claimedCounters.has(event.fingerprint)
       ) {
@@ -812,7 +816,7 @@ async function analyzeClaude(
   rateCard: RateCard,
   inheritedWarnings: string[],
   index: IndexScan | null = null,
-): Promise<SessionAnalytics> {
+): Promise<SessionAnalytics | null> {
   if (index) return index.session(row, await claudeEvidencePaths(mainPath), inheritedWarnings,
     () => analyzeClaude(row, mainPath, rateCard, inheritedWarnings));
   const state = createMutableSession();
@@ -1360,7 +1364,7 @@ async function analyzeTranscriptCandidate(
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
   index: IndexScan | null = null,
-): Promise<SessionAnalytics> {
+): Promise<SessionAnalytics | null> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   return candidate.provider === "codex"
@@ -1976,7 +1980,7 @@ async function analyzeSelectedRepositories(
     const explicitRepositoryFilter = Boolean(
       options.repositoryId || options.repositoryName || options.repositoryRemote || options.repositoryRoot,
     );
-    const includeHidden = options.includeHidden ?? !explicitRepositoryFilter;
+    const includeHidden = options.includeHidden ?? true;
     index = await IndexScan.open(options, rateCard, includeHidden);
     const availableRepositories = database
       ? database
@@ -2235,14 +2239,15 @@ function aggregateMachine(
       ...combined.summary,
       repositories: repositories.length,
       repositoriesWithSessions: repositories.filter(({ summary }) => summary.sessions > 0).length,
-      workingSnapshots: sessions.filter(({ transcript }) => transcript.snapshotWhileWorking).length,
+      workingSnapshots: sessions.filter(({ transcript }) => transcript.snapshotWhileWorking && !transcript.sourceDeleted &&
+        !transcript.warnings.includes("Source availability could not be checked; showing the last indexed facts.")).length,
     },
     topTools: combined.topTools,
     warnings: [
       ...new Set([
         ...combined.warnings,
         ...repositories.flatMap(({ warnings }) =>
-          warnings.filter((warning) => warning.startsWith("A provider transcript root") || warning.startsWith("Evidence changed during analysis")),
+          warnings.filter((warning) => warning.startsWith("A provider transcript root") || warning.startsWith("Evidence changed during analysis") || warning === "Cursor local session history could not be read."),
         ),
       ]),
     ],
