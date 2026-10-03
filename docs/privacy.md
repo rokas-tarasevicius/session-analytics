@@ -9,7 +9,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 **Returned:** allowlisted counters and identifiers only.
 
 - Token counters by class, cost figures, counts of events, durations, and ISO timestamps.
-- Model IDs and reasoning-effort labels as the provider recorded them.
+- Validated model IDs and reasoning-effort labels as the provider recorded them.
 - Tool names, and skill identifiers that match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
@@ -32,6 +32,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **Allowlist projection.** Parsers accumulate counters into an internal session state, and `finalizeSession` in `src/analyzer.ts` builds each public object field by field. Raw provider records are never spread into an output, so a new field in a provider's format cannot reach an output without a code change.
 - **Internal-only types.** `SessionDatabaseRow` and `AnalyzeOptions` in `src/types.ts` carry paths, titles, branches, and IDs for correlation. They are used inside the analysis process and are not part of any public type.
 - **Bounded derived names.** Skill identifiers must match the pattern above. Tool names come from the provider's structured tool-call records. The one exception is Codex code mode, where a single transported call can run several tools: the parser matches `tools.<name>(` in the call input and accepts only identifier characters (`[A-Za-z][A-Za-z0-9_]*`) as the name.
+- **Shared public-model boundary.** `src/public-model.ts` accepts at most 96 ASCII characters matching `^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$`. It rejects the entire value for paths, URLs, whitespace/control characters, arbitrary error sentences or excessive length; it never extracts a model substring from private text. Rejected/missing values become the fixed `<unknown>` label. The boundary covers Claude/Codex requests, Cursor cost keys, legacy model rollups/warnings, rate-card model labels and new cache/context dimensions. Valid unknown IDs remain visible but unpriced without a configured rate. Cursor reported cost survives normalization and merging.
 - **Sentinel tests.** Fixtures plant strings such as `secret-command`, `secret-path`, `secret-skill-args`, and `content-is-not-returned` in prompts, tool inputs, Cursor bubbles, Codex items, and streamed Claude content. Tests in `test/analyzer.test.ts`, `test/accounting.test.ts`, and `test/server.test.ts` serialize the full output and fail if any sentinel, transcript path, workspace name, remote, or raw session UUID appears.
 - **Generic errors.** The server maps every failure to one of three fixed messages. The analysis worker's standard error is discarded rather than forwarded, so local paths in exceptions cannot reach the dashboard.
 - **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
@@ -208,7 +209,7 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
-| `model` | Model ID as recorded by the provider (`<unknown>` when none was recorded) | P0 |
+| `model` | Bounded validated model identifier (`<unknown>` when missing or rejected); same policy for rate-card labels and all model dimensions | P0 |
 | `calls` | Requests attributed to this model | P0 |
 | `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
 
@@ -234,11 +235,13 @@ Types are explicitly defined in [`src/metrics/limits-cache-types.ts`](../src/met
 | `profiles[].windows[]` | Separate rate-limit windows; never added across accounts/profiles | P0/P1 |
 | `profiles[].windows[].key` | Hashed limit identifier plus window kind/duration, or fixed Claude window enum | P1 |
 | `profiles[].windows[].label`, `windowMinutes` | Fixed display label and nullable observed window duration | P0 |
-| `profiles[].windows[].observations`, `duplicatesDiscarded` | Retained observation count and encountered timestamp collisions | P0 |
+| `profiles[].windows[].observations`, `duplicatesDiscarded` | Retained observation count and encountered same-source timestamp collisions | P0 |
 | `profiles[].windows[].historyLimited`, `timelineSampled` | Explicit retention/sampling indicators | P0 |
 | `profiles[].windows[].timeline[]`, `latest` | Bounded timeline and most recent sample, as defined below | P0 |
-| `profiles[].windows[].stale` | Latest sample expired, future-dated, or past reset | P0 |
-| `profiles[].windows[].headroomPercent`, `timeToLimitMinutes` | Nullable headroom and guarded projection from latest observation | P0 |
+| `profiles[].windows[].latestNumeric` | Latest numeric sample using the same sample manifest below, or null; independently dated from latest status evidence | P0 |
+| `profiles[].windows[].headroomExpiresAt` | Numeric observation's ISO freshness/reset deadline, or null without numeric evidence | P0 |
+| `profiles[].windows[].stale` | Numeric sample (or latest status if no numeric sample exists) expired, future-dated, or past reset | P0 |
+| `profiles[].windows[].headroomPercent`, `timeToLimitMinutes` | Nullable headroom and guarded projection from latest compatible numeric observation | P0 |
 | `profiles[].windows[].observedMinutes`, `above90Minutes`, `shareAbove90` | Measured exposure denominator, ≥90% duration and nullable guarded share | P0 |
 | `profiles[].limitHits[].timestamp`, `kind` | Bounded event details; ISO time and `http-429`, `usage-limit-exceeded`, or `quota-rejected` | P0 |
 | `profiles[].limitHitCount`, `sessionsWithLimitErrors` | Exact observed event count and sessions with explicit request-limit errors; no raw session IDs | P0 |
@@ -250,7 +253,7 @@ Types are explicitly defined in [`src/metrics/limits-cache-types.ts`](../src/met
 | `policy.freshnessMinutes`, `maximumObservationGapMinutes`, `minimumObservedMinutes`, `minimumRequests`, `minimumInputTokens` | Published freshness, exposure and activity guards | P0 |
 | `policy.contextTableReviewedAt` | Review date for Claude fallback model capacities | P0 |
 
-Every `timeline[]` / `latest` sample contains only:
+Every `timeline[]` / `latest` / non-null `latestNumeric` sample contains only:
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
@@ -278,6 +281,7 @@ Every `timeline[]` / `latest` sample contains only:
 | `compactions[].timestamp`, `executionKind`, `trigger` | Nullable time, execution enum, and `auto`/`manual`/`unknown` | P0 |
 | `compactions[].preTokens`, `postTokens`, `turnsSincePrevious` | Nullable numeric pre/post sizes and observed human-turn interval within that stream | P0 |
 | `compactionCount`, `compactionsSampled` | Total supported boundaries and explicit detail-sampling flag | P0 |
+| `compactionCountExact` | False when missing timestamps or ambiguous cross-format matches prevent an exact observed-boundary count | P0 |
 
 Cache totals in `cache` and `buckets[].cache`:
 
@@ -298,10 +302,10 @@ Context totals in `context` and `buckets[].context`:
 | `reportedWindowRequests`, `reviewedWindowRequests` | Recorded Codex versus reviewed Claude-capacity coverage | P0 |
 | `above40`, `above60`, `above80`, `peakFill` | Strict threshold counts and nullable maximum paired fill ratio | P0 |
 | `context.shareAbove40`, `shareAbove60`, `shareAbove80` | Session-only nullable shares, with minimum activity guard | P0 |
-| `context.curveSampled` | Session-only curve sampling indicator | P0 |
+| `context.curveSampled` | Curve reduced by the 240-point session cap and/or 20,000-point snapshot cap; aggregate counts/peaks remain exact | P0 |
 | `context.curve[].request`, `timestamp`, `executionKind`, `inputTokens`, `windowTokens`, `fill` | Request ordinal (not raw ID), nullable time, execution enum, input/window counts and paired ratio | P0 |
 
-New sentinel tests in `test/limits-cache.test.ts` place content in diagnostics, quotas, unknown limit/plan IDs, credits metadata, Desktop organization IDs, compaction summaries and configuration. They verify serialized snapshots and terminal output contain only the fields above. Existing API privacy tests cover the same isolated-worker projection.
+Sentinel tests in `test/limits-cache.test.ts` place content in diagnostics, quotas, unknown limit/plan IDs, credits metadata, Desktop organization IDs, compaction summaries and configuration. `test/model-privacy-fixture.ts` also plants paths, URLs, control characters, error text and oversized strings directly in Claude/Codex model metadata and Cursor cost keys. Tests cover serialized analytics, terminal output, the actual isolated-worker HTTP API and executed dashboard renderer, including cache-break/model dimensions.
 
 ### Health endpoint
 

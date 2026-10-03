@@ -1,6 +1,9 @@
 import type { CostBreakdown, ExecutionKind, ModelRate, TokenUsage } from "../types.ts";
 import type { CacheHeuristic, CacheMissReason, CacheTotals, ContextTotals, EconomicsBucket, SessionLimitsCache } from "./limits-cache-types.ts";
 import { claudeContextWindow } from "./context-windows.ts";
+import { publicModel } from "../public-model.ts";
+import { reconcileCompactions, type CompactionEvidence } from "./compactions.ts";
+import { sampleContextCurve } from "./context-detail.ts";
 import { MIN_INPUT_TOKENS, MIN_REQUESTS, nonnegative, oneOf, record, sample, timestamp } from "./limits-utils.ts";
 
 export interface RequestEvidence {
@@ -27,17 +30,6 @@ export const emptyContext = (): ContextTotals => ({ requests: 0, eligibleRequest
   reviewedWindowRequests: 0, above40: 0, above60: 0, above80: 0, peakFill: null });
 
 interface PreviousRequest { model: string; timestamp: string | null; ttl: number | null; compactions: number; hadCache: boolean }
-interface CompactionEvidence {
-  stream: string;
-  shape: string;
-  identity: string;
-  timestamp: string | null;
-  executionKind: ExecutionKind;
-  turns: number;
-  trigger: "auto" | "manual" | "unknown";
-  preTokens: number | null;
-  postTokens: number | null;
-}
 
 /** Receives deduplicated requests only. No prompt text or raw record is retained. */
 export class CacheContextCollector {
@@ -48,23 +40,18 @@ export class CacheContextCollector {
   private previous = new Map<string, PreviousRequest>();
   private breaks: SessionLimitsCache["cacheBreaks"] = [];
   private curve: SessionLimitsCache["context"]["curve"] = [];
-  private compactions = new Map<string, CompactionEvidence[]>();
-  private seenCompactions = new Set<string>();
+  private compactions: CompactionEvidence[] = [];
 
-  addCompaction(stream: string, shape: string, identity: string, at: unknown, executionKind: ExecutionKind, turns: number, metadata?: unknown): void {
-    const id = `${stream}:${shape}:${identity}`;
-    if (this.seenCompactions.has(id)) return;
-    this.seenCompactions.add(id);
-    const fields = record(metadata), group = `${stream}:${shape}`;
-    const points = this.compactions.get(group) ?? [];
-    points.push({ stream, shape, identity, timestamp: timestamp(at), executionKind, turns,
+  addCompaction(stream: string, shape: string, identity: string | null, at: unknown, executionKind: ExecutionKind, turns: number, metadata?: unknown): void {
+    const fields = record(metadata);
+    this.compactions.push({ stream, shape, identity, timestamp: timestamp(at), executionKind, turns,
       trigger: oneOf(fields?.["trigger"], ["auto", "manual"] as const) ?? "unknown",
       preTokens: nonnegative(fields?.["preTokens"]), postTokens: nonnegative(fields?.["postTokens"]) });
-    this.compactions.set(group, points);
   }
 
   addRequest(model: string, usage: TokenUsage, rate: ModelRate | undefined, cost: CostBreakdown | null,
     at: string | null, executionKind: ExecutionKind, evidence: RequestEvidence, provider: "claude" | "codex"): void {
+    model = publicModel(model);
     const when = timestamp(at), day = when?.slice(0, 10) ?? null;
     const identity = JSON.stringify([day, model, executionKind]);
     let bucket = this.buckets.get(identity);
@@ -130,32 +117,8 @@ export class CacheContextCollector {
   }
 
   finalize(): SessionLimitsCache {
-    const byStream = new Map<string, CompactionEvidence[]>();
-    for (const points of this.compactions.values()) {
-      const stream = points[0]!.stream, previous = byStream.get(stream);
-      // Codex repeats a boundary as legacy, item and compacted records; use one shape.
-      if (!previous || points.length > previous.length) byStream.set(stream, points);
-    }
-    const compactions: SessionLimitsCache["compactions"] = [];
-    for (const points of byStream.values()) {
-      let previousTurns: number | null = null;
-      for (const p of points) {
-        compactions.push({ timestamp: p.timestamp, executionKind: p.executionKind, trigger: p.trigger,
-          preTokens: p.preTokens, postTokens: p.postTokens,
-          turnsSincePrevious: previousTurns === null ? null : Math.max(0, p.turns - previousTurns) });
-        previousTurns = p.turns;
-      }
-    }
-    compactions.sort((a,b) => (a.timestamp ?? "").localeCompare(b.timestamp ?? ""));
-    // Preserve peaks in each equal request-count bin, plus the two endpoints.
-    let curve = this.curve;
-    if (curve.length > 240) {
-      const maxima = Array.from({ length: 238 }, (_, index) => {
-        const begin = Math.floor(index * curve.length / 238), end = Math.floor((index + 1) * curve.length / 238);
-        return curve.slice(begin, end).reduce((a,b) => a.fill >= b.fill ? a : b);
-      });
-      curve = [...new Set([curve[0]!, ...maxima, curve.at(-1)!])].sort((a,b) => a.request - b.request);
-    }
+    const { boundaries: compactions, exact } = reconcileCompactions(this.compactions);
+    const curve = sampleContextCurve(this.curve, 240);
     const eligible = this.context.eligibleRequests;
     return { profileKey: this.profileKey,
       cache: { ...this.cache, hitRatio: this.cache.requests >= MIN_REQUESTS && this.cache.inputTokens >= MIN_INPUT_TOKENS ? this.cache.cacheReadTokens / this.cache.inputTokens : null,
@@ -165,6 +128,6 @@ export class CacheContextCollector {
         shareAbove80: eligible >= MIN_REQUESTS ? this.context.above80 / eligible : null, curveSampled: this.curve.length > 240, curve },
       buckets: [...this.buckets.values()].sort((a,b) => (a.day ?? "").localeCompare(b.day ?? "") || a.model.localeCompare(b.model) || a.executionKind.localeCompare(b.executionKind)),
       cacheBreaks: sample(this.breaks, 240), cacheBreaksSampled: this.breaks.length > 240,
-      compactions: sample(compactions, 240), compactionCount: compactions.length, compactionsSampled: compactions.length > 240 };
+      compactions: sample(compactions, 240), compactionCount: compactions.length, compactionCountExact: exact, compactionsSampled: compactions.length > 240 };
   }
 }

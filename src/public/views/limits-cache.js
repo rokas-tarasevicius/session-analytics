@@ -21,10 +21,13 @@ function add(target, bucket) {
 
 /** Date filtering uses request-day buckets, never the session start date. Also used by regression tests. */
 export function economicsForView(sessions, options) {
-  const result = { ...totals(), groups: [], sessionRows: [], months: [], untimedRequests: 0 };
+  const result = { ...totals(), groups: [], sessionRows: [], months: [], compactions: [], uncertainCompactions: false, untimedRequests: 0 };
   const groups = new Map(), months = new Map();
   for (const session of sessions) {
     if (options.repositoryId && session.repositoryId !== options.repositoryId || !session.limitsCache) continue;
+    const boundaries = session.limitsCache.compactions.filter((c) => within(c.timestamp?.slice(0,10) ?? null, options) && executionMatches(c.executionKind, options.execution ?? "all"));
+    result.compactions.push(...boundaries.map((c) => ({ ...c, sessionKey: session.sessionKey })));
+    if (session.limitsCache.compactionCountExact === false) result.uncertainCompactions = true;
     const sessionTotal = { ...totals(), session };
     for (const bucket of session.limitsCache.buckets) {
       if (!executionMatches(bucket.executionKind, options.execution ?? "all")) continue;
@@ -128,15 +131,16 @@ export function renderLimitsCache(container, snapshot, options) {
     const cards = node("div", null, "lc-limit-grid");
     const now = Date.now(); let nextExpiry = Infinity;
     for (const window of profile.windows) {
-      const observed = Date.parse(window.latest.timestamp);
-      const expires = Math.min(observed + policy.freshnessMinutes * 60_000, window.latest.resetsAt ? Date.parse(window.latest.resetsAt) : Infinity);
+      const observed = Date.parse((window.latestNumeric ?? window.latest).timestamp);
+      const expires = window.headroomExpiresAt ? Date.parse(window.headroomExpiresAt) : observed + policy.freshnessMinutes * 60_000;
       const stale = window.stale || now < observed || now >= expires;
       if (!stale) nextExpiry = Math.min(nextExpiry, expires);
       const card = node("section", null, "lc-window");
       card.append(node("h3", `${window.label}${window.windowMinutes ? ` · ${number(window.windowMinutes / 60)}h` : ""}`));
       card.append(node("strong", percent(stale || window.headroomPercent === null ? null : window.headroomPercent / 100), "lc-headroom"));
-      card.append(node("p", stale ? "Headroom unavailable · stale snapshot" : window.headroomPercent === null ? "Headroom unavailable · status evidence only" : "Headroom at last observation", "lc-muted"));
-      card.append(note(`Observed ${when(window.latest.timestamp)} · reset ${when(window.latest.resetsAt)}${window.latest.status ? ` · ${window.latest.status.replaceAll("_", " ")}` : ""}`));
+      card.append(node("p", stale ? "Headroom unavailable · stale snapshot" : window.headroomPercent === null ? "Headroom unavailable · no compatible numeric evidence" : "Headroom at last observation", "lc-muted"));
+      if (window.latestNumeric) card.append(note(`Numeric observation ${when(window.latestNumeric.timestamp)} · expires ${when(window.headroomExpiresAt)}`));
+      card.append(note(`Latest evidence ${when(window.latest.timestamp)} · reset ${when(window.latest.resetsAt)}${window.latest.status ? ` · ${window.latest.status.replaceAll("_", " ")}` : ""}`));
       card.append(chart(window.timeline.filter((p) => p.usedPercent !== null).map((p) => ({ x: Date.parse(p.timestamp), y: p.usedPercent / 100,
         label: `${when(p.timestamp)} · ${p.usedPercent}% used`, axis: p.timestamp.slice(0, 10) })), `${window.label}: percent of quota used`, policy.maximumObservationGapMinutes));
       card.append(note(`${percent(window.shareAbove90)} of ${number(window.observedMinutes)} observed minutes at ≥90% usage · ${number(window.observations)} snapshots. ${stale || window.timeToLimitMinutes === null ? "Time-to-limit projection unavailable." : `Projected limit in ${number(window.timeToLimitMinutes)} minutes from the last observation, if that pace continues.`}`));
@@ -196,11 +200,12 @@ export function renderLimitsCache(container, snapshot, options) {
     const row = view.sessionRows.find((row) => row.session.sessionKey === sessionKey);
     const points = row.session.limitsCache.context.curve.filter((p) => within(p.timestamp?.slice(0,10) ?? null, options) && executionMatches(p.executionKind, execution));
     contextPanel.append(chart(points.map((p) => ({ x: p.request, y: p.fill, label: `Request ${p.request} · ${when(p.timestamp)} · ${number(p.inputTokens)} / ${number(p.windowTokens)} tokens`, axis: `Request ${p.request}` })), "Request context fill across the selected session"));
-    if (row.session.limitsCache.context.curveSampled) contextPanel.append(note("Curve retains the peak in each request bin and both endpoints; threshold statistics use all requests."));
+    if (row.session.limitsCache.context.curveSampled) contextPanel.append(note("Curve detail is sampled within a 20,000-point snapshot budget and 240-point session cap. Allocations of at least 3 retain peaks and endpoints; smaller allocations prioritize peaks. Threshold statistics use all requests."));
   }
-  const compactions = view.sessionRows.flatMap(({ session }) => session.limitsCache.compactions.filter((c) => within(c.timestamp?.slice(0,10) ?? null, options) && executionMatches(c.executionKind, execution)).map((c) => ({ ...c, sessionKey: session.sessionKey }))).sort((a,b) => b.timestamp.localeCompare(a.timestamp));
+  const compactions = view.compactions.sort((a,b) => b.timestamp.localeCompare(a.timestamp));
   contextPanel.append(table(["Recent compactions (UTC)", "Session", "Pre → post tokens", "Turns since previous"], compactions.slice(0, 8).map((c) => [when(c.timestamp), c.sessionKey,
-    `${c.preTokens === null ? "N/A" : number(c.preTokens)} → ${c.postTokens === null ? "N/A" : number(c.postTokens)}`, c.turnsSincePrevious === null ? "N/A · first boundary" : String(c.turnsSincePrevious)]), "No dated compaction boundaries in this selection."));
+    `${c.preTokens === null ? "N/A" : number(c.preTokens)} → ${c.postTokens === null ? "N/A" : number(c.postTokens)}`, c.turnsSincePrevious === null ? "N/A · first or uncertain boundary" : String(c.turnsSincePrevious)]), "No dated compaction boundaries in this selection."));
+  if (view.uncertainCompactions) contextPanel.append(note("Some compaction counts are uncertain: boundary identity or timestamp evidence is incomplete."));
   contextPanel.append(note("Pre/post sizes are shown only when recorded. Turn intervals count human turns within the same execution stream. Detail lists may be sampled; missing boundaries and tool-result messages do not become turns."));
   container.append(contextPanel);
 

@@ -14,7 +14,7 @@ export function limitsCacheReport(snapshot: MachineAnalytics): string {
     lines.push(`${profile.label}: ${profile.limitHitCount} observed limit events; ${profile.sessionsWithLimitErrors} sessions with request-limit errors`);
     for (const window of profile.windows) {
       const headroom = window.headroomPercent === null ? `N/A${window.stale ? " (stale)" : " (no numeric evidence)"}` : `${window.headroomPercent.toFixed(1)}%`;
-      lines.push(`  ${window.label}${window.windowMinutes ? ` · ${window.windowMinutes}m window` : ""}: headroom ${headroom}; observed ${window.latest.timestamp}; reset ${window.latest.resetsAt ?? "unknown"}`);
+      lines.push(`  ${window.label}${window.windowMinutes ? ` · ${window.windowMinutes}m window` : ""}: headroom ${headroom}; numeric observation ${window.latestNumeric?.timestamp ?? "unavailable"}; expires ${window.headroomExpiresAt ?? "unknown"}; latest evidence ${window.latest.timestamp}; reset ${window.latest.resetsAt ?? "unknown"}`);
       lines.push(`    ≥90%: ${percent(window.shareAbove90)} of ${window.observedMinutes.toFixed(1)} observed minutes (${window.observations} snapshots); projected time to limit ${window.timeToLimitMinutes === null ? "N/A" : `${window.timeToLimitMinutes.toFixed(1)}m from last snapshot`}`);
       if (window.historyLimited) lines.push("    History limited to the latest 20,000 observations.");
     }
@@ -39,6 +39,7 @@ export function limitsCacheReport(snapshot: MachineAnalytics): string {
   lines.push(`Context: peak ${percent(context.peakFill)}; >40/60/80%: ${[context.above40, context.above60, context.above80].map((value) => percent(context.eligibleRequests >= MIN_REQUESTS ? value / context.eligibleRequests : null)).join(" / ")} · ${context.eligibleRequests}/${context.requests} requests with known windows`);
   lines.push(`  ${context.reportedWindowRequests} recorded windows, ${context.reviewedWindowRequests} reviewed model capacities (harness budgets may differ). Flags do not establish cause or quality.`);
   const compactions = snapshot.sessions.flatMap((s) => s.limitsCache?.compactions ?? []);
+  if (snapshot.sessions.some((s) => s.limitsCache?.compactionCountExact === false)) lines.push("Some compaction counts are uncertain: boundary identity or timestamp evidence is incomplete.");
   lines.push(`Compaction detail: ${compactions.filter((c) => c.preTokens !== null && c.postTokens !== null).length}/${compactions.length} retained boundaries with pre/post sizes; ${compactions.filter((c) => c.turnsSincePrevious !== null).length} with turn intervals`);
   lines.push("Subscription comparison · API-equivalent value, not an invoice or money saved");
   for (const row of analytics.subscriptions) {

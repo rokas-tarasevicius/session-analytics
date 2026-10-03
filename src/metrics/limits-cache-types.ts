@@ -25,6 +25,8 @@ export interface LimitWindow {
   timelineSampled: boolean;
   timeline: LimitSample[];
   latest: LimitSample;
+  latestNumeric: LimitSample | null;
+  headroomExpiresAt: string | null;
   stale: boolean;
   headroomPercent: number | null;
   timeToLimitMinutes: number | null;
@@ -119,6 +121,7 @@ export interface SessionLimitsCache {
     turnsSincePrevious: number | null;
   }>;
   compactionCount: number;
+  compactionCountExact: boolean;
   compactionsSampled: boolean;
 }
 

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { LimitsCollector } from "../src/metrics/limits.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { plantMalformedModels } from "./model-privacy-fixture.ts";
 
 // A small DOM contract harness keeps this interaction test dependency-free.
 // It checks actual rendering/control callbacks, not layout or browser CSS behavior.
@@ -48,7 +50,8 @@ test("Limits & cache renders evidence and handles profile, grouping, execution a
   globals["Option"] = OptionElement;
   try {
     const fixture = await createSessionAnalyticsFixture(directory);
-    const snapshot = await analyzeMachineSessions({ ...fixture, dataDirectory: directory });
+    await plantMalformedModels(fixture);
+    const snapshot = await analyzeMachineSessions({ ...fixture, dataDir: directory });
     const quotas = await LimitsCollector.create({ home: directory, codex: [fixture.codexRoot], claude: [fixture.claudeRoot], dataDirectory: directory });
     for (const minute of [0,5,10]) quotas.observe(join(fixture.codexRoot, "file"), { type: "event_msg", timestamp: `2026-07-20T10:${String(minute).padStart(2,"0")}:00Z`, payload: { type: "token_count", rate_limits: { primary: { used_percent: 70 + minute, window_minutes: 300, resets_at: 1784548800 } } } }, "fixture");
     snapshot.limitsCache = quotas.finalize(snapshot.sessions, "2026-07-20T10:10:00Z", false);
@@ -64,6 +67,7 @@ test("Limits & cache renders evidence and handles profile, grouping, execution a
     assert.match(container.text(), /Headroom at last observation/);
     assert.match(container.text(), /20.0%/);
     byId("lc-group")!.change("model");
+    assert.doesNotMatch(container.text(), /SYNTHETIC-MODEL-SENTINEL/);
     assert.equal(byId("lc-group")!.value, "model");
     assert.equal(focused, byId("lc-group"));
     byId("lc-trend")!.change(byId("lc-trend")!.children[1]!.value);
@@ -76,7 +80,9 @@ test("Limits & cache renders evidence and handles profile, grouping, execution a
     assert.match(container.text(), /No dated API-equivalent usage/);
     assert.match(container.text(), /20.0%/); // Account-wide quota ignores the date/repository controls.
     assert.equal(byId("lc-session"), undefined);
-    Date.now = () => Date.parse("2026-07-20T10:26:00Z");
+    // Later allowed evidence must not extend the numeric sample's expiry.
+    codexProfile.windows[0]!.latest = { ...codexProfile.windows[0]!.latest, timestamp: "2026-07-20T10:11:00Z", usedPercent: null, status: "allowed" };
+    Date.now = () => Date.parse("2026-07-20T10:25:30Z");
     renderLimitsCache(container, snapshot, {});
     assert.match(container.text(), /Headroom unavailable · stale snapshot/);
     renderLimitsCache(container, { ...snapshot, limitsCache: undefined }, {});
@@ -87,4 +93,77 @@ test("Limits & cache renders evidence and handles profile, grouping, execution a
     if (originalOption === undefined) delete globals["Option"]; else globals["Option"] = originalOption;
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("compaction-only sessions and trailing event days render without usage rows and obey event filters", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "compaction-view-"));
+  const globals = globalThis as unknown as Record<string, unknown>;
+  const originalDocument = globals["document"], originalOption = globals["Option"];
+  const container = new Element("section");
+  const byId = (id: string) => container.descendants().find((e) => e.id === id);
+  globals["document"] = { createElement: (tag: string) => new Element(tag), createElementNS: (_namespace: string, tag: string) => new Element(tag), getElementById: byId };
+  globals["Option"] = OptionElement;
+  let cleanup: (() => void) | undefined;
+  try {
+    const snapshot = await analyzeMachineSessions({ ...await createSessionAnalyticsFixture(directory), dataDir: directory });
+    for (const session of snapshot.sessions) if (session.limitsCache) session.limitsCache.compactions = [];
+    const session = snapshot.sessions.find((s) => s.provider === "claude")!;
+    session.limitsCache!.compactions = [{ timestamp: "2026-07-21T10:00:00.000Z", executionKind: "top-level", trigger: "manual", preTokens: 180000, postTokens: 40000, turnsSincePrevious: null }];
+    const only = structuredClone(session);
+    only.sessionKey = "compaction-only"; only.limitsCache!.buckets = [];
+    only.limitsCache!.compactions[0]!.timestamp = "2026-07-22T10:00:00.000Z";
+    snapshot.sessions.push(only);
+    const { clearLimitsCacheView, renderLimitsCache, economicsForView } = await import(new URL("../src/public/views/limits-cache.js", import.meta.url).href);
+    cleanup = () => clearLimitsCacheView(container);
+    for (const [day, key] of [["2026-07-21", session.sessionKey], ["2026-07-22", only.sessionKey]]) {
+      const options = { start: day, end: day, repositoryId: session.repositoryId };
+      assert.equal(economicsForView(snapshot.sessions, options).sessionRows.length, 0);
+      renderLimitsCache(container, snapshot, options);
+      byId("lc-execution")!.change("all");
+      assert.match(container.text(), /No request-level cache evidence/);
+      assert.doesNotMatch(container.text(), /No dated compaction boundaries/);
+      assert.ok(container.text().includes(key!));
+      byId("lc-execution")!.change("subagent");
+      assert.match(container.text(), /No dated compaction boundaries/);
+      renderLimitsCache(container, snapshot, { ...options, repositoryId: "excluded" });
+      byId("lc-execution")!.change("all");
+      assert.match(container.text(), /No dated compaction boundaries/);
+    }
+  } finally {
+    cleanup?.();
+    if (originalDocument === undefined) delete globals["document"]; else globals["document"] = originalDocument;
+    if (originalOption === undefined) delete globals["Option"]; else globals["Option"] = originalOption;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+// Execute the actual shared-control functions without booting unrelated dashboard panels.
+async function appFunction(name: string, globals: Record<string, unknown>) {
+  const source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
+  const fn = source.match(new RegExp(`function ${name}\\([^]*?\\n}`))?.[0];
+  assert.ok(fn, `Missing shared control ${name}`);
+  return runInNewContext(`(${fn})`, globals);
+}
+
+test("shared date bounds include trailing compactions even for sessions without usage", async () => {
+  const elements = { windowStart: { min: "", max: "", value: "" }, windowEnd: { min: "", max: "", value: "" }, windowPreset: { value: "" } };
+  const configure = await appFunction("configureWindow", { elements, snapshot: { sessions: [
+    { createdAt: "2026-09-29T10:00:00Z", spendByDay: {}, limitsCache: { buckets: [], compactions: [{ timestamp: "2026-09-30T10:00:00.000Z" }], cacheBreaks: [] } },
+  ] } });
+  configure();
+  assert.equal(elements.windowEnd.max, "2026-09-30");
+  assert.equal(elements.windowEnd.value, "2026-09-30");
+});
+
+test("shared scope caption distinguishes request and event dates from session starts and account quotas", async () => {
+  const elements = { scope: { textContent: "" } };
+  let view = "limits-cache";
+  const render = await appFunction("renderSharedView", { elements, selectedRepository: () => null,
+    currentViewName: () => view, windowCaption: () => "2026-10-01 through 2026-10-03" });
+  render({ summary: {} });
+  assert.match(elements.scope.textContent, /Request.*dates.*2026-10-01/);
+  assert.match(elements.scope.textContent, /[Qq]uota.*account-wide/);
+  assert.doesNotMatch(elements.scope.textContent, /Sessions started/);
+  view = "costs"; render({ summary: {} });
+  assert.match(elements.scope.textContent, /Sessions started during 2026-10-01/);
 });

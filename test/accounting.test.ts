@@ -131,7 +131,7 @@ test("keeps snapshot ownership, thinking detail, and top-level effort across mai
     );
 
     const result = await analyzeFixture(fixture);
-    const session = result.sessions.find(({ firstEventAt }) => firstEventAt === "2026-07-23T09:59:00Z");
+    const session = result.sessions.find(({ firstEventAt }) => firstEventAt === "2026-07-23T09:59:00.000Z");
     assert.ok(session);
     assert.equal(session.metrics.assistantMessages, 3);
     assert.equal(session.tokens.outputTokens, 1_401);

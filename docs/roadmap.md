@@ -19,6 +19,7 @@ Status: `[x]` shipped, `[ ]` not yet shipped. Milestones are not dated.
 - [ ] Cursor: read agent CLI transcripts and sessions run through Conductor's Cursor integration.
 - [ ] Conductor: use per-session result records as fallback evidence when a provider transcript has been deleted.
 - [x] Regression tests for streamed Claude usage, current Codex rollouts, profile discovery, and Cursor headers.
+- [x] Shared bounded public model IDs, zero-last-usage regression coverage, UTC request chronology, and per-boundary compaction reconciliation.
 - [ ] Golden-fixture parity tests for each supported provider format version.
 - [ ] Reconciliation report: compare computed totals with provider-reported totals where they exist.
 - [ ] Persistent content-free index with incremental ingest (per-file path, size, modification time, and offset watermarks), so launches stop rescanning unchanged history.
@@ -45,6 +46,7 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 - [x] Cache-break provider reasons and separately labeled idle-TTL/model-switch/compaction heuristics; observed re-cache write cost and no-cache input counterfactual.
 - [x] Context fill curves, paired per-request peaks, recorded compaction before/after sizes, and turns between compactions.
 - [x] Subscription leverage per profile against explicitly configured monthly USD prices, with coverage guards.
+- [x] Independent numeric quota freshness, compaction-only date filtering, and a 20,000-point snapshot curve budget with exact aggregates.
 - [ ] Counterfactual pricing: the same tokens at another model's rates.
 
 ## M2: Outcomes

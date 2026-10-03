@@ -29,12 +29,27 @@ interface ProfileState {
   config: ProfileConfig | undefined;
 }
 
+const statusRank = (point: LimitSample) => point.status === "rejected" ? 3 : point.status === "allowed_warning" ? 2 : point.status === "allowed" ? 1 : 0;
+const compareSamples = (a: LimitSample, b: LimitSample) => a.timestamp.localeCompare(b.timestamp) ||
+  statusRank(a) - statusRank(b) || (a.usedPercent ?? -1) - (b.usedPercent ?? -1) || JSON.stringify(a).localeCompare(JSON.stringify(b));
+
 export function summarizeLimitWindow(state: Pick<WindowState, "key" | "label" | "windowMinutes" | "duplicatesDiscarded" | "historyLimited">, samples: LimitSample[], now: number): LimitWindow {
-  const ordered = [...samples].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const ordered = [...samples].sort(compareSamples);
   const points = ordered.slice(-MAX_OBSERVATIONS);
   const latest = points.at(-1)!;
-  const age = (now - Date.parse(latest.timestamp)) / 60_000;
-  const stale = age < 0 || age >= FRESHNESS_MINUTES || !!latest.resetsAt && Date.parse(latest.resetsAt) <= now;
+  const numeric = points.filter((p) => p.usedPercent !== null);
+  const latestNumeric = numeric.at(-1) ?? null;
+  const evidence = latestNumeric ?? latest;
+  // Status observations neither advance a numeric fetch time nor erase it.
+  // Once contradicted, a numeric sample needs a newer fetch before reuse.
+  const subsequent = latestNumeric ? points.filter((p) => p.timestamp >= latestNumeric.timestamp) : [];
+  const compatible = !!latestNumeric && !subsequent.some((p) =>
+    p.status === "rejected" && latestNumeric.usedPercent! < 100 ||
+    p.resetsAt !== null && latestNumeric.resetsAt !== null && p.resetsAt !== latestNumeric.resetsAt);
+  const resetDeadline = subsequent.reduce((deadline, p) => Math.min(deadline, p.resetsAt ? Date.parse(p.resetsAt) : Infinity), Infinity);
+  const expires = Math.min(Date.parse(evidence.timestamp) + FRESHNESS_MINUTES * 60_000,
+    evidence.resetsAt ? Date.parse(evidence.resetsAt) : Infinity, resetDeadline);
+  const stale = now < Date.parse(evidence.timestamp) || now >= expires;
   let observedMinutes = 0, above90Minutes = 0;
   for (let index = 1; index < points.length; index++) {
     const before = points[index - 1]!, after = points[index]!;
@@ -47,9 +62,10 @@ export function summarizeLimitWindow(state: Pick<WindowState, "key" | "label" | 
     if (before.usedPercent >= 90) above90Minutes += minutes;
   }
   let timeToLimitMinutes: number | null = null;
-  const recent = points.slice(-3);
-  if (!stale && latest.usedPercent !== null && latest.usedPercent >= 100) timeToLimitMinutes = 0;
-  else if (!stale && latest.resetsAt && recent.length === 3 && recent.every((p) => p.resetsAt === latest.resetsAt && p.usedPercent !== null)) {
+  const recent = numeric.slice(-3);
+  if (!stale && compatible && latestNumeric!.usedPercent! >= 100) timeToLimitMinutes = 0;
+  else if (!stale && compatible && latestNumeric!.resetsAt && recent.length === 3 && recent.every((p) => p.resetsAt === latestNumeric!.resetsAt)) {
+    const latest = latestNumeric!;
     const first = recent[0]!, middle = recent[1]!;
     const minutes = (Date.parse(latest.timestamp) - Date.parse(first.timestamp)) / 60_000;
     const growth = latest.usedPercent! - first.usedPercent!;
@@ -57,14 +73,15 @@ export function summarizeLimitWindow(state: Pick<WindowState, "key" | "label" | 
     if (minutes >= MIN_OBSERVED_MINUTES && growth > 0 && middle.usedPercent! >= first.usedPercent! && latest.usedPercent! >= middle.usedPercent! && contiguous) {
       const estimate = (100 - latest.usedPercent!) * minutes / growth;
       // This is a projection from the last observation, not invented usage since it.
-      if (Date.parse(latest.timestamp) + estimate * 60_000 <= Date.parse(latest.resetsAt)) timeToLimitMinutes = estimate;
+      if (Date.parse(latest.timestamp) + estimate * 60_000 <= Date.parse(latest.resetsAt!)) timeToLimitMinutes = estimate;
     }
   }
   return { key: state.key, label: state.label, windowMinutes: state.windowMinutes,
     observations: points.length, duplicatesDiscarded: state.duplicatesDiscarded,
     historyLimited: state.historyLimited || ordered.length > MAX_OBSERVATIONS,
-    timelineSampled: points.length > 480, timeline: sample(points, 480), latest, stale,
-    headroomPercent: stale || latest.usedPercent === null ? null : 100 - latest.usedPercent,
+    timelineSampled: points.length > 480, timeline: sample(points, 480), latest, latestNumeric,
+    headroomExpiresAt: latestNumeric ? new Date(expires).toISOString() : null, stale,
+    headroomPercent: stale || !compatible ? null : 100 - latestNumeric!.usedPercent!,
     timeToLimitMinutes, observedMinutes, above90Minutes,
     shareAbove90: observedMinutes >= MIN_OBSERVED_MINUTES && points.filter((p) => p.usedPercent !== null && Date.parse(p.timestamp) <= now).length >= MIN_REQUESTS ? above90Minutes / observedMinutes : null };
 }
@@ -138,14 +155,16 @@ export class LimitsCollector {
       window = { key: windowKey, label, windowMinutes: minutes, observations: new Map(), duplicatesDiscarded: 0, historyLimited: false };
       profile.windows.set(windowKey, window);
     }
-    const previous = window.observations.get(point.timestamp);
+    // Numeric and status evidence at the same instant are complementary. Keep
+    // both so rejection/reset evidence cannot lose to a numeric tie-breaker.
+    const identity = `${point.timestamp}:${point.source}`;
+    const previous = window.observations.get(identity);
     if (previous) {
       window.duplicatesDiscarded++;
       // Deterministic, conservative resolution of conflicting simultaneous snapshots.
-      if ((previous.usedPercent ?? -1) > (point.usedPercent ?? -1) ||
-        previous.usedPercent === point.usedPercent && JSON.stringify(previous) >= JSON.stringify(point)) return;
+      if (compareSamples(previous, point) >= 0) return;
     }
-    window.observations.set(point.timestamp, point);
+    window.observations.set(identity, point);
     if (window.observations.size > MAX_OBSERVATIONS * 2) {
       window.observations = new Map([...window.observations].sort(([a], [b]) => b.localeCompare(a)).slice(0, MAX_OBSERVATIONS));
       window.historyLimited = true;

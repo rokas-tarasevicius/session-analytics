@@ -11,6 +11,9 @@ import { CacheContextCollector, claudeRequestEvidence, type RequestEvidence } fr
 import { claudeContextWindow } from "./metrics/context-windows.ts";
 import { LimitsCollector } from "./metrics/limits.ts";
 import type { LimitsCacheAnalytics } from "./metrics/limits-cache-types.ts";
+import { timestamp as normalizedTimestamp } from "./metrics/limits-utils.ts";
+import { publicModel } from "./public-model.ts";
+import { boundContextDetail } from "./metrics/context-detail.ts";
 
 import type {
   AnalyzeOptions,
@@ -233,7 +236,7 @@ async function loadRateCard(path: string | URL = defaultRateCardPath): Promise<R
           rate.longContext.thresholdInputTokens < 0)) ||
       !rate.source
     ) {
-      throw new Error(`The rate card entry for ${model} is invalid.`);
+      throw new Error("A session analytics rate card entry is invalid.");
     }
   }
   return parsed as RateCard;
@@ -306,6 +309,8 @@ function addModelUsage(
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
   requestEvidence?: RequestEvidence,
 ): void {
+  model = publicModel(model);
+  const rate = model !== "<unknown>" && Object.hasOwn(rateCard.models, model) ? rateCard.models[model] : undefined;
   let aggregate = session.models.get(model);
   if (!aggregate) {
     aggregate = {
@@ -313,13 +318,12 @@ function addModelUsage(
       ...zeroCost(),
       calls: 0,
       model,
-      priced: Boolean(rateCard.models[model]),
+      priced: Boolean(rate),
     };
     session.models.set(model, aggregate);
   }
   aggregate.calls += 1;
   sumTokens(aggregate, usage);
-  const rate = rateCard.models[model];
   const cost = rate ? calculateCost(rate, usage, inputForRequest) : null;
   if (requestEvidence && session.limitsProvider) {
     session.limitsCache.addRequest(model, usage, rate, cost, timestamp, executionKind, requestEvidence, session.limitsProvider);
@@ -628,7 +632,8 @@ async function analyzeCodex(
   // Codex has recorded the same lifecycle events in several shapes over time:
   // legacy `event_msg` notifications, `item_completed` items, and top-level
   // `compacted` records. A file can carry more than one shape for the same
-  // event, so each count takes the largest shape rather than their sum.
+  // event. Turns/messages use the largest shape count; compaction boundaries
+  // are reconciled individually by the shared cache/context collector.
   const legacy = { agentMessages: 0, compactions: 0, userMessages: 0 };
   const compactedRecords = { count: 0 };
   const items = {
@@ -664,7 +669,7 @@ async function analyzeCodex(
     }
     if (type === "compacted") {
       compactedRecords.count += 1;
-      state.limitsCache.addCompaction(path, "compacted", `${line}`, timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
+      state.limitsCache.addCompaction(path, "compacted", stringValue(record["id"]) ?? stringValue(payload?.["id"]), timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
       return;
     }
     if (type === "event_msg") {
@@ -674,7 +679,7 @@ async function analyzeCodex(
       if (payloadType === "task_complete") state.taskCompletions += 1;
       if (payloadType === "context_compacted") {
         legacy.compactions += 1;
-        state.limitsCache.addCompaction(path, "legacy", `${line}`, timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
+        state.limitsCache.addCompaction(path, "legacy", stringValue(payload?.["id"]), timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
       }
       if (payloadType === "item_completed") {
         const item = asRecord(payload?.["item"]);
@@ -684,7 +689,7 @@ async function analyzeCodex(
         if (itemType === "AgentMessage") items.agentMessages.add(itemId);
         if (itemType === "ContextCompaction") {
           items.compactions.add(itemId);
-          state.limitsCache.addCompaction(path, "item", itemId, timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
+          state.limitsCache.addCompaction(path, "item", stringValue(item?.["id"]), timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
         }
       }
       if (payloadType === "token_count") {
@@ -778,6 +783,9 @@ async function analyzeCodex(
       claimedCounters.add(event.fingerprint);
       observed = event.last;
     } else {
+      // Even a present all-zero last record is unusable: this is a cumulative
+      // observation, with no evidenced request size for context or pricing.
+      event.evidence.requestInputKnown = false;
       missingLastUsage += 1;
       if (tokenCount(attributableDelta) === 0 && tokenCount(event.total) > 0) {
         unattributableBaselines += 1;
@@ -920,7 +928,7 @@ async function analyzeClaude(
         parseErrors += 1;
         return;
       }
-      const timestamp = stringValue(record["timestamp"]);
+      const timestamp = normalizedTimestamp(record["timestamp"]);
       trackTimestamp(state, timestamp);
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
@@ -933,6 +941,10 @@ async function analyzeClaude(
           streamBoundaries.add(identity); streamCompactions++;
           state.limitsCache.addCompaction(path, "boundary", identity, timestamp, executionKind, streamTurns, record["compactMetadata"]);
         }
+      } else if (type.includes("compact") || subtype.includes("compact")) {
+        // Preserve older markers in the shared summary, even without sizes.
+        streamCompactions++;
+        state.limitsCache.addCompaction(path, `${type}:${subtype}`, stringValue(record["uuid"]), timestamp, executionKind, streamTurns);
       }
       const agentId = stringValue(record["agentId"]);
       if (agentId) state.delegatedAgents.add(agentId);
@@ -1016,7 +1028,8 @@ async function analyzeClaude(
   }
   state.effort = effort.current?.value ?? null;
   let reasoningMissing = false;
-  for (const { evidence, executionKind, model, reasoningExposed, timestamp, usage } of [...assistantUsage.values()].sort((a,b) => (a.timestamp ?? "").localeCompare(b.timestamp ?? ""))) {
+  // Valid instants first; undated requests retain stable input order at the end.
+  for (const { evidence, executionKind, model, reasoningExposed, timestamp, usage } of [...assistantUsage.values()].sort((a,b) => (a.timestamp ?? "\uffff").localeCompare(b.timestamp ?? "\uffff"))) {
     if (tokenCount(usage) === 0) continue;
     if (usage.outputTokens > 0 && !reasoningExposed) reasoningMissing = true;
     sumTokens(totals, usage);
@@ -1066,7 +1079,7 @@ function finalizeSession(
   }
   const metrics: SessionMetrics = {
     assistantMessages: state.assistantMessages,
-    compactions: state.compactions,
+    compactions: limitsCache?.compactionCount ?? state.compactions,
     contextUtilizationPeak,
     delegatedAgents: state.delegatedAgents.size,
     durationMilliseconds: sessionDuration,
@@ -1520,7 +1533,8 @@ function addCursorReportedCost(
 ): number {
   const usageData = asRecord(data["usageData"]);
   let total = 0;
-  for (const [model, rawUsage] of Object.entries(usageData ?? {})) {
+  for (const [rawModel, rawUsage] of Object.entries(usageData ?? {})) {
+    const model = publicModel(rawModel);
     const usage = asRecord(rawUsage);
     const value = Math.max(0, numberValue(usage?.["costInCents"]) / 100);
     if (value === 0) continue;
@@ -1533,7 +1547,7 @@ function addCursorReportedCost(
       totalUsd: value,
       upperEstimateUsd: value,
     };
-    state.models.set(model, aggregate);
+    mergeModelUsage(state.models, aggregate);
     if (state.executionKind === "subagent") state.costByExecution.subagentUsd += value;
     else if (state.executionKind === "top-level") state.costByExecution.topLevelUsd += value;
     else state.costByExecution.unknownUsd += value;
@@ -1997,7 +2011,7 @@ function aggregate(
     rateCard: {
       currency: rateCard.currency,
       effectiveDate: rateCard.effectiveDate,
-      models: Object.entries(rateCard.models).map(([model, { source }]) => ({ model, source })),
+      models: Object.entries(rateCard.models).map(([model, { source }]) => ({ model: publicModel(model), source })),
     },
     repository: {
       id: repository.id,
@@ -2107,7 +2121,7 @@ async function analyzeSelectedRepositories(
       : discoveredRoots.codex;
     const claudeRoots = options.claudeRoot ? [options.claudeRoot] : discoveredRoots.claude;
     const limits = await LimitsCollector.create({ claude: claudeRoots, codex: codexRoots, home: homedir(),
-      dataDirectory: options.dataDirectory, includeDesktop: !options.claudeRoot });
+      dataDirectory: options.dataDir, includeDesktop: !options.claudeRoot });
     const [codexIndexes, claudeIndexes] = await Promise.all([
       Promise.all(codexRoots.map((root) => indexProviderTranscripts(root, null, "codex"))),
       Promise.all(claudeRoots.map((root) => indexProviderTranscripts(root, null, "claude"))),
@@ -2217,6 +2231,7 @@ async function analyzeSelectedRepositories(
       ? allSessions.filter(({ repositoryId }) => selectedIds.has(repositoryId))
       : allSessions;
     const sessionsByRepository = new Map<string, SessionAnalytics[]>();
+    boundContextDetail(sessions);
     for (const session of sessions) {
       const repositorySessions = sessionsByRepository.get(session.repositoryId) ?? [];
       repositorySessions.push(session);

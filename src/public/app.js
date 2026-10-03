@@ -757,7 +757,9 @@ function populateRepositories() {
 }
 
 function configureWindow() {
-  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay, limitsCache }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay), ...(limitsCache?.buckets ?? []).flatMap(({ day }) => day ? [day] : [])]).sort();
+  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay, limitsCache }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay),
+    ...(limitsCache?.buckets ?? []).flatMap(({ day }) => day ? [day] : []),
+    ...(limitsCache?.compactions ?? []).flatMap(({ timestamp }) => timestamp ? [timestamp.slice(0, 10)] : [])]).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10), maximum = dates.at(-1) || minimum;
   for (const input of [elements.windowStart, elements.windowEnd]) { input.min = minimum; input.max = maximum; }
   elements.windowStart.value = minimum; elements.windowEnd.value = maximum; elements.windowPreset.value = "all";
@@ -791,7 +793,10 @@ function windowCaption() {
 
 function renderSharedView(view) {
   const selected = selectedRepository(); const summary = view.summary;
-  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.`;
+  const population = currentViewName() === "limits-cache"
+    ? `Request and compaction dates during ${windowCaption()}. Quota remains account-wide across all observed dates.`
+    : `Sessions started during ${windowCaption()}.`;
+  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${population}`;
 }
 
 function renderSummary(view) {

@@ -14,6 +14,10 @@ import { claudeContextWindow } from "../src/metrics/context-windows.ts";
 import { limitsCacheReport } from "../src/metrics/limits-report.ts";
 import type { LimitSample } from "../src/metrics/limits-cache-types.ts";
 import type { AnalyzeOptions, SessionAnalytics, TokenUsage } from "../src/types.ts";
+import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { plantMalformedModels } from "./model-privacy-fixture.ts";
+import { publicModel } from "../src/public-model.ts";
+import { boundContextDetail } from "../src/metrics/context-detail.ts";
 
 const date = (minute: number, day = 29) => new Date(Date.UTC(2026, 8, day, 10, minute)).toISOString();
 const secret = "private-content-must-never-escape";
@@ -156,7 +160,7 @@ test("profile symlink aliases share identity; config is opt-in, validated and er
     const warnings: string[] = [];
     assert.deepEqual(await readLimitsConfig(root, warnings), []);
     assert.equal(warnings.length, 1); assert.doesNotMatch(warnings.join(), new RegExp(secret));
-    assert.equal(analyzeOptionsFrom(["--data-dir", root], { SESSION_ANALYTICS_DATA_DIR: "fallback" }).dataDirectory, root);
+    assert.equal(analyzeOptionsFrom(["--data-dir", root], { SESSION_ANALYTICS_DATA_DIR: "fallback" }).dataDir, root);
   });
 });
 
@@ -170,9 +174,9 @@ test("large quota histories are bounded and expose retention and chart sampling"
 
 async function world(root: string) {
   const options: AnalyzeOptions = { claudeRoot: join(root, "claude/projects"), codexRoot: join(root, "codex/sessions"),
-    codexArchiveRoot: join(root, "codex/archived_sessions"), cursorDatabasePath: join(root, "missing-cursor.db"), databasePath: join(root, "missing.db"), dataDirectory: join(root, "data") };
+    codexArchiveRoot: join(root, "codex/archived_sessions"), cursorDatabasePath: join(root, "missing-cursor.db"), databasePath: join(root, "missing.db"), dataDir: join(root, "data") };
   const repo = join(root, "sample-repository");
-  await Promise.all([mkdir(join(repo, ".git"), { recursive: true }), ...[options.claudeRoot!, options.codexRoot!, options.codexArchiveRoot!, options.dataDirectory!].map((p) => mkdir(p, { recursive: true }))]);
+  await Promise.all([mkdir(join(repo, ".git"), { recursive: true }), ...[options.claudeRoot!, options.codexRoot!, options.codexArchiveRoot!, options.dataDir!].map((p) => mkdir(p, { recursive: true }))]);
   return { options, repo };
 }
 const claudeId = "11111111-aaaa-4111-8111-111111111111";
@@ -277,7 +281,7 @@ test("context ratios pair input with each deduplicated request's window, exclude
 test("subscriptions use request months, configured prices, coverage guards and a repository-scope label", async () => {
   await temporary(async (root) => {
     const { options, repo } = await world(root);
-    await writeFile(join(options.dataDirectory!, "config.json"), JSON.stringify({ limitsCache: { profiles: [{ provider: "claude", profile: 1, label: "Personal", monthlyPriceUsd: 20 }] } }));
+    await writeFile(join(options.dataDir!, "config.json"), JSON.stringify({ limitsCache: { profiles: [{ provider: "claude", profile: 1, label: "Personal", monthlyPriceUsd: 20 }] } }));
     const records = [27,28,29].map((day) => ({ ...assistant(repo, `request-${day}`, 0, usage(100000, 0, 1000)), timestamp: date(0, day) }));
     records.push({ ...assistant(repo, "october", 0, usage(100000, 0, 1000)), timestamp: "2026-10-01T10:00:00Z" });
     await writeFile(join(options.claudeRoot!, `${claudeId}.jsonl`), jsonl(records));
@@ -289,7 +293,7 @@ test("subscriptions use request months, configured prices, coverage guards and a
     assert.equal(rows[1]!.leverage, null);
     const selected = await analyzeRepositorySessions({ ...options, repositoryRoot: repo });
     assert.equal(selected.limitsCache!.subscriptions[0]!.scope, "selected-repository");
-    const cli = await promisify(execFile)(process.execPath, ["src/cli.ts", "--claude-root", options.claudeRoot!, "--codex-root", options.codexRoot!, "--codex-archive-root", options.codexArchiveRoot!, "--database", options.databasePath!, "--cursor-database", options.cursorDatabasePath!, "--data-dir", options.dataDirectory!]);
+    const cli = await promisify(execFile)(process.execPath, ["src/cli.ts", "--claude-root", options.claudeRoot!, "--codex-root", options.codexRoot!, "--codex-archive-root", options.codexArchiveRoot!, "--database", options.databasePath!, "--cursor-database", options.cursorDatabasePath!, "--data-dir", options.dataDir!]);
     assert.match(cli.stdout, /Limits & cache/); assert.match(cli.stdout, /Personal/); assert.match(cli.stdout, /not an invoice/);
     assert.doesNotMatch(cli.stdout, new RegExp(`${secret}|${claudeId}|${repo}`));
     // Exercise the dependency-free browser aggregation without requiring a DOM.
@@ -361,11 +365,11 @@ test("missing and zero plan prices never invent leverage, and invalid key target
     const profileKey = snapshot.limitsCache!.profiles[0]!.key;
     assert.equal(snapshot.limitsCache!.subscriptions[0]!.monthlyPriceUsd, null);
     assert.equal(snapshot.limitsCache!.subscriptions[0]!.leverage, null);
-    await writeFile(join(options.dataDirectory!, "config.json"), JSON.stringify({ limitsCache: { profiles: [
+    await writeFile(join(options.dataDir!, "config.json"), JSON.stringify({ limitsCache: { profiles: [
       { provider: "claude", profile: 1, profileKey: secret, monthlyPriceUsd: 99 },
       { provider: "claude", profileKey, monthlyPriceUsd: 0 },
     ] } }));
-    const collector = await LimitsCollector.create({ home: root, claude: [options.claudeRoot!], codex: [], dataDirectory: options.dataDirectory });
+    const collector = await LimitsCollector.create({ home: root, claude: [options.claudeRoot!], codex: [], dataDirectory: options.dataDir });
     const result = collector.finalize(snapshot.sessions, date(0), false);
     assert.equal(result.subscriptions[0]!.monthlyPriceUsd, 0);
     assert.equal(result.subscriptions[0]!.leverage, null);
@@ -394,4 +398,194 @@ test("replayed compaction boundaries and streamed 429 errors do not manufacture 
     assert.equal(snapshot.limitsCache!.profiles[0]!.limitHits[0]!.timestamp, date(5));
     assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(secret));
   });
+});
+
+test("zero last usage keeps cumulative totals but cannot invent a request context or cache saving", async () => {
+  await temporary(async (root) => {
+    const { options, repo } = await world(root), id = "22222222-bbbb-4222-8222-222222222222";
+    await writeFile(join(options.codexRoot!, `${id}.jsonl`), jsonl([
+      { type: "session_meta", timestamp: date(0), payload: { cwd: repo, id } },
+      { type: "turn_context", timestamp: date(0), payload: { model: "gpt-5.5" } },
+      ...[0, 1].map((n) => ({ type: "event_msg", timestamp: date(n), payload: { type: "token_count", info: {
+        total_token_usage: { input_tokens: 1000 + n * 600000, output_tokens: 10 },
+        last_token_usage: { input_tokens: n ? 0 : 1000, output_tokens: n ? 0 : 10 }, model_context_window: 200000,
+      } } })),
+    ]));
+    const snapshot = await analyzeMachineSessions(options), session = snapshot.sessions[0]!, metrics = session.limitsCache!;
+    assert.equal(session.tokens.inputTokens, 601000);
+    assert.equal(metrics.context.requests, 2);
+    assert.equal(metrics.context.eligibleRequests, 1);
+    assert.equal(metrics.context.peakFill, 0.005);
+    assert.equal(session.metrics.contextUtilizationPeak, 0.005);
+    assert.equal(metrics.cache.pricedRequests, 1);
+    assert.equal(metrics.cache.pricedInputTokens, 1000);
+    assert.equal(metrics.cache.cacheReadTokens, 0);
+    assert.equal(metrics.cache.netSavingsUsd, 0);
+  });
+});
+
+test("malformed model metadata never leaves any provider through JSON or terminal reports", async () => {
+  await temporary(async (root) => {
+    const fixture = await createSessionAnalyticsFixture(root);
+    await plantMalformedModels(fixture);
+    const snapshot = await analyzeMachineSessions({ ...fixture, dataDir: root });
+    assert.doesNotMatch(JSON.stringify(snapshot), /SYNTHETIC-MODEL-SENTINEL/);
+    for (const provider of ["claude", "codex", "cursor"]) assert.ok(snapshot.sessions.some((s) => s.provider === provider && s.models.some((m) => m.model === "<unknown>")));
+    assert.equal(snapshot.summary.providerReportedSpendUsd, 1.48);
+    const cli = await promisify(execFile)(process.execPath, ["src/cli.ts", "--claude-root", fixture.claudeRoot, "--codex-root", fixture.codexRoot,
+      "--codex-archive-root", fixture.codexArchiveRoot, "--database", fixture.databasePath, "--cursor-database", fixture.cursorDatabasePath, "--data-dir", root]);
+    assert.doesNotMatch(cli.stdout, /SYNTHETIC-MODEL-SENTINEL/);
+  });
+});
+
+test("Claude request chronology compares instants across UTC offsets and ignores invalid dates", async () => {
+  await temporary(async (root) => {
+    const { options, repo } = await world(root);
+    await writeFile(join(options.claudeRoot!, `${claudeId}.jsonl`), jsonl([
+      { ...assistant(repo, "early", 0, usage(0, 1000)), timestamp: "2026-09-29T12:00:00+02:00" },
+      assistant(repo, "later", 10, usage(0, 2000)),
+      { ...assistant(repo, "undated", 20, usage(0, 3000)), timestamp: "not-a-date" },
+    ]));
+    const session = (await analyzeMachineSessions(options)).sessions[0]!, metrics = session.limitsCache!;
+    assert.deepEqual(metrics.context.curve.map((p) => p.timestamp), [date(0), date(10), null]);
+    assert.equal(metrics.cache.heuristicBreaks, 1);
+    assert.deepEqual(metrics.cacheBreaks[0]!.heuristics, ["idle-ttl"]);
+    assert.equal(session.firstEventAt, date(0));
+    assert.equal(session.lastEventAt, date(10));
+  });
+});
+
+test("Codex compactions reconcile duplicate representations and preserve disjoint formats after upgrades", async () => {
+  await temporary(async (root) => {
+    const { options, repo } = await world(root), id = "22222222-bbbb-4222-8222-222222222222";
+    await writeFile(join(options.codexRoot!, `${id}.jsonl`), jsonl([
+      { type: "session_meta", timestamp: date(0), payload: { cwd: repo, id } },
+      { type: "event_msg", timestamp: date(0), payload: { type: "user_message", message: secret } },
+      { type: "event_msg", timestamp: date(1), payload: { type: "context_compacted" } },
+      { type: "compacted", timestamp: date(1), payload: { content: secret } },
+      { type: "event_msg", timestamp: date(1), payload: { type: "item_completed", item: { type: "ContextCompaction", id: "boundary-a" } } },
+      { type: "event_msg", timestamp: date(30), payload: { type: "user_message", message: secret } },
+      { type: "event_msg", timestamp: date(61), payload: { type: "item_completed", item: { type: "ContextCompaction", id: "boundary-b" } } },
+      { type: "event_msg", timestamp: date(62), payload: { type: "item_completed", item: { type: "ContextCompaction", id: "boundary-b" } } },
+      { type: "compacted", timestamp: date(121), payload: { content: secret } },
+    ]));
+    const snapshot = await analyzeMachineSessions(options), session = snapshot.sessions[0]!, metrics = session.limitsCache!;
+    assert.equal(metrics.compactionCount, 3);
+    assert.equal(session.metrics.compactions, 3);
+    assert.equal(snapshot.summary.compactions, 3);
+    assert.deepEqual(metrics.compactions.map((p) => p.timestamp), [date(1), date(61), date(121)]);
+    assert.deepEqual(metrics.compactions.map((p) => p.turnsSincePrevious), [null, 1, 0]);
+  });
+});
+
+test("fresh numeric Claude headroom survives allowed statuses but not rejections or reset changes, including ties", async () => {
+  await temporary(async (root) => {
+    const claude = join(root, ".claude", "projects"); await mkdir(claude, { recursive: true });
+    await writeFile(join(root, ".claude.json"), JSON.stringify({ cachedUsageUtilization: {
+      fetchedAtMs: Date.parse(date(10)), utilization: { five_hour: { utilization: 40, resets_at: date(60) } },
+    } }));
+    for (const minute of [10, 11]) for (const status of ["allowed", "allowed_warning", "rejected"]) {
+      const collector = await LimitsCollector.create({ home: root, claude: [claude], codex: [], dataDirectory: root });
+      collector.observe(join(claude, "file"), { timestamp: date(minute), quotaLimits: { status, rateLimitType: "five_hour", resetsAt: date(60) } }, "session");
+      const window = collector.finalize([], date(12), false).profiles[0]!.windows[0]!;
+      assert.equal(window.headroomPercent, status === "rejected" ? null : 60, `${minute}: ${status}`);
+      assert.equal(window.latest.status, status);
+      assert.equal(window.latestNumeric!.timestamp, date(10));
+      assert.equal(window.headroomExpiresAt, date(25));
+      assert.equal(collector.finalize([], date(25), false).profiles[0]!.windows[0]!.headroomPercent, null);
+    }
+    for (const minute of [10, 11]) {
+      const collector = await LimitsCollector.create({ home: root, claude: [claude], codex: [], dataDirectory: root });
+      collector.observe(join(claude, "file"), { timestamp: date(minute), quotaLimits: { status: "allowed", rateLimitType: "five_hour", resetsAt: date(120) } }, "session");
+      assert.equal(collector.finalize([], date(12), false).profiles[0]!.windows[0]!.headroomPercent, null);
+    }
+  });
+});
+
+test("snapshot-wide curve detail is bounded without changing request totals, peaks or date buckets", async () => {
+  await temporary(async (root) => {
+    const { options, repo } = await world(root);
+    for (let s = 0; s < 140; s++) {
+      const id = `11111111-aaaa-4111-8111-${String(s).padStart(12, "0")}`;
+      await writeFile(join(options.claudeRoot!, `${id}.jsonl`), jsonl(Array.from({ length: 200 }, (_, n) => ({
+        ...assistant(repo, `request-${n}`, n, usage(n === 100 ? 990000 : 1000)), sessionId: id,
+      }))));
+    }
+    const snapshot = await analyzeMachineSessions(options);
+    const curves = snapshot.sessions.map((s) => s.limitsCache!.context.curve);
+    assert.equal(snapshot.sessions.length, 140);
+    assert.ok(curves.reduce((count, curve) => count + curve.length, 0) <= 20000);
+    for (const session of snapshot.sessions) {
+      const metrics = session.limitsCache!;
+      assert.equal(metrics.context.requests, 200);
+      assert.equal(metrics.context.peakFill, 0.99);
+      assert.equal(metrics.context.above80, 1);
+      assert.equal(metrics.context.curveSampled, true);
+      assert.equal(metrics.buckets.reduce((n, b) => n + b.cache.requests, 0), 200);
+      assert.equal(metrics.context.curve[0]!.request, 1);
+      assert.equal(metrics.context.curve.at(-1)!.request, 200);
+      assert.ok(metrics.context.curve.some((p) => p.fill === 0.99));
+    }
+  });
+});
+
+test("compaction reconciliation retains distinct identities and marks undated cross-format evidence uncertain", () => {
+  const collector = new CacheContextCollector();
+  collector.addCompaction("stream", "legacy", "same", date(0), "top-level", 1);
+  collector.addCompaction("stream", "item", "same", date(1), "top-level", 1, { preTokens: 90000 });
+  collector.addCompaction("stream", "item", "different", date(0), "top-level", 1);
+  const identified = collector.finalize();
+  assert.equal(identified.compactionCount, 2);
+  assert.equal(identified.compactions[0]!.preTokens, 90000);
+  const undated = new CacheContextCollector();
+  undated.addCompaction("stream", "legacy", "legacy-only", null, "top-level", 1);
+  undated.addCompaction("stream", "item", "item-only", null, "top-level", 2);
+  const result = undated.finalize();
+  assert.equal(result.compactionCount, 2);
+  assert.equal((result as unknown as { compactionCountExact: boolean }).compactionCountExact, false);
+  assert.ok(result.compactions.every((p) => p.turnsSincePrevious === null));
+  const ambiguous = new CacheContextCollector();
+  ambiguous.addCompaction("stream", "item", "one", date(0), "top-level", 1);
+  ambiguous.addCompaction("stream", "item", "two", date(0), "top-level", 2);
+  ambiguous.addCompaction("stream", "legacy", null, date(0), "top-level", 2);
+  assert.equal(ambiguous.finalize().compactionCount, 2);
+  assert.equal(ambiguous.finalize().compactionCountExact, false);
+  assert.ok(ambiguous.finalize().compactions.every((p) => p.turnsSincePrevious === null));
+  for (const reverse of [false, true]) {
+    const replayed = new CacheContextCollector();
+    const records = [
+      ["legacy", null, date(0)], ["item", "same", date(1)], ["item", "same", date(0)],
+    ] as const;
+    for (const [shape, id, at] of reverse ? [...records].reverse() : records) replayed.addCompaction("stream", shape, id, at, "top-level", 1);
+    assert.equal(replayed.finalize().compactionCount, 1);
+    assert.equal(replayed.finalize().compactions[0]!.timestamp, date(0));
+  }
+});
+
+test("public model policy preserves bounded identifiers and rejects complete malformed values", () => {
+  for (const value of ["gpt-6.1-sol", "claude-haiku-4-5-20251001", "unknown-reviewed-model", "custom_model"]) assert.equal(publicModel(value), value);
+  for (const value of [null, {}, "", "..", "./model", "model/path", "~model", "user@host", "Error loading model", "gpt-5\u0000", "gpt-5\r", "x".repeat(97), "constructor", "__proto__"]) {
+    // A plain identifier may name no rate; object prototype names must never
+    // inherit a rate. Constructor itself is syntactically a valid identifier.
+    assert.equal(publicModel(value), value === "constructor" ? "constructor" : "<unknown>");
+  }
+});
+
+test("detail budgets smaller than session counts remain deterministic and preserve aggregate facts", () => {
+  const sessions = Array.from({ length: 5 }, (_, index) => {
+    const collector = new CacheContextCollector();
+    const metrics = collector.finalize();
+    metrics.context.peakFill = 0.9;
+    metrics.context.curve = [0.1, 0.9, 0.2].map((fill, n) => ({ request: n + 1, timestamp: date(n), executionKind: "top-level", inputTokens: fill * 1000, windowTokens: 1000, fill }));
+    return { sessionKey: `session-${index}`, limitsCache: metrics } as SessionAnalytics;
+  });
+  const reversed = structuredClone(sessions).reverse();
+  boundContextDetail(sessions, 3); boundContextDetail(reversed, 3);
+  assert.equal(sessions.reduce((n, s) => n + s.limitsCache!.context.curve.length, 0), 3);
+  assert.deepEqual(sessions, reversed.reverse());
+  for (const s of sessions) {
+    assert.equal(s.limitsCache!.context.peakFill, 0.9);
+    assert.equal(s.limitsCache!.context.curveSampled, true);
+    assert.ok(s.limitsCache!.context.curve.every((p) => p.fill === 0.9));
+  }
 });

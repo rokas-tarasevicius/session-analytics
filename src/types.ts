@@ -208,7 +208,7 @@ export interface SessionDatabaseRow {
 }
 
 export interface AnalyzeOptions {
-  dataDirectory?: string;
+  dataDir?: string;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;

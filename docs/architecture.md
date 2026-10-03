@@ -14,7 +14,9 @@
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
+| `src/public-model.ts` | Shared bounded model-identifier projection for every provider and public model dimension. |
 | `src/metrics/{limits,cache-context,context-windows,limits-config,limits-report}.ts` | Profile quota collection, request-level cache/context aggregation, reviewed window table, optional read-only configuration, and report projection. New types live in `limits-cache-types.ts`; no second transcript scan is added. |
+| `src/metrics/{compactions,context-detail}.ts` | Individual boundary reconciliation shared by detail and summary counts; deterministic snapshot-wide curve budget preserving exact aggregates. |
 | `src/public/views/limits-cache.{js,css}` | Scoped view and request-date aggregation, served through the existing static allowlist/CSP. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
@@ -53,7 +55,7 @@ The Cursor pass runs and serializes before the Claude and Codex pass starts, so 
 8. **Match orchestrator records.** Conductor sessions are matched to candidates by provider session ID and validated working directory. Legacy rows without a provider ID are recovered only when exactly one candidate shares the provider and working directory and started within 15 minutes. Rows without validated evidence are dropped rather than counted as empty sessions.
 9. **Assign repositories.** Every remaining candidate is assigned to a repository from its working directory (see [Repository assignment](#repository-assignment)).
 10. **Parse and price.** Provider parsers stream each file line by line and accumulate counters. Each request is priced as it is added, so long-context modifiers use that request's input size.
-11. **Aggregate.** Sessions roll up into repository summaries, then into the machine snapshot. Any repository filter is applied here.
+11. **Aggregate.** Sessions roll up into repository summaries, then into the machine snapshot. Any repository filter is applied here. Curve detail is reduced to at most 20,000 points across selected sessions before serialization; exact aggregates/buckets remain intact.
 12. **Project.** `finalizeSession` and the aggregators build the public objects field by field. The result is written as JSON to the parent process.
 
 ## Repository assignment
@@ -83,7 +85,7 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 | Claude human messages repeated in a file | Counted once per record UUID; tool results are not human turns. |
 | Codex broadcasts the same process-wide cumulative counter into several session files | Each `(total, last)` usage state is fingerprinted; the file whose nearest preceding local activity is closest owns it, ties broken by timestamp and path; other files skip it. Only `last_token_usage` is summed. |
 | A Codex file opens on a process-wide counter that includes requests it never issued | Without per-request usage, only deltas between two snapshots the same file observed are counted; the opening snapshot and any post-reset snapshot are baselines. |
-| Codex records the same lifecycle event in several shapes (`event_msg`, `item_completed`, top-level `compacted`) | Turns, messages, and compactions take the largest count among shapes rather than the sum. |
+| Codex records the same lifecycle event in several shapes (`event_msg`, `item_completed`, top-level `compacted`) | Turns/messages use the largest shape count. Compactions reconcile shared identities or equal UTC timestamps across shapes and retain distinct boundaries; incomplete/ambiguous evidence is flagged. |
 | Codex tool calls | Counted once per `call_id`. |
 | Codex execution kind changes mid-file | Each request is attributed to the execution segment (top-level or sub-agent) active when it was observed. |
 | Cursor conversation bubbles stored both inline and as separate records | Merged by bubble ID. |

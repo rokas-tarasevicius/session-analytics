@@ -13,6 +13,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Context utilization peak now pairs each deduplicated request's input with its own window, avoiding understatement when a session changes context-window size; Claude adds explicitly labeled reviewed model-capacity estimates.
 - Replayed Claude compaction boundaries and streamed limit-error messages no longer inflate the new cache-break or limit-event counters; repeated canonical boundaries also deduplicate the existing compaction count.
+- All-zero Codex last-usage records now exclude cumulative fallback deltas from request context and no-cache savings. This removes fictitious context peaks/savings while retaining observed token totals.
+- All public model dimensions reject paths, URLs, control characters, error sentences and oversized metadata, using `<unknown>` consistently across JSON, reports, API and dashboard; Cursor reported costs survive merged unknown labels.
+- Claude cache/context chronology now sorts normalized UTC instants, restoring idle-gap flags for mixed-offset timestamps.
+- Compactions reconcile individual boundaries across formats instead of choosing the largest representation group, increasing counts when distinct format-era boundaries were previously dropped. Ambiguous evidence is labeled. Manual compactions remain visible on days without requests, and date controls/captions match the selected view.
+- Later allowed Claude quota statuses preserve still-fresh numeric headroom with its own observation/deadline. Contradictory rejection/reset evidence invalidates it, including equal timestamps.
+
+### Changed
+
+- Context curves have a 20,000-point snapshot budget in addition to the per-session cap; aggregate counts, costs, daily buckets and peaks remain exact, with sampling disclosed.
 
 ## [0.5.0] - 2026-10-02
 

@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { plantMalformedModels } from "./model-privacy-fixture.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -73,6 +74,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   let child: ChildProcess | null = null;
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    await plantMalformedModels(fixture);
     await appendFile(join(fixture.codexRoot, "2026/07/20", "rollout-2026-07-20T10-00-00-11111111-1111-4111-8111-111111111111.jsonl"),
       JSON.stringify({ type: "event_msg", timestamp: "2026-07-20T10:10:00Z", payload: { type: "token_count", info: null,
         rate_limits: { limit_id: "secret-limit-payload", plan_type: "secret-limit-payload", primary: { used_percent: 80, window_minutes: 300, resets_at: 1784548800, payload: "secret-limit-payload" }, credits: { balance: "secret-limit-payload" } } } }) + "\n");
@@ -129,6 +131,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
     assert.doesNotMatch(serialized, /secret-limit-payload/);
+    assert.doesNotMatch(serialized, /SYNTHETIC-MODEL-SENTINEL/);
     assert.match(serialized, /"usedPercent":80/);
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);

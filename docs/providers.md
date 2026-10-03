@@ -100,7 +100,8 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | Cost | Estimated: API list-price equivalent, with long-context modifiers applied per request. |
 | Tools | Exact by name, once per `call_id`. Code-mode calls are expanded to the inner tool names; the transported calls are kept separately as `transportTools`. |
 | Skills | Inferred lower bound: at most one invocation per call and skill when a read-capable call references a canonical `SKILL.md`. |
-| Turns, messages, compactions | Exact; the largest count among the legacy, `item_completed`, and `compacted` shapes. |
+| Turns, messages | Largest count among legacy and `item_completed` shapes. |
+| Compactions | Individual boundaries joined by shared identity or equal UTC timestamp across legacy, item and `compacted` shapes. Distinct format-era events survive; `compactionCountExact` flags missing/ambiguous evidence. |
 | Sub-agent cost | Exact split by the execution segment active when each request was observed. |
 | Model | From `turn_context`; when a request precedes any model record, the file's single model is used if it has exactly one. |
 
