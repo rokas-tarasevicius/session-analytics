@@ -5,16 +5,23 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisValueFlags, analyzeOptionsFrom, setting } from "./options.ts";
-import type { MachineAnalytics } from "./types.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, setting, argument } from "./options.ts";
+import { refreshPricingIfStale } from "./pricing/update.ts";
+import type { MachineAnalytics, SharedSnapshot } from "./types.ts";
+import { loadSnapshot } from "./interop/snapshot.ts";
+import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
+import { loadInsightContext, parseInsightConfig } from "./insights/config.ts";
+import { insightsForSnapshot } from "./insights/service.ts";
+import type { InsightContext } from "./insights/types.ts";
+import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
-const valueFlags = new Set([...analysisValueFlags, "--port"]);
-const booleanFlags = new Set(["--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version"]);
+const valueFlags = new Set([...analysisValueFlags, "--port", "--snapshot"]);
+const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -37,6 +44,15 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it.
+${pricingHelp}
+--reliability-content-rules enables local P2 error, command and behavior rules (off by default).
+--no-reliability-content-rules overrides the environment; --data-dir PATH locates the private hashing key.
+Optional outcomes: --outcomes-git (bounded local Git) and --outcomes-github (authenticated gh PR state).
+Both are off by default; --no-outcomes-git and --no-outcomes-github override environment settings.
+--workflow-content-rules opts into local Claude interruption marker counts (P2).
+--no-workflow-content-rules overrides an environment opt-in.
+--snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
+Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
 `);
   process.exit(0);
 }
@@ -82,7 +98,11 @@ async function sendFile(response: ServerResponse, path: string): Promise<void> {
 }
 
 function safeError(error: unknown): string {
+  const indexError = indexErrorMessage(indexErrorCode(error));
+  if (indexError) return indexError;
   const message = error instanceof Error ? error.message : "";
+  if (message.includes("insights")) return "Insights are unavailable. Check the configured thresholds, inventory and filters.";
+  if (message.includes("Snapshot")) return "The snapshot file is invalid, unsupported, or unavailable.";
   if (message.includes("rate card")) return "The configured rate card is invalid or unavailable.";
   if (message.includes("repository")) return "The requested repository could not be selected.";
   return "Local analytics evidence is unavailable or could not be parsed.";
@@ -105,8 +125,43 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
 const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
+  ["/view-model.js", join(publicRoot, "view-model.js")],
+
+  ["/providers.js", join(publicRoot, "providers.js")],
+
+  ["/velocity.js", join(publicRoot, "velocity.js")],
+  ["/velocity-data.js", join(publicRoot, "velocity-data.js")],
+  ["/velocity.css", join(publicRoot, "velocity.css")],
+  ["/reliability-data.js", join(publicRoot, "reliability-data.js")],
+  ["/reliability-view.js", join(publicRoot, "reliability-view.js")],
+  ["/reliability.css", join(publicRoot, "reliability.css")],
+
+  ["/views/limits-cache.js", join(publicRoot, "views", "limits-cache.js")],
+  ["/views/limits-cache.css", join(publicRoot, "views", "limits-cache.css")],
+  ["/outcomes.js", join(publicRoot, "outcomes.js")],
+  ["/outcomes.css", join(publicRoot, "outcomes.css")],
+  ["/metrics/outcomes-summary.js", join(toolRoot, "metrics", "outcomes-summary.js")],
+  ["/outcomes-summary.js", join(toolRoot, "metrics", "outcomes-summary.js")],
+  ["/workflow.js", join(publicRoot, "workflow.js")],
+  ["/workflow-scope.js", join(publicRoot, "workflow-scope.js")],
+  ["/workflow-worker.js", join(publicRoot, "workflow-worker.js")],
+  ["/workflow-data.js", join(publicRoot, "workflow-data.js")],
+  ["/workflow.css", join(publicRoot, "workflow.css")],
   ["/styles.css", join(publicRoot, "styles.css")],
-  ["/fonts/space-grotesk-latin.woff2", join(publicRoot, "fonts", "space-grotesk-latin.woff2")],
+  ["/fonts/geist-latin.woff2", join(publicRoot, "fonts", "geist-latin.woff2")],
+
+  ["/pricing.js", join(publicRoot, "pricing.js")],
+  ["/model-id.js", join(publicRoot, "model-id.js")],
+  ["/pricing.css", join(publicRoot, "pricing.css")],
+  ["/views/insights.js", join(publicRoot, "views", "insights.js")],
+  ["/views/insights-state.js", join(publicRoot, "views", "insights-state.js")],
+  ["/views/insights.css", join(publicRoot, "views", "insights.css")],
+  ["/export-data.js", join(publicRoot, "export-data.js")],
+  ["/evidence.js", join(publicRoot, "evidence.js")],
+  ["/timestamps.js", join(publicRoot, "timestamps.js")],
+  ["/export-menu.js", join(publicRoot, "export-menu.js")],
+  ["/shared-view.js", join(publicRoot, "shared-view.js")],
+  ["/interop.css", join(publicRoot, "interop.css")],
   ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],
   ["/brands/codex.svg", join(publicRoot, "brands", "codex.svg")],
   ["/brands/claude.svg", join(publicRoot, "brands", "claude.svg")],
@@ -114,16 +169,24 @@ const staticFiles = new Map<string, string>([
   ["/favicon.svg", join(publicRoot, "favicon.svg")],
 ]);
 
-const analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
+let analyzeOptions: import("./types.ts").AnalyzeOptions;
+try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
+catch { process.stderr.write("Invalid pricing configuration.\n"); process.exit(2); }
+try { assertSnapshotOptions(process.argv); } catch {
+  process.stderr.write("Snapshot input cannot be combined with analysis flags.\n");
+  process.exit(2);
+}
+const snapshotFile = argument(process.argv, "--snapshot");
 
-let analyticsPromise: Promise<MachineAnalytics> | null = null;
+let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
+let insightContext: { generatedAt: string; promise: Promise<InsightContext> } | null = null;
 let snapshotReady = false;
-function analytics(refresh = false): Promise<MachineAnalytics> {
+function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> {
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
-    analyticsPromise = analyzeMachineSessionsIsolated(analyzeOptions)
+    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachineSessionsIsolated(analyzeOptions))
       .then((result) => {
         snapshotReady = true;
         return result;
@@ -149,6 +212,7 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/health") {
       sendJson(response, 200, {
         service: serviceId,
+        dataSource: snapshotFile ? "snapshot" : "live",
         snapshot: snapshotReady ? "ready" : analyticsPending ? "building" : "not-started",
         status: "ok",
       });
@@ -156,6 +220,30 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/api/analytics") {
       sendJson(response, 200, await analytics(url.searchParams.get("refresh") === "1"));
+      return;
+    }
+    if (url.pathname === "/api/insights") {
+      if ([...url.searchParams.keys()].some((key) => !["repo-id", "from", "through"].includes(key))) {
+        sendJson(response, 400, { error: "Invalid insights filters." });
+        return;
+      }
+      const snapshot = await analytics();
+      if ("kind" in snapshot) { sendJson(response, 400, { error: "Insights require a full session snapshot." }); return; }
+      if (!insightContext || insightContext.generatedAt !== snapshot.generatedAt) {
+        insightContext = { generatedAt: snapshot.generatedAt, promise: snapshotFile ? Promise.resolve({ ...parseInsightConfig({}), inventory: [],
+          rateCard: { currency: "USD", effectiveDate: snapshot.rateCard.effectiveDate, models: {} },
+          warnings: ["Snapshot insights use saved evidence. Local inventory and comparison rates are unavailable."] }) : loadInsightContext(analyzeOptions) };
+      }
+      const context = await insightContext.promise;
+      try {
+        sendJson(response, 200, insightsForSnapshot(snapshot, context, {
+          repositoryId: url.searchParams.get("repo-id") || undefined,
+          from: url.searchParams.get("from") || undefined,
+          through: url.searchParams.get("through") || undefined,
+        }));
+      } catch {
+        sendJson(response, 400, { error: "Invalid insights filters." });
+      }
       return;
     }
     const path = staticFiles.get(url.pathname);
@@ -166,6 +254,7 @@ const server = createServer(async (request, response) => {
     sendJson(response, 404, { error: "Not found." });
   } catch (error) {
     if (url.pathname === "/api/analytics") analyticsPromise = null;
+    if (url.pathname === "/api/insights") insightContext = null;
     sendJson(response, 502, { error: safeError(error) });
   }
 });
@@ -206,8 +295,8 @@ async function compatibleDashboardIsRunning(): Promise<boolean> {
       signal: AbortSignal.timeout(2_000),
     });
     if (!response.ok) return false;
-    const body = await response.json() as { service?: unknown; status?: unknown };
-    return body.service === serviceId && body.status === "ok";
+    const body = await response.json() as { service?: unknown; status?: unknown; dataSource?: unknown };
+    return body.service === serviceId && body.status === "ok" && body.dataSource === "live";
   } catch {
     return false;
   }
@@ -215,7 +304,7 @@ async function compatibleDashboardIsRunning(): Promise<boolean> {
 
 server.on("error", (error: NodeJS.ErrnoException) => {
   void (async () => {
-    if (error.code === "EADDRINUSE" && await compatibleDashboardIsRunning()) {
+    if (error.code === "EADDRINUSE" && !snapshotFile && await compatibleDashboardIsRunning()) {
       process.stdout.write(`${brand.name} already running: ${dashboardUrl}\n`);
       if (process.argv.includes("--open")) await openDashboard();
       process.exit(0);
@@ -235,11 +324,19 @@ server.listen(port, "127.0.0.1", () => {
   const warmup = analytics(false);
   void warmup
     .then((result) => {
+      if ("kind" in result) {
+        process.stdout.write(`Loaded shared aggregates for ${result.summary.sessions} sessions across ${result.repositories.length} repositories.\n`);
+        return;
+      }
       process.stdout.write(
         `Analyzed ${result.summary.analyzedSessions}/${result.summary.sessions} sessions across ` +
           `${result.summary.repositories} repositories; ` +
-          `priced usage value $${result.summary.estimatedSpendUsd.toFixed(2)} (not an invoice).\n`,
+        `priced usage value $${result.summary.estimatedSpendUsd.toFixed(2)} (not an invoice).\n`,
       );
+      // Startup-only refresh, after the first local scan. No analysis/API request waits on pricing I/O.
+      if (!snapshotFile) void refreshPricingIfStale(analyzeOptions).then((update) => {
+        if (update) process.stdout.write(`Background pricing update: ${update.status}. Refresh the dashboard snapshot to use new prices.\n`);
+      }).catch(() => process.stderr.write("Background pricing update unavailable; cached rates remain in use.\n"));
     })
     .catch((error) => {
       process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);

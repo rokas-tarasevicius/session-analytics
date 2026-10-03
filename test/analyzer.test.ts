@@ -12,6 +12,10 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const result = await analyzeRepositorySessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -132,6 +136,10 @@ test("scans every visible Conductor repository and preserves zero-session reposi
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const result = await analyzeMachineSessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -183,6 +191,10 @@ test("scans every visible Conductor repository and preserves zero-session reposi
     }
 
     const withoutHidden = await analyzeMachineSessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -203,6 +215,10 @@ test("retains end-to-end pricing for Claude Opus 4.8", async () => {
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory, "claude-opus-4-8");
     const result = await analyzeRepositorySessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -235,6 +251,10 @@ test("keeps unknown provider models unpriced instead of applying a database-mode
     await writeFile(transcript, evidence.replaceAll("gpt-5.6-sol", "unknown-test-model"));
 
     const result = await analyzeRepositorySessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -265,6 +285,10 @@ test("discovers provider sessions when optional Conductor metadata is absent", a
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const result = await analyzeMachineSessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -282,6 +306,10 @@ test("discovers provider sessions when optional Conductor metadata is absent", a
     const cursorSession = result.sessions.find(({ provider }) => provider === "cursor");
     assert.ok(cursorSession);
     const cursorRepository = await analyzeRepositorySessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -354,6 +382,10 @@ test("never charges an unobserved process-wide counter baseline to a session or 
     );
 
     const result = await analyzeRepositorySessions({
+      noIndex: true, additionalProviders: false,
+
+      pricingPolicy: "reviewed-only",
+      dataDir: fixture.dataDir,
       claudeRoot: fixture.claudeRoot,
       codexArchiveRoot: fixture.codexArchiveRoot,
       codexRoot: fixture.codexRoot,
@@ -364,7 +396,7 @@ test("never charges an unobserved process-wide counter baseline to a session or 
     });
     const session = result.sessions.find(
       ({ firstEventAt, provider }) =>
-        provider === "codex" && firstEventAt === "2026-07-20T11:00:00Z",
+        provider === "codex" && firstEventAt === "2026-07-20T11:00:00.000Z",
     );
     assert.ok(session);
     assert.equal(session.tokens.inputTokens, 120_000);

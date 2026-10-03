@@ -17,7 +17,8 @@
 - [ ] No new public field, **or** every new field is declared in `src/types.ts`, listed with its tier in the field manifest in `docs/privacy.md`, defined in `docs/metrics.md`, and covered by a test that plants sentinel content and asserts it does not appear in the output
 - [ ] Public objects are built field by field; no provider records are spread or passed through
 - [ ] No prompts, messages, reasoning, tool arguments or results, commands, paths, raw IDs, titles, branches, credentials, or raw errors can reach the dashboard, API, report, JSON, or skill
-- [ ] No network requests, telemetry, CORS headers, or non-loopback binds
+- [ ] Network requests are limited to the documented fixed public-pricing GETs; offline behavior and absence of local data in URLs, headers and bodies are tested
+- [ ] No telemetry, CORS headers, or non-loopback binds
 - [ ] Provider stores are still opened read-only
 - [ ] No new runtime dependencies
 - [ ] Screenshots and examples come from the synthetic demo, not real history

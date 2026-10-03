@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export interface SessionAnalyticsFixture {
+  additionalProviders: false;
+  noIndex: true;
+  dataDir: string;
   claudeRoot: string;
   codexArchiveRoot: string;
   codexRoot: string;
@@ -473,5 +476,5 @@ export async function createSessionAnalyticsFixture(
     `${JSON.stringify(subagentRecord)}\n`,
   );
 
-  return { claudeRoot, codexArchiveRoot, codexRoot, cursorDatabasePath, databasePath, remote, repositoryRoot };
+  return { noIndex: true, dataDir: join(root, "index"), additionalProviders: false, claudeRoot, codexArchiveRoot, codexRoot, cursorDatabasePath, databasePath, remote, repositoryRoot };
 }

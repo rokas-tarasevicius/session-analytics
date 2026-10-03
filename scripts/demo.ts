@@ -20,6 +20,15 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { generateProviderDemo } from "./demo-providers.ts";
+
+import { seedDemoPricing } from "./demo-pricing.ts";
+import { claudeReliabilityDemo, codexReliabilityDemo } from "./demo-reliability.ts";
+
+import { demoRateLimits, writeLimitsDemo } from "./demo-limits-cache.ts";
+import { demoClaudeOutcomes, demoCodexFileChange, demoCodexGit } from "./demo-outcomes.ts";
+import { addWorkflowDemo } from "./demo-workflow.ts";
+import { seedMcpDemo } from "./mcp-demo.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bin = join(projectRoot, "bin", "session-analytics.ts");
@@ -30,8 +39,9 @@ const DAYS = 60;
 // Arguments
 
 const argv = process.argv.slice(2);
-const reportMode = argv[0] === "report";
-const options = reportMode ? argv.slice(1) : argv;
+const reportMode = argv[0] === "report" || argv[0] === "insights";
+const mcpMode = argv[0] === "mcp";
+const options = reportMode || mcpMode ? argv.slice(1) : argv;
 const has = (flag: string): boolean => options.includes(flag);
 function valueOf(flag: string): string | undefined {
   const index = options.indexOf(flag);
@@ -43,10 +53,10 @@ for (let index = 0; index < options.length; index += 1) {
   if (!known.has(flag)) fail(`Unknown demo argument: ${flag}`);
   if (flag === "--port") index += 1;
 }
-if (has("--json") && !reportMode) fail("--json is only valid with the report command.");
+if (has("--json") && !reportMode) fail("--json is only valid with report or insights.");
 if (has("--help")) {
   process.stdout.write(
-    "Usage: node scripts/demo.ts [report [--json]] [--no-open] [--port PORT] [--keep]\n" +
+    "Usage: node scripts/demo.ts [report|insights [--json] | mcp] [--no-open] [--port PORT] [--keep]\n" +
       "Generates synthetic sessions in a temporary directory and analyzes only that data.\n",
   );
   process.exit(0);
@@ -217,6 +227,8 @@ function toolInput(name: string, repository: Repository): Record<string, unknown
 }
 
 interface ClaudeTranscriptOptions {
+  entrypoint: "cli" | "sdk-ts" | "local-agent";
+  attributionAgent?: "general-purpose" | "Explore" | "Plan";
   agentId?: string;
   cwd: string;
   messages: number;
@@ -233,8 +245,10 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   const records: unknown[] = [];
   const state: ClaudeTurnState = { clock: options.start, compactions: 0, context: options.subagent ? integer(9_000, 16_000) : integer(18_000, 32_000) };
   const effort = model.includes("haiku") ? undefined : weighted(effortLevels);
-  const longCache = !options.subagent && chance(0.35);
-  const base = { cwd, sessionId, version: "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
+  const coldCache = repository.name === "data-pipeline" && !options.subagent;
+  const longCache = !coldCache && !options.subagent && chance(0.35);
+  const base = { entrypoint: options.entrypoint, ...(options.attributionAgent ? { attributionAgent: options.attributionAgent } : {}), cwd, sessionId, version: options.start < Date.now() - 30 * DAY ? "2.3.0" : "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
+  let humanStarted = state.clock;
   let parent: string | null = null;
   let spawned = 0;
   const push = (record: Record<string, unknown>): void => {
@@ -243,13 +257,15 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
     parent = uuidValue;
   };
   const human = (): void => {
-    push({ type: "user", message: { role: "user", content: "[synthetic demo prompt]" } });
+    humanStarted = state.clock;
+    push({ type: "user", message: { role: "user", content: "[synthetic demo prompt PRIVATE_DEMO_CONTENT_SENTINEL]" } });
     state.clock += integer(4, 25) * 1000;
   };
 
   human();
   for (let index = 0; index < options.messages; index += 1) {
     if (!options.subagent && index > 0 && chance(0.12)) {
+      push({ type: "system", subtype: "turn_duration", durationMs: state.clock - humanStarted });
       state.clock += integer(1, 9) * 60_000;
       human();
     }
@@ -272,8 +288,22 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       tools.push({ id: `toolu_${hex(24)}`, name, input });
     }
     const usage = claudeUsage(model, state, output, longCache);
+    const cacheMiss = index > 0 && chance(0.08) ? pick(["tools_changed", "system_changed", "messages_changed"] as const) : null;
+    if (cacheMiss) {
+      usage.cache_creation_input_tokens += usage.cache_read_input_tokens;
+      if (longCache) usage.cache_creation.ephemeral_1h_input_tokens += usage.cache_read_input_tokens;
+      else usage.cache_creation.ephemeral_5m_input_tokens += usage.cache_read_input_tokens;
+      usage.cache_read_input_tokens = 0;
+    }
+    // A synthetic stop/start workload supplies honest low-reuse and idle-gap signals.
+    if (coldCache) {
+      state.clock += 6 * 60_000;
+      usage.cache_creation_input_tokens += usage.cache_read_input_tokens;
+      usage.cache_creation.ephemeral_5m_input_tokens = usage.cache_creation_input_tokens;
+      usage.cache_read_input_tokens = 0;
+    }
     const content = [
-      { type: "text", text: "[synthetic demo response]" },
+      { type: "text", text: "[synthetic demo response PRIVATE_DEMO_CONTENT_SENTINEL]" },
       ...tools.map(({ id, name, input }) => ({ type: "tool_use", id, name, input })),
     ];
     const message = (blocks: unknown[], outputTokens: number) => ({
@@ -289,19 +319,23 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       push({ type: "assistant", requestId, ...(effort ? { effort } : {}), message: message(content.slice(0, 1), Math.max(1, Math.round(output * 0.2))) });
       state.clock += integer(1, 6) * 1000;
     }
-    push({ type: "assistant", requestId, ...(effort ? { effort } : {}), message: message(content, output) });
+    push({ type: "assistant", requestId, ...(effort ? { effort } : {}), message: message(content, output),
+      ...(cacheMiss ? { diagnostics: { cache_miss_reason: { type: cacheMiss } } } : {}) });
     state.clock += integer(3, 40) * 1000;
     for (const tool of tools) {
-      push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: tool.id, content: "[synthetic tool result]" }] } });
+      push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: tool.id, is_error: Number.parseInt(tool.id.slice(-2), 16) % 17 === 0, content: "[synthetic tool result PRIVATE_DEMO_CONTENT_SENTINEL]" }] } });
       state.clock += integer(1, 30) * 1000;
     }
     state.context += integer(600, 3_200);
     if (state.context > 165_000) {
-      push({ type: "system", subtype: "compact_boundary", content: "Conversation compacted" });
-      state.context = integer(24_000, 38_000);
+      const postTokens = integer(24_000, 38_000);
+      push({ type: "system", subtype: "compact_boundary", content: "Conversation compacted",
+        compactMetadata: { trigger: "auto", preTokens: state.context, postTokens } });
+      state.context = postTokens;
       state.compactions += 1;
     }
   }
+  push({ type: "system", subtype: "turn_duration", durationMs: state.clock - humanStarted });
   return { records, end: state.clock, spawned };
 }
 
@@ -311,13 +345,18 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
   const model = weighted(claudeModels);
   const messages = heavy(34, 0.85, 420);
   const projectDirectory = join(root, claudeProjectDirectory(cwd));
-  const main = claudeTranscript({ cwd, messages, model, repository, sessionId, start, subagent: false });
+  const entrypoint = weighted([["cli", 40], ["sdk-ts", 50], ["local-agent", 10]] as const);
+  const main = claudeTranscript({ entrypoint, cwd, messages, model, repository, sessionId, start, subagent: false });
+  if (messages % 4 === 0) main.records.push(...claudeReliabilityDemo(main.end, cwd, sessionId));
+  main.records.push(...demoClaudeOutcomes(sessionId, repository.name, cwd, iso(main.end)));
   writeJsonl(join(projectDirectory, `${sessionId}.jsonl`), main.records);
   const subagents = main.spawned + (chance(0.18) ? 1 : 0);
   for (let index = 0; index < subagents; index += 1) {
     const agentId = hex(8);
     const offset = between(0.1, 0.8) * Math.max(60_000, main.end - start);
     const transcript = claudeTranscript({
+      entrypoint,
+      attributionAgent: pick(["general-purpose", "Explore", "Plan"] as const),
       agentId,
       cwd,
       messages: heavy(14, 0.6, 90),
@@ -356,8 +395,8 @@ function writeCodexSession(
   const push = (type: string, payload: Record<string, unknown>): void => {
     records.push({ timestamp: iso(clock), type, payload });
   };
-  const source = parentThreadId ? { subagent: { thread_spawn: { parent_thread_id: parentThreadId, depth: 1 } } } : pick(["cli", "vscode", "exec"]);
-  push("session_meta", { id, cwd, source, originator: "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock) });
+  const source = parentThreadId ? { subagent: { thread_spawn: { parent_thread_id: parentThreadId, depth: 1 } } } : pick(["cli", "vscode", "exec", "review"]);
+  push("session_meta", { id, cwd, source, originator: source === "exec" ? "codex_exec" : source === "vscode" ? "codex_vscode" : "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock), git: demoCodexGit(id) });
   push("turn_context", { cwd, model, effort, approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } });
   const total: CodexCounter = { cached_input_tokens: 0, input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 };
   let context = integer(9_000, 18_000);
@@ -365,8 +404,9 @@ function writeCodexSession(
   const children: number[] = [];
   for (let turn = 0; turn < turns; turn += 1) {
     clock += integer(20, 600) * 1000;
-    push("event_msg", { type: "user_message", message: "[synthetic demo prompt]", images: [] });
-    push("event_msg", { type: "task_started", model_context_window: 272_000 });
+    const turnStarted = clock;
+    push("event_msg", { type: "user_message", message: "[synthetic demo prompt PRIVATE_DEMO_CONTENT_SENTINEL]", images: [] });
+    push("event_msg", { type: "task_started", turn_id: `turn-${turn}`, model_context_window: 272_000 });
     const calls = heavy(parentThreadId ? 5 : 7, 0.7, 60);
     for (let call = 0; call < calls; call += 1) {
       clock += integer(2, 45) * 1000;
@@ -376,20 +416,29 @@ function writeCodexSession(
       const reasoning = Math.round(output * between(0.25, 0.65));
       const last = { cached_input_tokens: cached, input_tokens: input, output_tokens: output, reasoning_output_tokens: reasoning, total_tokens: input + output };
       for (const key of Object.keys(total) as Array<keyof CodexCounter>) total[key] += last[key];
-      push("event_msg", { type: "token_count", info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 272_000 } });
+      push("event_msg", { type: "token_count", info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 272_000 }, rate_limits: demoRateLimits(clock) });
       const callId = `call_${hex(24)}`;
       const kind = weighted([["exec_command", 52], ["apply_patch", 26], ["update_plan", 8], ["write_stdin", 6], ["skill", 3], ["none", 5]] as const);
       if (kind === "apply_patch") {
-        push("response_item", { type: "custom_tool_call", name: "apply_patch", call_id: callId, input: "*** Begin Patch\n[synthetic]\n*** End Patch", status: "completed" });
+        push("response_item", { type: "custom_tool_call", name: "apply_patch", call_id: callId, input: `*** Begin Patch\n*** Update File: ${repository.files[call % repository.files.length]}\n@@\n-synthetic before\n+synthetic after\n*** End Patch`, status: "completed" });
+        push("event_msg", demoCodexFileChange(callId));
       } else if (kind === "skill") {
         const skill = pick(codexSkills);
         push("response_item", { type: "function_call", name: "exec_command", call_id: callId, arguments: JSON.stringify({ cmd: `sed -n '1,200p' .agents/skills/${skill}/SKILL.md` }) });
       } else if (kind !== "none") {
-        push("response_item", { type: "function_call", name: kind, call_id: callId, arguments: JSON.stringify({ cmd: "[synthetic]" }) });
+        const command = ["git diff --stat", "npm test", "rg example src", "cat package.json"][call % 4];
+        push("response_item", { type: "function_call", name: kind, call_id: callId, arguments: JSON.stringify({ cmd: command }) });
       }
       if (kind !== "none") {
         clock += integer(1, 20) * 1000;
-        push("response_item", { type: "function_call_output", call_id: callId, output: "[synthetic tool output]" });
+        const failed = kind === "exec_command" && call % 17 === 0;
+        push("response_item", { type: "function_call_output", call_id: callId,
+          output: kind === "write_stdin" ? "[synthetic running process]" : JSON.stringify({
+            status: failed ? "failed" : "completed", duration_ms: 100 + (call % 8) * 250,
+            ...(["exec_command", "skill"].includes(kind) ? { exit_code: failed ? 1 : 0 } : {}),
+            output: "[synthetic tool output]",
+          }),
+        });
       }
       context += integer(800, 4_000);
       if (context > 210_000) {
@@ -399,9 +448,11 @@ function writeCodexSession(
       if (!parentThreadId && chance(0.012)) children.push(clock);
     }
     clock += integer(2, 20) * 1000;
-    push("event_msg", { type: "agent_message", message: "[synthetic demo response]" });
-    push("event_msg", { type: "task_complete", last_agent_message: "[synthetic]" });
+    push("event_msg", { type: "agent_message", message: "[synthetic demo response PRIVATE_DEMO_CONTENT_SENTINEL]" });
+    if (chance(0.08)) push("event_msg", { type: "turn_aborted", turn_id: `turn-${turn}`, reason: turn % 2 ? "interrupted" : "replaced", duration_ms: clock - turnStarted });
+    else push("event_msg", { type: "task_complete", turn_id: `turn-${turn}`, duration_ms: clock - turnStarted, last_agent_message: "[synthetic]" });
   }
+  if (!parentThreadId && records.length % 3 === 0) records.push(...codexReliabilityDemo(clock));
   // Older sessions have usually been archived; recent ones stay in the dated tree.
   const archived = now - start > 14 * DAY && chance(0.45);
   const stamp = iso(start).slice(0, 19).replace(/:/g, "-");
@@ -458,6 +509,8 @@ function writeCursorDatabase(path: string, sessions: Array<{ repository: Reposit
         createdAt: start,
         lastUpdatedAt: clock,
         status: "completed",
+        totalLinesAdded: bubbles * 7,
+        totalLinesRemoved: bubbles * 2,
         originalModelLines: { [join(repository.root, pick(repository.files))]: [] },
         usageData: { [pick(["composer-1", "claude-4.5-sonnet", "gpt-5"])]: { amount: Math.ceil(bubbles / 2), costInCents } },
       }),
@@ -486,6 +539,10 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
   const cursorDatabase = join(root, "cursor", "User", "globalStorage", "state.vscdb");
   const home = join(root, "home");
   for (const directory of [claudeRoot, codexRoot, codexArchiveRoot, home]) mkdirSync(directory, { recursive: true });
+  writeFileSync(join(root, "claude", "settings.json"), JSON.stringify({
+    skills: { "code-review": true, "release-checklist": true },
+    mcpServers: { github: { command: "synthetic-demo-only" }, "archive-search": { command: "synthetic-demo-only" } },
+  }));
 
   const repositories: Repository[] = repositorySpecs.map((spec) => {
     const repository: Repository = { ...spec, directories: [...spec.directories], files: [...spec.files], root: join(root, "repos", spec.name) };
@@ -533,6 +590,8 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
     }
   }
   writeCursorDatabase(cursorDatabase, cursorSessions);
+  writeLimitsDemo({ root, claudeRoot, codexRoot, repository: repositories[0]!.root, now });
+  addWorkflowDemo(claudeRoot, codexRoot, repositories, now);
   process.stderr.write(`Generated ${sessions} synthetic top-level sessions across ${repositories.length} repositories in ${root}\n`);
   return { claudeRoot, codexRoot, codexArchiveRoot, cursorDatabase, home };
 }
@@ -548,7 +607,7 @@ async function portIsFree(candidate: number): Promise<boolean> {
   });
 }
 
-if (!reportMode && !(await portIsFree(port))) {
+if (!reportMode && !mcpMode && !(await portIsFree(port))) {
   // Never fall through to "reuse the running dashboard": it may be showing real history.
   fail(`Port ${port} is already in use. Stop that process or pass --port with a free port.`);
 }
@@ -560,8 +619,13 @@ const cleanup = (): void => {
 };
 
 let sources: ReturnType<typeof generate>;
+let providerFlags: string[];
 try {
   sources = generate(root);
+  providerFlags = generateProviderDemo(root, repositorySpecs.map(({ name }) => ({ name, root: join(root, "repos", name) })), Date.now());
+
+  await seedDemoPricing(join(root, "analytics-data"));
+  seedMcpDemo(root);
 } catch (error) {
   cleanup();
   throw error;
@@ -569,20 +633,27 @@ try {
 
 const environment: NodeJS.ProcessEnv = {};
 for (const [key, value] of Object.entries(process.env)) {
-  if (/^(CLAUDE_CONFIG_DIR|CODEX_HOME|SESSION_ANALYTICS_|MACHINE_|CONDUCTOR_)/.test(key)) continue;
+  if (/^(CLAUDE_CONFIG_DIR|CLAUDE_PROJECT_DIR|CODEX_HOME|SESSION_ANALYTICS_|MACHINE_|CONDUCTOR_)/.test(key)) continue;
   environment[key] = value;
 }
 environment["HOME"] = sources.home;
+environment["SESSION_ANALYTICS_DATA_DIR"] = join(root, "analytics-data");
+environment["SESSION_ANALYTICS_OFFLINE"] = "1";
 
 const sourceFlags = [
+  "--reliability-content-rules",
+
+  "--data-dir", join(root, "analytics-data"),
+  "--workflow-content-rules", // Synthetic marker examples only; real scans default off.
   "--claude-root", sources.claudeRoot,
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,
   "--cursor-database", sources.cursorDatabase,
-  "--database", join(root, "conductor-not-present.db"),
+  ...providerFlags,
 ];
 const childArguments = reportMode
-  ? [bin, "report", ...sourceFlags, ...(has("--json") ? ["--json"] : [])]
+  ? [bin, argv[0]!, ...sourceFlags, ...(has("--json") ? ["--json"] : [])]
+  : mcpMode ? [bin, "mcp", ...sourceFlags, "--mcp-cwd", join(root, "repos/acme-web")]
   : [bin, "dashboard", ...sourceFlags, "--port", String(port), ...(has("--no-open") ? ["--no-open"] : [])];
 
 const child = spawn(process.execPath, childArguments, { env: environment, stdio: "inherit" });

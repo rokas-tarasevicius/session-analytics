@@ -1,0 +1,61 @@
+/* Insights-only styles: shared theme tokens remain owned by the theme lanes. */
+.insights-intro { display: flex; justify-content: space-between; align-items: end; gap: 2rem; padding: 1.5rem 0; border-bottom: 1px solid var(--line); }
+.insights-intro h2 { font-size: 18px; font-weight: 500; letter-spacing: -.045em; margin: 0; }
+.insights-intro p { margin-bottom: 0; }
+.insights-contract { color: var(--muted); font-size: .82rem; line-height: 1.7; text-align: right; }
+.insights-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem 0; }
+.insights-toolbar p { font-size: .8rem; }
+.insights-note { color: var(--muted); font-size: .82rem; line-height: 1.7; max-width: 100ch; }
+.insights-list { display: grid; gap: 1rem; margin: 1.5rem 0; }
+.insight-heading { display: flex; align-items: start; justify-content: space-between; gap: 2rem; }
+.insight-heading .insight-impact { flex-shrink: 0; }
+.insight-counts { font-size: .85rem; line-height: 1.7; margin: .4rem 0; }
+.insight-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-top: 3px solid var(--sage); background: var(--surface); padding: var(--pad); }
+.insight-card h2 { font-size: 15px; font-weight: 500; letter-spacing: -.025em; margin: .4rem 0 1.2rem; }
+.insight-scope { font: .7rem var(--font-mono); color: var(--muted); line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+.insight-impact { font: 500 clamp(1.5rem, 3vw, 2.15rem) var(--font-sans); letter-spacing: -.04em; color: var(--sage); }
+.insight-impact-label { color: var(--muted); font-size: .76rem; margin: .3rem 0 1rem; line-height: 1.6; }
+.insight-evidence { margin: 0; font-size: .78rem; }
+.insight-evidence > div { display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); padding: .65rem 0; }
+.insight-evidence dt { color: var(--muted); }
+.insight-evidence dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; max-width: 60%; overflow-wrap: anywhere; }
+.insight-coverage { font-size: .7rem; color: var(--muted); margin: .5rem 0; }
+.insight-guardrail { font-size: .8rem; line-height: 1.7; color: var(--muted); }
+.insight-names { font: .74rem var(--font-mono); line-height: 1.8; overflow-wrap: anywhere; }
+.insight-action { margin-top: auto; padding-top: .75rem; border-top: 1px solid var(--line); font-size: .85rem; }
+.insight-action strong { font-size: .75rem; color: var(--sage); }
+.insight-action p { line-height: 1.65; margin: .4rem 0 .8rem; }
+.insight-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; border-top: 1px solid var(--line); }
+.insight-controls .button { border-left: 0; padding-left: 0; padding-right: 1.3rem; text-transform: none; }
+.insight-controls span { font-size: .7rem; }
+.insight-muted { border-top-color: var(--muted); }
+.insight-session-context { font: .72rem var(--font-mono); color: var(--muted); overflow-wrap: anywhere; line-height: 1.6; }
+.insight-details { margin: .5rem 0 1rem; }
+.insight-details summary { cursor: pointer; padding: .65rem 0; font-size: .8rem; }
+.insight-review-label { font-size: .74rem; color: var(--muted); margin: .5rem 0 1rem; }
+.insight-review-command { display: block; box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; margin-top: .4rem; padding: .6rem; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: .7rem var(--font-mono); }
+.insight-card :is(button, summary, input, [tabindex]):focus-visible, .insight-card:focus-visible, .insights-toolbar :is(button, select):focus-visible, .insights-load-more:focus-visible { outline: 2px solid var(--sage); outline-offset: 3px; }
+.insight-controls .button { min-height: 44px; }
+.insights-load-more { min-height: 44px; margin: 0 0 1.5rem; }
+.insights-empty { padding: 3rem 1.5rem; border: 1px solid var(--line); line-height: 1.8; }
+.insights-coverage { border: 1px solid var(--line); padding: 1rem 1.5rem; overflow-x: auto; font-size: .8rem; }
+.insights-coverage summary { cursor: pointer; min-height: 32px; font-weight: 500; }
+.insights-coverage table { width: 100%; min-width: 460px; border-collapse: collapse; margin: 1rem 0; }
+.insights-coverage th, .insights-coverage td { padding: .65rem .75rem .65rem 0; text-align: left; border-bottom: 1px solid var(--line); }
+.insight-scopes { margin: .5rem 0; }
+.insight-scopes > summary { cursor: pointer; padding: .8rem 0; font-size: .85rem; min-height: 24px; }
+.insight-filter-label { display: flex; flex-direction: column; gap: .5rem; color: var(--muted); font-size: .8rem; margin: .6rem 0; }
+.insight-scope-filter, .insights-toolbar select { box-sizing: border-box; min-width: 0; min-height: 44px; padding: .6rem; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: .8rem var(--font-mono); }
+.insight-table-scroll { max-width: 100%; overflow-x: auto; margin: .75rem 0; }
+.insight-scope-table { width: 100%; min-width: 750px; border-collapse: collapse; table-layout: fixed; font-size: .8rem; }
+.insight-scope-table caption { text-align: left; padding: .5rem 0; color: var(--muted); }
+.insight-scope-table th, .insight-scope-table td { vertical-align: top; padding: .8rem .75rem; text-align: left; border-top: 1px solid var(--line); overflow-wrap: anywhere; line-height: 1.6; }
+.insight-scope-table th { font-weight: 500; }
+.insight-scope-table th:nth-child(1) { width: 23%; }
+.insight-scope-table th:nth-child(2) { width: 17%; }
+.insight-scope-table th:nth-child(3) { width: 38%; }
+.insight-scope-table th:nth-child(4) { width: 22%; }
+.insight-scope-table .insight-controls { flex-direction: column; align-items: start; }
+.insight-scope-table .button { font-size: .74rem; min-height: 44px; white-space: normal; text-align: left; }
+.insight-scope-table .insight-muted { opacity: .7; }
+@media (max-width: 800px) { .insights-intro { align-items: start; flex-direction: column; gap: .5rem; } .insights-contract { text-align: left; } .insights-toolbar { flex-wrap: wrap; } .insight-card { padding: 1.1rem; } .insight-heading { flex-direction: column; gap: .2rem; } .insights-toolbar .insight-filter-label { flex: 1; } }

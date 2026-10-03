@@ -1,0 +1,1803 @@
+{
+  "claude": {
+    "assistant_messages": {
+      "api_error_messages": 30,
+      "cache_miss_reason": {
+        "messages_changed": 9,
+        "model_changed": 6,
+        "other": 1,
+        "previous_message_not_found": 81,
+        "system_changed": 6,
+        "tools_changed": 7
+      },
+      "distributions": {
+        "cache_read_percent": {
+          "max": 100.0,
+          "median": 99.168,
+          "min": 0.0,
+          "n": 10543,
+          "p25": 97.5,
+          "p75": 99.662,
+          "p90": 99.837,
+          "p95": 99.89
+        },
+        "output_tokens": {
+          "max": 46473,
+          "median": 504.0,
+          "min": 0,
+          "n": 10583,
+          "p25": 246.0,
+          "p75": 1173.0,
+          "p90": 2377.0,
+          "p95": 3826.9
+        },
+        "thinking_tokens": {
+          "max": 27380,
+          "median": 121.0,
+          "min": 0,
+          "n": 10493,
+          "p25": 0.0,
+          "p75": 431.0,
+          "p90": 1115.8,
+          "p95": 1869.4
+        }
+      },
+      "effort": {
+        "high": 41,
+        "medium": 220,
+        "xhigh": 10282
+      },
+      "field_coverage": {
+        "attributionAgent": {
+          "eligible": 10583,
+          "percent": 30.69,
+          "present": 3248
+        },
+        "attributionMcpServer": {
+          "eligible": 10583,
+          "percent": 3.43,
+          "present": 363
+        },
+        "attributionPlugin": {
+          "eligible": 10583,
+          "percent": 0.0,
+          "present": 0
+        },
+        "attributionSkill": {
+          "eligible": 10583,
+          "percent": 20.95,
+          "present": 2217
+        },
+        "effort": {
+          "eligible": 10583,
+          "percent": 99.62,
+          "present": 10543
+        },
+        "message.diagnostics.cache_miss_reason.type": {
+          "eligible": 10583,
+          "percent": 1.04,
+          "present": 110
+        },
+        "message.id": {
+          "eligible": 10583,
+          "percent": 100.0,
+          "present": 10583
+        },
+        "quotaLimits": {
+          "eligible": 10583,
+          "percent": 0.22,
+          "present": 23
+        },
+        "requestId": {
+          "eligible": 10583,
+          "percent": 99.85,
+          "present": 10567
+        },
+        "stop_details": {
+          "eligible": 10583,
+          "percent": 100.0,
+          "present": 10583
+        },
+        "stop_reason": {
+          "eligible": 10583,
+          "percent": 100.0,
+          "present": 10583
+        },
+        "usage": {
+          "eligible": 10583,
+          "percent": 100.0,
+          "present": 10583
+        },
+        "usage.cache_creation": {
+          "eligible": 10583,
+          "percent": 100.0,
+          "present": 10583
+        },
+        "usage.cache_read_input_tokens": {
+          "eligible": 10583,
+          "percent": 100.0,
+          "present": 10583
+        },
+        "usage.iterations": {
+          "eligible": 10583,
+          "percent": 99.15,
+          "present": 10493
+        },
+        "usage.output_tokens_details.thinking_tokens": {
+          "eligible": 10583,
+          "percent": 99.15,
+          "present": 10493
+        },
+        "usage.server_tool_use": {
+          "eligible": 10583,
+          "percent": 99.53,
+          "present": 10533
+        }
+      },
+      "unique": 10583
+    },
+    "counts": {
+      "api_error_system": 25,
+      "assistant_records": 23584,
+      "changed_during_read": 0,
+      "compactions": 2,
+      "cost_state": 104,
+      "duplicate_session_files_skipped": 0,
+      "duplicate_tool_calls": 5,
+      "duplicate_tool_results": 36,
+      "files_completed": 180,
+      "files_read": 180,
+      "files_with_compaction": 2,
+      "files_with_tool_calls": 165,
+      "files_with_turn_aborted": 0,
+      "hook_errors": 0,
+      "lines_read": 67061,
+      "missing_tool_call_ids": 0,
+      "missing_tool_result_ids": 0,
+      "non_object_records": 0,
+      "oversize_lines_skipped": 0,
+      "parse_failures": 0,
+      "pr_link": 1204,
+      "queue_operation": 1988,
+      "read_errors": 0,
+      "records": 67061,
+      "stop_hook_summary": 96,
+      "subagent_files": 80,
+      "system_records": 129,
+      "thinking_blocks": 7829,
+      "tool_result_records": 13275,
+      "tool_use_result_records": 8639,
+      "user_records": 14056
+    },
+    "distributions": {
+      "compaction_durationMs": {
+        "max": 139992,
+        "median": 129181.0,
+        "min": 118370,
+        "n": 2,
+        "p25": 123775.5,
+        "p75": 134586.5,
+        "p90": 137829.8,
+        "p95": 138910.9
+      },
+      "compaction_postTokens": {
+        "max": 16942,
+        "median": 12524.5,
+        "min": 8107,
+        "n": 2,
+        "p25": 10315.75,
+        "p75": 14733.25,
+        "p90": 16058.5,
+        "p95": 16500.25
+      },
+      "compaction_preTokens": {
+        "max": 999737,
+        "median": 983418.0,
+        "min": 967099,
+        "n": 2,
+        "p25": 975258.5,
+        "p75": 991577.5,
+        "p90": 996473.2,
+        "p95": 998105.1
+      },
+      "compactions_per_file": {
+        "max": 1,
+        "median": 0.0,
+        "min": 0,
+        "n": 180,
+        "p25": 0.0,
+        "p75": 0.0,
+        "p90": 0.0,
+        "p95": 0.0
+      },
+      "error_percent_per_file_min20_classified_results": {
+        "max": 16.0,
+        "median": 2.36,
+        "min": 0.0,
+        "n": 100,
+        "p25": 0.0,
+        "p75": 4.762,
+        "p90": 6.686,
+        "p95": 8.441
+      },
+      "error_percent_per_file_with_classified_results": {
+        "max": 100.0,
+        "median": 1.897,
+        "min": 0.0,
+        "n": 143,
+        "p25": 0.0,
+        "p75": 5.518,
+        "p90": 13.247,
+        "p95": 100.0
+      },
+      "errors_per_file": {
+        "max": 19,
+        "median": 0.0,
+        "min": 0,
+        "n": 180,
+        "p25": 0.0,
+        "p75": 2.0,
+        "p90": 6.1,
+        "p95": 7.05
+      },
+      "hookCount": {
+        "max": 2,
+        "median": 2.0,
+        "min": 2,
+        "n": 96,
+        "p25": 2.0,
+        "p75": 2.0,
+        "p90": 2.0,
+        "p95": 2.0
+      },
+      "hook_duration_ms": {
+        "max": 569,
+        "median": 101.5,
+        "min": 10,
+        "n": 192,
+        "p25": 13.0,
+        "p75": 197.0,
+        "p90": 231.7,
+        "p95": 274.25
+      },
+      "linked_results_per_file": {
+        "max": 685,
+        "median": 24.0,
+        "min": 0,
+        "n": 180,
+        "p25": 10.75,
+        "p75": 104.25,
+        "p90": 190.1,
+        "p95": 293.65
+      },
+      "records_per_file": {
+        "max": 4800,
+        "median": 106.0,
+        "min": 8,
+        "n": 180,
+        "p25": 60.75,
+        "p75": 482.5,
+        "p90": 912.2,
+        "p95": 1600.45
+      },
+      "tool_call_records_per_file": {
+        "max": 685,
+        "median": 24.0,
+        "min": 0,
+        "n": 180,
+        "p25": 10.75,
+        "p75": 104.25,
+        "p90": 190.1,
+        "p95": 293.65
+      }
+    },
+    "enums": {
+      "apiErrorStatus": {
+        "400": 1,
+        "429": 23
+      },
+      "assistant_error": {
+        "authentication_failed": 1,
+        "invalid_request": 1,
+        "rate_limit": 23,
+        "server_error": 5
+      },
+      "attachment_type": {
+        "deferred_tools_delta": 246,
+        "environment": 577,
+        "hook_success": 2,
+        "invoked_skills": 1,
+        "other": 14890,
+        "skill_listing": 167
+      },
+      "compaction_trigger": {
+        "auto": 2
+      },
+      "gitOperation": {
+        "other": 203
+      },
+      "latest_effort_per_file": {
+        "high": 4,
+        "medium": 31,
+        "xhigh": 130
+      },
+      "permissionMode": {
+        "acceptEdits": 5,
+        "auto": 4,
+        "bypassPermissions": 494,
+        "default": 4,
+        "dontAsk": 43
+      },
+      "queue_operation": {
+        "dequeue": 546,
+        "enqueue": 996,
+        "remove": 446
+      },
+      "toolDenialKind": {
+        "other": 11
+      },
+      "toolUseResult.status": {
+        "async_launched": 82,
+        "completed": 17,
+        "other": 3
+      }
+    },
+    "file_coverage": {
+      "agentId": {
+        "eligible": 180,
+        "percent": 44.44,
+        "present": 80
+      },
+      "api_error.retryAttempt": {
+        "eligible": 180,
+        "percent": 6.67,
+        "present": 12
+      },
+      "api_error.retryInMs": {
+        "eligible": 180,
+        "percent": 6.67,
+        "present": 12
+      },
+      "attachment.environment.isGitRepo": {
+        "eligible": 180,
+        "percent": 0.0,
+        "present": 0
+      },
+      "attachment.environment.isWorktree": {
+        "eligible": 180,
+        "percent": 0.0,
+        "present": 0
+      },
+      "attributionAgent": {
+        "eligible": 180,
+        "percent": 39.44,
+        "present": 71
+      },
+      "attributionMcpServer": {
+        "eligible": 180,
+        "percent": 32.22,
+        "present": 58
+      },
+      "attributionSkill": {
+        "eligible": 180,
+        "percent": 23.33,
+        "present": 42
+      },
+      "compactMetadata.durationMs": {
+        "eligible": 180,
+        "percent": 1.11,
+        "present": 2
+      },
+      "compactMetadata.postTokens": {
+        "eligible": 180,
+        "percent": 1.11,
+        "present": 2
+      },
+      "compactMetadata.preTokens": {
+        "eligible": 180,
+        "percent": 1.11,
+        "present": 2
+      },
+      "compactMetadata.trigger": {
+        "eligible": 180,
+        "percent": 1.11,
+        "present": 2
+      },
+      "cost_state.totalAPIDuration": {
+        "eligible": 180,
+        "percent": 28.89,
+        "present": 52
+      },
+      "cost_state.totalCostUSD": {
+        "eligible": 180,
+        "percent": 28.89,
+        "present": 52
+      },
+      "cost_state.totalDuration": {
+        "eligible": 180,
+        "percent": 28.89,
+        "present": 52
+      },
+      "cost_state.totalLinesAdded": {
+        "eligible": 180,
+        "percent": 28.89,
+        "present": 52
+      },
+      "cost_state.totalLinesRemoved": {
+        "eligible": 180,
+        "percent": 28.89,
+        "present": 52
+      },
+      "cost_state.totalToolDuration": {
+        "eligible": 180,
+        "percent": 28.89,
+        "present": 52
+      },
+      "cwd": {
+        "eligible": 180,
+        "percent": 99.44,
+        "present": 179
+      },
+      "effort": {
+        "eligible": 180,
+        "percent": 91.67,
+        "present": 165
+      },
+      "entrypoint": {
+        "eligible": 180,
+        "percent": 99.44,
+        "present": 179
+      },
+      "gitBranch": {
+        "eligible": 180,
+        "percent": 99.44,
+        "present": 179
+      },
+      "hook.hookCount": {
+        "eligible": 180,
+        "percent": 7.78,
+        "present": 14
+      },
+      "hook.hookErrors": {
+        "eligible": 180,
+        "percent": 7.78,
+        "present": 14
+      },
+      "hook.hookInfos": {
+        "eligible": 180,
+        "percent": 7.78,
+        "present": 14
+      },
+      "hook.preventedContinuation": {
+        "eligible": 180,
+        "percent": 7.78,
+        "present": 14
+      },
+      "message.diagnostics.cache_miss_reason.type": {
+        "eligible": 180,
+        "percent": 22.22,
+        "present": 40
+      },
+      "message.id": {
+        "eligible": 180,
+        "percent": 97.22,
+        "present": 175
+      },
+      "permissionMode": {
+        "eligible": 180,
+        "percent": 55.56,
+        "present": 100
+      },
+      "pr_link": {
+        "eligible": 180,
+        "percent": 20.0,
+        "present": 36
+      },
+      "quotaLimits": {
+        "eligible": 180,
+        "percent": 7.78,
+        "present": 14
+      },
+      "requestId": {
+        "eligible": 180,
+        "percent": 96.67,
+        "present": 174
+      },
+      "stop_details": {
+        "eligible": 180,
+        "percent": 97.22,
+        "present": 175
+      },
+      "stop_reason": {
+        "eligible": 180,
+        "percent": 97.22,
+        "present": 175
+      },
+      "thinking_block": {
+        "eligible": 180,
+        "percent": 90.56,
+        "present": 163
+      },
+      "timestamp": {
+        "eligible": 180,
+        "percent": 99.44,
+        "present": 179
+      },
+      "toolUseResult.bytes": {
+        "eligible": 180,
+        "percent": 2.78,
+        "present": 5
+      },
+      "toolUseResult.code": {
+        "eligible": 180,
+        "percent": 2.78,
+        "present": 5
+      },
+      "toolUseResult.durationMs": {
+        "eligible": 180,
+        "percent": 4.44,
+        "present": 8
+      },
+      "toolUseResult.durationSeconds": {
+        "eligible": 180,
+        "percent": 3.89,
+        "present": 7
+      },
+      "toolUseResult.gitOperation": {
+        "eligible": 180,
+        "percent": 21.11,
+        "present": 38
+      },
+      "toolUseResult.interrupted": {
+        "eligible": 180,
+        "percent": 32.78,
+        "present": 59
+      },
+      "toolUseResult.numLines": {
+        "eligible": 180,
+        "percent": 7.22,
+        "present": 13
+      },
+      "toolUseResult.resolvedModel": {
+        "eligible": 180,
+        "percent": 7.78,
+        "present": 14
+      },
+      "toolUseResult.returnCodeInterpretation": {
+        "eligible": 180,
+        "percent": 10.56,
+        "present": 19
+      },
+      "toolUseResult.status": {
+        "eligible": 180,
+        "percent": 8.89,
+        "present": 16
+      },
+      "toolUseResult.structuredPatch": {
+        "eligible": 180,
+        "percent": 22.22,
+        "present": 40
+      },
+      "toolUseResult.timedOutAfterMs": {
+        "eligible": 180,
+        "percent": 7.22,
+        "present": 13
+      },
+      "toolUseResult.toolStats": {
+        "eligible": 180,
+        "percent": 2.78,
+        "present": 5
+      },
+      "toolUseResult.totalDurationMs": {
+        "eligible": 180,
+        "percent": 2.78,
+        "present": 5
+      },
+      "toolUseResult.totalLines": {
+        "eligible": 180,
+        "percent": 7.22,
+        "present": 13
+      },
+      "toolUseResult.totalTokens": {
+        "eligible": 180,
+        "percent": 2.78,
+        "present": 5
+      },
+      "toolUseResult.truncatedByTokenCap": {
+        "eligible": 180,
+        "percent": 0.0,
+        "present": 0
+      },
+      "toolUseResult.type": {
+        "eligible": 180,
+        "percent": 26.11,
+        "present": 47
+      },
+      "toolUseResult.userModified": {
+        "eligible": 180,
+        "percent": 22.22,
+        "present": 40
+      },
+      "usage": {
+        "eligible": 180,
+        "percent": 97.22,
+        "present": 175
+      },
+      "usage.cache_creation": {
+        "eligible": 180,
+        "percent": 97.22,
+        "present": 175
+      },
+      "usage.cache_read_input_tokens": {
+        "eligible": 180,
+        "percent": 97.22,
+        "present": 175
+      },
+      "usage.iterations": {
+        "eligible": 180,
+        "percent": 91.67,
+        "present": 165
+      },
+      "usage.output_tokens_details.thinking_tokens": {
+        "eligible": 180,
+        "percent": 91.67,
+        "present": 165
+      },
+      "usage.server_tool_use": {
+        "eligible": 180,
+        "percent": 97.22,
+        "present": 175
+      }
+    },
+    "nested_static_tool_references": {},
+    "record_field_counts": {
+      "agentId": 14056,
+      "api_error.retryAttempt": 25,
+      "api_error.retryInMs": 25,
+      "attachment.environment.isGitRepo": 0,
+      "attachment.environment.isWorktree": 0,
+      "compactMetadata.durationMs": 2,
+      "compactMetadata.postTokens": 2,
+      "compactMetadata.preTokens": 2,
+      "compactMetadata.trigger": 2,
+      "cost_state.totalAPIDuration": 104,
+      "cost_state.totalCostUSD": 104,
+      "cost_state.totalDuration": 104,
+      "cost_state.totalLinesAdded": 104,
+      "cost_state.totalLinesRemoved": 104,
+      "cost_state.totalToolDuration": 104,
+      "cwd": 53652,
+      "entrypoint": 53652,
+      "gitBranch": 53652,
+      "hook.hookCount": 96,
+      "hook.hookErrors": 96,
+      "hook.hookInfos": 96,
+      "hook.preventedContinuation": 96,
+      "permissionMode": 550,
+      "timestamp": 56844,
+      "toolUseResult.bytes": 17,
+      "toolUseResult.code": 17,
+      "toolUseResult.durationMs": 25,
+      "toolUseResult.durationSeconds": 20,
+      "toolUseResult.gitOperation": 203,
+      "toolUseResult.interrupted": 7184,
+      "toolUseResult.numLines": 58,
+      "toolUseResult.resolvedModel": 91,
+      "toolUseResult.returnCodeInterpretation": 34,
+      "toolUseResult.status": 102,
+      "toolUseResult.structuredPatch": 609,
+      "toolUseResult.timedOutAfterMs": 23,
+      "toolUseResult.toolStats": 17,
+      "toolUseResult.totalDurationMs": 17,
+      "toolUseResult.totalLines": 58,
+      "toolUseResult.totalTokens": 17,
+      "toolUseResult.truncatedByTokenCap": 0,
+      "toolUseResult.type": 523,
+      "toolUseResult.userModified": 609
+    },
+    "strata": {
+      "main": {
+        "classified_results": 7435,
+        "compactions": 2,
+        "errors": 258,
+        "files": 100,
+        "files_with_compaction": 2,
+        "files_with_turn_aborted": 0,
+        "linked_results": 9446,
+        "unique_tool_calls": 9446
+      },
+      "subagent": {
+        "classified_results": 2762,
+        "compactions": 0,
+        "errors": 86,
+        "files": 80,
+        "files_with_compaction": 0,
+        "files_with_turn_aborted": 0,
+        "linked_results": 3793,
+        "unique_tool_calls": 3793
+      }
+    },
+    "tool_results": {
+      "by_tool": {
+        "Agent": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 92,
+          "status_classified": 0
+        },
+        "Bash": {
+          "errors": 279,
+          "explicit_status": 10124,
+          "linked_results": 10124,
+          "status_classified": 10124
+        },
+        "CronCreate": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 1,
+          "status_classified": 0
+        },
+        "CronDelete": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 1,
+          "status_classified": 0
+        },
+        "Edit": {
+          "errors": 8,
+          "explicit_status": 8,
+          "linked_results": 863,
+          "status_classified": 8
+        },
+        "Glob": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 8,
+          "status_classified": 0
+        },
+        "Grep": {
+          "errors": 1,
+          "explicit_status": 1,
+          "linked_results": 60,
+          "status_classified": 1
+        },
+        "Read": {
+          "errors": 7,
+          "explicit_status": 7,
+          "linked_results": 666,
+          "status_classified": 7
+        },
+        "SendMessage": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 54,
+          "status_classified": 0
+        },
+        "Skill": {
+          "errors": 4,
+          "explicit_status": 4,
+          "linked_results": 79,
+          "status_classified": 4
+        },
+        "TaskOutput": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 6,
+          "status_classified": 0
+        },
+        "TaskStop": {
+          "errors": 1,
+          "explicit_status": 1,
+          "linked_results": 9,
+          "status_classified": 1
+        },
+        "ToolSearch": {
+          "errors": 1,
+          "explicit_status": 1,
+          "linked_results": 123,
+          "status_classified": 1
+        },
+        "WebFetch": {
+          "errors": 2,
+          "explicit_status": 2,
+          "linked_results": 106,
+          "status_classified": 2
+        },
+        "WebSearch": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 85,
+          "status_classified": 0
+        },
+        "Write": {
+          "errors": 4,
+          "explicit_status": 4,
+          "linked_results": 260,
+          "status_classified": 4
+        },
+        "mcp_tool_name_redacted": {
+          "errors": 33,
+          "explicit_status": 33,
+          "linked_results": 590,
+          "status_classified": 33
+        },
+        "other_tool_name_redacted": {
+          "errors": 4,
+          "explicit_status": 12,
+          "linked_results": 112,
+          "status_classified": 12
+        }
+      },
+      "calls_without_results": 0,
+      "classification_percent_of_linked": 77.02,
+      "classified_results": 10197,
+      "error_percent_of_classified": 3.37,
+      "errors": 344,
+      "errors_percent_of_linked": 2.6,
+      "explicit_non_error_results": 9853,
+      "explicit_status_results": 10197,
+      "linked_results": 13239,
+      "status_sources": {
+        "explicit_boolean": {
+          "errors": 344,
+          "linked_results": 10197
+        },
+        "unknown": {
+          "errors": 0,
+          "linked_results": 3042
+        }
+      },
+      "unique_calls": 13239,
+      "unique_results": 13239,
+      "unknown_status_results": 3042,
+      "unlinked_results": 0
+    },
+    "tools": {
+      "Agent": 92,
+      "Bash": 10124,
+      "CronCreate": 1,
+      "CronDelete": 1,
+      "Edit": 863,
+      "Glob": 8,
+      "Grep": 60,
+      "Read": 666,
+      "SendMessage": 54,
+      "Skill": 79,
+      "TaskOutput": 6,
+      "TaskStop": 9,
+      "ToolSearch": 123,
+      "WebFetch": 106,
+      "WebSearch": 85,
+      "Write": 260,
+      "mcp_tool_name_redacted": 590,
+      "other_tool_name_redacted": 112
+    }
+  },
+  "codex": {
+    "counts": {
+      "agent_message": 97,
+      "changed_during_read": 0,
+      "command_items": 482,
+      "command_items_exit_known": 482,
+      "command_items_nonzero": 52,
+      "compactions": 40,
+      "duplicate_session_files_skipped": 0,
+      "file_change_items": 460,
+      "files_completed": 190,
+      "files_read": 190,
+      "files_with_compaction": 21,
+      "files_with_tool_calls": 174,
+      "files_with_turn_aborted": 7,
+      "lines_read": 34367,
+      "mcp_items": 32,
+      "missing_tool_call_ids": 0,
+      "missing_tool_result_ids": 0,
+      "non_object_records": 0,
+      "oversize_lines_skipped": 0,
+      "parse_failures": 0,
+      "rate_exhausted_five_hour": 5,
+      "rate_exhausted_seven_day": 0,
+      "rate_headroom_le20_five_hour": 49,
+      "rate_headroom_le20_seven_day": 22,
+      "rate_window_records": 8636,
+      "read_errors": 0,
+      "records": 34367,
+      "session_meta_records": 193,
+      "subagent_files": 16,
+      "task_complete": 357,
+      "task_started": 366,
+      "token_count_records": 6132,
+      "tool_result_records": 6735,
+      "turn_aborted": 7,
+      "turn_context_records": 390,
+      "user_message": 16
+    },
+    "distributions": {
+      "compactions_per_file": {
+        "max": 7,
+        "median": 0.0,
+        "min": 0,
+        "n": 190,
+        "p25": 0.0,
+        "p75": 0.0,
+        "p90": 1.0,
+        "p95": 1.0
+      },
+      "error_percent_per_file_min20_classified_results": {
+        "max": 16.364,
+        "median": 4.398,
+        "min": 0.0,
+        "n": 26,
+        "p25": 3.054,
+        "p75": 9.226,
+        "p90": 10.628,
+        "p95": 13.611
+      },
+      "error_percent_per_file_with_classified_results": {
+        "max": 80.0,
+        "median": 15.385,
+        "min": 0.0,
+        "n": 147,
+        "p25": 3.474,
+        "p75": 33.333,
+        "p90": 60.0,
+        "p95": 62.5
+      },
+      "errors_per_file": {
+        "max": 58,
+        "median": 1.0,
+        "min": 0,
+        "n": 190,
+        "p25": 0.0,
+        "p75": 2.0,
+        "p90": 4.0,
+        "p95": 5.0
+      },
+      "file_max_rate_used_percent_five_hour": {
+        "max": 100.0,
+        "median": 16.0,
+        "min": 0,
+        "n": 146,
+        "p25": 7.0,
+        "p75": 27.75,
+        "p90": 44.0,
+        "p95": 52.5
+      },
+      "file_max_rate_used_percent_seven_day": {
+        "max": 99.0,
+        "median": 10.0,
+        "min": 0,
+        "n": 185,
+        "p25": 4.0,
+        "p75": 17.0,
+        "p90": 38.6,
+        "p95": 51.6
+      },
+      "linked_results_per_file": {
+        "max": 1297,
+        "median": 7.5,
+        "min": 0,
+        "n": 190,
+        "p25": 5.0,
+        "p75": 17.5,
+        "p90": 68.0,
+        "p95": 118.7
+      },
+      "rate_used_percent_five_hour": {
+        "max": 100.0,
+        "median": 19.0,
+        "min": 0.0,
+        "n": 496,
+        "p25": 6.0,
+        "p75": 44.0,
+        "p90": 79.0,
+        "p95": 90.0
+      },
+      "rate_used_percent_seven_day": {
+        "max": 99.0,
+        "median": 16.0,
+        "min": 0.0,
+        "n": 482,
+        "p25": 6.0,
+        "p75": 34.75,
+        "p90": 50.0,
+        "p95": 77.95
+      },
+      "records_per_file": {
+        "max": 5701,
+        "median": 38.0,
+        "min": 9,
+        "n": 190,
+        "p25": 30.0,
+        "p75": 128.75,
+        "p90": 363.8,
+        "p95": 551.75
+      },
+      "tool_call_records_per_file": {
+        "max": 1297,
+        "median": 7.5,
+        "min": 0,
+        "n": 190,
+        "p25": 5.0,
+        "p75": 17.5,
+        "p90": 68.0,
+        "p95": 118.7
+      }
+    },
+    "enums": {
+      "approval_policy": {
+        "never": 379,
+        "on-request": 11
+      },
+      "collaboration_mode": {
+        "default": 377,
+        "plan": 13
+      },
+      "effort_by_turn_context": {
+        "high": 146,
+        "max": 40,
+        "medium": 24,
+        "none": 120,
+        "ultra": 6,
+        "xhigh": 54
+      },
+      "item_completed_type": {
+        "AgentMessage": 2292,
+        "CommandExecution": 482,
+        "ContextCompaction": 37,
+        "FileChange": 460,
+        "McpToolCall": 32,
+        "Plan": 12,
+        "SubAgentActivity": 136,
+        "UserMessage": 324,
+        "WebSearch": 118,
+        "other": 481
+      },
+      "latest_effort_per_file": {
+        "high": 34,
+        "max": 4,
+        "medium": 4,
+        "none": 120,
+        "ultra": 4,
+        "xhigh": 24
+      },
+      "source": {
+        "exec": 144,
+        "subagent": 19,
+        "vscode": 30
+      },
+      "subagent_kind": {
+        "completed": 2,
+        "interacted": 114,
+        "interrupted": 2,
+        "started": 18
+      },
+      "turn_aborted_reason": {
+        "interrupted": 7
+      }
+    },
+    "file_coverage": {
+      "agent_message": {
+        "eligible": 190,
+        "percent": 2.11,
+        "present": 4
+      },
+      "command_item.duration": {
+        "eligible": 190,
+        "percent": 6.32,
+        "present": 12
+      },
+      "command_item.exit_code": {
+        "eligible": 190,
+        "percent": 6.32,
+        "present": 12
+      },
+      "command_item.parsed_cmd": {
+        "eligible": 190,
+        "percent": 6.32,
+        "present": 12
+      },
+      "command_item.status": {
+        "eligible": 190,
+        "percent": 6.32,
+        "present": 12
+      },
+      "file_change.changes": {
+        "eligible": 190,
+        "percent": 15.26,
+        "present": 29
+      },
+      "item_completed": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "mcp_item.duration": {
+        "eligible": 190,
+        "percent": 2.11,
+        "present": 4
+      },
+      "mcp_item.error": {
+        "eligible": 190,
+        "percent": 1.05,
+        "present": 2
+      },
+      "mcp_item.result": {
+        "eligible": 190,
+        "percent": 1.58,
+        "present": 3
+      },
+      "mcp_item.server": {
+        "eligible": 190,
+        "percent": 2.11,
+        "present": 4
+      },
+      "mcp_item.status": {
+        "eligible": 190,
+        "percent": 2.11,
+        "present": 4
+      },
+      "mcp_item.tool": {
+        "eligible": 190,
+        "percent": 2.11,
+        "present": 4
+      },
+      "session_meta.agent_nickname": {
+        "eligible": 190,
+        "percent": 9.47,
+        "present": 18
+      },
+      "session_meta.agent_role": {
+        "eligible": 190,
+        "percent": 1.05,
+        "present": 2
+      },
+      "session_meta.cli_version": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "session_meta.cwd": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "session_meta.forked_from_id": {
+        "eligible": 190,
+        "percent": 8.42,
+        "present": 16
+      },
+      "session_meta.git": {
+        "eligible": 190,
+        "percent": 99.47,
+        "present": 189
+      },
+      "task_complete": {
+        "eligible": 190,
+        "percent": 97.89,
+        "present": 186
+      },
+      "task_complete.duration_ms": {
+        "eligible": 190,
+        "percent": 91.58,
+        "present": 174
+      },
+      "task_complete.time_to_first_token_ms": {
+        "eligible": 190,
+        "percent": 89.47,
+        "present": 170
+      },
+      "task_started": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "timestamp": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "token_count": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "token_count.info.last_token_usage": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "token_count.info.model_context_window": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "token_count.info.total_token_usage": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "token_count.last_token_usage.cached_input_tokens": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "token_count.last_token_usage.input_tokens": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "token_count.last_token_usage.output_tokens": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "token_count.last_token_usage.reasoning_output_tokens": {
+        "eligible": 190,
+        "percent": 98.42,
+        "present": 187
+      },
+      "token_count.rate_limits": {
+        "eligible": 190,
+        "percent": 98.95,
+        "present": 188
+      },
+      "turn_aborted": {
+        "eligible": 190,
+        "percent": 3.68,
+        "present": 7
+      },
+      "turn_context.approval_policy": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "turn_context.collaboration_mode": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "turn_context.effort": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "turn_context.model": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "turn_context.sandbox_policy": {
+        "eligible": 190,
+        "percent": 100.0,
+        "present": 190
+      },
+      "user_message": {
+        "eligible": 190,
+        "percent": 2.11,
+        "present": 4
+      }
+    },
+    "nested_static_tool_references": {
+      "apply_patch": 242,
+      "exec_command": 1780,
+      "mcp_tool_name_redacted": 5,
+      "other_tool_name_redacted": 115,
+      "update_plan": 23,
+      "write_stdin": 443
+    },
+    "record_field_counts": {
+      "command_item.duration": 482,
+      "command_item.exit_code": 482,
+      "command_item.parsed_cmd": 482,
+      "command_item.status": 482,
+      "file_change.changes": 460,
+      "mcp_item.duration": 32,
+      "mcp_item.error": 8,
+      "mcp_item.result": 24,
+      "mcp_item.server": 32,
+      "mcp_item.status": 32,
+      "mcp_item.tool": 32,
+      "session_meta.agent_nickname": 18,
+      "session_meta.agent_role": 2,
+      "session_meta.cli_version": 193,
+      "session_meta.cwd": 193,
+      "session_meta.forked_from_id": 16,
+      "session_meta.git": 191,
+      "task_complete.duration_ms": 276,
+      "task_complete.time_to_first_token_ms": 267,
+      "timestamp": 34367,
+      "token_count.info.last_token_usage": 6113,
+      "token_count.info.model_context_window": 6113,
+      "token_count.info.total_token_usage": 6113,
+      "token_count.last_token_usage.cached_input_tokens": 6113,
+      "token_count.last_token_usage.input_tokens": 6113,
+      "token_count.last_token_usage.output_tokens": 6113,
+      "token_count.last_token_usage.reasoning_output_tokens": 6113,
+      "token_count.rate_limits": 6036,
+      "turn_context.approval_policy": 390,
+      "turn_context.collaboration_mode": 390,
+      "turn_context.effort": 390,
+      "turn_context.model": 390,
+      "turn_context.sandbox_policy": 390
+    },
+    "strata": {
+      "active": {
+        "classified_results": 2281,
+        "compactions": 36,
+        "errors": 292,
+        "files": 180,
+        "files_with_compaction": 20,
+        "files_with_turn_aborted": 5,
+        "linked_results": 5444,
+        "unique_tool_calls": 5444
+      },
+      "archive": {
+        "classified_results": 991,
+        "compactions": 4,
+        "errors": 91,
+        "files": 10,
+        "files_with_compaction": 1,
+        "files_with_turn_aborted": 2,
+        "linked_results": 1291,
+        "unique_tool_calls": 1291
+      }
+    },
+    "tool_results": {
+      "by_tool": {
+        "apply_patch": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 355,
+          "status_classified": 0
+        },
+        "close_agent": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 4,
+          "status_classified": 0
+        },
+        "create_goal": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 1,
+          "status_classified": 0
+        },
+        "exec": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 2280,
+          "status_classified": 0
+        },
+        "exec_command": {
+          "errors": 358,
+          "explicit_status": 0,
+          "linked_results": 3285,
+          "status_classified": 3154
+        },
+        "get_goal": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 2,
+          "status_classified": 0
+        },
+        "other_tool_name_redacted": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 122,
+          "status_classified": 0
+        },
+        "request_user_input": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 30,
+          "status_classified": 0
+        },
+        "run": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 3,
+          "status_classified": 0
+        },
+        "spawn_agent": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 18,
+          "status_classified": 0
+        },
+        "update_goal": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 1,
+          "status_classified": 0
+        },
+        "update_plan": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 22,
+          "status_classified": 0
+        },
+        "view_image": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 15,
+          "status_classified": 0
+        },
+        "wait": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 411,
+          "status_classified": 0
+        },
+        "wait_agent": {
+          "errors": 0,
+          "explicit_status": 0,
+          "linked_results": 12,
+          "status_classified": 0
+        },
+        "write_stdin": {
+          "errors": 25,
+          "explicit_status": 0,
+          "linked_results": 174,
+          "status_classified": 118
+        }
+      },
+      "calls_without_results": 0,
+      "classification_percent_of_linked": 48.58,
+      "classified_results": 3272,
+      "error_percent_of_classified": 11.71,
+      "errors": 383,
+      "errors_percent_of_linked": 5.69,
+      "explicit_non_error_results": 2889,
+      "explicit_status_results": 0,
+      "linked_results": 6735,
+      "status_sources": {
+        "lexical_wrapper_exit": {
+          "errors": 383,
+          "linked_results": 3272
+        },
+        "unknown": {
+          "errors": 0,
+          "linked_results": 3463
+        }
+      },
+      "unique_calls": 6735,
+      "unique_results": 6735,
+      "unknown_status_results": 3463,
+      "unlinked_results": 0
+    },
+    "tools": {
+      "apply_patch": 355,
+      "close_agent": 4,
+      "create_goal": 1,
+      "exec": 2280,
+      "exec_command": 3285,
+      "get_goal": 2,
+      "other_tool_name_redacted": 122,
+      "request_user_input": 30,
+      "run": 3,
+      "spawn_agent": 18,
+      "update_goal": 1,
+      "update_plan": 22,
+      "view_image": 15,
+      "wait": 411,
+      "wait_agent": 12,
+      "write_stdin": 174
+    }
+  },
+  "cursor": {
+    "counts": {
+      "changed_during_read": 0,
+      "compactions": 0,
+      "duplicate_session_files_skipped": 0,
+      "files_completed": 80,
+      "files_read": 80,
+      "files_with_compaction": 0,
+      "files_with_tool_calls": 27,
+      "files_with_turn_aborted": 0,
+      "lines_read": 1223,
+      "missing_tool_call_ids": 2389,
+      "missing_tool_result_ids": 0,
+      "non_object_records": 0,
+      "oversize_lines_skipped": 0,
+      "parse_failures": 0,
+      "read_errors": 0,
+      "records": 1223,
+      "subagent_files": 0,
+      "transcript_records": 1223
+    },
+    "distributions": {
+      "compactions_per_file": {
+        "max": 0,
+        "median": 0.0,
+        "min": 0,
+        "n": 80,
+        "p25": 0.0,
+        "p75": 0.0,
+        "p90": 0.0,
+        "p95": 0.0
+      },
+      "errors_per_file": {
+        "max": 0,
+        "median": 0.0,
+        "min": 0,
+        "n": 80,
+        "p25": 0.0,
+        "p75": 0.0,
+        "p90": 0.0,
+        "p95": 0.0
+      },
+      "linked_results_per_file": {
+        "max": 0,
+        "median": 0.0,
+        "min": 0,
+        "n": 80,
+        "p25": 0.0,
+        "p75": 0.0,
+        "p90": 0.0,
+        "p95": 0.0
+      },
+      "records_per_file": {
+        "max": 106,
+        "median": 2.0,
+        "min": 2,
+        "n": 80,
+        "p25": 2.0,
+        "p75": 16.25,
+        "p90": 45.4,
+        "p95": 76.55
+      },
+      "tool_call_records_per_file": {
+        "max": 252,
+        "median": 0.0,
+        "min": 0,
+        "n": 80,
+        "p25": 0.0,
+        "p75": 45.25,
+        "p90": 98.1,
+        "p95": 137.85
+      }
+    },
+    "enums": {
+      "role": {
+        "assistant": 1076,
+        "user": 147
+      }
+    },
+    "file_coverage": {
+      "timestamp": {
+        "eligible": 80,
+        "percent": 0.0,
+        "present": 0
+      }
+    },
+    "nested_static_tool_references": {},
+    "record_field_counts": {
+      "timestamp": 0
+    },
+    "strata": {
+      "transcript": {
+        "classified_results": 0,
+        "compactions": 0,
+        "errors": 0,
+        "files": 80,
+        "files_with_compaction": 0,
+        "files_with_turn_aborted": 0,
+        "linked_results": 0,
+        "unique_tool_calls": 2389
+      }
+    },
+    "tool_results": {
+      "by_tool": {},
+      "calls_without_results": 2389,
+      "classification_percent_of_linked": null,
+      "classified_results": 0,
+      "error_percent_of_classified": null,
+      "errors": 0,
+      "errors_percent_of_linked": null,
+      "explicit_non_error_results": 0,
+      "explicit_status_results": 0,
+      "linked_results": 0,
+      "status_sources": {},
+      "unique_calls": 2389,
+      "unique_results": 0,
+      "unknown_status_results": 0,
+      "unlinked_results": 0
+    },
+    "tools": {
+      "Glob": 70,
+      "Grep": 53,
+      "Read": 472,
+      "Shell": 733,
+      "StrReplace": 157,
+      "Task": 1,
+      "TodoWrite": 9,
+      "WebFetch": 5,
+      "WebSearch": 8,
+      "Write": 16,
+      "other_tool_name_redacted": 865
+    }
+  },
+  "cursor_database": {
+    "available": true,
+    "bubble_rows": 0,
+    "bubble_sample": {
+      "field_coverage": {},
+      "parse_failures": 0,
+      "parsed": 0
+    },
+    "composer_rows": 1,
+    "composer_sample": {
+      "field_coverage": {
+        "composerId": {
+          "eligible": 1,
+          "percent": 100.0,
+          "present": 1
+        },
+        "conversation": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "costInCents": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "createdAt": {
+          "eligible": 1,
+          "percent": 100.0,
+          "present": 1
+        },
+        "isBestOfNSubcomposer": {
+          "eligible": 1,
+          "percent": 100.0,
+          "present": 1
+        },
+        "lastUpdatedAt": {
+          "eligible": 1,
+          "percent": 100.0,
+          "present": 1
+        },
+        "model": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "modelConfig": {
+          "eligible": 1,
+          "percent": 100.0,
+          "present": 1
+        },
+        "subagentInfo": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "timingInfo": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "tokenCount": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "toolFormerData": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "type": {
+          "eligible": 1,
+          "percent": 0.0,
+          "present": 0
+        },
+        "usageData": {
+          "eligible": 1,
+          "percent": 100.0,
+          "present": 1
+        }
+      },
+      "parse_failures": 0,
+      "parsed": 1
+    },
+    "header_known_columns": {
+      "composerId": true,
+      "createdAt": true,
+      "isSubagent": true,
+      "lastUpdatedAt": true,
+      "name": false,
+      "workspaceId": true
+    },
+    "header_rows": 3,
+    "header_subagent_rows": 0,
+    "known_tables": {
+      "ItemTable": true,
+      "composerHeaders": true,
+      "cursorDiskKV": true
+    },
+    "kv_rows": 6,
+    "read_only": true,
+    "sample_limit": 100
+  },
+  "inventory": {
+    "claude": {
+      "discovered_bytes": 2059218873,
+      "discovered_files": 1770,
+      "discovered_main": 358,
+      "discovered_subagent": 1412,
+      "eligible_files": 1765,
+      "eligible_main": 353,
+      "eligible_subagent": 1412,
+      "oversize_files_excluded": 5,
+      "oversize_main": 5,
+      "roots": 3,
+      "selected_bytes": 319939744,
+      "selected_files": 180,
+      "selected_main": 100,
+      "selected_subagent": 80
+    },
+    "codex": {
+      "discovered_active": 4630,
+      "discovered_archive": 10,
+      "discovered_bytes": 4210249573,
+      "discovered_files": 4640,
+      "eligible_active": 4615,
+      "eligible_archive": 10,
+      "eligible_files": 4625,
+      "oversize_active": 15,
+      "oversize_files_excluded": 15,
+      "roots": 2,
+      "selected_active": 180,
+      "selected_archive": 10,
+      "selected_bytes": 118216412,
+      "selected_files": 190
+    },
+    "cursor": {
+      "discovered_bytes": 1616536,
+      "discovered_files": 80,
+      "discovered_transcript": 80,
+      "eligible_files": 80,
+      "eligible_transcript": 80,
+      "roots": 1,
+      "selected_bytes": 1616536,
+      "selected_files": 80,
+      "selected_transcript": 80
+    }
+  },
+  "methodology": {
+    "canonical_codex_root_only": true,
+    "captured_completed_at": "2026-10-02T15:10:26.116337+00:00",
+    "captured_started_at": "2026-10-02T15:10:22.613319+00:00",
+    "codex_nested_names": "static tools.name(...) references in custom-tool input; invocation intent only, not execution or success",
+    "corrective_pass": true,
+    "error_scope": "Claude/Cursor explicit boolean tool_result is_error only; missing is unknown; Codex explicit isError/direct exit_code structured status separated from P2 lexical wrapper exit-marker evidence for joined known command transports only; lexical evidence is exploratory, not validated tool-error status",
+    "file_cap_bytes": 33554432,
+    "ids": "provider IDs retained in memory for joins/deduplication; none serialized",
+    "limitations": [
+      "No time weighting; counts describe the sampled snapshot, including recent active files.",
+      "Zero observed Cursor events for unavailable signal families are not zero rates.",
+      "Claude missing is_error is unknown; explicit status availability is strongly tool-dependent.",
+      "Codex command exit markers are P2 exploratory evidence; no reliable nested invocation-to-output attribution.",
+      "Codex subagent_files uses the final session_meta classification in each file, not workload share.",
+      "Claude gitOperation was present as an object; string enum mapping remains unverified.",
+      "Metadata size/mtime comparison detects some concurrent writes but does not create an atomic snapshot."
+    ],
+    "line_cap_bytes": 8388608,
+    "p2_content_rules_enabled": true,
+    "quotas": {
+      "claude_main": 100,
+      "claude_subagent": 80,
+      "codex_active": 180,
+      "codex_archive": 20,
+      "cursor_transcript": 100
+    },
+    "rate_sampling": "unique (file, window class, used percent, reset) snapshots; repeated identical observations collapsed per file; maxima per file also reported",
+    "sampling": "fixed SHA-256 ranking of home-relative paths with public fixed seed; no selected paths persisted",
+    "sampling_unit": "file; unweighted stratified convenience snapshot, not a representative population estimator",
+    "unknown_names": "non-allowlisted tool names, MCP names, enums collapsed to category",
+    "version": 2
+  }
+}

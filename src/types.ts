@@ -1,7 +1,68 @@
-export type SessionProvider = "claude" | "codex" | "cursor";
+import type { SessionReliability } from "./metrics/reliability-types.ts";
+export type { SessionReliability, ToolClass, ToolOutcome, ErrorClass, ReliabilityStats } from "./metrics/reliability-types.ts";
+
+export type SessionProvider = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "unsupported";
+import type { LimitsCacheAnalytics, SessionLimitsCache } from "./metrics/limits-cache-types.ts";
+import type { OutcomeSummary, SessionOutcomes } from "./metrics/outcome-types.ts";
+export type { OutcomeConfidence, OutcomeSource, OutcomeLink, OutcomeOperations, OutcomeEnrichmentStatus, OutcomeRatio, OutcomeSummary, SessionOutcomes } from "./metrics/outcome-types.ts";
+
+import type { SessionWorkflow, WorkflowSummary } from "./metrics/workflow-types.ts";
+export type * from "./metrics/workflow-types.ts";
+
+import type { CacheGapSignals } from "./insights/types.ts";
+export type { Insight, InsightGroup, InsightsReport, InsightThresholds, CacheGapSignals } from "./insights/types.ts";
+export type { ReviewPreview } from "./insights/review-context.ts";
+export type { ReviewAssessment } from "./insights/review-agent.ts";
+
+export type SessionStatus = "idle" | "working" | "completed" | "failed" | "error" | "interrupted" | "cancelled" | "pending" | "unknown";
+import type { McpContext, McpSessionEvidence, McpSourceHealth } from "./mcp/types.ts";
+export type * from "./mcp/types.ts";
+
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
 export type SkillEvidence = "explicit" | "inferred" | "unavailable";
+export type { IndexStatus, IndexScanStats } from "./store/database.ts";
+
+// Velocity is additive: old snapshots remain readable without these fields.
+export type ClaudeEntrypoint = "cli" | "sdk" | "desktop" | "unknown";
+export type ClaudeSubagentType = "general-purpose" | "explore" | "plan" | "other";
+export type CodexSource = "cli" | "exec" | "vscode" | "subagent" | "review" | "unknown";
+export type CodexOriginator = "cli" | "exec" | "vscode" | "desktop" | "unknown";
+export type VelocityAgent =
+  | "claude-cli" | "claude-sdk" | "claude-desktop" | "claude-unknown"
+  | "claude-general-purpose" | "claude-explore" | "claude-plan" | "claude-subagent"
+  | "codex-cli" | "codex-exec" | "codex-vscode" | "codex-desktop" | "codex-subagent" | "codex-review" | "codex-unknown"
+  | "cursor";
+export type VelocityEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "unknown";
+export interface AgentIdentity {
+  claudeEntrypoint?: ClaudeEntrypoint;
+  claudeSubagentType?: ClaudeSubagentType | "mixed";
+  codexSource?: CodexSource;
+  codexOriginator?: CodexOriginator;
+}
+export interface VelocityDimension {
+  agent: VelocityAgent;
+  model: string;
+  executionKind: Exclude<ExecutionKind, "mixed">;
+  effort: VelocityEffort;
+}
+/** Fixed-order counters avoid repeating field names in every hourly cell. */
+export type VelocityValues = [
+  valueUsd: number, inputTokens: number, uncachedInputTokens: number,
+  cachedInputTokens: number, cacheWriteInputTokens: number, outputTokens: number,
+  reasoningOutputTokens: number, modelCalls: number, toolCalls: number, sessionsStarted: number,
+  pricedTokens: number, reasoningKnownOutputTokens: number,
+  cacheReadKnownInputTokens: number, cacheWriteKnownInputTokens: number,
+];
+export interface SessionVelocity {
+  dimensions: VelocityDimension[];
+  buckets: Array<[day: string, hour: number, dimension: number, values: VelocityValues]>;
+  undated: Array<[dimension: number, values: VelocityValues]>;
+}
+export interface VelocityMetadata {
+  version: 1;
+  timeZone: string;
+}
 
 export interface LongContextRate {
   inputMultiplier: number;
@@ -20,13 +81,112 @@ export interface ModelRate {
   cacheWriteObservable?: boolean;
   outputPerMillion: number;
   longContext?: LongContextRate;
+  contextTiers?: ContextPriceTier[];
+  assumptions?: PricingAssumption[];
   source: string;
+}
+
+/** Absolute USD/million prices above a per-request input boundary. */
+export interface ContextPriceTier {
+  aboveInputTokens: number;
+  inputPerMillion: number;
+  outputPerMillion: number;
+  cacheReadPerMillion?: number;
+  cacheWrite5mPerMillion?: number;
+  cacheWrite1hPerMillion?: number;
+  assumptions?: PricingAssumption[];
+}
+
+export type PricingSource = "models.dev" | "litellm";
+export type PricingPolicy = "reviewed-first" | "api-first" | "reviewed-only";
+export type PricingAssumption = "anthropic-cache-1h-2x" | "codex-cache-write-upper-1.25x"
+  | "cache-write-upper-multiplier" | "cache-read-at-input" | "cache-write-5m-at-input"
+  | "cache-write-5m-multiplier" | "cache-write-1h-at-5m" | "context-cache-read-at-base"
+  | "context-cache-write-5m-at-base" | "context-cache-write-1h-at-base" | "cache-write-ttl-5m";
+
+export interface RateProvenance {
+  source: PricingSource | "reviewed";
+  kind: "api" | "reviewed" | "fallback";
+  snapshotDate: string;
+  payloadSha256: string;
+  rateModel: string;
+  match: "exact" | "alias";
+  temporal: "at-or-before" | "oldest" | "undated";
+  assumptions: PricingAssumption[];
+}
+
+export interface PricingSourceStatus {
+  source: PricingSource;
+  url: string;
+  fetchedAt: string | null;
+  payloadSha256: string | null;
+  ageDays: number | null;
+  stale: boolean;
+  models: number;
+  rejectedModels: number;
+}
+
+export interface PricingStatus {
+  offline: boolean;
+  policy: PricingPolicy;
+  refreshAfterDays: number;
+  newestSnapshotAt: string | null;
+  ageDays: number | null;
+  stale: boolean;
+  snapshots: number;
+  sources: PricingSourceStatus[];
+  warnings: Array<"cache-unavailable" | "invalid-snapshot" | "large-price-change" | "rejected-models">;
+}
+
+export interface PricingCoverage {
+  modelsSeen: number;
+  modelsPriced: number;
+  ratio: number | null;
+  bySource: Array<{ source: PricingSource | "reviewed"; models: number }>;
+  unpricedModels: string[];
+}
+
+export interface PriceChange {
+  source: PricingSource;
+  model: string;
+  change: "added" | "removed" | "changed";
+  large: boolean;
+  before: ModelRate | null;
+  after: ModelRate | null;
+}
+
+export interface PricingUpdateResult {
+  status: "updated" | "partial" | "failed" | "offline" | "reviewed-only";
+  sources: Array<{ source: PricingSource; status: "updated" | "failed"; models: number; rejectedModels: number }>;
+  changes: PriceChange[];
+}
+
+export interface PricingRatesView {
+  currency: "USD";
+  status: PricingStatus;
+  models: Array<{ model: string; rate: ModelRate; provenance: RateProvenance }>;
+}
+
+export interface PricingDiffView {
+  comparisons: Array<{ source: PricingSource; before: string | null; after: string | null }>;
+  changes: PriceChange[];
+}
+
+export interface PricingStatusView { status: PricingStatus; coverage: PricingCoverage }
+
+export interface PricingOptions {
+  dataDir?: string;
+  offline?: boolean;
+  pricingPolicy?: PricingPolicy;
+  pricingSources?: PricingSource[];
+  pricingMaxAgeDays?: number;
 }
 
 export interface RateCard {
   currency: "USD";
   effectiveDate: string;
   models: Record<string, ModelRate>;
+  reviewedOverrides?: string[];
 }
 
 export interface TokenUsage {
@@ -54,6 +214,10 @@ export interface ModelUsage extends TokenUsage, CostBreakdown {
   model: string;
   calls: number;
   priced: boolean;
+  /** All rate snapshots used for this model; empty for unpriced/provider-reported usage. */
+  pricing?: RateProvenance[];
+  /** API-priceable token denominator; absent for provider-reported usage. */
+  pricingCoverage?: { pricedTokens: number; eligibleTokens: number };
 }
 
 export interface SessionMetrics {
@@ -76,13 +240,35 @@ export interface SessionMetrics {
 }
 
 export interface TranscriptHealth {
+  /** False when the session start was unavailable; fallback dates are not start evidence. */
+  startTimeKnown?: boolean;
+  completeness?: "complete" | "partial" | "unknown";
+  liveness?: "inactive" | "active" | "unknown";
   files: number;
   snapshotWhileWorking: boolean;
   status: "invalid" | "missing" | "ok" | "unsupported";
   warnings: string[];
+  /** Last indexed facts retained after the provider removed their source. Absent on live/full-scan evidence. */
+  sourceDeleted?: boolean;
 }
 
 export interface SessionAnalytics {
+  /** Present for added evidence sources; absence preserves the legacy provider contract. */
+  evidence?: ProviderEvidence;
+  conductor?: ConductorResultMetrics;
+
+  agentIdentity?: AgentIdentity;
+  velocity?: SessionVelocity;
+  reliability?: SessionReliability;
+  limitsCache?: SessionLimitsCache;
+  outcomes?: SessionOutcomes;
+  workflow?: SessionWorkflow;
+  insightSignals?: {
+    cacheGaps?: CacheGapSignals;
+    requestSizes?: { observedTokens: number; unknownTokens: number };
+    mcpServers?: Record<string, number>;
+  };
+  mcpEvidence?: McpSessionEvidence;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -106,7 +292,7 @@ export interface SessionAnalytics {
   skillEvidence: SkillEvidence;
   skills: Record<string, number>;
   spendByDay: Record<string, number>;
-  status: string;
+  status: SessionStatus;
   tokens: TokenUsage;
   tools: Record<string, number>;
   transcript: TranscriptHealth;
@@ -120,11 +306,17 @@ export interface NamedMetric {
 }
 
 export interface RepositoryAnalytics {
+  velocity?: VelocityMetadata;
+  limitsCache?: LimitsCacheAnalytics;
+  outcomes?: OutcomeSummary;
+  workflow?: WorkflowSummary;
+  schemaVersion: 1;
   generatedAt: string;
   rateCard: {
     currency: "USD";
     effectiveDate: string;
-    models: Array<{ model: string; source: string }>;
+    models: Array<{ model: string; source: string; provenance?: RateProvenance }>;
+    pricing?: PricingStatus;
   };
   repository: {
     id: string;
@@ -158,6 +350,13 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  velocity?: VelocityMetadata;
+  limitsCache?: LimitsCacheAnalytics;
+  outcomes?: OutcomeSummary;
+  workflow?: WorkflowSummary;
+  schemaVersion: 1;
+  mcpSourceHealth?: McpSourceHealth[];
+  mcpContext?: McpContext;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];
   repositories: RepositoryRollup[];
@@ -174,6 +373,7 @@ export interface MachineAnalytics {
 }
 
 export interface RepositoryRollup {
+  outcomes?: OutcomeSummary;
   repository: RepositoryAnalytics["repository"];
   spendByDay: NamedMetric[];
   spendByModel: ModelUsage[];
@@ -183,6 +383,10 @@ export interface RepositoryRollup {
 }
 
 export interface SessionDatabaseRow {
+  outcome_archive_commit?: string | null;
+  outcome_pr_present?: number;
+  outcome_workspace_id?: string;
+  outcome_workspace_status?: string | null;
   agent_type: string;
   branch: string | null;
   conductor_session_id: string;
@@ -202,7 +406,22 @@ export interface SessionDatabaseRow {
   workspace_path: string;
 }
 
-export interface AnalyzeOptions {
+export interface AnalyzeOptions extends PricingOptions {
+  cursorSdkRoot?: string;
+  cursorTranscriptRoot?: string;
+  copilotRoot?: string;
+  opencodeDatabasePath?: string;
+  geminiRoot?: string;
+  /** Disable discovery of additional stores; explicit store options still apply. */
+  additionalProviders?: boolean;
+  reliabilityContentRules?: boolean;
+  outcomesGit?: boolean;
+  outcomesGithub?: boolean;
+  workflowContentRules?: boolean;
+  insightsConfigPath?: string;
+  /** Internal launch context, never accepted as an MCP tool argument or returned as a path. */
+  mcpCwd?: string;
+  noIndex?: boolean;
   claudeRoot?: string;
   codexArchiveRoot?: string;
   codexRoot?: string;
@@ -214,4 +433,56 @@ export interface AnalyzeOptions {
   repositoryName?: string;
   repositoryRemote?: string;
   repositoryRoot?: string;
+}
+
+export interface ProviderEvidence {
+  /** Partial means retained usage does not prove a complete, disjoint accounting interval. */
+  accounting?: "complete" | "partial";
+  source: "conductor-result" | "cursor-sdk" | "cursor-transcript" | "copilot-events" | "opencode-db" | "gemini-chat";
+  fidelity: "message" | "summary" | "activity-only";
+  tokens: "reported" | "unavailable";
+  tools: "observed" | "unavailable";
+  turns: "observed" | "unavailable";
+  timing: "provider" | "file-mtime";
+  usageUnit: "request" | "run" | "session" | "unavailable";
+}
+
+export type ConductorTerminalReason = "success" | "error_during_execution" | "error_max_turns" | "error_max_budget_usd" | "error_max_structured_output_retries" | "completed" | "cancelled" | "interrupted" | "unknown";
+export interface ConductorResultMetrics {
+  /** Deduplicated turn-local receipt usage, never added to cumulative model totals. */
+  turnLocalTokens?: TokenUsage | null;
+  resultRecords: number;
+  reportedTurns: number | null;
+  durationMilliseconds: number | null;
+  apiDurationMilliseconds: number | null;
+  permissionDenials: number | null;
+  errorResults: number;
+  terminalReasons: Partial<Record<ConductorTerminalReason, number>>;
+}
+
+/** Aggregate-only interchange format; never a substitute for session evidence. */
+export interface SharedCounters {
+  sessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  pricedTokens: number;
+  priceableTokens: number;
+  apiEquivalentSpendUsd: number;
+  providerReportedSpendUsd: number;
+  estimatedUpperSpendUsd: number;
+  toolCalls: number;
+  compactions: number;
+}
+
+export interface SharedRepository extends SharedCounters {
+  repository: string;
+}
+
+export interface SharedSnapshot {
+  schemaVersion: 1;
+  kind: "shared";
+  minimumSessions: number;
+  sources: string[];
+  repositories: SharedRepository[];
+  summary: SharedCounters;
 }

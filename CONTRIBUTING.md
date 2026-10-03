@@ -64,24 +64,29 @@ These rules apply to every change, including dashboard and documentation changes
    - covered by a test that plants sentinel content in the relevant provider records (see `test/fixtures.ts`) and asserts with `assert.doesNotMatch` that it does not appear in the serialized output.
 3. **Names must be bounded.** Tool names come from structured tool-call records. Skill identifiers must pass `normalizedSkillName`. Do not derive names from prompts, system instructions, or arbitrary text.
 4. **No paths, IDs, or errors in output.** File paths, working directories, repository roots and remotes, raw session or provider IDs, branch names, titles, and raw exception messages stay inside the analysis process. Use the existing hashed keys and fixed error messages.
-5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add network requests, telemetry, CORS headers, or non-loopback binds.
+5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add telemetry, CORS headers, or non-loopback binds. Public pricing GETs in `src/pricing/sources.ts` are the documented exception to network isolation; see [pricing](docs/pricing.md). Optional GitHub outcome enrichment sends only already-evidenced PR coordinates when explicitly enabled; see [privacy](docs/privacy.md).
+
+5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add background network requests, telemetry, CORS headers, or non-loopback binds. The sole opt-in network surface is the reviewed OTLP export flag; see `docs/interop.md`.
+5. **Read-only sources and local storage.** Open provider SQLite databases with `readOnly: true`, never write to provider directories, and do not add network requests, telemetry, CORS headers, or non-loopback binds. Only `src/store/` may write the private derived index. Extend its explicit disk projection when adding public session fields; test full-scan/index parity and sentinel absence on disk as well as in output. Give fixtures and demo runs their own `dataDir`.
 6. **No runtime dependencies.** Use Node built-ins. A new development dependency needs a reason in the pull request.
 7. **Opt-in for content.** Features that need content (privacy tiers P2 and P3) must be off by default, behind an explicit option, and labeled in the interface.
 
 ## Adding a provider
 
-Provider support currently lives in `src/analyzer.ts`; the [roadmap](docs/roadmap.md#architecture-direction) moves it to one adapter per source. Until then, a new source needs:
+Provider adapters live in `src/providers/`; the host in `src/analyzer.ts` supplies shared repository assignment, pricing, and aggregation. A new source needs:
 
 1. **Discovery.** Default locations, profile handling if the tool supports several profiles, and an explicit override option added to `src/options.ts`, which gives both commands the flag and its `SESSION_ANALYTICS_*` environment variable. An explicit override must replace discovery so synthetic and narrowed scans never read real history.
 2. **Identity.** Read the provider's own session ID and working directory, and only accept a file whose recorded ID matches its name or key.
-3. **Parser.** Stream records and accumulate counters into the session state, then call `finalizeSession`. Decide and document the dedupe key for every counter (message IDs, call IDs, cumulative counters).
-4. **Cost basis.** Use the rate card when the provider records model IDs and token classes; otherwise use a provider-reported value on its own basis, or mark cost unavailable. Never guess a price.
+3. **Parser.** Stream records and accumulate counters into an explicit allowlist projection. Decide and document the dedupe key for every counter (message IDs, call IDs, cumulative counters).
+4. **Cost basis.** Use the rate card when the provider records model IDs and token classes; otherwise use a provider-reported value on its own basis, or mark cost unavailable. Never present an imputed token-class price as observed evidence; any documented substitution must carry a bounded assumption and exclude affected tokens from explicit-rate coverage.
 5. **Evidence labels.** Set `executionKind`, `skillEvidence`, and fidelity honestly. Missing data is `unavailable`, not zero.
-6. **Types and UI.** Extend `SessionProvider`, add a provider mark to `src/public/brands/` with an entry in its `NOTICE.md`, and add the provider to the dashboard filters.
+6. **Types and UI.** Extend `SessionProvider` and the dashboard provider registry. Prefer text labels for new providers; a vendor mark requires a license/provenance note in `src/public/brands/NOTICE.md`.
 7. **Fixtures and tests.** Add records in the provider's real shape to `test/fixtures.ts`, including sentinel content, and test counts, dedupe, cost, and the absence of content.
 8. **Docs.** Add a section to [docs/providers.md](docs/providers.md) and a column or row to the README's evidence table.
 
 Open a [provider support issue](https://github.com/rokas-tarasevicius/session-analytics/issues/new?template=provider_support.yml) first so the record format can be discussed with redacted samples.
+
+Provider implementations live in `src/providers/`. Implement `ProviderAdapter` (`discoverRoots`, `identify`, `analyze`), register the source in `src/providers/index.ts`, and inject pricing/repository assignment through the host. Keep raw IDs, paths, and source objects behind that boundary. Add explicit path options, primary-source schema references, synthetic sentinel fixtures, and fidelity/availability labels. Preserve native-provider outputs with parity fixtures when migrating a parser. Extend `scripts/demo-providers.ts` when adding a source so visual QA remains entirely synthetic.
 
 ## Rate-card changes
 
@@ -92,7 +97,7 @@ Open a [provider support issue](https://github.com/rokas-tarasevicius/session-an
 - note pricing exceptions (cache multipliers, long-context thresholds) in the pricing section of `docs/metrics.md`;
 - keep `test/contract.test.ts` passing, and add a test when the change exercises new pricing logic.
 
-Do not add live price fetching. Prices are reviewed and versioned on purpose.
+Public pricing fetches belong only in `src/pricing/`; analysis stays network-free. Tests use loopback HTTP fixtures, never real sources. Preserve immutable observations, shared rate tables (including legacy snapshot readability), the reviewed override list, model-specific exceptions, and content-free provenance when changing normalization or precedence. Exercise the history-size benchmark when changing lookup/storage, and test both report modes for fixed errors when changing failure handling.
 
 ## Commits and pull requests
 

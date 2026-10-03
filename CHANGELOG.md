@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [0.6.0] - 2026-10-03
+
+### Added
+
+- Fourteen views in the Control Room dashboard, grouped navigation, command palette, collision-free shortcuts, URL entry points, density controls, and light/dark themes (#17).
+- Velocity and guarded period comparisons (#4); cached, dated public price feeds, request-time provenance, Pricing view and `rates` commands (#5).
+- Tool reliability, latency, verification and optional local content rules (#6); quota, cache, context and plan-value evidence (#7); outcome linkage and opt-in Git/GitHub enrichment (#8).
+- Workflow timing, concurrency, steering, command history and skill inventory (#9); grouped insights and an explicit per-run content review workflow (#10).
+- A private SQLite index with complete session replay, source-deleted retention, ownership checkpoints and `index status|path|rebuild|prune` (#11).
+- Seven metrics-only MCP tools with repository scope, coverage and summaries from every integrated metric family (#12).
+- Provider adapters, Cursor SDK/transcripts, Copilot CLI, OpenCode, Gemini and conservative Conductor result recovery (#13).
+- Versioned snapshot schemas, CSV/NDJSON/OTLP exports, aggregate-only sharing and snapshot dashboards (#14).
+- Product strategy, information architecture, evidence research and launch proposals (#15, #16).
+
+### Changed
+
+- One dispatcher and shared analysis options across dashboard, reports, pricing, insights, review, exports, index and MCP.
+- One synthetic demo covers every view and provider. New views use the Control Room cards, typography, colors, controls and tables.
+- The persistent projection and interchange schemas cover all final metric namespaces, pricing provenance and normalized quota evidence; cold/warm/full scans are checked for parity.
+- P2 rule settings partition cached history. Public price refreshes and each explicit network feature are documented separately; provider stores remain read-only and runtime dependencies remain zero.
+
+### Fixed
+
+- Preserved streamed-response maxima, Codex ownership/deduplication, partial-accounting coverage and provider-specific N/A semantics across merged parsers and consumers.
+- Preserved quota facts on warm scans and invalidated caches for parser, pricing, command-history and option changes; open workflows are reevaluated as they age.
+- Unified bounded model identities, numeric UTC comparisons, unknown-start exclusions and full-metric filtered exports.
+- Kept source-deleted history warnings visible and excluded historical working observations from live counts.
+- Reconciled all reviewed conflict fixes and privacy tests; no lane tests removed.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

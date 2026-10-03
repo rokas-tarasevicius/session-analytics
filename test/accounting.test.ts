@@ -24,6 +24,10 @@ async function withFixture(
 
 function analyzeFixture(fixture: SessionAnalyticsFixture, overrides: { cursorDatabasePath?: string } = {}) {
   return analyzeRepositorySessions({
+    noIndex: true, additionalProviders: false,
+
+    pricingPolicy: "reviewed-only",
+    dataDir: fixture.dataDir,
     claudeRoot: fixture.claudeRoot,
     codexArchiveRoot: fixture.codexArchiveRoot,
     codexRoot: fixture.codexRoot,
@@ -131,7 +135,7 @@ test("keeps snapshot ownership, thinking detail, and top-level effort across mai
     );
 
     const result = await analyzeFixture(fixture);
-    const session = result.sessions.find(({ firstEventAt }) => firstEventAt === "2026-07-23T09:59:00Z");
+    const session = result.sessions.find(({ firstEventAt }) => firstEventAt === "2026-07-23T09:59:00.000Z");
     assert.ok(session);
     assert.equal(session.metrics.assistantMessages, 3);
     assert.equal(session.tokens.outputTokens, 1_401);
@@ -168,7 +172,7 @@ test("counts current-format Codex turns, messages, and compactions once", async 
     );
 
     const result = await analyzeFixture(fixture);
-    const session = result.sessions.find(({ firstEventAt }) => firstEventAt === "2026-07-20T15:00:00Z");
+    const session = result.sessions.find(({ firstEventAt }) => firstEventAt === "2026-07-20T15:00:00.000Z");
     assert.ok(session);
     assert.equal(session.metrics.userTurns, 2);
     assert.equal(session.metrics.assistantMessages, 2);

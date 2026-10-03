@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
+import { indexErrorMessage } from "./store/errors.ts";
 
 export async function analyzeMachineSessionsIsolated(
   options: AnalyzeOptions,
@@ -22,7 +23,9 @@ export async function analyzeMachineSessionsIsolated(
     child.once("close", (code) => {
       if (code !== 0) {
         void errorOutput;
-        reject(new Error("Session analysis process exited before returning a result."));
+        let message: string | null = null;
+        try { message = indexErrorMessage((JSON.parse(output) as { analysisError?: unknown }).analysisError); } catch { /* No raw child error is forwarded. */ }
+        reject(new Error(message ?? "Session analysis process exited before returning a result."));
         return;
       }
       try {

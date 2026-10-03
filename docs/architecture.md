@@ -1,24 +1,67 @@
 # Architecture
 
-`session-analytics` is a single Node.js 24 package with no runtime dependencies. It uses Node's native TypeScript type stripping, `node:sqlite` for read-only database access, and `node:http` for the dashboard. Every launch performs a fresh scan; there is no persistent index yet (planned in [M0](roadmap.md#m0-correctness)).
+`session-analytics` is a single Node.js 24 package with zero runtime dependencies. Native TypeScript, `node:sqlite` and `node:http` provide parsing, read-only provider access, a private derived index and a loopback dashboard. Unchanged Claude/Codex facts are replayed; `--no-index` reads present sources. MCP additionally caches snapshots for a bounded TTL.
 
 ## Modules
 
 | Path | Role |
 | --- | --- |
-| `bin/session-analytics.ts` | Command dispatcher: `dashboard` (default), `report`, `--help`, `--version`. Adds `--open` to the dashboard unless `--no-open` is given. |
+| `bin/session-analytics.ts` | Dispatcher for dashboard, report, rates, insights, review, export, merge, index and MCP; common help/version handling. |
 | `src/server.ts` | Dashboard server: argument and environment parsing, loopback HTTP server, static files, `/api/health`, `/api/analytics`, browser opener. |
 | `src/cli.ts` | Terminal report and `--json` snapshot. |
+| `src/mcp/` | Stdio protocol, strict tool schemas, bounded snapshot worker, TTL cache, query metrics, structured evidence collector and names-only extension inventory. See [MCP](mcp.md). |
 | `src/analysis-process.ts` | Runs one analysis in a child process and returns the parsed result. |
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
+| `src/providers/adapter.ts` | Private adapter contract: discover roots, identify sessions, analyze into the public allowlist. |
+| `src/providers/claude.ts` | Existing Claude parser behind the adapter; shared state and pricing are injected by the analyzer. |
+| `src/providers/` | Additional-source registry, bounded readers and projection, Cursor SDK/transcripts, Copilot, OpenCode, Gemini, and Conductor result fallback. |
+| `src/public/providers.js` | Provider labels, daily series, and source-specific evidence coverage. |
+| `src/pricing/` | Fixed public-feed fetchers, normalization, validation, content-addressed rate tables with immutable observations, indexed request-time history, token-class pricing/coverage, provenance and rates CLI. |
+| `src/public/pricing.js` | Isolated Pricing tab renderer using selected sessions. |
+| `src/public/model-id.js` | Shared bounded model projection for provider parsing, catalogs and Pricing rendering. |
+| `src/metrics/velocity.ts` | Fixed agent enums and a streaming hourly counter accumulator attached at existing deduplicated parser counting points. |
+| `src/public/velocity-data.js` | Pure calendar rollups, coverage, comparisons, projection scenarios and movers; exercised directly by tests. |
+| `src/public/velocity.js`, `velocity.css` | Shared Summary/Velocity charts and isolated view styling. Served through the static allowlist with the existing CSP. |
+| `src/metrics/outcomes.ts`, `outcome-types.ts` | Streaming outcome evidence collector and explicit content-free types/projection. |
+| `src/metrics/outcome-lines.ts` | Bounded numeric observations, snapshot coverage/chronology reconciliation, and conservative partial line counts. |
+| `src/metrics/outcomes-enrichment.ts` | Per-scan opt-in read-only Git and authenticated GitHub enrichment, with shared budgets and a PR cache. |
+| `src/metrics/outcomes-summary.js`, `outcomes-report.ts` | Shared pure outcome aggregation for the analyzer/browser and terminal presentation. |
+| `src/public/outcomes.js`, `outcomes.css` | Isolated Outcomes view and theme-variable-based layout. |
+| `src/metrics/workflow.ts`, `workflow-types.ts` | Streaming workflow projection and namespaced public types; primary-transcript timing, bounded metadata, deduplicated events and heuristic labels. |
+| `src/metrics/workflow-inventory.ts` | Read-only matched Claude command history and scoped skill-directory inventories. Raw IDs remain internal. |
+| `src/public/workflow-data.js` | Pure workflow calculations shared by the worker and browser: exact pooled quantiles, interval sweep, UTC patterns and guarded comparisons. The adjacent declaration file defines its TypeScript contract. |
+| `src/public/workflow-scope.js`, `workflow-worker.js` | Reuse the full snapshot aggregate; cache eight filtered cohorts per snapshot and compute them in a same-origin module worker. Yield between input batches; ignore stale render results. |
+| `src/public/workflow.js`, `workflow.css`, `src/report/workflow.ts` | Workflow tab, scoped styles and terminal formatting. |
+| `src/interop/` | Validated snapshot IO, sharing/merge, private file export, and explicit opt-in OTLP delivery. No additional provider parsing. |
+| `schemas/`, `scripts/snapshot-schema.ts` | Published v1 schemas and exhaustive TypeScript-checked field maps. |
+| `src/public/export-data.js`, `evidence.js`, `timestamps.js` | Typechecked pure aggregation/selection, warning vocabulary, UTC normalization, and CSV helpers shared by ingestion, validation, and browser exports. |
+| `src/public/export-menu.js`, `shared-view.js` | Bound download previews and aggregate-only snapshot view. |
+| `src/store/index.ts` | Scoped incremental ingest, session reuse, dependency invalidation, source-deleted retention, and atomic persistence. |
+| `src/store/database.ts` | Private data-directory resolution, permissions, SQLite writer lease, WAL, migrations, status, prune, and rebuild. |
+| `src/store/writer-gate.ts` | Private filesystem ticket mutex protecting writers and coordination recovery independently of SQLite. |
+| `src/store/fingerprint.ts` | Device/inode, size, nanosecond times, keyed edge fingerprints, and full-prefix verification. |
+| `src/store/codex-ledger.ts` | Content-free per-file counter observations and verified append-only continuation. |
+| `src/store/projection.ts` | Explicit disk allowlist for session facts, used when writing and reading cached sessions. |
+| `src/store/cli.ts` | `index status|path|rebuild|prune` management commands. |
+| `src/store/errors.ts` | Fixed index failure codes/messages allowed across the worker boundary. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
+| `src/metrics/reliability*.ts` | Streaming Claude/Codex adapters, bounded call/result reconciliation, classification and HMAC rules, private key lifecycle, public types and report formatting. |
+| `src/public/reliability-data.js` | Pure mergeable counters/histograms shared by the analysis process, report and browser; declaration file checks its TypeScript callers. |
+| `src/public/reliability-view.js`, `reliability.css` | Additive Reliability panel and scoped styles using the existing theme. |
+| `src/public-model.ts`, `src/public/model-id.js` | Shared bounded model-identifier projection for providers, pricing and metric dimensions. |
+| `src/metrics/{limits,cache-context,context-windows,limits-config,limits-report}.ts` | Profile quota collection, request-level cache/context aggregation, reviewed window table, optional read-only configuration, and report projection. New types live in `limits-cache-types.ts`; no second transcript scan is added. |
+| `src/metrics/{compactions,context-detail}.ts` | Individual boundary reconciliation shared by detail and summary counts; deterministic snapshot-wide curve budget preserving exact aggregates. |
+| `src/public/views/limits-cache.{js,css}` | Scoped view and request-date aggregation, served through the existing static allowlist/CSP. |
+| `src/insights/` | Deterministic rule engine, strict configuration/name inventory projection, cache-gap counters, CLI/filter service and separate opt-in review worker. |
+| `src/public/views/insights.*`, `insights-state.js` | Scoped Insights UI/styles and browser-only dismiss/snooze persistence. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
 | `data/rate-cards.json` | Versioned model rates with an effective date and a source URL per model. |
 | `skills/session-analytics/` | Agent skill that launches the dashboard or report. |
 | `scripts/demo.ts` | Synthetic dataset generator that runs the tool against that data only. |
+| `scripts/benchmark-index.ts` | Numeric-only cold/warm timing, plus full-scan parity for a retained demo dataset. |
 | `test/` | Node test runner suites and the shared fixture builder. |
 
 ## Process model
@@ -27,7 +70,7 @@
 flowchart TB
   bin["bin/session-analytics.ts"] --> server["src/server.ts<br/>HTTP on 127.0.0.1"]
   bin --> cli["src/cli.ts<br/>report and JSON"]
-  server -- "options on stdin" --> worker["analysis-worker.ts<br/>child, 256 MB heap cap"]
+  server -- "options on stdin" --> worker["analysis-worker.ts<br/>child, 256 MiB V8 old-space limit"]
   cli -- "options on stdin" --> worker
   worker -- "options on stdin" --> cursor["cursor-worker.ts<br/>child, 192 MB heap cap"]
   cursor -- "serialized sessions" --> worker
@@ -35,23 +78,26 @@ flowchart TB
   worker -- "snapshot JSON on stdout" --> cli
 ```
 
-The server and the report never parse transcripts themselves. Each snapshot is computed in a fresh child process started with `--max-old-space-size=256`, and Cursor's composer database is parsed in its own child with a 192 MB cap. This keeps a machine-wide scan from growing the long-running server's memory, releases everything when the child exits, and means only serialized, already-allowlisted results cross the process boundary. A child's standard error is discarded; a failure surfaces as a fixed message.
+The server and report never parse transcripts themselves. Each snapshot runs in a fresh worker with `--max-old-space-size=256`; Cursor uses a separate 192 MiB worker. These are V8 old-space caps, not total resident-memory limits. Only serialized, allowlisted results cross the process boundary. Child stderr is discarded; index failures cross as bounded error codes and other failures use fixed messages.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
 
+Reliability observes each record during the existing Claude/Codex pass, without an extra transcript scan. One collector per execution stream retains call IDs for reconciliation, bounded enums/numbers, call-start/result-completion sequence positions, and optional internal HMACs. Receipt parsing keeps only enum/numeric candidates until the tool identity arrives; raw text never enters reconciliation state. Aggregate hashing limits (32 MiB of charged canonical string bytes and 16,384 file references per stream) stop hashing before it can consume the worker heap; limits or orphan results suppress composite sequence claims. Claude subagent streams are finalized separately before their public projections merge, preventing false loops across independent agents. Only `SessionReliability` crosses the worker boundary. Its sparse latency histograms can be merged after repository/time/agent filtering, avoiding statistically invalid averages of session percentiles. Public reliability counters are part of the derived index. P2 scans additionally persist a random private matching key; correlation digests remain internal and provider stores remain untouched.
+The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 256 MiB V8 old-space limit, then caches the allowlisted snapshot and names-only inventory for a completion-based TTL. Concurrent calls share the worker. Stdio EOF/signals abort and reap it; scans have a 180-second deadline. Output drains for at most 250 ms, then the CLI exits to release unread standard-pipe writes; the 4 MiB output overflow path skips the drain. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Structured tool flags, lifecycle observations and numeric Codex limit samples are collected during the normal transcript pass in `src/mcp/evidence.ts` and `activity.ts`. The existing pricing pass supplies dated eligible/priced token operands, including unknown prices; provider source-health counts are retained before repository selection; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
+
 ## Pipeline
 
-1. **Load the rate card.** `data/rate-cards.json`, or `--rate-card`, is validated: USD currency, an ISO effective date, non-negative rates, a provider of `claude` or `codex`, and a source for every model.
+1. **Load local price evidence.** Validate `data/rate-cards.json` plus cached API snapshots; `--rate-card` and `reviewed-only` pin the current reviewed card. Loaders never fetch or write. Request-time resolution binary-searches per-source observation indexes under the configured source order and reviewed exception policy; unchanged tables and their alias indexes are shared. Token-class substitutions retain estimated costs but reduce priced-token coverage and carry explicit assumptions. Only the public rate-card projection crosses the worker boundary; raw payloads, cache paths and internal history do not. See [pricing](pricing.md).
 2. **Open optional metadata.** If the Conductor database exists, it is opened read-only and its repositories, workspaces, and sessions are loaded. A missing database is normal.
 3. **Cursor pass.** In the Cursor child, every `composerData:*` record is read with its `bubbleId:*` records, composer headers map composers to workspaces, and each composer becomes a session assigned to a repository.
 4. **Discover provider roots.** Claude Code and Codex roots are collected across profiles (see [providers.md](providers.md)), then deduplicated by resolved real path. An explicit root option replaces discovery for that provider.
 5. **Index transcripts.** Each root is walked for transcript files, keyed by the session UUID in the file name. Claude sub-agent files and audit logs are excluded from the index; they are read later as part of their parent session.
 6. **Validate identity.** For each indexed session, the first records are read to find the provider's own session ID and working directory. A file is a candidate only when the recorded ID matches the file name and a working directory is present.
-7. **Build the Codex counter ledger.** Every Codex candidate is pre-scanned to decide which file owns each cumulative token snapshot (see [Deduplication](#deduplication)).
+7. **Build the Codex counter ledger.** Merge per-file counter observations from the index, reading changed candidates, to decide which file owns each cumulative snapshot (see [Deduplication](#deduplication)). Without the index, every candidate is pre-scanned.
 8. **Match orchestrator records.** Conductor sessions are matched to candidates by provider session ID and validated working directory. Legacy rows without a provider ID are recovered only when exactly one candidate shares the provider and working directory and started within 15 minutes. Rows without validated evidence are dropped rather than counted as empty sessions.
 9. **Assign repositories.** Every remaining candidate is assigned to a repository from its working directory (see [Repository assignment](#repository-assignment)).
-10. **Parse and price.** Provider parsers stream each file line by line and accumulate counters. Each request is priced as it is added, so long-context modifiers use that request's input size.
-11. **Aggregate.** Sessions roll up into repository summaries, then into the machine snapshot. Any repository filter is applied here.
+10. **Parse, price, or reuse.** A session can be reused only when its evidence group, metadata, parser revision, rate card, and ownership dependencies match. Otherwise provider parsers stream its files and price requests individually, preserving long-context modifiers.
+11. **Retain and aggregate.** Previously indexed sessions with deleted sources join present sessions with an explicit source-deleted mark. The retention floor applies before aggregation; repository filters apply to the full evidenced union.
 12. **Project.** `finalizeSession` and the aggregators build the public objects field by field. The result is written as JSON to the parent process.
 
 ## Repository assignment
@@ -78,10 +124,11 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 | The same session file under more than one root | The transcript index merges candidate paths per session ID. |
 | Claude Code writes one record per streamed content block, repeating input and cache counters while output grows | Usage is kept per `message.id`, and the snapshot with the most output (the final one) is priced once. |
 | Claude tool-use blocks repeated across streamed records | Tool calls are counted once per tool-use ID. |
+| Claude tool results replayed in parent or sibling files | Outcome operations and patches deduplicate tool-use IDs across the logical session; the first accepted result owns line evidence. Only UUID fallbacks are stream-local. |
 | Claude human messages repeated in a file | Counted once per record UUID; tool results are not human turns. |
 | Codex broadcasts the same process-wide cumulative counter into several session files | Each `(total, last)` usage state is fingerprinted; the file whose nearest preceding local activity is closest owns it, ties broken by timestamp and path; other files skip it. Only `last_token_usage` is summed. |
 | A Codex file opens on a process-wide counter that includes requests it never issued | Without per-request usage, only deltas between two snapshots the same file observed are counted; the opening snapshot and any post-reset snapshot are baselines. |
-| Codex records the same lifecycle event in several shapes (`event_msg`, `item_completed`, top-level `compacted`) | Turns, messages, and compactions take the largest count among shapes rather than the sum. |
+| Codex records the same lifecycle event in several shapes (`event_msg`, `item_completed`, top-level `compacted`) | Turns/messages use the largest shape count. Compactions reconcile shared identities or equal UTC timestamps across shapes and retain distinct boundaries; incomplete/ambiguous evidence is flagged. |
 | Codex tool calls | Counted once per `call_id`. |
 | Codex execution kind changes mid-file | Each request is attributed to the execution segment (top-level or sub-agent) active when it was observed. |
 | Cursor conversation bubbles stored both inline and as separate records | Merged by bubble ID. |
@@ -94,13 +141,54 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 - Rejects requests whose `Host` is not `127.0.0.1` or `localhost`, or whose `Origin` (when present) is not a loopback origin, with `403`.
 - Accepts `GET` only; anything else gets `405`.
 - Serves static files from a fixed map of URL paths, so request paths never reach the file system.
+- After the first successful scan, refreshes stale public pricing feeds once in the background unless offline or pinned to a reviewed card. This does not mutate the in-memory analytics snapshot; the next explicit refresh loads new cache evidence. There is no price-update HTTP endpoint.
 - Caches one snapshot promise. `/api/analytics?refresh=1` starts a new scan; concurrent requests share the scan in progress.
 - Sends a strict Content Security Policy (`default-src 'self'`, no inline script or style, `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and same-origin opener and resource policies. No CORS headers are sent.
 - If the port is taken, it checks `/api/health` for its own service ID and reuses that dashboard; otherwise it exits with an error.
 
+## Persistent index
+
+The default data directory is the macOS Application Support directory or the Linux XDG data directory described in [README](../README.md#local-index). `index.sqlite`, its WAL/SHM sidecars, `writer.sqlite` (a small coordination database), and `index.key` are mode `0600` inside a mode `0700` directory. Links, hard-linked files, and foreign-owned files are rejected. No source store is modified. `--no-index` returns before opening any index file.
+
+The schema uses `PRAGMA user_version` and ordered transactional migrations. Version 1 creates metadata, evidence, and session facts; version 2 adds deletion state, retention indexing, scan statistics, and keyed counter reservations; version 3 adds verified retention dates and keyed exclusion checkpoints. Future versions are refused rather than downgraded. WAL uses `synchronous=FULL`, a 5-second busy timeout, foreign keys, disabled trusted schema, and secure deletion. A domain-separated key-verification MAC is checked before selecting a scope. Legacy stores bootstrap it only after authenticating their existing payloads; unverifiable keyed-only stores fail closed.
+
+A filesystem bakery mutex protects the SQLite writer transaction and its recovery. Each process publishes a private choosing ticket, then an ordered numeric ticket using atomic rename, and waits for preceding live tickets. Tickets contain only a process ID, random nonce, and ordering number; abandoned tickets from dead processes are removed by their unique names. The 5-second wait limit gives a fixed busy error. This requires a local filesystem with coherent atomic rename and directory reads. SQLite still coordinates older writers and releases its locks on process exit. Rebuild can quarantine corrupt `writer.sqlite` files while holding the filesystem mutex; contention is never treated as corruption. Status checks both databases and the key, and can read the last committed generation during ingest.
+
+### Reuse and invalidation
+
+- Evidence is keyed by HMAC-SHA-256 of its absolute local path with the machine key. Fingerprints contain device/inode, byte length, nanosecond mtime **and ctime**, plus keyed hashes of the first and last 4 KiB. Content and raw paths never enter SQLite. Ctime catches middle-of-file rewrites even when size and mtime are restored. This detects ordinary filesystem changes, not an adversary controlling the filesystem and its metadata.
+- Source scope includes explicit provider roots (or the machine/profile discovery policy), the Cursor/Conductor configuration, and hidden-record policy. Machine and repository API entrypoints both include hidden records by default; an explicit exclusion still selects an isolated scope. Repository filters are projections over this scope. Switching an explicit source root never imports retained facts from a different scope.
+- Session signatures include the complete evidence group, relevant metadata, reviewed rate card, analyzer/ledger/store/projection revision, and Codex ownership decisions for that file. Headers are still validated and repository assignment is still computed from current local evidence. A Git/worktree mapping or Conductor metadata change therefore changes the signature. Pruned groups keep only keyed signature/source checkpoints, allowing unchanged excluded groups to skip session parsing. Evidence, metadata, ownership, or parser-policy changes re-evaluate them; new activity can re-enter above the floor.
+- Each Claude main transcript and its entire current `subagents/` tree form one group. Adding, changing, replacing, truncating, or removing a member invalidates the composite. The parser then deduplicates message IDs and keeps the final streamed usage exactly as in a full scan.
+- Codex stores each file's best observation of each numeric counter fingerprint, activity gap, timestamp, model set, and append continuation state. Rebuilding the machine ledger from these facts preserves the existing activity/timestamp/path ownership rule. A new owner invalidates the old owner's session, even if its file is unchanged. Timestamp-free counters disable Codex session reuse for that scan because order-sensitive claim ownership cannot be proved.
+- Append continuation is limited to the Codex **ledger pass**: the same device/inode, increased length, a newline-terminated old file, and a matching keyed hash of the **entire old prefix** are required. A size increase and matching edge samples alone are insufficient. Partial lines, rewrites, replacements, and truncation trigger a full ledger read. Changed session aggregates are recomputed because later records can revise deduplication, streaming maxima, and attribution.
+- Cursor is refreshed through the existing isolated reader on every scan; mutable SQLite tables, WALs, workspace metadata, and repository assignment make a single database-file fingerprint insufficient. Its projected session facts are stored for retention, but a new Cursor incremental adapter remains a follow-up.
+
+### Atomicity and retention
+
+Facts, fingerprints, deletion marks, exclusions, reservations, and scan statistics commit in one main-database transaction. An exception rolls it back. Files are checked again before commit. Deferral follows the complete connected component of prior owners, current owners, and consumers, including undated fingerprints and counters an old owner no longer observes. Every pending session and exclusion in an unstable component is restored to its prior generation, its ledgers are invalidated, and new reservations are discarded. Unrelated stable components can commit. The current response remains a best-effort live snapshot and carries a fixed warning. The next scan re-evaluates deferred files and their ownership dependents.
+
+When a previously validated main source disappears, its last public session projection is retained with `transcript.sourceDeleted: true`. A moved rollout with the same provider identity updates its source keys rather than creating a duplicate. Present-but-invalid identity evidence is excluded; an unreadable source tree keeps prior facts with an availability warning instead of declaring deletion. Retained-only repositories keep keyed root/remote matches for CLI filtering without storing paths. Cursor composers absent from a successful database read are retained similarly.
+
+Deleted Codex owners reserve their attributed counter states, so a surviving broadcast receiver cannot charge them again. Every request claim checks retired membership independently of timestamps or ledger ownership. Prune removes sessions last active strictly before its UTC date and persists a retention floor; keyed membership of retired counters remains solely to prevent rebilling after pruning. Event extrema compare parsed instants and are stored in normalized UTC. Pre-version-3 retention dates are unverified and cannot justify pruning until a source is reparsed; source-deleted legacy facts remain conservatively retained. Raw provider files are untouched. Rebuild clears facts, exclusions, counters, and the retention floor; deleted history cannot be reconstructed. Corrupt databases are moved to private `.rebuild-*` quarantine files; healthy rebuilds clear and vacuum the existing database. Quarantines are never opened by analysis or included in status/prune and may be removed manually after recovery.
+
+Retained facts use the parser and price card from their last successful ingest. They are not silently repriced using current model aggregates, which would lose per-request long-context behavior. A fixed warning states this. The index does not archive raw files or separately freeze removed subagent contributions when a main file remains; a changed partial Claude group is recomputed from present evidence.
+
+### Verification
+
+`test/index-store.test.ts` checks cold/warm/full parity, cross-file ownership changes, streamed/composite invalidation, prefix verification, rotation/truncation, deletion, pruning, migrations, corruption, concurrency, rollback, permissions, and sentinel absence in SQLite and output. To measure the demo: run `node scripts/demo.ts report --keep`, then `node scripts/benchmark-index.ts --demo-root <printed-synthetic-directory>`. `--machine` instead performs one cold ingest and one incremental launch against local defaults, emits only counts/timings, and removes its temporary index on exit.
+
 ## Dashboard client
 
-`src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
+`src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Velocity filters event-date cells independently of session-start filtering, so a long-running session can contribute activity after its start falls outside the window. The snapshot declares the analysis timezone. Legacy UTC spend fields remain available to other consumers. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
+
+`src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Reliability uses lightweight provider/repository totals, weakly cached session totals and a three-scope selection cache over immutable snapshot objects; repository tables initially render 50 rows. Switching views clears the inactive Reliability DOM. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
+
+Outcome collectors observe records during the existing streaming pass; no second transcript scan is added. Branches, full SHAs, and validated GitHub coordinates are private enrichment inputs. Only explicit links/counters leave `project()`. Opt-in enrichment completes inside the analysis worker before serialization. The Outcomes tab and backend import the same aggregation module, served through the fixed static-file map. Optional Conductor fields use schema detection. Outcomes are optional additive namespaces at the session, repository, and machine levels.
+
+Workflow reuses `snapshot.workflow` for the full scope. Filtered cohorts are calculated in a module worker from public session fields, with an eight-entry cache tied to snapshot identity. Input transfer yields every 128 sessions; pending state is visible and older responses cannot overwrite the current filter or repopulate an inactive tab. Repository selection stays independent of the date-filtered sessions, retaining empty-repository inventories. The worker module and scope controller are fixed static assets covered by the existing same-origin CSP.
+
+Retention counts and pricing caveats follow the filtered sessions; scan-wide warnings remain visible on every tab. Historical working observations from deleted or unavailable sources are excluded from the live snapshot count. Retained prices are qualified beside summary totals and in the shared view context.
 
 ## Design constraints
 
@@ -109,6 +197,43 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 - **Streaming parsers.** Transcripts are read line by line. Identity checks stop at the first records that carry an ID and working directory, and concurrency is kept low because a single Codex `session_meta` record can be several megabytes.
 - **Fail closed on content.** When a record is malformed it is counted as a warning, not echoed.
 
+## Insights and review boundaries
+
+The Insights API evaluates `src/insights/engine.ts` over the cached content-free snapshot; repository/date filters never rescan history. `config.ts` projects only bounded installed skill/MCP names and numeric thresholds from local settings, reads the reviewed rate card, and never returns settings contents. The CLI shares this engine. Claude parsers add a small numeric `insightSignals.cacheGaps` namespace after streamed-message deduplication; per-file/model boundaries prevent unrelated parallel traces from creating idle gaps.
+
+`eligibility.ts` shares base eligibility with review and distinguishes completed-peer evidence from uncertain aggregate observations. `transcript-evidence.ts` interprets ordered lifecycle markers without equating old unmatched starts with current work. Parser projections also expose owned request-size coverage and bounded structured MCP attribution; no content is added. The engine's optional internal finding observer supplies exact contributing sessions to review without serializing a contributor list. The schema-v2 report uses `grouping.ts` to aggregate one card per rule/scope level from internal contributor unions while retaining ranked `items`. `pricing-policy.ts` defines configurable one-step tiers; `pricing-scenario.ts` reprices each model's usage once with the existing size/eligibility guards. The UI renders up to ten groups initially and builds tables lazily in batches of ten, with row search, repository drill-down, separate rule/scope decisions and metadata-only dry-run commands. Group totals never authorize review.
+
+The opt-in review uses a **separate** 256 MB worker. An internal analyzer observer correlates the selected public session key with its validated source path inside that worker. Neither the callback nor raw source paths are serialized into analytics. The worker temporarily selects/redacts bounded prose, returns metadata only by default, and requires a per-run `--send-content` boolean to invoke the user's agent CLI. It returns only a projected enum assessment, discarding arbitrary provider stdout/stderr. The dashboard has no review route and remains read-only. See [insights.md](insights.md) for caps and interpretation limits.
+
+`review-source.ts` keeps source identity and file-version stamps inside that worker. It revalidates them around analysis, excerpt reads and invocation; the excerpt reader also checks its open file descriptor. Ineligible or changing evidence fails closed. Default analytics do not run these review-only identity rechecks. Review bypasses indexed session reuse so source identity and version checks always use present evidence.
+
 ## Planned changes
 
+The remaining native parsers can move behind the adapter boundary introduced below. The complete projection now has a persistent index. Remaining work includes a normalized event model and incremental mutable-database adapters. See [roadmap.md](roadmap.md).
+
+## Provider adapter boundary
+
+`ProviderAdapter<Session, Context>` owns `discoverRoots`, `identify`, and `analyze`. Session identity, working directory, source path, and opaque project grouping keys are private worker data. Only `SessionAnalytics` crosses the public boundary. The host supplies repository assignment and the existing pricing function; adapters do not fetch rates, run provider CLIs, or write provider stores. Claude retains its mature mutable-state/finalizer implementation through injected callbacks; a saved five-session fixture checks the complete legacy projection after migration.
+
+Additional adapters run sequentially after the original stores. For the same Cursor ID, composer evidence wins over SDK runs, and SDK runs win over activity-only transcripts. Identity matching is exact; tools or tokens from copies are never added together. Conductor results run last and cannot supplement any canonical provider identity or uniquely recovered legacy session. Distinct SDK result UUIDs are counted once, including duplicate database envelopes; rows without provider IDs can use the result's own identity to suppress copies.
+
+New JSONL readers release streams on early identity exit and retain only projected data. Recursive discovery does not follow child symlinks and is limited to eight directory levels. Legacy monolithic Gemini JSON is limited to 32 MiB, with JSONL available for larger histories. Source failures produce fixed warnings, retain successfully read sessions, and do not echo exceptions. All SQLite connections use `readOnly: true` and close in `finally` blocks. A missing new store is normal; a present unsupported store emits a fixed warning.
+
+Gemini maps a provider project hash through known repository/workspace paths, `projects.json`, or `.project_root`; Cursor's encoded project directory is matched only to an unambiguous known path. Unresolved projects receive a pseudonymous unassigned group. The code never guesses a filesystem path by reversing an encoded folder name.
+
 The roadmap moves the analyzer toward per-source adapters, a normalized event model, and a persistent content-free SQLite index with incremental ingest, so launches no longer rescan unchanged files. See [roadmap.md](roadmap.md).
+
+## Interchange boundary
+
+Full and shared snapshots have separate closed schemas. `--snapshot` bypasses analysis and validates file input before display. Shared files retain only thresholded repository counters; no synthetic sessions are created to reuse session charts. Aggregation/selection helpers run in both Node and the browser and are checked as JavaScript against the public types. File imports reconcile every rollup and applicable session invariant. Browser export previews bind one selection and are invalidated on data/scope changes. Health checks distinguish live scans from saved files. Exports write new private files; OTLP posts only after local output succeeds and only with an explicit endpoint flag. See [interop.md](interop.md) for the formats and privacy limits.
+The roadmap moves parsing toward per-source adapters, a normalized event model, and more granular continuation checkpoints on top of the persistent index. See [roadmap.md](roadmap.md).
+
+## v0.6.0 integration boundaries
+
+All native metrics attach to the existing Claude/Codex parse streams. The Codex counter ledger establishes ownership before accounting; metrics use the same deduplicated, priced usage. Additional adapters label their fidelity and unavailable metrics. The analysis worker remains capped at 256 MiB.
+
+The published schema supplies the recursive disk allowlist. Cached session facts include velocity, reliability, limits/cache/context, outcomes, workflow, insight signals, MCP evidence and model price provenance. Quota evidence contains only normalized observations and hashed hit/session keys, replayed into the per-scan collector. Provider source changes, parser/schema code, pricing policy/history, source options and command-history dependencies invalidate reuse. P2 settings partition history; stale-open workflows are recomputed. Optional outcome enrichment and P3 review use present source evidence.
+
+Mutable additional-provider stores are reread, while their complete derived sessions can be retained after deletion. Repository/day filters project the same population; they do not create separate index datasets. Quotas remain explicitly global. Snapshot dashboards validate input and derive all views without scanning local history or refreshing prices.
+
+The shared browser aggregation/selection modules also serve filtered exports. MCP exposes bounded summaries of each metric namespace, with coverage and request-time quota freshness. No raw parser object crosses the worker, index, API, MCP or export boundaries.

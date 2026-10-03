@@ -73,6 +73,10 @@ test("report reads SESSION_ANALYTICS_* settings and returns only fixture evidenc
       encoding: "utf8",
       env: {
         ...process.env,
+        SESSION_ANALYTICS_NO_INDEX: "1", SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0",
+
+        SESSION_ANALYTICS_OFFLINE: "1",
+        SESSION_ANALYTICS_DATA_DIR: resolve(directory, "pricing-data"),
         SESSION_ANALYTICS_CLAUDE_ROOT: fixture.claudeRoot,
         SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: fixture.codexArchiveRoot,
         SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,

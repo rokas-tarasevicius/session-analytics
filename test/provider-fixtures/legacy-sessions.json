@@ -1,0 +1,500 @@
+[
+  {
+    "cost": {
+      "cacheWriteUsd": 0,
+      "cachedInputUsd": 0,
+      "inputUsd": 0,
+      "outputUsd": 0,
+      "totalUsd": 1.23,
+      "upperEstimateUsd": 1.23
+    },
+    "costBasis": "provider-reported",
+    "costByExecution": {
+      "subagentUsd": 0,
+      "topLevelUsd": 1.23,
+      "unknownUsd": 0
+    },
+    "costComplete": true,
+    "createdAt": "2026-07-20T14:00:00.000Z",
+    "effort": null,
+    "executionKind": "top-level",
+    "firstEventAt": "2026-07-20T14:00:00.000Z",
+    "lastEventAt": "2026-07-20T14:04:00.000Z",
+    "metrics": {
+      "assistantMessages": 1,
+      "compactions": 0,
+      "contextUtilizationPeak": null,
+      "delegatedAgents": 0,
+      "durationMilliseconds": 240000,
+      "eventSpanMilliseconds": 240000,
+      "maxContextWindow": 0,
+      "maxInputTokensPerCall": 200,
+      "modelCalls": 1,
+      "queueOperations": 0,
+      "summaries": 0,
+      "taskCompletions": 0,
+      "taskStarts": 0,
+      "toolCalls": 1,
+      "transportToolCalls": 1,
+      "userTurns": 1
+    },
+    "models": [
+      {
+        "cacheWrite1hInputTokens": 0,
+        "cacheWrite5mInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "cachedInputTokens": 0,
+        "inputTokens": 0,
+        "nonReasoningOutputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "uncachedInputTokens": 0,
+        "cacheWriteUsd": 0,
+        "cachedInputUsd": 0,
+        "inputUsd": 0,
+        "outputUsd": 0,
+        "totalUsd": 1.23,
+        "upperEstimateUsd": 1.23,
+        "calls": 0,
+        "model": "cursor-fixture-model",
+        "priced": true
+      }
+    ],
+    "pricedTokenCoverage": null,
+    "provider": "cursor",
+    "repositoryId": "conductor",
+    "repositoryName": "conductor",
+    "sessionKey": "75b09add29cd",
+    "skillEvidence": "unavailable",
+    "skills": {},
+    "spendByDay": {},
+    "status": "idle",
+    "tokens": {
+      "cacheWrite1hInputTokens": 0,
+      "cacheWrite5mInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "cachedInputTokens": 0,
+      "inputTokens": 200,
+      "nonReasoningOutputTokens": 40,
+      "outputTokens": 40,
+      "reasoningOutputTokens": 0,
+      "uncachedInputTokens": 200
+    },
+    "tools": {
+      "edit_file": 1
+    },
+    "transcript": {
+      "files": 1,
+      "snapshotWhileWorking": false,
+      "status": "ok",
+      "warnings": [
+        "Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card."
+      ]
+    },
+    "transportTools": {
+      "edit_file": 1
+    },
+    "updatedAt": "2026-07-20T14:04:00.000Z"
+  },
+  {
+    "cost": {
+      "cacheWriteUsd": 0,
+      "cachedInputUsd": 0.000032,
+      "inputUsd": 0.00008,
+      "outputUsd": 0.0002,
+      "totalUsd": 0.000312,
+      "upperEstimateUsd": 0.000332
+    },
+    "costBasis": "api-list-price-equivalent",
+    "costByExecution": {
+      "subagentUsd": 0,
+      "topLevelUsd": 0.000312,
+      "unknownUsd": 0
+    },
+    "costComplete": true,
+    "createdAt": "2026-07-18T10:00:00Z",
+    "effort": null,
+    "executionKind": "mixed",
+    "firstEventAt": "2026-07-18T10:00:00Z",
+    "lastEventAt": "2026-07-20T10:02:59Z",
+    "metrics": {
+      "assistantMessages": 0,
+      "compactions": 0,
+      "contextUtilizationPeak": null,
+      "delegatedAgents": 0,
+      "durationMilliseconds": 172979000,
+      "eventSpanMilliseconds": 172979000,
+      "maxContextWindow": 0,
+      "maxInputTokensPerCall": 500,
+      "modelCalls": 1,
+      "queueOperations": 0,
+      "summaries": 0,
+      "taskCompletions": 0,
+      "taskStarts": 0,
+      "toolCalls": 0,
+      "transportToolCalls": 0,
+      "userTurns": 0
+    },
+    "models": [
+      {
+        "cacheWrite1hInputTokens": 0,
+        "cacheWrite5mInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "cachedInputTokens": 80,
+        "inputTokens": 100,
+        "nonReasoningOutputTokens": 10,
+        "outputTokens": 10,
+        "reasoningOutputTokens": 0,
+        "uncachedInputTokens": 20,
+        "cacheWriteUsd": 0,
+        "cachedInputUsd": 0.000032,
+        "inputUsd": 0.00008,
+        "outputUsd": 0.0002,
+        "totalUsd": 0.000312,
+        "upperEstimateUsd": 0.000332,
+        "calls": 1,
+        "model": "gpt-5.6-sol",
+        "priced": true
+      }
+    ],
+    "pricedTokenCoverage": 1,
+    "provider": "codex",
+    "repositoryId": "conductor",
+    "repositoryName": "conductor",
+    "sessionKey": "845c513423c7",
+    "skillEvidence": "inferred",
+    "skills": {},
+    "spendByDay": {
+      "2026-07-18": 0.000312
+    },
+    "status": "idle",
+    "tokens": {
+      "cacheWrite1hInputTokens": 0,
+      "cacheWrite5mInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "cachedInputTokens": 80,
+      "inputTokens": 100,
+      "nonReasoningOutputTokens": 10,
+      "outputTokens": 10,
+      "reasoningOutputTokens": 0,
+      "uncachedInputTokens": 20
+    },
+    "tools": {},
+    "transcript": {
+      "files": 1,
+      "snapshotWhileWorking": false,
+      "status": "ok",
+      "warnings": [
+        "Discovered directly from the machine-wide provider transcript store.",
+        "1 repeated process-wide token snapshot was excluded from this session.",
+        "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
+      ]
+    },
+    "transportTools": {},
+    "updatedAt": "2026-07-18T10:00:00Z"
+  },
+  {
+    "cost": {
+      "cacheWriteUsd": 0,
+      "cachedInputUsd": 0.00048000000000000007,
+      "inputUsd": 0.0012000000000000001,
+      "outputUsd": 0.003,
+      "totalUsd": 0.00468,
+      "upperEstimateUsd": 0.004980000000000001
+    },
+    "costBasis": "api-list-price-equivalent",
+    "costByExecution": {
+      "subagentUsd": 0,
+      "topLevelUsd": 0.00468,
+      "unknownUsd": 0
+    },
+    "costComplete": true,
+    "createdAt": "2026-07-20T10:00:00Z",
+    "effort": "high",
+    "executionKind": "top-level",
+    "firstEventAt": "2026-07-20T10:00:00Z",
+    "lastEventAt": "2026-07-20T10:05:00Z",
+    "metrics": {
+      "assistantMessages": 0,
+      "compactions": 1,
+      "contextUtilizationPeak": 0.5,
+      "delegatedAgents": 0,
+      "durationMilliseconds": 300000,
+      "eventSpanMilliseconds": 300000,
+      "maxContextWindow": 2000,
+      "maxInputTokensPerCall": 1000,
+      "modelCalls": 2,
+      "queueOperations": 0,
+      "summaries": 0,
+      "taskCompletions": 1,
+      "taskStarts": 1,
+      "toolCalls": 2,
+      "transportToolCalls": 1,
+      "userTurns": 1
+    },
+    "models": [
+      {
+        "cacheWrite1hInputTokens": 0,
+        "cacheWrite5mInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "cachedInputTokens": 1200,
+        "inputTokens": 1500,
+        "nonReasoningOutputTokens": 100,
+        "outputTokens": 150,
+        "reasoningOutputTokens": 50,
+        "uncachedInputTokens": 300,
+        "cacheWriteUsd": 0,
+        "cachedInputUsd": 0.00048000000000000007,
+        "inputUsd": 0.0012000000000000001,
+        "outputUsd": 0.003,
+        "totalUsd": 0.00468,
+        "upperEstimateUsd": 0.004980000000000001,
+        "calls": 2,
+        "model": "gpt-5.6-sol",
+        "priced": true
+      }
+    ],
+    "pricedTokenCoverage": 1,
+    "provider": "codex",
+    "repositoryId": "conductor",
+    "repositoryName": "conductor",
+    "sessionKey": "be7065a43b32",
+    "skillEvidence": "inferred",
+    "skills": {
+      "frontend-design": 1
+    },
+    "spendByDay": {
+      "2026-07-20": 0.00468
+    },
+    "status": "idle",
+    "tokens": {
+      "cacheWrite1hInputTokens": 0,
+      "cacheWrite5mInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "cachedInputTokens": 1200,
+      "inputTokens": 1500,
+      "nonReasoningOutputTokens": 100,
+      "outputTokens": 150,
+      "reasoningOutputTokens": 50,
+      "uncachedInputTokens": 300
+    },
+    "tools": {
+      "exec_command": 1,
+      "apply_patch": 1
+    },
+    "transcript": {
+      "files": 1,
+      "snapshotWhileWorking": false,
+      "status": "ok",
+      "warnings": [
+        "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
+      ]
+    },
+    "transportTools": {
+      "exec": 1
+    },
+    "updatedAt": "2026-07-20T11:00:00Z"
+  },
+  {
+    "cost": {
+      "cacheWriteUsd": 0.0014375,
+      "cachedInputUsd": 0.00019999999999999998,
+      "inputUsd": 0.00075,
+      "outputUsd": 0.00125,
+      "totalUsd": 0.0036375,
+      "upperEstimateUsd": 0.0036375
+    },
+    "costBasis": "api-list-price-equivalent",
+    "costByExecution": {
+      "subagentUsd": 0.00055,
+      "topLevelUsd": 0.0030875,
+      "unknownUsd": 0
+    },
+    "costComplete": true,
+    "createdAt": "2026-07-20T12:00:00Z",
+    "effort": null,
+    "executionKind": "mixed",
+    "firstEventAt": "2026-07-20T12:00:00Z",
+    "lastEventAt": "2026-07-20T12:03:00Z",
+    "metrics": {
+      "assistantMessages": 2,
+      "compactions": 0,
+      "contextUtilizationPeak": null,
+      "delegatedAgents": 1,
+      "durationMilliseconds": 180000,
+      "eventSpanMilliseconds": 180000,
+      "maxContextWindow": 0,
+      "maxInputTokensPerCall": 0,
+      "modelCalls": 2,
+      "queueOperations": 0,
+      "summaries": 0,
+      "taskCompletions": 0,
+      "taskStarts": 0,
+      "toolCalls": 3,
+      "transportToolCalls": 3,
+      "userTurns": 1
+    },
+    "models": [
+      {
+        "cacheWrite1hInputTokens": 50,
+        "cacheWrite5mInputTokens": 150,
+        "cacheWriteInputTokens": 200,
+        "cachedInputTokens": 400,
+        "inputTokens": 750,
+        "nonReasoningOutputTokens": 50,
+        "outputTokens": 50,
+        "reasoningOutputTokens": 0,
+        "uncachedInputTokens": 150,
+        "cacheWriteUsd": 0.0014375,
+        "cachedInputUsd": 0.00019999999999999998,
+        "inputUsd": 0.00075,
+        "outputUsd": 0.00125,
+        "totalUsd": 0.0036375,
+        "upperEstimateUsd": 0.0036375,
+        "calls": 2,
+        "model": "claude-opus-5",
+        "priced": true
+      }
+    ],
+    "pricedTokenCoverage": 1,
+    "provider": "claude",
+    "repositoryId": "conductor",
+    "repositoryName": "conductor",
+    "sessionKey": "d42e477d6e75",
+    "skillEvidence": "explicit",
+    "skills": {
+      "review": 1
+    },
+    "spendByDay": {
+      "2026-07-20": 0.0036375
+    },
+    "status": "idle",
+    "tokens": {
+      "cacheWrite1hInputTokens": 50,
+      "cacheWrite5mInputTokens": 150,
+      "cacheWriteInputTokens": 200,
+      "cachedInputTokens": 400,
+      "inputTokens": 750,
+      "nonReasoningOutputTokens": 50,
+      "outputTokens": 50,
+      "reasoningOutputTokens": 0,
+      "uncachedInputTokens": 150
+    },
+    "tools": {
+      "Bash": 1,
+      "Skill": 1,
+      "Read": 1
+    },
+    "transcript": {
+      "files": 2,
+      "snapshotWhileWorking": false,
+      "status": "ok",
+      "warnings": [
+        "Some Claude responses do not expose thinking tokens separately; they remain included in output."
+      ]
+    },
+    "transportTools": {
+      "Bash": 1,
+      "Skill": 1,
+      "Read": 1
+    },
+    "updatedAt": "2026-07-20T13:00:00Z"
+  },
+  {
+    "cost": {
+      "cacheWriteUsd": 0,
+      "cachedInputUsd": 0,
+      "inputUsd": 0,
+      "outputUsd": 0,
+      "totalUsd": 0.25,
+      "upperEstimateUsd": 0.25
+    },
+    "costBasis": "provider-reported",
+    "costByExecution": {
+      "subagentUsd": 0,
+      "topLevelUsd": 0.25,
+      "unknownUsd": 0
+    },
+    "costComplete": true,
+    "createdAt": "2026-07-19T14:00:00.000Z",
+    "effort": null,
+    "executionKind": "top-level",
+    "firstEventAt": "2026-07-19T14:00:00.000Z",
+    "lastEventAt": "2026-07-21T14:00:00.000Z",
+    "metrics": {
+      "assistantMessages": 2,
+      "compactions": 0,
+      "contextUtilizationPeak": null,
+      "delegatedAgents": 0,
+      "durationMilliseconds": 172800000,
+      "eventSpanMilliseconds": 172800000,
+      "maxContextWindow": 0,
+      "maxInputTokensPerCall": 300,
+      "modelCalls": 1,
+      "queueOperations": 0,
+      "summaries": 0,
+      "taskCompletions": 0,
+      "taskStarts": 0,
+      "toolCalls": 1,
+      "transportToolCalls": 1,
+      "userTurns": 0
+    },
+    "models": [
+      {
+        "cacheWrite1hInputTokens": 0,
+        "cacheWrite5mInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "cachedInputTokens": 0,
+        "inputTokens": 0,
+        "nonReasoningOutputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "uncachedInputTokens": 0,
+        "cacheWriteUsd": 0,
+        "cachedInputUsd": 0,
+        "inputUsd": 0,
+        "outputUsd": 0,
+        "totalUsd": 0.25,
+        "upperEstimateUsd": 0.25,
+        "calls": 0,
+        "model": "cursor-archived-model",
+        "priced": true
+      }
+    ],
+    "pricedTokenCoverage": null,
+    "provider": "cursor",
+    "repositoryId": "conductor",
+    "repositoryName": "conductor",
+    "sessionKey": "f9e4f8fdc301",
+    "skillEvidence": "unavailable",
+    "skills": {},
+    "spendByDay": {},
+    "status": "completed",
+    "tokens": {
+      "cacheWrite1hInputTokens": 0,
+      "cacheWrite5mInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "cachedInputTokens": 0,
+      "inputTokens": 300,
+      "nonReasoningOutputTokens": 50,
+      "outputTokens": 50,
+      "reasoningOutputTokens": 0,
+      "uncachedInputTokens": 300
+    },
+    "tools": {
+      "search_code": 1
+    },
+    "transcript": {
+      "files": 1,
+      "snapshotWhileWorking": false,
+      "status": "ok",
+      "warnings": [
+        "Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card."
+      ]
+    },
+    "transportTools": {
+      "search_code": 1
+    },
+    "updatedAt": "2026-07-21T14:00:00.000Z"
+  }
+]
