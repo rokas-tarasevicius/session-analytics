@@ -1,3 +1,5 @@
+import { donutGradient, donutStops, layoutEndLabels, nearestIndex, positionAt, sharePercent } from "/chart-geometry.js";
+
 const $ = (selector) => document.querySelector(selector);
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
@@ -59,14 +61,6 @@ const integer = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 const currency = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
 const money = (value) => currency.format(value || 0);
 const percent = (value) => value === null || value === undefined ? "N/A" : `${(value * 100).toFixed(1)}%`;
-
-function duration(milliseconds) {
-  if (!milliseconds) return "—";
-  const hours = milliseconds / 3_600_000;
-  if (hours >= 24) return `${(hours / 24).toFixed(1)}d`;
-  if (hours >= 1) return `${hours.toFixed(1)}h`;
-  return `${Math.max(1, Math.round(milliseconds / 60_000))}m`;
-}
 
 function dateTime(value) {
   if (!value) return "Unknown time";
@@ -182,7 +176,7 @@ function activeView() {
 function selectRepository(id) {
   elements.repositoryFilter.value = id;
   renderView();
-  document.querySelector(".hero").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(".hero").scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
 }
 
 function renderBars(container, items, formatter, limit = 9, onSelect = null) {
@@ -234,8 +228,21 @@ function sessionsForProviders(sessions, scope) {
   return sessions.filter(({ provider }) => selected.has(provider));
 }
 
+// Re-rendered controls keep keyboard focus: remember the focused control's key before a container is
+// rebuilt and move focus back to the rebuilt control with the same key.
+function focusedKey(container, attribute) {
+  const active = document.activeElement;
+  return active && container.contains(active) ? active.closest(`[${attribute}]`)?.getAttribute(attribute) ?? null : null;
+}
+
+function restoreFocus(container, attribute, key) {
+  if (key === null) return;
+  const host = container.querySelector(`[${attribute}="${CSS.escape(key)}"]`);
+  (host?.matches("button, input") ? host : host?.querySelector("input, button"))?.focus();
+}
+
 function renderViewProviderFilters(container, scope) {
-  clear(container);
+  const focused = focusedKey(container, "data-provider"); clear(container);
   for (const provider of ["codex", "claude", "cursor"]) {
     const label = node("label", null, "provider-toggle"); label.dataset.provider = provider;
     const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider);
@@ -247,6 +254,7 @@ function renderViewProviderFilters(container, scope) {
     });
     label.append(input, logo, document.createTextNode(providerLabels[provider])); container.append(label);
   }
+  restoreFocus(container, "data-provider", focused);
 }
 
 function ensureDistributionRepositories() {
@@ -263,7 +271,8 @@ function ensureDistributionRepositories() {
 }
 
 function renderDistributionRepositoryOptions() {
-  ensureDistributionRepositories(); clear(elements.distributionRepositoryOptions);
+  ensureDistributionRepositories();
+  const focused = focusedKey(elements.distributionRepositoryOptions, "data-repository"); clear(elements.distributionRepositoryOptions);
   const sessionCounts = new Map();
   for (const { repositoryId } of snapshot.sessions) sessionCounts.set(repositoryId, (sessionCounts.get(repositoryId) || 0) + 1);
   const repositories = snapshot.repositories.filter(({ repository }) => sessionCounts.has(repository.id)).sort((left, right) => {
@@ -273,7 +282,7 @@ function renderDistributionRepositoryOptions() {
     return activityOrder || left.repository.name.localeCompare(right.repository.name);
   });
   for (const { repository } of repositories) {
-    const label = node("label", null, "compare-option");
+    const label = node("label", null, "compare-option"); label.dataset.repository = repository.id;
     label.style.setProperty("--series-color", repositoryColor(repository.id));
     const input = node("input"); input.type = "checkbox"; input.checked = distributionRepositories.has(repository.id);
     input.disabled = !input.checked && distributionRepositories.size >= seriesColors.length;
@@ -284,13 +293,18 @@ function renderDistributionRepositoryOptions() {
     });
     label.append(input, document.createTextNode(`${repository.name} · ${integer.format(sessionCounts.get(repository.id) || 0)}`)); elements.distributionRepositoryOptions.append(label);
   }
+  restoreFocus(elements.distributionRepositoryOptions, "data-repository", focused);
 }
 
-function addSvgText(svg, value, x, y, anchor = "start") {
-  const label = document.createElementNS(svg.namespaceURI, "text");
-  label.setAttribute("x", String(x)); label.setAttribute("y", String(y));
-  label.setAttribute("class", "axis-label"); label.setAttribute("text-anchor", anchor);
-  label.textContent = value; svg.append(label);
+function svgElement(svg, tag, attributes) {
+  const element = document.createElementNS(svg.namespaceURI, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));
+  return element;
+}
+
+function addSvgText(svg, value, x, y, anchor = "start", className = "axis-label") {
+  const label = svgElement(svg, "text", { x, y, class: className, "text-anchor": anchor });
+  label.textContent = value; svg.append(label); return label;
 }
 
 function renderDistributionChart(container, series, accessor, formatter, logarithmic = false) {
@@ -417,6 +431,7 @@ function renderActivity(view) {
       cell.addEventListener("focus", showTooltip);
       cell.addEventListener("blur", hideTooltip);
       cell.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") { hideTooltip(); return; }
         const movement = { ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0] }[event.key];
         if (!movement) return;
         const nextDay = day + movement[0], nextHour = hour + movement[1];
@@ -525,6 +540,7 @@ function evidenceLabel(sessions) {
 function renderNamedDistribution({ view, field, keyContainer, tableContainer, detailContainer, detailTitle, providerScope, skillMode = false }) {
   const sessions = sessionsForProviders(view.sessions, providerScope);
   const names = namedTotals(sessions, field).slice(0, 6);
+  const focused = focusedKey(tableContainer, "data-repository");
   clear(tableContainer); clear(keyContainer);
   const header = node("div", null, "distribution-row header-row");
   header.append(node("span", "Repository"), node("span", "Distribution"), node("span", field === "skills" ? "Observed" : "Calls"), node("span", skillMode ? "Coverage" : "Top")); tableContainer.append(header);
@@ -535,7 +551,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
   }).filter(({ total }) => total > 0).sort((left, right) => right.total - left.total);
   for (const item of rows) {
     const row = node("div", null, "distribution-row"); const open = node("button", item.repository.name);
-    open.type = "button"; open.addEventListener("click", () => {
+    open.type = "button"; open.dataset.repository = item.repository.id; open.addEventListener("click", () => {
       if (field === "skills") skillsDetailRepositoryId = item.repository.id; else toolsDetailRepositoryId = item.repository.id;
       renderActiveAnalyticsView(view);
     }); row.append(open);
@@ -552,6 +568,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
     row.append(stack, node("strong", integer.format(item.total)), node("span", skillMode ? evidenceLabel(item.sessions) : top)); tableContainer.append(row);
   }
   if (rows.length === 0) tableContainer.append(node("p", skillMode ? "No observed skill invocations in this view." : "No tool activity in this view.", "empty-state"));
+  restoreFocus(tableContainer, "data-repository", focused);
   for (const [index, { name }] of names.entries()) {
     const item = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", seriesColors[index]); item.append(swatch, document.createTextNode(name)); keyContainer.append(item);
   }
@@ -621,15 +638,9 @@ function activeProviders() {
 
 const providerLabels = { claude: "Claude", codex: "Codex", cursor: "Cursor" };
 
-function dayLabel(name) {
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(`${name}T00:00:00`));
-}
-
-function svgElement(svg, tag, attributes) {
-  const element = document.createElementNS(svg.namespaceURI, tag);
-  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, String(value));
-  return element;
-}
+const dayFormatter = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
+const dayLabel = (name) => dayFormatter.format(new Date(`${name}T00:00:00`));
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function renderLine(items) {
   clear(elements.dailySpend);
@@ -654,19 +665,15 @@ function renderLine(items) {
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`); svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Daily priced usage value in US dollars by provider");
   const tooltip = node("div", null, "chart-tooltip"); tooltip.hidden = true;
-  const addText = (value, x, y, className, anchor = "start") => {
-    const label = svgElement(svg, "text", { x, y, class: className, "text-anchor": anchor });
-    label.textContent = value; svg.append(label);
-  };
-  const xAt = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
+  const xAt = (index) => positionAt(index, left, plotWidth, items.length);
   const yAt = (value) => top + (1 - value / axisMaximum) * plotHeight;
   for (let index = 0; index < 5; index += 1) {
     const value = axisMaximum * (1 - index / 4), y = yAt(value);
     svg.append(svgElement(svg, "line", { x1: left, x2: width - right, y1: y, y2: y, class: "grid-line" }));
-    addText(Number.isInteger(value) ? `$${integer.format(value)}` : money(value), left - 10, y + 4, "axis-label", "end");
+    addSvgText(svg, Number.isInteger(value) ? `$${integer.format(value)}` : money(value), left - 10, y + 4, "end");
   }
   const tickIndexes = [...new Set([0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
-  for (const index of tickIndexes) addText(dayLabel(items[index].name), xAt(index), height - 14, "axis-label", index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
+  for (const index of tickIndexes) addSvgText(svg, dayLabel(items[index].name), xAt(index), height - 14, index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
   const crosshair = svgElement(svg, "line", { x1: left, x2: left, y1: top, y2: top + plotHeight, class: "crosshair" });
   svg.append(crosshair);
   const series = providers.map((provider) => ({
@@ -676,55 +683,81 @@ function renderLine(items) {
   for (const { provider, points } of series) {
     svg.append(svgElement(svg, "polyline", { points: points.map(({ x, y }) => `${x},${y}`).join(" "), class: `trend-line ${provider}` }));
   }
-  // Direct labels at the line ends stand in for a legend; they are nudged apart when the series converge.
-  const endLabels = series.map(({ provider, points }) => ({ provider, y: points.at(-1).y })).sort((a, b) => a.y - b.y);
-  for (let index = 1; index < endLabels.length; index += 1) endLabels[index].y = Math.max(endLabels[index].y, endLabels[index - 1].y + 14);
-  for (const label of endLabels) addText(providerLabels[label.provider], width - right + 10, Math.min(top + plotHeight, label.y) + 4, `series-label ${label.provider}`);
+  // Direct labels at the line ends stand in for a legend. They are laid out inside the plot with a minimum
+  // spacing, and a label that had to leave its line end gets a short leader line back to it.
+  const labels = layoutEndLabels(series.map(({ points }) => points.at(-1).y), top + 6, top + plotHeight, 14);
+  series.forEach(({ provider, points }, position) => {
+    const end = points.at(-1), { y, moved } = labels[position];
+    if (moved) svg.append(svgElement(svg, "line", { x1: end.x + 4, y1: end.y, x2: width - right + 6, y2: y, class: "leader-line" }));
+    addSvgText(svg, providerLabels[provider], width - right + 10, y + 4, "start", `series-label ${provider}`);
+  });
+  // The tooltip lists every provider for one day; its nodes are built once and updated in place.
+  const tooltipDate = node("strong"); tooltip.append(tooltipDate);
+  const tooltipValues = providers.map((provider) => {
+    const row = node("div"), key = node("i"), value = node("b"); key.style.background = `var(--tip-${provider})`;
+    row.append(key, value, node("span", providerLabels[provider])); tooltip.append(row); return value;
+  });
   const pointGroups = new Map();
+  let activeIndex = -1, activeGroups = [], focusedIndex = -1, frame = 0;
   const place = (x, y) => {
-    const bounds = svg.getBoundingClientRect(), scale = bounds.width / width;
-    const offsetY = (bounds.height - height * scale) / 2;
-    tooltip.style.left = `${Math.min(bounds.width - 90, Math.max(90, x * scale))}px`;
-    tooltip.style.top = `${offsetY + y * scale}px`;
+    const matrix = svg.getScreenCTM(); if (!matrix) return;
+    const screen = new DOMPoint(x, y).matrixTransform(matrix), bounds = elements.dailySpend.getBoundingClientRect();
+    tooltip.style.left = `${Math.min(bounds.width - 90, Math.max(90, screen.x - bounds.left))}px`;
+    tooltip.style.top = `${screen.y - bounds.top}px`;
   };
   const hide = () => {
-    crosshair.classList.remove("active"); tooltip.hidden = true;
-    for (const group of svg.querySelectorAll(".chart-point.active")) group.classList.remove("active");
+    for (const group of activeGroups) group.classList.remove("active");
+    activeGroups = []; activeIndex = -1; crosshair.classList.remove("active"); tooltip.hidden = true;
   };
-  // One readout for every series at the chosen day; the value leads, the provider follows.
   const showAt = (index) => {
+    if (index === activeIndex) return;
+    for (const group of activeGroups) group.classList.remove("active");
+    activeGroups = pointGroups.get(index) || []; activeIndex = index;
+    for (const group of activeGroups) group.classList.add("active");
     const x = xAt(index);
     crosshair.setAttribute("x1", String(x)); crosshair.setAttribute("x2", String(x)); crosshair.classList.add("active");
-    for (const group of svg.querySelectorAll(".chart-point.active")) group.classList.remove("active");
-    for (const group of pointGroups.get(index) || []) group.classList.add("active");
-    clear(tooltip); tooltip.append(node("strong", dayLabel(items[index].name)));
-    for (const provider of providers) {
-      const row = node("div"); const key = node("i"); key.style.background = `var(--tip-${provider})`;
-      row.append(key, node("b", money(items[index][provider])), node("span", providerLabels[provider])); tooltip.append(row);
-    }
+    tooltipDate.textContent = dayLabel(items[index].name);
+    providers.forEach((provider, position) => { tooltipValues[position].textContent = money(items[index][provider]); });
     tooltip.hidden = false;
     place(x, Math.min(...providers.map((provider) => yAt(items[index][provider]))));
   };
   for (const { provider, points } of series) for (const point of points) {
-    // Zero-value dates stay in the polyline so missing calendar days are
-    // represented, but they do not become hundreds of redundant controls.
+    // Zero-value dates stay in the polyline so missing calendar days are represented, but they do not
+    // become hundreds of redundant controls. A single-day window keeps its markers visible at rest.
     if (point.value <= 0) continue;
-    const group = svgElement(svg, "g", { class: `chart-point ${provider}`, tabindex: "0", role: "button", "aria-label": `${providerLabels[provider]}, ${items[point.index].name}, ${money(point.value)}` });
+    const group = svgElement(svg, "g", { class: `chart-point ${provider}${items.length === 1 ? " pinned" : ""}`, tabindex: "0", role: "button", "aria-label": `${providerLabels[provider]}, ${items[point.index].name}, ${money(point.value)}` });
     group.append(svgElement(svg, "circle", { cx: point.x, cy: point.y, r: "3.5", class: "trend-dot" }));
-    group.addEventListener("focus", () => showAt(point.index)); group.addEventListener("blur", hide);
+    group.addEventListener("focus", () => { focusedIndex = point.index; showAt(point.index); });
+    group.addEventListener("blur", () => { focusedIndex = -1; hide(); });
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); hide(); showAt(point.index); }
+      else if (event.key === "Escape") hide();
+    });
     svg.append(group);
     if (!pointGroups.has(point.index)) pointGroups.set(point.index, []);
     pointGroups.get(point.index).push(group);
   }
-  // The crosshair finds the X: the pointer only has to be nearest a day, never on a 2px line.
+  // The crosshair finds the X. Pointer coordinates go through the SVG's screen matrix, so scaling and
+  // letterboxing cannot shift the chosen day; moves are coalesced to one update per frame and only re-render
+  // when the day changes; a tap or click opens the readout without a preceding move; a focused point keeps
+  // its readout when the pointer leaves.
   const overlay = svgElement(svg, "rect", { x: left, y: top, width: plotWidth, height: plotHeight, class: "chart-overlay" });
+  const indexAt = (event) => {
+    const matrix = svg.getScreenCTM(); if (!matrix) return 0;
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+    return nearestIndex(point.x, left, plotWidth, items.length);
+  };
   overlay.addEventListener("pointermove", (event) => {
-    const bounds = svg.getBoundingClientRect();
-    const pointer = ((event.clientX - bounds.left) / bounds.width) * width;
-    const index = items.length === 1 ? 0 : Math.round(((pointer - left) / plotWidth) * (items.length - 1));
-    showAt(Math.max(0, Math.min(items.length - 1, index)));
+    if (frame) return;
+    frame = requestAnimationFrame(() => { frame = 0; showAt(indexAt(event)); });
   });
-  overlay.addEventListener("pointerleave", hide);
+  overlay.addEventListener("pointerdown", (event) => showAt(indexAt(event)));
+  overlay.addEventListener("pointerleave", () => {
+    if (frame) { cancelAnimationFrame(frame); frame = 0; }
+    hide();
+    if (focusedIndex >= 0) showAt(focusedIndex);
+  });
+  svg.addEventListener("keydown", (event) => { if (event.key === "Escape") hide(); });
   svg.append(overlay);
   elements.dailySpend.append(svg, tooltip);
 }
@@ -733,22 +766,16 @@ function renderDonut(sessions) {
   const counts = { codex: 0, claude: 0, cursor: 0 };
   for (const session of sessions) counts[session.provider] = (counts[session.provider] || 0) + 1;
   const total = sessions.length || 1;
-  const segments = ["codex", "claude", "cursor"].map((provider) => ({ provider, share: (counts[provider] / total) * 100 })).filter(({ share }) => share > 0);
-  // Adjacent segments are separated by a sliver of the surface colour rather than a stroke.
-  const gap = segments.length > 1 ? 0.8 : 0;
-  const stops = []; let cursor = 0;
-  for (const { provider, share } of segments) {
-    const start = cursor + gap / 2, end = Math.max(start, cursor + share - gap / 2);
-    stops.push(`var(--surface) ${cursor}% ${start}%`, `var(--${provider}) ${start}% ${end}%`, `var(--surface) ${end}% ${cursor + share}%`);
-    cursor += share;
-  }
-  elements.providerDonut.style.background = segments.length ? `conic-gradient(${stops.join(", ")})` : "var(--surface-2)";
+  // Adjacent slices are separated by a sliver of the surface colour rather than a stroke; the sliver is
+  // capped per slice so a small nonzero share keeps a painted arc.
+  const stops = donutStops(["codex", "claude", "cursor"].map((provider) => ({ name: provider, share: (counts[provider] / total) * 100 })));
+  elements.providerDonut.style.background = stops.length ? donutGradient(stops) : "var(--surface-2)";
   elements.providerDonut.dataset.label = String(sessions.length);
   clear(elements.providerLegend);
   [["Codex", counts.codex, "codex"], ["Claude", counts.claude, "claude"], ["Cursor", counts.cursor, "cursor"]].forEach(([label, value, provider]) => {
     const row = node("div", null, "legend-row"); row.dataset.provider = provider;
     const logo = node("img"); logo.src = `/brands/${provider}.svg`; logo.alt = "";
-    row.append(logo, node("span", label), node("strong", integer.format(value)), node("small", sessions.length ? `${Math.round((value / sessions.length) * 100)}%` : "—"));
+    row.append(logo, node("span", label), node("strong", integer.format(value)), node("small", sessions.length ? sharePercent(value, sessions.length) : "—"));
     elements.providerLegend.append(row);
   });
 }
@@ -838,9 +865,11 @@ function windowCaption() {
 }
 
 function renderSharedView(view) {
-  const selected = selectedRepository(); const summary = view.summary;
+  const selected = selectedRepository();
   elements.main.dataset.scope = selected ? "repository" : "all";
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} Sessions started during ${windowCaption()}.`;
+  // Coverage notes live in the shared scope area and follow the current filters on every view.
+  renderWarnings(view.warnings);
 }
 
 function renderSummary(view) {
@@ -857,7 +886,7 @@ function renderSummary(view) {
   renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd }) => ({ name: model, value: totalUsd, provider })), money, 8);
   renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
   renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.subagentSpendUsd })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
-  renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
+  renderRepositoryTable(view.repositories);
 }
 
 function renderView() {
@@ -884,11 +913,12 @@ function render(data) {
 
 async function load(refresh = false) {
   elements.error.hidden = true; elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = refresh ? "Refreshing local snapshot" : "Mapping local sessions"; elements.refresh.disabled = true;
-  // The previous render holds at reduced opacity while a refresh runs, so there is no skeleton flash or layout jump.
-  document.body.dataset.state = "loading";
+  // The previous render stays fully readable while a refresh runs; progress shows in the live status and a
+  // sweep under the top bar, so there is no skeleton flash, layout jump, or dimmed text.
+  document.body.dataset.state = "loading"; elements.main.setAttribute("aria-busy", "true");
   try { const response = await fetch(`/api/analytics${refresh ? "?refresh=1" : ""}`); const body = await response.json(); if (!response.ok) throw new Error(body.error || `Analysis failed with ${response.status}.`); render(body); elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready"; document.body.dataset.state = "live"; }
   catch (error) { elements.sync.dataset.state = "error"; elements.syncLabel.textContent = "Analysis failed"; elements.error.textContent = error instanceof Error ? error.message : "Unknown analysis failure."; elements.error.hidden = false; document.body.dataset.state = "error"; }
-  finally { elements.refresh.disabled = false; }
+  finally { elements.refresh.disabled = false; elements.main.setAttribute("aria-busy", "false"); }
 }
 
 function setTheme(theme) { document.documentElement.dataset.theme = theme; elements.themeLabel.textContent = theme === "dark" ? "Light" : "Dark"; localStorage.setItem("session-analytics-theme", theme); }

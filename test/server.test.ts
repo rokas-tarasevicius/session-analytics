@@ -133,6 +133,10 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /<svg class="mark"[\s\S]*fill="#d66b55"[\s\S]*fill="#7eb7a7"[\s\S]*fill="#d4aa70"/);
     assert.match(pageText, /data-view-button="distributions"/);
+    assert.ok(
+      pageText.indexOf('id="warning-banner"') < pageText.indexOf('data-view-panel="summary"'),
+      "coverage warnings stay in the shared scope area above every view",
+    );
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
     const application = await fetch(`${origin}/app.js`);
@@ -144,10 +148,16 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(applicationText, /Math\.log1p\(value\)[\s\S]*\* 7/);
     assert.match(applicationText, /session-analytics-theme"\) \|\| "light"/);
     assert.match(applicationText, /urlParameters\.get\("view"\)/);
+    assert.match(applicationText, /from "\/chart-geometry\.js"/);
+    const geometry = await fetch(`${origin}/chart-geometry.js`);
+    assert.equal(geometry.status, 200);
+    assert.match(geometry.headers.get("content-type") ?? "", /text\/javascript/);
     const stylesheet = await fetch(`${origin}/styles.css`);
     const stylesheetText = await stylesheet.text();
-    assert.match(stylesheetText, /--heat-7:\s*#004532/);
-    assert.match(stylesheetText, /\[data-theme="dark"\][\s\S]*--heat-7:\s*#9bd6bf/);
+    assert.match(stylesheetText, /--heat-1:\s*#56957d[\s\S]*--heat-7:\s*#00281b/);
+    assert.match(stylesheetText, /\[data-theme="dark"\][\s\S]*--heat-1:\s*#31715b[\s\S]*--heat-7:\s*#b0e5cf/);
+    assert.match(stylesheetText, /--violet:\s*var\(--coral\)/);
+    assert.match(stylesheetText, /\.metric-card \{/);
     assert.doesNotMatch(stylesheetText, /--heat-[1-7]:\s*#(?:9a7736|c85b45|c69a5d|d66b55)/);
     assert.equal((await fetch(`${origin}/api/health`, { method: "POST" })).status, 405);
     assert.equal((await fetch(`${origin}/missing`)).status, 404);

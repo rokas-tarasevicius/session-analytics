@@ -28,9 +28,12 @@ Palette, shared with the dashboard's light and dark themes ("Ink & Signal"; ever
 | Connector — rules, elbows, tree lines | `#62665c` | `#62665c` |
 | Providers: Codex / Claude / Cursor | `#c6c5ba` / `#d66b55` / `#6796c7` | `#2a2c27` / `#c4553f` / `#32669a` |
 | Repository series 1–6 | `#cc6859 #5488ca #879947 #ab6da6 #b7893b #3d9d80` | `#b54c3d #3164a3 #6a7b27 #8c5087 #a17003 #0c7b60` |
-| Heatmap (sage ramp, 7 steps) | `#135742` to `#9bd6bf` | `#7db8a1` to `#004532` |
+| Heatmap (sage ramp, 7 steps) | `#31715b` to `#b0e5cf` | `#56957d` to `#00281b` |
+| Neutral — "Other" segments, tool families, provider-reported | `#7f8279` | `#7d8078` |
 
-The series and heatmap steps were chosen with the `dataviz` palette validator (adjacent colour-vision ΔE ≥ 8.5, normal-vision ΔE ≥ 15, marks ≥ 3:1 on their surface); regenerate them the same way rather than by eye.
+The series and heatmap steps were chosen with the `dataviz` palette validator (adjacent colour-vision ΔE ≥ 8.5, normal-vision ΔE ≥ 15; heat ramps monotone with ΔL ≥ 0.06); regenerate them the same way rather than by eye. Measured WCAG ratios against the panel surface: every series slot, provider colour, semantic mark, the neutral, and the lowest heat step are ≥ 3:1 in both themes (heat step 1 is 3.04:1 dark / 3.13:1 light); text tokens are ≥ 4.5:1. Decorative hairlines (`--line`, `--line-2`) are not held to 3:1.
+
+The stylesheet ends with a compatibility layer for code written against the previous theme (`--violet`, `--cyan`, `--lime`, `--font-display`, `--font-utility`, `.metric-grid`, `.metric-card`, `.compact-metrics`, `.bar-list.cyan`, `.bar-list.coral`). It maps marks to coral/sage, text to sage text, and the old ochre-leaning `--coral` class uses to `--ochre`; new code should use the current tokens directly.
 
 ### Regenerating images
 

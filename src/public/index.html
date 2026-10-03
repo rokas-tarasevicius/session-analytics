@@ -10,7 +10,7 @@
     <script src="/app.js" type="module"></script>
   </head>
   <body data-state="loading">
-    <a class="skip-link" href="#repository-comparison">Skip to repository metrics</a>
+    <a class="skip-link" href="#analytics-views">Skip to analytics views</a>
     <header class="topbar">
       <a class="wordmark" href="#top" aria-label="Session Analytics home">
         <svg class="mark" viewBox="0 0 128 128" width="28" height="28" aria-hidden="true" focusable="false">
@@ -23,7 +23,7 @@
         <span class="wordmark-text">SESSION <b>ANALYTICS</b></span>
       </a>
       <div class="top-actions">
-        <span class="status" id="sync-context" data-state="loading">
+        <span class="status" id="sync-context" data-state="loading" aria-live="polite">
           <i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span>
         </span>
         <button class="button" id="refresh-button" type="button">Refresh snapshot</button>
@@ -35,7 +35,7 @@
       </div>
     </header>
 
-    <main id="top" data-scope="all">
+    <main id="top" data-scope="all" aria-busy="true">
       <p class="error-banner" id="error-banner" role="alert" hidden></p>
 
       <section class="filters-bar" aria-label="Repository scope">
@@ -63,7 +63,11 @@
         </div>
       </section>
 
-      <nav class="view-tabs" aria-label="Analytics views">
+      <section class="warning-banner" id="warning-banner" aria-label="Coverage warnings" hidden>
+        <strong>Coverage notes</strong><ul id="warning-list"></ul>
+      </section>
+
+      <nav class="view-tabs" id="analytics-views" tabindex="-1" aria-label="Analytics views">
         <button type="button" data-view-button="summary" aria-current="page">Summary</button>
         <button type="button" data-view-button="distributions">Distributions</button>
         <button type="button" data-view-button="activity">Activity</button>
@@ -74,10 +78,6 @@
       </nav>
 
       <div class="analytics-view" data-view-panel="summary">
-        <section class="warning-banner" id="warning-banner" aria-label="Coverage warnings" hidden>
-          <strong>Coverage notes</strong><ul id="warning-list"></ul>
-        </section>
-
         <section class="hero" aria-label="Machine totals">
           <article class="hero-primary">
             <p class="kicker">Priced usage value</p>
@@ -153,7 +153,7 @@
       </section>
 
       <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
-        <header class="view-header"><div><p class="kicker">Session starts</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour. Darker cells mark busier hours; the scale is logarithmic so quiet hours stay visible.</p></div><div class="provider-key" id="activity-provider-filters"></div></header>
+        <header class="view-header"><div><p class="kicker">Session starts</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour. Cell intensity follows the Less–More key; the scale is logarithmic so quiet hours stay visible.</p></div><div class="provider-key" id="activity-provider-filters"></div></header>
         <article class="panel activity-panel"><div class="activity-heatmap" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
         <div class="heatmap-tooltip" id="activity-tooltip" role="tooltip" hidden></div>
         <article class="panel activity-repositories"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div><span class="unit">Sessions</span></header><div class="bar-list sage" id="activity-repositories"></div></article>
