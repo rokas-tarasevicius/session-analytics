@@ -10,6 +10,14 @@ All notable changes to this project are documented here. The format follows [Kee
 - Model, effort, CLI-version, entrypoint and originator histories with guarded, same-repository before/after comparisons; matched Claude slash-command names and installed skills without observed invocations.
 - Explicit coverage and sample counts, idle/wait thresholds, typed-event deduplication, synthetic workflow demos, and privacy regression tests. Local Claude interruption-text rules require `--workflow-content-rules` (P2, off by default).
 
+### Fixed
+
+- Slash-command history now requires built-in or discovered command/skill registry evidence; unrecognized slash-prefixed entries contribute only a count, preventing single-component paths and raw IDs from escaping.
+- Malformed primary records explicitly mark partial workflow coverage and suppress boundary estimates, abandonment and comparisons while retaining independent provider durations. Child-file errors do not invalidate the parent's clock.
+- Delayed terminal events cannot close another turn or split its activity spans; same-timestamp human inputs remain distinct without a stable provider ID.
+- Malformed optional workflow metadata and projection failures no longer undercount otherwise valid tokens, spend or tools.
+- Workflow reuses full-snapshot and cached aggregates, computes filtered scopes in a module worker, and retains unused skill installations for empty repositories and date windows.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

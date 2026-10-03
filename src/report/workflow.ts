@@ -12,6 +12,7 @@ export function workflowReport(w: WorkflowSummary, repositories: Pick<Repository
     `Human turns: ${a.humanTurns} across ${w.coverage.humanSessions} primary sessions; mean ${a.turnsPerSession?.toFixed(1) ?? "N/A (minimum 5 sessions)"}.`,
     `Tools between human turns: p50 ${count(a.toolRuns.p50)}, max ${count(a.toolRuns.max)} (${a.toolRuns.samples} runs, includes zero-tool turns and final runs).`,
     `Turn wall time: p50 ${ms(a.turnWallTime.p50)}, p95 ${ms(a.turnWallTime.p95)} (${a.turnWallTime.samples} samples; ${a.recordedTurnDurations} recorded durations, ${a.inferredTurnDurations} event-derived).`,
+    "Incomplete transcripts retain observed counters and independent provider durations; boundary estimates and abandonment claims are suppressed.",
     `Estimated agent activity: ${ms(w.time.activeMilliseconds)}; waiting for human: ${ms(w.time.waitingForHumanMilliseconds)}; idle/unclassified: ${ms(w.time.unclassifiedMilliseconds)}.`,
     "Activity joins work-event gaps up to 5m; waiting needs a terminal marker then a human and is capped at 30m. Permission waiting is unavailable.",
     `Concurrent sessions: peak ${c.peak}; effective parallelism ${c.effectiveParallelism?.toFixed(2) ?? "N/A"}× (${ms(c.activeSessionMilliseconds)} session activity / ${ms(c.wallClockActiveMilliseconds)} wall-clock activity; ${c.eligibleSessions} active sessions; minimum 1m wall time).`,
@@ -28,7 +29,7 @@ export function workflowReport(w: WorkflowSummary, repositories: Pick<Repository
     `Abandonment heuristic: ${w.abandonment.flagged}/${w.abandonment.eligible} eligible flagged; ${w.abandonment.ongoing} ongoing; ${w.abandonment.insufficientEvidence} insufficient evidence. An open turn inactive for 24h is a flag, not a verdict.`,
     `UTC active days: ${w.patterns.activeDays}; longest streak ${w.patterns.longestStreakDays}d; current ${w.patterns.currentStreakDays}d as of ${w.patterns.asOfDay}.`,
     `Hourly API-equivalent value: ${w.patterns.timestampedPricedRequests}/${w.patterns.pricedRequests} priced primary-transcript requests timestamped; not an invoice.`,
-    `Slash commands: ${w.commands.slice(0, 12).map(({ name, count }) => `${name} ${count}`).join(", ") || "none observed"} (${w.commandHistorySessions} sessions with readable history).`,
+    `Slash commands: ${w.commands.slice(0, 12).map(({ name, count }) => `${name} ${count}`).join(", ") || "none observed"} (${w.commandHistorySessions} sessions with readable history; ${w.unrecognizedCommands} unrecognized slash-prefixed entries counted without text). Names require command/skill registry evidence.`,
     `Installed skills: ${w.installedSkills.length}; ${w.installedSkills.filter((s) => !s.observedInvocations).length} without an observed invocation in this scope (${w.inventory.directoriesRead} directories read; ${w.inventory.directoriesUnavailable} absent/unreadable). Codex usage is a lower bound.`,
     `CLI/model comparisons: ${w.comparisons.filter((c) => c.status === "eligible").length}/${w.comparisons.length} comparable transitions (same repository, provider, archetype, effort and entrypoint; minimum 5 sessions each side within 28d).`,
   );

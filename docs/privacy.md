@@ -11,7 +11,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - Token counters by class, cost figures, counts of events, durations, and ISO timestamps.
 - Model IDs and reasoning-effort labels as the provider recorded them.
 - Tool names, and skill identifiers that match `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`.
-- Bounded numeric CLI versions, fixed entrypoint/originator/effort enums, and leading slash-command identifiers using the skill-name grammar (never arguments or the rest of the command).
+- Bounded numeric CLI versions, fixed entrypoint/originator/effort enums, and registry-verified slash-command identifiers using the skill-name grammar (never unknown tokens, arguments or the rest of the command).
 - A repository display name and a stable repository ID.
 - A session key: the first 12 hex characters of a SHA-256 hash of the provider-qualified session ID.
 - Fixed-text parser warnings, which may include counts and model IDs.
@@ -46,7 +46,7 @@ Every field belongs to a tier. The tiers also govern planned features (see [road
 | Tier | Contents | Status |
 | --- | --- | --- |
 | **P0** | Counts, token counters, costs, timestamps, durations, model IDs, tool and skill names, enumerated labels | Returned today |
-| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys and repository metadata only) |
+| **P1** | Pseudonymous keys and identifying metadata: session keys, repository IDs and display names, workflow command and installed-skill identifiers; later keyed hashes (with a per-machine secret) of paths and arguments, file extensions, command classes, MCP server names, commit SHAs | Returned today (keys, repository metadata and registry identifiers) |
 | **P2** | Results of local rules over content, where only fixed rule identifiers and counts leave the parser | Exact Claude interruption-marker counts are opt-in; no command/diff rules |
 | **P3** | Text shown to you or sent to an LLM, such as an opt-in session review | Not implemented; will be opt-in per run, stored separately, and labeled |
 
@@ -127,7 +127,7 @@ Repository summaries and the machine summary share these fields.
 | `status` | Session status label: Conductor's status when registered there, Cursor's composer status, otherwise `idle` | P0 |
 | `createdAt` | Session start time | P0 |
 | `updatedAt` | Conductor's or Cursor's last-updated time when available; otherwise the session start time | P0 |
-| `workflow` | Optional primary-transcript workflow projection; absent for unsupported/failed parses. See below | P0/P2 |
+| `workflow` | Optional primary-transcript workflow projection; absent for unsupported/failed parses. See below | P0/P1/P2 |
 | `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
 | `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
 | `effort` | Reasoning-effort label as recorded, or `null` | P0 |
@@ -224,8 +224,9 @@ Paths below are relative to `session.workflow`, except where specified. Unavaila
 | `scope` | `primary-transcript` | P0 |
 | `ending` | `terminal`, `interrupted`, `inferred`, `open`, `unavailable` | P0 |
 | `coverage.timing` | `observed`, `partial`, `unavailable` timing coverage | P0 |
-| `coverage.humanTurns` | `observed` or `not-applicable` for a child thread | P0 |
+| `coverage.humanTurns` | `observed`, `partial` when primary records/projection signals were lost, or `not-applicable` for a child thread | P0 |
 | `coverage.timestampedEvents`, `coverage.untimedEvents`, `coverage.droppedEvents` | Normalized signal and cap counters | P0 |
+| `coverage.malformedRecords`, `coverage.projectionErrors` | Primary JSON/record-shape gaps and isolated optional-observer failures; no raw errors | P0 |
 | `coverage.contentRules` | Whether the P2 marker rule was enabled for this session | P0 |
 | `humanTurns` | Observed primary human inputs, null for sub-agent threads | P0 |
 | `toolCalls` | Selected primary-transcript tool-call count, including untimed calls | P0 |
@@ -248,7 +249,9 @@ Paths below are relative to `session.workflow`, except where specified. Unavaila
 | `mix[].cliVersion` | Numeric three-component version; optional numeric alpha/beta/rc/dev suffix; null otherwise | P0 |
 | `mix[].entrypoint` | `cli`, `sdk-ts`, `local-agent`, `vscode`, `exec`, `subagent`, `review`, `unknown` | P0 |
 | `mix[].originator` | `codex_cli_rs`, `codex_vscode`, `codex_exec`, `codex_sdk`, `app-server`, `unknown` | P0 |
-| `commands[].name`, `commands[].at` | Whole leading slash-command identifier and normalized timestamp from matched Claude history | P0 |
+| `commands[].name` | Leading identifier independently verified against built-in or scoped command/skill registries; unknown spellings never leave the parser | P1 |
+| `commands[].at` | Normalized timestamp of a recognized command in matched Claude history | P0 |
+| `unrecognizedCommands` | Matched slash-prefixed history entries without registry evidence; count only, never the spelling | P0 |
 | `commandHistoryAvailable` | Whether the matching profile history was readable | P0 |
 | `valueByHour[].hour`, `valueByHour[].usd` | UTC-hour timestamp and API-equivalent value of timestamped priced primary requests | P0 |
 | `pricedRequests`, `timestampedPricedRequests` | Value heatmap denominator/numerator | P0 |
@@ -285,12 +288,16 @@ The following paths are relative to `MachineAnalytics.workflow` or `RepositoryAn
 | `comparisons[].before`, `.after`, `.changedAt` | Bounded before/after identifiers and first new-era ISO timestamp | P0 |
 | `comparisons[].beforeSessions`, `.afterSessions`, `.status` | Cohort sizes and `eligible`, `small-cohort`, `overlapping-eras` guard label | P0 |
 | `comparisons[].beforeTurnP50`, `.afterTurnP50`, `.beforeRunP50`, `.afterRunP50`, `.turnTimeChange` | Pooled turn/run medians and guarded fractional timing change; nullable | P0 |
-| `commands[].name`, `.count`, `commandHistorySessions` | Leading command-name counts and readable-history session denominator | P0 |
-| `installedSkills[].name`, `.provider`, `.observedInvocations` | Bounded installed name, Claude/Codex provider and observed scoped invocation count | P0 |
+| `commands[].name` | Registry-verified command identifier | P1 |
+| `commands[].count`, `commandHistorySessions`, `unrecognizedCommands` | Recognized command counts, readable-history session denominator and unrecognized slash-entry count | P0 |
+| `installedSkills[].name` | Bounded discovered skill identifier | P1 |
+| `installedSkills[].provider`, `.observedInvocations` | Claude/Codex provider and observed scoped invocation count | P0 |
 | `installedSkills[].repositoryId` | Existing repository key for project installations; null for provider profile/shared inventory | P1 |
 | `inventory.directoriesRead`, `.directoriesUnavailable`, `.historyFilesRead`, `.historyFilesUnavailable`, `.malformedHistoryRecords` | Inventory coverage counters; no directory names, history filenames or errors | P0 |
 
 Derived timing/turn/heuristic fields can incorporate P2 interruption control events **only when enabled**, as indicated by coverage. All such values remain counters, enums and timestamps. No P3 content is introduced. New workflow controls persist no extra browser state; only the existing selected-tab/theme storage is used.
+
+Malformed primary evidence makes timing partial and ending unavailable. Tool-run, inferred-turn, activity, waiting and abandonment estimates are suppressed; independent provider durations retain their evidence count. Enum fields accept strings only, and optional observer failures cannot discard accounting. The browser worker receives only the existing public projection, never provider records. Its cache is in memory, bounded to eight filtered aggregates, and invalidated with each new snapshot.
 
 ### Health endpoint
 

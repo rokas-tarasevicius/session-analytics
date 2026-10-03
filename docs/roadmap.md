@@ -71,6 +71,8 @@ M2 links agent sessions to the code they produced, retroactively from existing l
 - [ ] Task-matched regression attribution; observed timing changes alone cannot establish a regression.
 - [x] Leading slash-command names and skill usage, including discovered installations without an observed invocation in scope.
 - [x] Workflow dashboard and report, UTC active-time/value heatmaps and activity streaks.
+- [x] Fail closed on unregistered slash-history tokens and incomplete primary lifecycle evidence; isolate optional workflow failures from accounting.
+- [x] Reuse full-snapshot workflow aggregates, compute filtered cohorts in a browser worker, and preserve skill inventories in empty scopes.
 
 ## M3: Agent-facing
 

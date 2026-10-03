@@ -178,10 +178,13 @@ The Workflow view, report and JSON add a separate primary-transcript projection.
 | Claude user control markers | Exact whole-message or single-text-block interruption markers, **only with `--workflow-content-rules`** | P2 rule count; text is never retained |
 | Codex lifecycle | `task_started`, `task_complete.duration_ms`, `turn_aborted.reason/duration_ms`, `turn_id`, typed `UserMessage`, `AgentMessage`, `CommandExecution`, `FileChange`, `McpToolCall`, `WebSearch`, `SubAgentActivity.kind`, `Plan` | Deduplicated event counts and timestamps; raw IDs stay internal; richer tool/human shape wins instead of adding duplicates |
 | Codex metadata | `session_meta.cli_version`, `source`, `originator`; `turn_context.model`, `effort`, `collaboration_mode.mode` | Bounded model/version IDs and fixed effort/source/originator enums |
-| Matched Claude profile `history.jsonl` | `sessionId`, `timestamp`, leading `/command` token in `display` | Command identifier and ISO timestamp, no arguments; unmatched sessions excluded |
+| Matched Claude profile `history.jsonl` | `sessionId`, `timestamp`, leading `/command` token in `display` | Registry-verified command identifier and ISO timestamp; unrecognized slash entries counted without spelling; unmatched sessions excluded |
+| Claude profile/repository command and skill registries | `commands/**/*.md`, `skills/*/SKILL.md` names/existence | Independent evidence for custom command identifiers; names only, never command/skill bodies |
 | Selected provider/repository skill directories | Directory entry names and existence of `SKILL.md`, including symlinks and Codex `.system` | Bounded names, provider, existing repository key or null; no skill body/frontmatter/path |
 
 Explicit provider roots also constrain history and profile skill discovery. The shared default `.agents/skills` directory is read only when Codex discovery is enabled. Project inventories follow selected canonical repository roots. Missing directories/histories and malformed history records contribute only coverage counters.
+
+Malformed primary JSONL records (including truncated tails and non-object rows) mark partial workflow coverage. Claude child-file failures remain separate from the primary interaction clock. Optional metadata validators accept strings only, and workflow observation/finalization failures cannot remove otherwise valid accounting records.
 
 ## Adding a provider
 

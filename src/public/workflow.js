@@ -1,8 +1,10 @@
-import { summarizeWorkflow } from "./workflow-data.js";
+import { createWorkflowScope } from "./workflow-scope.js";
 
-const number = (value) => value === null || value === undefined ? "N/A" : new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(value);
+const numberFormat = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
+const moneyFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+const number = (value) => value === null || value === undefined ? "N/A" : numberFormat.format(value);
 const time = (value) => value === null || value === undefined ? "N/A" : value < 60_000 ? `${number(value / 1000)}s` : value < 3_600_000 ? `${number(value / 60_000)}m` : `${number(value / 3_600_000)}h`;
-const money = (value) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+const money = (value) => moneyFormat.format(value);
 const el = (tag, text, className) => {
   const node = document.createElement(tag);
   if (text !== undefined && text !== null) node.textContent = text;
@@ -131,24 +133,61 @@ function mixPanel(w) {
     }
     table(content, ["Observed identifier", "Provider", "First → last seen", "Session-days"], [...rows.values()].sort((a, b) => b.count - a.count).map((r) => [r.name, r.provider, `${r.first} → ${r.last}`, number(r.count)]));
     const details = el("details"), grid = el("div"); details.append(el("summary", "Daily mix observations"));
-    table(grid, ["UTC date", "Provider", "Identifier", "Sessions observed"], w.mix.filter((s) => s.dimension === select.value).slice().reverse().map((s) => [s.day, s.provider, s.name, number(s.sessions)])); details.append(grid); content.append(details);
+    let built = false;
+    details.addEventListener("toggle", () => {
+      if (!details.open || built) return;
+      built = true;
+      table(grid, ["UTC date", "Provider", "Identifier", "Sessions observed"], w.mix.filter((s) => s.dimension === select.value).slice().reverse().map((s) => [s.day, s.provider, s.name, number(s.sessions)]));
+    });
+    details.append(grid); content.append(details);
   };
   select.addEventListener("change", draw); section.querySelector("header").append(select); section.append(content);
   note(section, "Counts are distinct session-day observations, not time or token shares. A session can use several models or versions. Unknown labels are omitted; retained metadata transitions define coverage."); draw(); return section;
 }
 
-let lastView = null, lastSnapshot = null;
-export function renderWorkflow(view, snapshot) {
+function inventoryPanels(w) {
+  const commands = panel("SHORTCUTS", "Observed slash commands");
+  table(commands, ["Command name", "Uses"], w.commands.map((s) => [s.name, number(s.count)]), "No registered slash commands in the matched history.");
+  note(commands, `${w.commandHistorySessions} sessions with readable Claude history · ${w.inventory.historyFilesRead} files read, ${w.inventory.historyFilesUnavailable} absent/unreadable. ${w.unrecognizedCommands || 0} unrecognized slash-prefixed entries counted without their text. Names require built-in or discovered command/skill registry evidence. Arguments are discarded.`);
+  const skills = panel("SKILL INVENTORY", "Installed, without an observed invocation");
+  const unused = w.installedSkills.filter((s) => !s.observedInvocations), tags = el("div", null, "workflow-inventory");
+  for (const item of unused) tags.append(el("span", `${item.name} · ${item.provider}${item.repositoryId ? " · repository" : ""}`, "workflow-tag"));
+  if (!unused.length) note(tags, w.installedSkills.length ? "Every discovered skill has an observed invocation in this scope." : "No installed skills discovered in the scoped directories.");
+  skills.append(tags);
+  note(skills, `${unused.length}/${w.installedSkills.length} provider-and-scope installations without an observed invocation. ${w.inventory.directoriesRead} directories read; ${w.inventory.directoriesUnavailable} absent/unreadable. This is a coverage gap, not a recommendation to remove a skill. Codex invocation evidence is a lower bound; project and profile inventories can overlap.`);
+  return [commands, skills];
+}
+
+const workflowScope = createWorkflowScope();
+let lastView = null, lastSnapshot = null, generation = 0;
+export function clearWorkflow() { generation += 1; }
+export async function renderWorkflow(view, snapshot) {
+  const request = ++generation;
   lastView = view; lastSnapshot = snapshot;
   const filter = document.querySelector("#workflow-provider"), container = document.querySelector("#workflow-content");
   if (!filter.dataset.bound) { filter.dataset.bound = "true"; filter.addEventListener("change", () => renderWorkflow(lastView, lastSnapshot)); }
   const selected = view.sessions.filter((s) => filter.value === "all" || s.provider === filter.value);
-  const inventory = { ...(snapshot.workflow?.inventory || {}), skills: (snapshot.workflow?.installedSkills || []).filter((s) => filter.value === "all" || s.provider === filter.value) };
-  const w = summarizeWorkflow(selected, inventory, snapshot.generatedAt), a = w.autonomy, c = w.concurrency;
+  let w;
+  try {
+    const result = workflowScope.get(snapshot, view.sessions, view.repositories.map((r) => r.repository.id), filter.value);
+    if (result instanceof Promise) {
+      const pending = el("p", "Calculating workflow for this scope…", "workflow-empty"); pending.setAttribute("role", "status");
+      container.replaceChildren(pending); container.setAttribute("aria-busy", "true");
+      w = await result;
+    } else w = result;
+  } catch {
+    if (request !== generation) return;
+    container.replaceChildren(el("p", "Workflow calculation is unavailable. Select the full scope or reload to retry.", "workflow-empty"));
+    container.setAttribute("aria-busy", "false"); return;
+  }
+  if (request !== generation) return;
+  const a = w.autonomy, c = w.concurrency;
+  container.setAttribute("aria-busy", "false");
   container.replaceChildren();
   container.append(el("p", `${w.coverage.supportedSessions}/${w.coverage.sessions} sessions supported · ${w.coverage.timedSessions} with timing · ${w.coverage.partialSessions} partial · ${w.coverage.humanSessions} with human-turn evidence. Scope follows session start dates; a selected session’s full history is included.`, "workflow-coverage"));
   if (!w.coverage.supportedSessions) {
-    container.append(el("p", selected.length ? "Workflow timing is unavailable for these sessions. Cursor’s local store does not provide the lifecycle evidence needed for these estimates. Choose Claude, Codex, or a wider scope." : "No sessions in this scope. Choose a wider date window or another repository.", "workflow-empty")); return;
+    container.append(el("p", selected.length ? "Workflow timing is unavailable for these sessions. Cursor’s local store does not provide the lifecycle evidence needed for these estimates. Choose Claude, Codex, or a wider scope." : "No sessions in this scope. Choose a wider date window or another repository.", "workflow-empty"));
+    const grid = el("div", null, "workflow-grid"); grid.append(...inventoryPanels(w)); container.append(grid); return;
   }
   const metrics = el("div", null, "workflow-metrics");
   for (const [label, value, caption] of [
@@ -161,7 +200,7 @@ export function renderWorkflow(view, snapshot) {
   const grid = el("div", null, "workflow-grid"); grid.append(concurrencyPanel(w));
   const autonomy = panel("AUTONOMY & TIME", "Between human decisions");
   stats(autonomy, [["Human turns", `${number(a.humanTurns)} / ${w.coverage.humanSessions} sessions`], ["Mean turns per session", a.turnsPerSession === null ? "N/A · minimum 5 sessions" : number(a.turnsPerSession)], ["Estimated agent activity", time(w.time.activeMilliseconds)], ["Estimated human waiting", time(w.time.waitingForHumanMilliseconds)], ["Idle / unclassified span", time(w.time.unclassifiedMilliseconds)]]);
-  note(autonomy, `${a.recordedTurnDurations} provider duration samples + ${a.inferredTurnDurations} event-derived turn spans. Activity joins gaps ≤5m. Human waiting needs a terminal marker followed by a human and is capped at 30m. Permission waiting is unavailable. Tool runs include zero-tool turns and the final run; child-agent inputs are excluded.`);
+  note(autonomy, `${a.recordedTurnDurations} provider duration samples + ${a.inferredTurnDurations} event-derived turn spans. Incomplete transcripts contribute observed counters and independent provider durations only; boundary estimates are suppressed. Activity joins gaps ≤5m. Human waiting needs a terminal marker followed by a human and is capped at 30m. Permission waiting is unavailable. Tool runs include zero-tool turns and the final run; child-agent inputs are excluded.`);
   const steering = panel("STEERING", "Interruptions & planning"), i = w.interruptions;
   stats(steering, [["Codex interrupted / replaced / other", `${i.interrupted} / ${i.replaced} / ${i.other}`], ["Claude interrupt markers · P2", i.claudeMarkers === null ? "Not enabled" : `${i.claudeMarkers} · ${w.coverage.contentRuleSessions} sessions`], ["Sub-agent interruptions", number(i.subagentInterrupted)], ["Mid-turn human inputs", number(w.steering.midTurnHumanTurns)], ["Plan-mode entries / Plan items", `${w.steering.planEntries} / ${w.steering.planItems}`]]);
   note(steering, `Interruptions per human turn: ${i.perHumanTurn === null ? "N/A" : i.perHumanTurn.toFixed(2)} · ${i.eligibleHumanTurns} eligible turns in ${i.eligibleSessions} sessions, minimum 5 turns. Interrupts can rise with expertise; they are not a failure signal. Plan entries are observations, not plan rejections.`);
@@ -169,7 +208,7 @@ export function renderWorkflow(view, snapshot) {
   grid.append(autonomy, steering, heatPanel(w));
   const repos = panel("BY REPOSITORY", "Where parallel work happens");
   const names = new Map(view.repositories.map((r) => [r.repository.id, r.repository.name]));
-  table(repos, ["Repository", "Peak", "Parallelism", "Session / wall activity"], w.repositories.sort((a, b) => b.peak - a.peak).map((r) => [[names.get(r.repositoryId) || "Repository", `${r.sessions} supported sessions`], number(r.peak), r.effectiveParallelism?.toFixed(2) ?? "N/A", `${time(r.activeSessionMilliseconds)} / ${time(r.wallClockActiveMilliseconds)}`]));
+  table(repos, ["Repository", "Peak", "Parallelism", "Session / wall activity"], w.repositories.slice().sort((a, b) => b.peak - a.peak).map((r) => [[names.get(r.repositoryId) || "Repository", `${r.sessions} supported sessions`], number(r.peak), r.effectiveParallelism?.toFixed(2) ?? "N/A", `${time(r.activeSessionMilliseconds)} / ${time(r.wallClockActiveMilliseconds)}`]));
   note(repos, "Each repository has its own wall-clock union. Summing repository wall time would double-count cross-repository concurrency.");
   const shapes = panel("SESSION SHAPE", "Archetypes & open ends");
   stats(shapes, Object.entries(w.archetypes).map(([name, count]) => [name, number(count)]));
@@ -179,18 +218,9 @@ export function renderWorkflow(view, snapshot) {
   grid.append(repos, shapes, mixPanel(w));
   const changes = panel("DESCRIPTIVE COMPARISONS", "Before & after a model or CLI change", true);
   note(changes, `${w.comparisons.filter((c) => c.status === "eligible").length}/${w.comparisons.length} transitions eligible. Same repository, provider, archetype, effort, entrypoint and duration evidence; the other model/CLI dimension stays fixed. Each side needs ≥5 sessions with terminal endings within 28 days of the change. Interleaved versions are ineligible. Task difficulty is unknown; a slower turn does not establish a regression.`);
-  w.comparisons.sort((a, b) => Number(b.status === "eligible") - Number(a.status === "eligible") || b.changedAt.localeCompare(a.changedAt));
-  table(changes, ["Transition", "Comparable context", "Before / after sessions", "Turn p50", "Evidence"], w.comparisons.map((r) => [[`${r.before} → ${r.after}`, `${r.changedAt.slice(0, 10)} · ${r.dimension}`], [names.get(r.repositoryId) || "Repository", `${r.provider} · ${r.archetype} · ${r.effort} · ${r.entrypoint} · ${r.heldConstant}`], `${r.beforeSessions} / ${r.afterSessions}`, `${time(r.beforeTurnP50)} → ${time(r.afterTurnP50)}`, r.status === "eligible" ? r.turnTimeChange === null ? "N/A · tiny baseline" : `${r.turnTimeChange >= 0 ? "+" : ""}${(r.turnTimeChange * 100).toFixed(0)}% · descriptive` : r.status === "small-cohort" ? "Below minimum" : "Overlapping eras"]), "No stable version transitions with turn timing in this scope. Mixed-model sessions and unknown metadata are excluded.");
+  const comparisons = w.comparisons.slice().sort((a, b) => Number(b.status === "eligible") - Number(a.status === "eligible") || b.changedAt.localeCompare(a.changedAt));
+  table(changes, ["Transition", "Comparable context", "Before / after sessions", "Turn p50", "Evidence"], comparisons.map((r) => [[`${r.before} → ${r.after}`, `${r.changedAt.slice(0, 10)} · ${r.dimension}`], [names.get(r.repositoryId) || "Repository", `${r.provider} · ${r.archetype} · ${r.effort} · ${r.entrypoint} · ${r.heldConstant}`], `${r.beforeSessions} / ${r.afterSessions}`, `${time(r.beforeTurnP50)} → ${time(r.afterTurnP50)}`, r.status === "eligible" ? r.turnTimeChange === null ? "N/A · tiny baseline" : `${r.turnTimeChange >= 0 ? "+" : ""}${(r.turnTimeChange * 100).toFixed(0)}% · descriptive` : r.status === "small-cohort" ? "Below minimum" : "Overlapping eras"]), "No stable version transitions with turn timing in this scope. Mixed-model sessions and unknown metadata are excluded.");
   grid.append(changes);
-  const commands = panel("SHORTCUTS", "Observed slash commands");
-  table(commands, ["Command name", "Uses"], w.commands.map((s) => [s.name, number(s.count)]), "No leading slash-command names in the matched history.");
-  note(commands, `${w.commandHistorySessions} sessions with readable Claude history · ${w.inventory.historyFilesRead} files read, ${w.inventory.historyFilesUnavailable} absent/unreadable. Only the leading /command identifier is retained. Arguments are discarded. History timestamps remain in the session JSON.`);
-  const skills = panel("SKILL INVENTORY", "Installed, without an observed invocation");
-  const unused = w.installedSkills.filter((s) => !s.observedInvocations), tags = el("div", null, "workflow-inventory");
-  for (const item of unused) tags.append(el("span", `${item.name} · ${item.provider}${item.repositoryId ? " · repository" : ""}`, "workflow-tag"));
-  if (!unused.length) note(tags, w.installedSkills.length ? "Every discovered skill has an observed invocation in this scope." : "No installed skills discovered in the scoped directories.");
-  skills.append(tags);
-  note(skills, `${unused.length}/${w.installedSkills.length} provider-and-scope installations without an observed invocation. ${w.inventory.directoriesRead} directories read; ${w.inventory.directoriesUnavailable} absent/unreadable. This is a coverage gap, not a recommendation to remove a skill. Codex invocation evidence is a lower bound; project and profile inventories can overlap.`);
-  grid.append(commands, skills); container.append(grid);
+  grid.append(...inventoryPanels(w)); container.append(grid);
   note(container, "Activity counters describe recorded work. They do not prove success, quality, causation, human time saved or value delivered. Claude parent interaction metrics exclude its child transcripts; existing accounting totals still include them.");
 }

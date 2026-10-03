@@ -131,6 +131,13 @@ interface MutableSession {
   warnings: string[];
 }
 
+// Optional projections must never suppress core usage or tool accounting.
+function updateWorkflow(state: MutableSession, update: (collector: WorkflowCollector) => void): void {
+  if (!state.workflow) return;
+  try { update(state.workflow); }
+  catch { state.workflow.gap("projection"); }
+}
+
 function asRecord(value: unknown): JsonRecord | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -325,7 +332,7 @@ function addModelUsage(
   const cost = calculateCost(rate, usage, inputForRequest);
   // Claude child transcripts contribute to accounting, but not to their
   // parent's interaction clock. Codex child threads have their own clock.
-  session.workflow?.value(timestamp, cost.totalUsd, executionKind);
+  updateWorkflow(session, (workflow) => workflow.value(timestamp, cost.totalUsd, executionKind));
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
@@ -370,13 +377,15 @@ async function visitJsonLines(
   for await (const line of lines) {
     lineNumber += 1;
     if (!line.trim()) continue;
-    try {
-      const record = asRecord(JSON.parse(line));
-      if (record) visitor(record, lineNumber);
-    } catch {
+    let record: JsonRecord | null;
+    try { record = asRecord(JSON.parse(line)); }
+    catch {
       // The caller reports a single bounded warning instead of returning transcript content.
       visitor({ __parse_error: true }, lineNumber);
+      continue;
     }
+    if (record) visitor(record, lineNumber);
+    else visitor({ __parse_error: true }, lineNumber);
   }
 }
 
@@ -628,11 +637,12 @@ async function analyzeCodex(
   await visitJsonLines(path, (record, line) => {
     if (record["__parse_error"] === true) {
       parseErrors += 1;
+      state.workflow?.gap("malformed");
       return;
     }
     const timestamp = stringValue(record["timestamp"]);
     trackTimestamp(state, timestamp);
-    state.workflow?.observe(record, line);
+    updateWorkflow(state, (workflow) => workflow.observe(record, line));
     const type = stringValue(record["type"]);
     const payload = asRecord(record["payload"]);
     const payloadType = stringValue(payload?.["type"]);
@@ -703,7 +713,7 @@ async function analyzeCodex(
       const transportName = stringValue(payload?.["name"]) ?? payloadType;
       increment(state.transportTools, transportName);
       const nested = payloadType === "custom_tool_call" ? nestedToolNames(payload?.["input"]) : [];
-      state.workflow?.tool(timestamp, Math.max(1, nested.length));
+      updateWorkflow(state, (workflow) => workflow.tool(timestamp, Math.max(1, nested.length)));
       const canReadSkill =
         ["Bash", "Read", "exec_command", "read_file"].includes(transportName) ||
         nested.some((name) => ["exec_command", "read_file"].includes(name));
@@ -858,7 +868,7 @@ async function analyzeClaude(
   contentRules = false,
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
-  state.workflow = new WorkflowCollector("claude", contentRules, historyForTranscript(mainPath, workflowSources));
+  state.workflow = new WorkflowCollector("claude", contentRules, await historyForTranscript(mainPath, workflowSources, row.root_path));
   state.effort = null;
   state.executionKind = "top-level";
   state.executionKindsSeen.add("top-level");
@@ -883,7 +893,7 @@ async function analyzeClaude(
   } = { current: null };
   const seenHumanMessages = new Set<string>();
   const seenToolCalls = new Set<string>();
-  let parseErrors = 0;
+  let parseErrors = 0, primaryParseErrors = 0;
   const totals = zeroTokens();
 
   for (const path of paths) {
@@ -893,11 +903,12 @@ async function analyzeClaude(
     await visitJsonLines(path, (record, line) => {
       if (record["__parse_error"] === true) {
         parseErrors += 1;
+        if (path === mainPath) { primaryParseErrors += 1; state.workflow?.gap("malformed"); }
         return;
       }
       const timestamp = stringValue(record["timestamp"]);
       trackTimestamp(state, timestamp);
-      if (path === mainPath) state.workflow?.observe(record, line);
+      if (path === mainPath) updateWorkflow(state, (workflow) => workflow.observe(record, line));
       const type = stringValue(record["type"]) ?? "";
       const subtype = stringValue(record["subtype"]) ?? "";
       const agentId = stringValue(record["agentId"]);
@@ -952,7 +963,7 @@ async function analyzeClaude(
           const toolId = stringValue(block["id"]) ?? `${path}:${line}`;
           if (seenToolCalls.has(toolId)) continue;
           seenToolCalls.add(toolId);
-          if (path === mainPath) state.workflow?.tool(timestamp);
+          if (path === mainPath) updateWorkflow(state, (workflow) => workflow.tool(timestamp));
           const name = stringValue(block["name"]) ?? "tool_use";
           increment(state.tools, name);
           increment(state.transportTools, name);
@@ -989,7 +1000,8 @@ async function analyzeClaude(
       "Some Claude responses do not expose thinking tokens separately; they remain included in output.",
     );
   }
-  if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
+  if (primaryParseErrors > 0) state.warnings.push(`${primaryParseErrors} malformed JSONL records were skipped in the primary transcript.`);
+  if (parseErrors > primaryParseErrors) state.warnings.push(`${parseErrors - primaryParseErrors} malformed JSONL records were skipped in child transcripts.`);
   return finalizeSession(row, state, totals, paths.length);
 }
 
@@ -1044,8 +1056,11 @@ function finalizeSession(
     transportToolCalls,
     userTurns: state.userTurns,
   };
+  let workflow: SessionAnalytics["workflow"];
+  try { workflow = state.workflow?.finish(Date.now(), row.status === "working"); }
+  catch { state.warnings.push("Workflow projection is unavailable; accounting was retained."); }
   return {
-    ...(state.workflow ? { workflow: state.workflow.finish(Date.now(), row.status === "working") } : {}),
+    ...(workflow ? { workflow } : {}),
     cost,
     costBasis:
       row.agent_type === "cursor"
@@ -2192,7 +2207,7 @@ async function analyzeSelectedRepositories(
       workflowInventory: workflowSources.inventory,
       repositories: repositoriesForOutput.map((repository) => {
         const result = aggregate(repository, sessionsByRepository.get(repository.id) ?? [], rateCard);
-        result.workflow = summarizeWorkflow(result.sessions, workflowSources.inventory, result.generatedAt);
+        result.workflow = summarizeWorkflow(result.sessions, workflowSources.inventory, result.generatedAt, [result.repository.id]);
         result.warnings.push(
           ...[codexIndex.warning, claudeIndex.warning, cursorResult.warning].filter(
             (warning): warning is string => Boolean(warning),
@@ -2263,7 +2278,7 @@ export async function analyzeMachineSessions(
 ): Promise<MachineAnalytics> {
   const result = await analyzeSelectedRepositories(options);
   const machine = aggregateMachine(result.repositories, result.rateCard);
-  machine.workflow = summarizeWorkflow(machine.sessions, result.workflowInventory, machine.generatedAt);
+  machine.workflow = summarizeWorkflow(machine.sessions, result.workflowInventory, machine.generatedAt, machine.repositories.map((r) => r.repository.id));
   return machine;
 }
 

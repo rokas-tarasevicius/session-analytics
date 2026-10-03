@@ -12,9 +12,46 @@ import { workflowReport } from "../src/report/workflow.ts";
 import type { MachineAnalytics } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 import { addWorkflowDemo } from "../scripts/demo-workflow.ts";
+import { addCommandHistoryFixture, commandSentinels } from "./workflow-fixtures.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const forbidden = /WORKFLOW_SECRET|content-is-not-returned|secret-command|secret-path|secret-skill-args|private-turn-id|\/fixtures\/|11111111-1111-4111-8111-111111111111|22222222-2222-4222-8222-222222222222|conductor-claude|transcriptPath/;
+
+test("review 1: history exports only registered built-in and custom commands across all projections", async () => {
+  const root = await mkdtemp(join(tmpdir(), "workflow-command-privacy-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    await addCommandHistoryFixture(fixture);
+    const machine = await analyzeMachineSessions(fixture);
+    const repository = await analyzeRepositorySessions({ ...fixture, repositoryName: "conductor" });
+    for (const output of [machine, repository]) {
+      assert.doesNotMatch(JSON.stringify(output), commandSentinels);
+      assert.equal(output.workflow!.unrecognizedCommands, 4);
+      assert.deepEqual(output.workflow!.commands.map((c) => c.name).sort(), ["/custom.audit", "/namespace:check", "/project-check", "/review"]);
+      assert.doesNotMatch(workflowReport(output.workflow!, machine.repositories), commandSentinels);
+    }
+    const json = spawnSync(process.execPath, [join(here, "../bin/session-analytics.ts"), "report", "--json", "--no-workflow-content-rules", "--claude-root", fixture.claudeRoot, "--codex-root", fixture.codexRoot, "--codex-archive-root", fixture.codexArchiveRoot, "--cursor-database", fixture.cursorDatabasePath, "--database", fixture.databasePath], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    assert.equal(json.status, 0, json.stderr); assert.doesNotMatch(json.stdout, commandSentinels);
+    assert.deepEqual((JSON.parse(json.stdout) as MachineAnalytics).workflow!.commands, machine.workflow!.commands);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("review 7: registered repositories without sessions retain unused project installations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "workflow-empty-repo-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const skill = join(root, "quiet-repository", ".claude", "skills", "quiet-skill");
+    await mkdir(skill, { recursive: true }); await writeFile(join(skill, "SKILL.md"), "WORKFLOW_SECRET");
+    const machine = await analyzeMachineSessions({ ...fixture, repositoryRoot: undefined });
+    const empty = machine.repositories.find((r) => r.repository.name === "quiet-repository")!;
+    assert.equal(empty.summary.sessions, 0);
+    assert.ok(machine.workflow!.installedSkills.some((s) => s.name === "quiet-skill" && s.repositoryId === empty.repository.id && s.observedInvocations === 0));
+    const repository = await analyzeRepositorySessions({ ...fixture, repositoryRoot: undefined, repositoryName: "quiet-repository" });
+    assert.equal(repository.workflow!.coverage.sessions, 0);
+    assert.equal(repository.workflow!.installedSkills[0]?.name, "quiet-skill");
+    assert.doesNotMatch(JSON.stringify(repository), /WORKFLOW_SECRET/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("workflow: parsers, isolated JSON, report and repository output preserve the privacy boundary", async () => {
   const root = await mkdtemp(join(tmpdir(), "workflow-integration-"));

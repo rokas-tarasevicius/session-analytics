@@ -108,6 +108,8 @@ const staticFiles = new Map<string, string>([
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
   ["/workflow.js", join(publicRoot, "workflow.js")],
+  ["/workflow-scope.js", join(publicRoot, "workflow-scope.js")],
+  ["/workflow-worker.js", join(publicRoot, "workflow-worker.js")],
   ["/workflow-data.js", join(publicRoot, "workflow-data.js")],
   ["/workflow.css", join(publicRoot, "workflow.css")],
   ["/styles.css", join(publicRoot, "styles.css")],

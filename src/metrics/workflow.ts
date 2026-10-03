@@ -5,13 +5,15 @@ type RecordValue = Record<string, unknown>;
 type Kind = "human" | "start" | "activity" | "assistant" | "tool" | "end" | "abort";
 interface Event { at: number; kind: Kind; count: number; duration: number | null; turn: string | null }
 export interface WorkflowHistory {
-  commands: Map<string, Array<{ name: string; at: string }>>;
+  /** Internal candidates, including unrecognized spellings. Never serialize. */
+  commands: Map<string, Array<{ name: string | null; at: string }>>;
+  commandNames: ReadonlySet<string>;
   available: boolean;
 }
 const IDLE = 5 * 60_000, WAIT_CAP = 30 * 60_000, DAY = 86_400_000;
 const MAX_EVENTS = 100_000;
 const record = (value: unknown): RecordValue | null => value !== null && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : null;
-const string = (value: unknown): string | null => typeof value === "string" ? value : null;
+const string = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
 const duration = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 7 * DAY ? value : null;
 export const workflowName = (value: unknown): string | null => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) && !["__proto__", "constructor", "prototype"].includes(value) ? value : null;
 export function workflowTimestamp(value: unknown): number | null {
@@ -20,9 +22,9 @@ export function workflowTimestamp(value: unknown): number | null {
   return Number.isFinite(time) && time >= Date.UTC(2020, 0) && time <= Date.UTC(2100, 0) ? time : null;
 }
 const iso = (time: number): string => new Date(time).toISOString();
-const entrypoint = (value: unknown): WorkflowEntrypoint => ["cli", "sdk-ts", "local-agent", "vscode", "exec", "subagent", "review"].includes(String(value)) ? value as WorkflowEntrypoint : "unknown";
-const originator = (value: unknown): WorkflowOriginator => ["codex_cli_rs", "codex_vscode", "codex_exec", "codex_sdk", "app-server"].includes(String(value)) ? value as WorkflowOriginator : "unknown";
-const effort = (value: unknown): WorkflowEffort | null => ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"].includes(String(value)) ? value as WorkflowEffort : null;
+const entrypoint = (value: unknown): WorkflowEntrypoint => typeof value === "string" && ["cli", "sdk-ts", "local-agent", "vscode", "exec", "subagent", "review"].includes(value) ? value as WorkflowEntrypoint : "unknown";
+const originator = (value: unknown): WorkflowOriginator => typeof value === "string" && ["codex_cli_rs", "codex_vscode", "codex_exec", "codex_sdk", "app-server"].includes(value) ? value as WorkflowOriginator : "unknown";
+const effort = (value: unknown): WorkflowEffort | null => typeof value === "string" && ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"].includes(value) ? value as WorkflowEffort : null;
 const version = (value: unknown): string | null => typeof value === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-(?:alpha|beta|rc|dev)(?:[.-]?\d{1,6})?)?$/.test(value) ? value : null;
 const blocks = (message: RecordValue | null): RecordValue[] => Array.isArray(message?.content) ? message.content.map(record).filter((b): b is RecordValue => b !== null) : [];
 
@@ -32,6 +34,8 @@ export class WorkflowCollector {
   private readonly contentRules: boolean;
   private readonly history: WorkflowHistory | undefined;
   private commands: Array<{ name: string; at: string }> = [];
+  private historySession: string | null = null;
+  private unrecognizedCommands = 0;
   private events: Event[] = [];
   private humans: Event[][] = [[], []];
   private tools: Event[][] = [[], []];
@@ -42,6 +46,8 @@ export class WorkflowCollector {
   private timestamped = 0;
   private untimed = 0;
   private dropped = 0;
+  private malformed = 0;
+  private projectionErrors = 0;
   private count = 0;
   private subagent = false;
   private topLevel = false;
@@ -61,6 +67,12 @@ export class WorkflowCollector {
   constructor(provider: "claude" | "codex", contentRules = false, history?: WorkflowHistory) {
     this.provider = provider; this.contentRules = provider === "claude" && contentRules; this.history = history;
     this.interruptions = { interrupted: 0, replaced: 0, other: 0, subagentInterrupted: 0, claudeMarkers: this.contentRules ? 0 : null };
+  }
+
+  /** Only the primary transcript can invalidate this interaction clock. */
+  gap(kind: "malformed" | "projection"): void {
+    if (kind === "malformed") this.malformed += 1;
+    else this.projectionErrors += 1;
   }
 
   private event(kind: Kind, timestamp: unknown, target = this.events, count = 1, elapsed: unknown = null, turn: unknown = null): Event | undefined {
@@ -128,7 +140,12 @@ export class WorkflowCollector {
     if (this.duplicate(`record:${string(raw.uuid) ?? line}`)) return;
     this.topLevel = true;
     const sessionId = string(raw.sessionId);
-    if (sessionId && this.history?.commands.has(sessionId)) this.commands = this.history.commands.get(sessionId) ?? [];
+    if (sessionId && sessionId !== this.historySession && this.history?.commands.has(sessionId)) {
+      this.historySession = sessionId;
+      const candidates = this.history.commands.get(sessionId) ?? [];
+      this.commands = candidates.filter((c): c is { name: string; at: string } => c.name !== null && this.history!.commandNames.has(c.name));
+      this.unrecognizedCommands = candidates.length - this.commands.length;
+    }
     this.metadata(timestamp, {
       model: message?.model === undefined ? undefined : workflowName(message.model),
       effort: raw.effort === undefined ? undefined : effort(raw.effort),
@@ -139,12 +156,13 @@ export class WorkflowCollector {
     if (type === "queue-operation") {
       const op = string(raw.operation) ?? "other";
       this.steering.queueOperations[op === "enqueue" || op === "dequeue" || op === "remove" ? op : "other"] += 1;
-      const reason = raw.reason;
-      const bucket = reason === undefined || reason === null ? "unspecified"
-        : ["prompt", "user", "user_input", "user-input"].includes(String(reason)) ? "prompt"
-          : ["interrupt", "interrupted", "replaced"].includes(String(reason)) ? "interrupt"
-            : ["complete", "completed", "completion"].includes(String(reason)) ? "completion"
-              : ["cancel", "cancelled", "canceled", "clear"].includes(String(reason)) ? "cancellation" : "other";
+      const reason = string(raw.reason);
+      const bucket = raw.reason === undefined || raw.reason === null ? "unspecified"
+        : reason === null ? "other"
+          : ["prompt", "user", "user_input", "user-input"].includes(reason) ? "prompt"
+            : ["interrupt", "interrupted", "replaced"].includes(reason) ? "interrupt"
+              : ["complete", "completed", "completion"].includes(reason) ? "completion"
+                : ["cancel", "cancelled", "canceled", "clear"].includes(reason) ? "cancellation" : "other";
       this.steering.queueReasons[bucket] += 1;
     }
     if (type === "system" && raw.subtype === "turn_duration") this.event("end", timestamp, this.events, 1, raw.durationMs);
@@ -186,7 +204,7 @@ export class WorkflowCollector {
     }
     this.metadata(timestamp, {});
     if (type === "event_msg") {
-      const turn = string(payload.turn_id), fallback = string(raw.uuid) ?? `${string(timestamp) ?? line}`;
+      const turn = string(payload.turn_id), fallback = string(raw.uuid) ?? string(payload.message_id) ?? string(payload.id) ?? `line:${line}`;
       if (subtype === "user_message" && !this.subagent && !this.duplicate(`human:${fallback}`)) this.event("human", timestamp, this.humans[0]);
       if (subtype === "agent_message") this.event("assistant", timestamp);
       if (subtype === "task_started" && !this.duplicate(`start:${turn ?? fallback}`)) this.event("start", timestamp, this.events, 1, null, turn);
@@ -198,10 +216,10 @@ export class WorkflowCollector {
       }
       if (subtype === "item_completed") {
         const item = record(payload.item);
-        if (!item || this.duplicate(`item:${item.type}:${string(item.id) ?? line}`)) return;
+        if (!item || typeof item.type !== "string" || this.duplicate(`item:${item.type}:${string(item.id) ?? line}`)) return;
         if (item.type === "UserMessage" && !this.subagent) this.event("human", timestamp, this.humans[1]);
         else if (item.type === "AgentMessage") this.event("assistant", timestamp);
-        else if (["CommandExecution", "FileChange", "McpToolCall", "WebSearch"].includes(String(item.type))) this.event("tool", timestamp, this.tools[1]);
+        else if (["CommandExecution", "FileChange", "McpToolCall", "WebSearch"].includes(item.type)) this.event("tool", timestamp, this.tools[1]);
         else if (item.type === "Plan") { this.steering.planItems += 1; this.event("activity", timestamp); }
         else if (item.type === "SubAgentActivity") {
           if (item.kind === "interrupted") this.interruptions.subagentInterrupted += 1;
@@ -219,12 +237,19 @@ export class WorkflowCollector {
     const humans = this.humans[humanShape]!, tools = this.tools[toolShape]!;
     const order: Record<Kind, number> = { human: 0, start: 1, tool: 2, activity: 3, assistant: 4, end: 5, abort: 6 };
     const events = [...this.events, ...humans, ...tools].sort((a, b) => a.at - b.at || order[a.kind] - order[b.kind]);
-    const runs: number[] = [], elapsed: number[] = [], spans: WorkflowSpan[] = [];
+    const runs: number[] = [], spans: WorkflowSpan[] = [], recordedSamples = new Map<number, number>();
+    let elapsed: number[] = [];
+    const incomplete = Boolean(this.untimed || this.dropped || this.malformed || this.projectionErrors);
+    const closedTurns = new Set<string>();
     let run: number | null = null, humanStart: number | null = null, turnStart: number | null = null, turnId: string | null = null;
     let lastWork: number | null = null, ended = false, explicitOpen = false, recorded = 0, inferred = 0, waiting = 0;
     let midTurnHumanTurns = 0, latestDurationRecorded = false, turnSampleIndex: number | null = null;
     let previous: Event | null = null, pendingEnd: number | null = null, toolPending = false;
     for (const event of events) {
+      // Rejected terminal markers never enter the accepted activity/lifecycle
+      // stream. They cannot advance its clock, split spans, or end another turn.
+      if ((event.kind === "end" || event.kind === "abort") && event.turn &&
+        ((turnId && event.turn !== turnId) || (event.turn !== turnId && closedTurns.has(event.turn)))) continue;
       if (event.kind === "human") {
         if (run !== null) runs.push(run);
         if (explicitOpen && turnStart !== null && lastWork !== null && lastWork > turnStart) midTurnHumanTurns += 1;
@@ -243,16 +268,19 @@ export class WorkflowCollector {
         if (!event.turn || !turnId || event.turn === turnId) {
           if (!ended) {
             const start = turnStart ?? humanStart;
-            if (event.duration !== null) { turnSampleIndex = elapsed.length; elapsed.push(event.duration); recorded += 1; latestDurationRecorded = true; }
+            if (event.duration !== null) { turnSampleIndex = elapsed.length; elapsed.push(event.duration); recordedSamples.set(turnSampleIndex, event.duration); recorded += 1; latestDurationRecorded = true; }
             else if (start !== null && event.at > start) { turnSampleIndex = elapsed.length; elapsed.push(event.at - start); inferred += 1; }
           } else if (event.duration !== null && !latestDurationRecorded) {
             if (turnSampleIndex !== null) { elapsed[turnSampleIndex] = event.duration; inferred -= 1; }
             else { turnSampleIndex = elapsed.length; elapsed.push(event.duration); }
+            recordedSamples.set(turnSampleIndex, event.duration);
             recorded += 1; latestDurationRecorded = true;
           }
+          if (event.turn) closedTurns.add(event.turn);
           ended = true; explicitOpen = false; toolPending = false; pendingEnd = event.at;
         }
       } else {
+        if (ended) { ended = false; humanStart = null; turnStart = null; turnId = null; latestDurationRecorded = false; turnSampleIndex = null; }
         if (event.kind === "tool") { if (run !== null) run += event.count; toolPending = true; }
         if (event.kind === "assistant") toolPending = false;
         lastWork = event.at; pendingEnd = null;
@@ -269,9 +297,12 @@ export class WorkflowCollector {
       previous = event;
     }
     if (run !== null) runs.push(run);
-    const last = events.at(-1), first = events[0];
-    const ending = !last ? "unavailable" : last.kind === "end" ? "terminal" : last.kind === "abort" ? "interrupted" : last.kind === "assistant" && !explicitOpen ? "inferred" : "open";
+    const last = previous, first = events[0];
+    const ending = !last || incomplete ? "unavailable" : ended ? last.kind === "abort" ? "interrupted" : "terminal" : last.kind === "assistant" && !explicitOpen ? "inferred" : "open";
     if (!ended && !explicitOpen && last?.kind === "assistant" && humanStart !== null && last.at > humanStart) { elapsed.push(last.at - humanStart); inferred += 1; }
+    // An unknown record can hide a human, start or terminal boundary. Keep only
+    // independent provider durations and counters; no inferred boundary claims.
+    if (incomplete) { spans.length = 0; waiting = 0; elapsed = [...recordedSamples.values()]; recorded = elapsed.length; inferred = 0; midTurnHumanTurns = 0; }
     const active = spans.reduce((sum, span) => sum + Date.parse(span.end) - Date.parse(span.start), 0);
     const observedSpan = last && first ? last.at - first.at : 0;
     // Waiting is only between a terminal marker and the next human, with no
@@ -282,18 +313,18 @@ export class WorkflowCollector {
     const archetype = !active ? null : active >= 4 * 3_600_000 || turns >= 30 || toolCalls >= 300 ? "marathon"
       : active >= 3_600_000 || turns >= 10 || toolCalls >= 80 ? "deep"
         : active < 10 * 60_000 && turns <= 2 && toolCalls <= 10 ? "quick" : "standard";
-    const abandonment = working || (last && now - last.at < DAY && ending === "open") ? "ongoing"
+    const abandonment = incomplete ? "insufficient-evidence" : working || (last && now - last.at < DAY && ending === "open") ? "ongoing"
       : humanTurns === null || !last || !humanTurns || toolCalls < 3 || this.dropped > 0 ? "insufficient-evidence"
         : !ended && last.kind !== "assistant" && now - last.at >= DAY ? "flagged" : "not-flagged";
     return {
       schemaVersion: 1, scope: "primary-transcript", ending,
-      coverage: { timing: !observedSpan ? "unavailable" : this.untimed || this.dropped ? "partial" : "observed", humanTurns: humanTurns === null ? "not-applicable" : "observed", timestampedEvents: this.timestamped, untimedEvents: this.untimed, droppedEvents: this.dropped, contentRules: this.contentRules },
-      humanTurns, toolCalls, toolRuns: histogram(humanTurns === null || this.untimed || this.dropped ? [] : runs), turnWallTime: histogram(elapsed), recordedTurnDurations: recorded, inferredTurnDurations: inferred,
+      coverage: { timing: incomplete ? "partial" : !observedSpan ? "unavailable" : "observed", humanTurns: humanTurns === null ? "not-applicable" : this.malformed || this.projectionErrors || this.dropped ? "partial" : "observed", timestampedEvents: this.timestamped, untimedEvents: this.untimed, droppedEvents: this.dropped, malformedRecords: this.malformed, projectionErrors: this.projectionErrors, contentRules: this.contentRules },
+      humanTurns, toolCalls, toolRuns: histogram(humanTurns === null || incomplete ? [] : runs), turnWallTime: histogram(elapsed), recordedTurnDurations: recorded, inferredTurnDurations: inferred,
       time: { activeMilliseconds: active, waitingForHumanMilliseconds: waiting, unclassifiedMilliseconds: Math.max(0, observedSpan - active - waiting), observedSpanMilliseconds: observedSpan, idleThresholdMilliseconds: IDLE, waitingCapMilliseconds: WAIT_CAP, activeSpans: spans },
       interruptions: { ...this.interruptions },
       steering: { midTurnHumanTurns, planEntries: this.steering.planEntries, planItems: this.steering.planItems, queueOperations: { ...this.steering.queueOperations }, queueReasons: { ...this.steering.queueReasons } },
       archetype, abandonment, mix: this.mix,
-      commands: this.commands.map(({ name, at }) => ({ name, at })), commandHistoryAvailable: this.history?.available ?? false,
+      commands: this.commands.map(({ name, at }) => ({ name, at })), unrecognizedCommands: this.unrecognizedCommands, commandHistoryAvailable: this.history?.available ?? false,
       valueByHour: [...this.values].sort(([a], [b]) => a.localeCompare(b)).map(([hour, usd]) => ({ hour, usd })), pricedRequests: this.pricedRequests, timestampedPricedRequests: this.timestampedPricedRequests,
     };
   }

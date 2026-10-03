@@ -153,6 +153,8 @@ Both commands also read `SESSION_ANALYTICS_*` environment variables for the same
 
 Workflow estimates join work events at most five minutes apart; a terminal marker followed by a human supplies at most 30 minutes of estimated human waiting. Permission waiting is unavailable. Concurrency counts overlapping active session spans, with summed activity divided by its wall-clock union for effective parallelism. Claude child transcripts remain inside their parent for accounting but are excluded from the parent's interaction clock; Codex child threads have their own clocks. Cursor workflow timing is unavailable. See [workflow definitions and thresholds](docs/metrics.md#workflow-human-and-agent-interaction) before interpreting the comparisons or heuristics.
 
+Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations; boundary estimates and abandonment claims are suppressed. Slash-command names require built-in or discovered command/skill registry evidence. Workflow reuses full-snapshot results and computes filtered scopes in a browser worker; empty repositories and date windows still show discovered skill installations.
+
 ## Supported agents and evidence
 
 | Source | Default location | Format |

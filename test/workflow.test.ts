@@ -227,12 +227,16 @@ test("workflow: empty and unsupported scopes keep ratios unavailable", () => {
   const cursor = summarizeWorkflow([{ provider: "cursor", repositoryId: "repo", transcript: { status: "ok" } } as SessionAnalytics], undefined, at(0));
   assert.equal(cursor.coverage.sessions, 1); assert.equal(cursor.coverage.supportedSessions, 0);
   assert.equal(cursor.autonomy.turnWallTime.p50, null);
+  const c = new WorkflowCollector("claude"); c.gap("malformed");
+  const partial = summarizeWorkflow([session(c.finish(AFTER))], undefined, at(0));
+  assert.equal(partial.coverage.partialSessions, 1);
+  assert.equal(partial.coverage.timedSessions, 0, "a parse gap without positive event span is not timed evidence");
 });
 
 test("workflow: leading command token is bounded, argument-free and never a path prefix", () => {
   assert.equal(slashCommand("/review secret args /private/path"), "/review");
-  assert.equal(slashCommand("/plugin:review\nSENTINEL"), "/plugin:review");
-  for (const value of ["ordinary /review", " /review", "/Users/private/file", "/review;secret", "/review?secret", "/__proto__", `/${"a".repeat(129)}`, null, 42]) assert.equal(slashCommand(value), null);
+  assert.equal(slashCommand("/plugin:review\nSENTINEL", new Set(["/plugin:review"])), "/plugin:review");
+  for (const value of ["/PRIVATE_FILE.txt", "/PRIVATE_DIRECTORY", "/PRIVATE_RAW_ID", "/plugin:review", "ordinary /review", " /review", "/Users/private/file", "/review;secret", "/review?secret", "/__proto__", `/${"a".repeat(129)}`, null, 42]) assert.equal(slashCommand(value), null);
 });
 
 test("workflow: content rules default off and explicit disable beats the environment", () => {

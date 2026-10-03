@@ -29,10 +29,12 @@ export interface SessionWorkflow {
   ending: "terminal" | "interrupted" | "inferred" | "open" | "unavailable";
   coverage: {
     timing: "observed" | "partial" | "unavailable";
-    humanTurns: "observed" | "not-applicable";
+    humanTurns: "observed" | "partial" | "not-applicable";
     timestampedEvents: number;
     untimedEvents: number;
     droppedEvents: number;
+    malformedRecords: number;
+    projectionErrors: number;
     contentRules: boolean;
   };
   humanTurns: number | null;
@@ -68,6 +70,7 @@ export interface SessionWorkflow {
   abandonment: "flagged" | "not-flagged" | "insufficient-evidence" | "ongoing";
   mix: WorkflowMix[];
   commands: Array<{ name: string; at: string }>;
+  unrecognizedCommands: number;
   commandHistoryAvailable: boolean;
   valueByHour: Array<{ hour: string; usd: number }>;
   pricedRequests: number;
@@ -143,6 +146,7 @@ export interface WorkflowSummary {
   mix: Array<{ day: string; provider: SessionProvider; dimension: "model" | "effort" | "cliVersion" | "entrypoint" | "originator"; name: string; sessions: number }>;
   comparisons: WorkflowComparison[];
   commands: Array<{ name: string; count: number }>;
+  unrecognizedCommands: number;
   commandHistorySessions: number;
   installedSkills: Array<WorkflowSkill & { observedInvocations: number }>;
   inventory: Omit<WorkflowInventory, "skills">;

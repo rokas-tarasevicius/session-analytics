@@ -1,4 +1,4 @@
-import { renderWorkflow } from "./workflow.js";
+import { clearWorkflow, renderWorkflow } from "./workflow.js";
 
 const $ = (selector) => document.querySelector(selector);
 const elements = {
@@ -564,6 +564,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
 }
 
 function clearInactiveAnalyticsViews(activeName) {
+  if (activeName !== "workflow") clearWorkflow();
   const containers = {
     activity: [elements.activityProviderFilters, elements.activityHeatmap, elements.activityRepositories],
     costs: [elements.providerCostComponents, elements.repositoryCostComponents],

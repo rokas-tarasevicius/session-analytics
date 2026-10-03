@@ -16,6 +16,7 @@
 | `src/metrics/workflow.ts`, `workflow-types.ts` | Streaming workflow projection and namespaced public types; primary-transcript timing, bounded metadata, deduplicated events and heuristic labels. |
 | `src/metrics/workflow-inventory.ts` | Read-only matched Claude command history and scoped skill-directory inventories. Raw IDs remain internal. |
 | `src/public/workflow-data.js` | Pure workflow calculations shared by the worker and browser: exact pooled quantiles, interval sweep, UTC patterns and guarded comparisons. The adjacent declaration file defines its TypeScript contract. |
+| `src/public/workflow-scope.js`, `workflow-worker.js` | Reuse the full snapshot aggregate; cache eight filtered cohorts per snapshot and compute them in a same-origin module worker. Yield between input batches; ignore stale render results. |
 | `src/public/workflow.js`, `workflow.css`, `src/report/workflow.ts` | Workflow tab, scoped styles and terminal formatting. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/brand.ts`, `src/version.ts` | Display name, command name, neutral service ID, and version. |
@@ -105,6 +106,8 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 ## Dashboard client
 
 `src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
+
+Workflow reuses `snapshot.workflow` for the full scope. Filtered cohorts are calculated in a module worker from public session fields, with an eight-entry cache tied to snapshot identity. Input transfer yields every 128 sessions; pending state is visible and older responses cannot overwrite the current filter or repopulate an inactive tab. Repository selection stays independent of the date-filtered sessions, retaining empty-repository inventories. The worker module and scope controller are fixed static assets covered by the existing same-origin CSP.
 
 ## Design constraints
 

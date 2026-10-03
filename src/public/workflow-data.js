@@ -168,7 +168,7 @@ function patterns(workflows, asOf) {
     pricedRequests: sum(workflows.map((w) => w.pricedRequests)), timestampedPricedRequests: sum(workflows.map((w) => w.timestampedPricedRequests)) };
 }
 
-export function summarizeWorkflow(sessions, inventory, asOf = new Date().toISOString()) {
+export function summarizeWorkflow(sessions, inventory, asOf = new Date().toISOString(), repositoryScope) {
   const supported = sessions.filter((s) => s.workflow && s.transcript.status === "ok");
   const workflows = supported.map((s) => s.workflow), human = workflows.filter((w) => w.humanTurns !== null);
   const humanTurns = sum(human.map((w) => w.humanTurns));
@@ -203,16 +203,27 @@ export function summarizeWorkflow(sessions, inventory, asOf = new Date().toISOSt
       if (!seen.has(key)) { add(mix, key); seen.add(key); }
     }
   }
-  const repositoryIds = [...new Set(sessions.map((s) => s.repositoryId))];
+  // Inventory scope is independent of session/date coverage. In the absence of
+  // an explicit selection, every supplied installation is in scope.
+  const repositoryIds = [...new Set(repositoryScope ?? [...sessions.map((s) => s.repositoryId), ...(inventory?.skills || []).map((s) => s.repositoryId).filter((id) => id !== null)])].sort();
+  const repositorySet = new Set(repositoryIds), byRepository = new Map(), invocations = new Map();
+  for (const s of supported) {
+    const group = byRepository.get(s.repositoryId) || [];
+    group.push(s); byRepository.set(s.repositoryId, group);
+  }
+  for (const s of sessions) for (const [name, count] of Object.entries(s.skills || {})) {
+    add(invocations, JSON.stringify([s.provider, null, name]), count);
+    add(invocations, JSON.stringify([s.provider, s.repositoryId, name]), count);
+  }
   const repositories = repositoryIds.map((repositoryId) => {
-    const selected = supported.filter((s) => s.repositoryId === repositoryId);
+    const selected = byRepository.get(repositoryId) || [];
     const c = concurrency(selected.map((s) => ({ spans: s.workflow.time.activeSpans })));
     return { repositoryId, sessions: selected.length, peak: c.peak, effectiveParallelism: c.effectiveParallelism,
       activeSessionMilliseconds: c.activeSessionMilliseconds, wallClockActiveMilliseconds: c.wallClockActiveMilliseconds };
   });
   return {
     schemaVersion: 1,
-    coverage: { sessions: sessions.length, supportedSessions: workflows.length, timedSessions: workflows.filter((w) => w.coverage.timing !== "unavailable").length,
+    coverage: { sessions: sessions.length, supportedSessions: workflows.length, timedSessions: workflows.filter((w) => w.time.observedSpanMilliseconds > 0).length,
       humanSessions: human.length, contentRuleSessions: workflows.filter((w) => w.coverage.contentRules).length, partialSessions: workflows.filter((w) => w.coverage.timing === "partial").length },
     autonomy: { humanTurns, turnsPerSession: human.length >= 5 ? humanTurns / human.length : null,
       toolRuns: mergeHistograms(human.map((w) => w.toolRuns)), turnWallTime: mergeHistograms(workflows.map((w) => w.turnWallTime)),
@@ -224,10 +235,11 @@ export function summarizeWorkflow(sessions, inventory, asOf = new Date().toISOSt
     mix: [...mix].map(([key, sessions]) => { const [day, provider, dimension, name] = JSON.parse(key); return { day, provider, dimension, name, sessions }; }).sort((a, b) => a.day.localeCompare(b.day)),
     comparisons: compareVersions(supported),
     commands: [...commands].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    unrecognizedCommands: sum(workflows.map((w) => w.unrecognizedCommands ?? 0)),
     commandHistorySessions: workflows.filter((w) => w.commandHistoryAvailable).length,
-    installedSkills: (inventory?.skills || []).filter((skill) => skill.repositoryId === null || repositoryIds.includes(skill.repositoryId)).map((skill) => ({
+    installedSkills: (inventory?.skills || []).filter((skill) => skill.repositoryId === null || repositorySet.has(skill.repositoryId)).map((skill) => ({
       name: skill.name, provider: skill.provider, repositoryId: skill.repositoryId,
-      observedInvocations: sum(sessions.filter((s) => s.provider === skill.provider && (skill.repositoryId === null || skill.repositoryId === s.repositoryId)).map((s) => s.skills[skill.name] || 0)),
+      observedInvocations: invocations.get(JSON.stringify([skill.provider, skill.repositoryId, skill.name])) || 0,
     })),
     inventory: { directoriesRead: inventory?.directoriesRead ?? 0, directoriesUnavailable: inventory?.directoriesUnavailable ?? 0, historyFilesRead: inventory?.historyFilesRead ?? 0, historyFilesUnavailable: inventory?.historyFilesUnavailable ?? 0, malformedHistoryRecords: inventory?.malformedHistoryRecords ?? 0 },
   };

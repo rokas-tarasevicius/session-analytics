@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { addCommandHistoryFixture, commandSentinels } from "./workflow-fixtures.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -73,6 +74,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   let child: ChildProcess | null = null;
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    await addCommandHistoryFixture(fixture);
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
@@ -115,6 +117,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
     const serialized = await response.text();
+    assert.doesNotMatch(serialized, commandSentinels);
+    assert.match(serialized, /\/custom.audit/);
     assert.match(serialized, /"analyzedSessions":5/);
     assert.match(serialized, /"providerReportedSpendUsd":1\.48/);
     assert.match(serialized, /"repositories":3/);
@@ -134,7 +138,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(pageText, /SESSION <b>ANALYTICS<\/b>/);
     assert.match(pageText, /data-view-button="distributions"/);
     assert.match(pageText, /data-view-button="workflow"/);
-    for (const asset of ["workflow.js", "workflow-data.js", "workflow.css"]) {
+    for (const asset of ["workflow.js", "workflow-data.js", "workflow-scope.js", "workflow-worker.js", "workflow.css"]) {
       const response = await fetch(`${origin}/${asset}`);
       assert.equal(response.status, 200);
       assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'self'/);
