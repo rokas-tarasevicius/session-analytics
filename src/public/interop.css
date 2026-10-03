@@ -1,15 +1,7 @@
-/* Interchange controls; all colors and typography inherit the active theme. */
-.export-menu { position: relative; }
-.export-menu > summary { display: flex; align-items: center; cursor: pointer; }
-.export-options { position: absolute; right: 0; top: 100%; width: min(360px, 88vw); padding: 1rem; background: var(--surface); border: 1px solid var(--line); }
-.export-options p { font-size: .85rem; line-height: 1.5; }
-.export-options .button { display: block; width: 100%; text-align: left; border: 0; }
-.export-options .button[hidden] { display: none; }
-#export-status:empty { display: none; }
-#shared-snapshot { margin-block: 2rem; }
+/* Interchange controls inherit the dashboard theme; the export popover and shared snapshot are styled in styles.css. */
+#shared-snapshot { margin: 0 0 var(--gap); }
 #shared-snapshot .table-scroll { overflow-x: auto; }
 #shared-snapshot td { overflow-wrap: anywhere; }
+#shared-snapshot h1 { margin: 2px 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+#shared-snapshot p { color: var(--text-2); font-size: 12.5px; }
 .filters-bar[hidden], .view-tabs[hidden], #shared-snapshot[hidden] { display: none; }
-@media (max-width: 470px) {
-  .topbar .export-menu > summary.button, .topbar .export-options .button:not([hidden]) { display: flex; }
-}

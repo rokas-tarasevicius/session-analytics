@@ -1,4 +1,5 @@
 import { providerIds, providerLabels } from "./providers.js";
+import { DASH, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
 import { agentLabels, buildVelocity, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
@@ -146,38 +147,34 @@ function coverageText(data) {
   const undated = formatMetric(data.undated[metricDefinitions[data.metric].index], data.metric);
   return `${included} dated · ${number.format(data.contributingSessions)} sessions with dated evidence. ${detail ? `${detail}. ` : ""}${undated} undated across this repository/provider scope, excluded from date filters and charts.${data.missingSessions ? ` ${data.missingSessions} sessions lack velocity data.` : ""}`;
 }
-function card(title, value, note) {
-  const article = element("article", undefined, "kpi");
-  article.append(element("span", title), element("strong", value), element("small", note));
-  return article;
-}
-function selectControl(label, choices) {
-  const wrapper = element("label"), select = element("select");
-  select.setAttribute("aria-label", label);
-  for (const [value, text] of choices) { const option = element("option", text); option.value = value; select.append(option); }
-  wrapper.append(element("span", label), select); return { wrapper, select };
-}
 const controllers = new WeakMap();
+function panelShell(kicker, title) {
+  const article = el("article", null, "panel"), header = el("header"), block = el("div");
+  const kickerNode = el("p", kicker, "kicker"), heading = el("h3", title);
+  block.append(kickerNode, heading); header.append(block); article.append(header);
+  return { article, heading, header };
+}
 export function renderVelocity(container, sessions, context) {
   let controller = controllers.get(container);
   if (!controller) {
-    const controls = element("div", undefined, "velocity-controls");
-    const group = selectControl("Group by", [["agent", "Agent"], ["provider", "Provider"], ["model", "Model"], ["repository", "Repository"], ["execution", "Execution kind"], ["effort", "Effort"]]);
-    const metric = selectControl("Metric", Object.entries(metricDefinitions).map(([key, value]) => [key, value.label]));
-    const granularity = selectControl("Granularity", [["day", "Day"], ["week", "Week · Monday start"], ["month", "Month"], ["hour", "Hour-of-day profile"]]);
-    const mode = selectControl("Chart", [["stacked", "Stacked area"], ["lines", "Lines"], ["cumulative", "Cumulative"]]);
-    const rollingLabel = element("label", undefined, "velocity-checkbox"), rolling = element("input");
-    rolling.type = "checkbox"; rolling.checked = true; rollingLabel.append(rolling, document.createTextNode("7-day average"));
-    controls.append(group.wrapper, metric.wrapper, granularity.wrapper, mode.wrapper, rollingLabel);
-    const filters = element("fieldset", undefined, "velocity-providers"); filters.append(element("legend", "Providers"));
+    const group = selectField("velocity-group", "Group by", [["agent", "Agent"], ["provider", "Provider"], ["model", "Model"], ["repository", "Repository"], ["execution", "Execution kind"], ["effort", "Effort"]]);
+    const metric = selectField("velocity-metric", "Metric", Object.entries(metricDefinitions).map(([key, value]) => [key, value.label]));
+    const granularity = selectField("velocity-granularity", "Granularity", [["day", "Day"], ["week", "Week · Monday start"], ["month", "Month"], ["hour", "Hour-of-day profile"]]);
+    const mode = selectField("velocity-mode", "Chart", [["stacked", "Stacked area"], ["lines", "Lines"], ["cumulative", "Cumulative"]]);
+    const rollingLabel = el("label", null, "check"), rolling = el("input");
+    rolling.type = "checkbox"; rolling.checked = true; rollingLabel.append(rolling, el("span", "7-day average"));
+    const filters = el("div", null, "provider-key"); filters.setAttribute("role", "group"); filters.setAttribute("aria-label", "Providers");
     const selectedProviders = new Set(providerIds);
-    const totals = element("div", undefined, "kpi-grid compact-metrics velocity-totals");
-    const panel = element("article", undefined, "panel velocity-main-panel");
-    const heading = element("h3"), subtitle = element("p", undefined, "chart-note"), chart = element("div"), coverage = element("p", undefined, "chart-note velocity-coverage");
-    panel.append(heading, subtitle, chart, coverage);
-    const projection = element("article", undefined, "panel velocity-projection");
-    const movers = element("article", undefined, "panel velocity-movers");
-    container.append(controls, filters, totals, panel, projection, movers);
+    const controls = filterBar(group.wrapper, metric.wrapper, granularity.wrapper, mode.wrapper, rollingLabel, filters);
+    const totals = el("div", null, "kpi-grid compact-metrics velocity-totals");
+    const comparisons = evidence([], { title: "How the comparisons are built" });
+    const main = panelShell("Observed", "Usage over time");
+    const subtitle = el("span", null, "panel-meta"); main.header.append(subtitle);
+    const chart = el("div"), coverage = evidence([], { title: "Evidence & limits" });
+    main.article.append(chart, coverage);
+    const projection = panelShell("End-of-month scenario", "Projection");
+    const movers = panelShell("Largest increases", "Top movers");
+    container.append(controls, totals, comparisons, main.article, projection.article, movers.article);
     controller = { sessions, context, update: null };
     const update = () => {
       const current = controller.context;
@@ -190,49 +187,60 @@ export function renderVelocity(container, sessions, context) {
       const data = buildVelocity(scoped, options);
       const today = localDay(current.generatedAt, current.timeZone);
       const indicators = velocityIndicators(data, today);
-      heading.textContent = `${metricDefinitions[options.metric].label} by ${group.select.selectedOptions[0].textContent.toLowerCase()}`;
-      subtitle.textContent = `${current.start} → ${current.end} · ${current.timeZone} · ${options.granularity === "hour" ? "Totals for each local clock hour; repeated DST hours combine." : options.granularity === "week" || options.granularity === "month" ? "Boundary periods include only selected dates." : "Inactive calendar dates are included."} ${options.mode === "cumulative" ? "Accumulation restarts at the selected start date." : ""}`;
+      main.heading.textContent = `${metricDefinitions[options.metric].label} by ${group.select.selectedOptions[0].textContent.toLowerCase()}`;
+      subtitle.textContent = `${current.start} → ${current.end} · ${current.timeZone}`;
       renderVelocityChart(chart, data, { rolling: rolling.checked && !rolling.disabled });
-      coverage.textContent = coverageText(data);
-      const comparisonNote = (item) => `Observed ${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} and ${item.previous.coveredDays}/${item.previous.days} calendar days covered. ${evidenceLabels[options.metric] ? `Evidence current: ${evidenceText(item.current.evidence, options.metric)}; prior: ${evidenceText(item.previous.evidence, options.metric)}. ` : ""}${item.delta === null ? "N/A: incomplete evidence/window or small baseline." : "Same elapsed days; today excluded."}`;
+      coverage.replaceChildren(el("summary", "Evidence & limits"), (() => { const body = el("div", null, "evidence-body"); for (const text of [
+        options.granularity === "hour" ? "Totals for each local clock hour; repeated DST hours combine." : options.granularity === "week" || options.granularity === "month" ? "Boundary periods include only selected dates." : "Inactive calendar dates are included.",
+        options.mode === "cumulative" ? "Accumulation restarts at the selected start date." : null,
+        coverageText(data),
+        "Value is not an invoice; activity is not an outcome.",
+      ].filter(Boolean)) body.append(el("p", text)); return body; })());
+      const comparisonNote = (item) => `Observed ${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} and ${item.previous.coveredDays}/${item.previous.days} calendar days covered. ${evidenceLabels[options.metric] ? `Evidence current: ${evidenceText(item.current.evidence, options.metric)}; prior: ${evidenceText(item.previous.evidence, options.metric)}. ` : ""}${item.delta === null ? "Not comparable: incomplete evidence/window or small baseline." : "Same elapsed days; today excluded."}`;
+      const shortNote = (item) => `${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} days covered`;
       totals.replaceChildren(
-        card("Selected period", formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric), `${data.daily.length} calendar days · ${metricDefinitions[options.metric].unit}${data.evidence.complete ? "" : " · partially observed"}. Activity counters do not prove quality or value delivered.`),
-        card("This week vs last", deltaLabel(indicators.week.delta), comparisonNote(indicators.week)),
-        card("Month to date vs prior", deltaLabel(indicators.month.delta), comparisonNote(indicators.month)),
-        card("Today / 14-day median", indicators.burn.ratio === null ? "N/A" : `${number.format(indicators.burn.ratio)}×`, `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered. ${evidenceLabels[options.metric] ? `Evidence today: ${evidenceText(indicators.burn.todayEvidence, options.metric)}; baseline: ${evidenceText(indicators.burn.baselineEvidence, options.metric)}. ` : ""}Today is partial; this is not a same-hour comparison.`),
+        kpi({ label: "Selected period", value: formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric), note: `${data.daily.length} calendar days · ${metricDefinitions[options.metric].unit}${data.evidence.complete ? "" : " · partially observed"}`, accent: true }),
+        kpi({ label: "This week vs last", value: indicators.week.delta === null ? null : deltaLabel(indicators.week.delta), reason: "Incomplete evidence, window, or small baseline", note: shortNote(indicators.week) }),
+        kpi({ label: "Month to date vs prior", value: indicators.month.delta === null ? null : deltaLabel(indicators.month.delta), reason: "Incomplete evidence, window, or small baseline", note: shortNote(indicators.month) }),
+        kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number.format(indicators.burn.ratio)}×`, reason: "Needs a 14-day baseline with complete evidence", note: `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered` }),
       );
-      projection.replaceChildren(element("p", "END-OF-MONTH SCENARIO", "kicker"));
+      comparisons.replaceChildren(el("summary", "How the comparisons are built"), (() => { const body = el("div", null, "evidence-body"); for (const text of [
+        `This week vs last: ${comparisonNote(indicators.week)}`,
+        `Month to date vs prior: ${comparisonNote(indicators.month)}`,
+        `Today / 14-day median: ${evidenceLabels[options.metric] ? `Evidence today: ${evidenceText(indicators.burn.todayEvidence, options.metric)}; baseline: ${evidenceText(indicators.burn.baselineEvidence, options.metric)}. ` : ""}Today is partial; this is not a same-hour comparison.`,
+        "Activity counters do not prove quality or value delivered.",
+      ]) body.append(el("p", text)); return body; })());
       const forecast = indicators.projection;
+      projection.article.replaceChildren(projection.header);
       if (!forecast) {
-        projection.append(element("h3", "More complete history needed"), element("p", "Select the month from its start, with at least 7 completed days and 3 active days. Complete metric evidence is required for the month, today and every sampled day. Missing pricing or token detail, a small baseline or a clipped time window cannot support a projection.", "chart-note"));
+        projection.heading.textContent = "More complete history needed";
+        projection.article.append(el("p", "Select the month from its start, with at least 7 completed days and 3 active days. Complete metric evidence is required for the month, today and every sampled day.", "empty-line"));
       } else {
-        projection.append(element("h3", `${formatMetric(forecast.value, options.metric)} projected by ${forecast.monthEnd}`));
+        projection.heading.textContent = `Projected by ${forecast.monthEnd}`;
+        projection.article.append(el("p", formatMetric(forecast.value, options.metric), "projected"));
         const band = svgElement("svg", { viewBox: "0 0 960 60", role: "img", "aria-label": `Scenario range ${formatMetric(forecast.low, options.metric)} to ${formatMetric(forecast.high, options.metric)}, median ${formatMetric(forecast.value, options.metric)}`, class: "velocity-band" });
         const scale = (value) => 24 + value / Math.max(forecast.high, 0.001) * 910;
         band.append(svgElement("line", { x1: 24, x2: 934, y1: 30, y2: 30, class: "velocity-band-base" }), svgElement("line", { x1: scale(forecast.low), x2: scale(forecast.high), y1: 30, y2: 30, class: "velocity-band-range" }), svgElement("circle", { cx: scale(forecast.value), cy: 30, r: 7, class: "velocity-band-point" }));
-        projection.append(band, element("p", `${formatMetric(forecast.low, options.metric)}–${formatMetric(forecast.high, options.metric)} scenario range · ${forecast.sampleDays} complete days sampled, ${forecast.activeDays} active · ${forecast.remainingDays} days to project.`, "chart-note"), element("p", "Completed month-to-date plus remaining days at the trailing daily median, with today never below its observed value; range uses the daily 10th–90th percentiles. This is a rate scenario, not a confidence interval. It assumes the recent workload continues, includes inactive days, and cannot predict changes in work. API-equivalent value is not an invoice.", "chart-note"));
+        projection.article.append(band, el("p", `${formatMetric(forecast.low, options.metric)}–${formatMetric(forecast.high, options.metric)} scenario range · ${forecast.sampleDays} complete days sampled, ${forecast.activeDays} active · ${forecast.remainingDays} days to project.`, "chart-note"));
       }
-      if (evidenceLabels[options.metric]) projection.append(element("p", `Evidence month to date: ${evidenceText(indicators.projectionEvidence.observed, options.metric)}; sample: ${evidenceText(indicators.projectionEvidence.sample, options.metric)}.`, "chart-note"));
+      projection.article.append(evidence([
+        "Completed month-to-date plus remaining days at the trailing daily median, with today never below its observed value; the range uses the daily 10th–90th percentiles. This is a rate scenario, not a confidence interval. It assumes the recent workload continues, includes inactive days, and cannot predict changes in work. API-equivalent value is not an invoice.",
+        evidenceLabels[options.metric] ? `Evidence month to date: ${evidenceText(indicators.projectionEvidence.observed, options.metric)}; sample: ${evidenceText(indicators.projectionEvidence.sample, options.metric)}.` : null,
+        !forecast ? "Missing pricing or token detail, a small baseline or a clipped time window cannot support a projection." : null,
+      ]));
       const movement = topMovers(scoped, options, today);
-      movers.replaceChildren(element("p", "LARGEST INCREASES", "kicker"), element("h3", "Top movers"), element("p", `${movement.start}–${movement.end} vs ${movement.previousStart}–${movement.previousEnd} · last 7 completed days versus preceding 7 · ${metricDefinitions[options.metric].label.toLowerCase()}.`, "chart-note"));
-      if (movement.excludedGroups) movers.append(element("p", `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.`, "chart-note"));
-      if (!movement.available || !movement.rows.length) movers.append(element("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
-      else {
-        const wrap = element("div", undefined, "table-wrap"), table = element("table"), head = element("thead"), body = element("tbody"), row = element("tr");
-        for (const title of ["Dimension", "Name", "Previous 7 days", "Last 7 days", "Increase", "Change", "Evidence · previous → current"]) { const th = element("th", title); th.scope = "col"; row.append(th); }
-        head.append(row);
-        for (const item of movement.rows) {
-          const row = element("tr");
-          for (const value of [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? "N/A · small baseline" : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]) row.append(element("td", value));
-          body.append(row);
-        }
-        table.append(head, body); wrap.append(table); movers.append(wrap);
-      }
+      movers.article.replaceChildren(movers.header);
+      movers.heading.textContent = "Top movers";
+      movers.article.append(el("p", `${movement.start}–${movement.end} vs ${movement.previousStart}–${movement.previousEnd} · last 7 completed days versus preceding 7 · ${metricDefinitions[options.metric].label.toLowerCase()}.`, "chart-note"));
+      if (!movement.available || !movement.rows.length) movers.article.append(el("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
+      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]), { className: "velocity-movers" }));
+      movers.article.append(evidence([movement.excludedGroups ? `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.` : "Groups need complete current and prior metric evidence to appear. A change in telemetry is not a measured change in workload."]));
     };
     controller.update = update;
     for (const provider of providerIds) {
-      const label = element("label", undefined, "velocity-checkbox"), input = element("input"); input.type = "checkbox"; input.checked = true;
-      label.append(input, document.createTextNode(providerLabels[provider]));
+      const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = true;
+      label.dataset.provider = provider; input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
+      label.append(input, el("span", providerLabels[provider]));
       input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); }); filters.append(label);
     }
     for (const input of [group.select, metric.select, granularity.select, mode.select, rolling]) input.addEventListener("change", update);

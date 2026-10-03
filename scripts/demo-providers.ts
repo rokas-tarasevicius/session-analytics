@@ -36,7 +36,7 @@ export function generateProviderDemo(root: string, repositories: Array<{ root: s
       write(join(copilot, id, "events.jsonl"), jsonl(persisted));
       write(join(gemini, repo.name, "chats", `session-${id}.json`), JSON.stringify({ sessionId: id, projectHash: createHash("sha256").update(repo.root).digest("hex"), startTime: at, lastUpdated: later, kind: "main", messages: [
         { id: `${id}-user`, type: "user", timestamp: at, content: "Synthetic prompt" },
-        { id: `${id}-response`, type: "gemini", timestamp: later, model: "gemini-2.5-pro", tokens: { input: 35000 * (n + 1), cached: 12000, output: 4500, thoughts: 2500 }, toolCalls: [{ id: `${id}-read`, name: "read_file", args: {}, result: "Synthetic result" }] },
+        { id: `${id}-response`, type: "gemini", timestamp: later, model: "claude-sonnet-5", tokens: { input: 35000 * (n + 1), cached: 12000, output: 4500, thoughts: 2500 }, toolCalls: [{ id: `${id}-read`, name: "read_file", args: {}, result: "Synthetic result" }] },
       ] }));
       const agentId = `c0000000-0000-4000-8000-${String(i * 10 + n).padStart(12, "0")}`, dir = join(sdk, id);
       write(join(dir, "agents.ndjson"), jsonl([{ agentId, cwd: repo.root, createdAt: at, updatedAt: later }]));

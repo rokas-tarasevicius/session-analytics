@@ -30,10 +30,13 @@ async function harness() {
   const viewModel = await import(new URL("../src/public/view-model.js", import.meta.url).href);
   const evidenceHelpers = await import(new URL("../src/public/evidence.js", import.meta.url).href);
   const exportHelpers = await import(new URL("../src/public/export-data.js", import.meta.url).href);
-  const context = createContext({ ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, document, Intl, Set, Map, console, HTMLElement: Element,
+  const ui = await import(new URL("../src/public/ui.js", import.meta.url).href);
+  const context = createContext({ ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   source = source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
+  // Shared components resolve `document` at call time, so the stub is exposed as the global for this harness.
+  (globalThis as any).document = document;
   runInContext(source, context);
   return { elements, context, run: (js: string) => runInContext(js, context) };
 }
@@ -64,7 +67,7 @@ test("review: distributions label zero/one/sufficient eligible denominators and 
 test("review: models display N/A requests for run summaries and coverage for mixed evidence", async () => {
   const h = await harness(); const summary = sample(evidence()); summary.tokens = tokens(100, 0, 0, 20); summary.models = [reportedModel("claude-opus-5", summary.tokens, 1)]; summary.costBasis = "provider-reported";
   h.context["sessions"] = [summary]; h.run('modelMetric="calls"; renderModels({sessions})');
-  assert.match(h.elements.get("#models-by-provider")!.textContent, /N\/A/); assert.doesNotMatch(h.elements.get("#models-by-provider")!.textContent, /0 calls/);
+  assert.match(h.elements.get("#models-by-provider")!.textContent, /—/); assert.doesNotMatch(h.elements.get("#models-by-provider")!.textContent, /0 calls|N\/A/);
   const native = sample(undefined); native.models = [{ ...summary.models[0]!, calls: 2 }]; native.tokens = summary.tokens; native.costBasis = "api-list-price-equivalent";
   h.context["sessions"] = [summary, native]; h.run('renderModels({sessions})'); assert.match(h.elements.get("#models-by-provider")!.textContent, /2 calls.*1\/2/);
 });
@@ -75,7 +78,7 @@ test("review: invalid and unavailable sessions never imply observed tools or com
   assert.equal(h.run('providerEvidenceRows(sessions)[0].toolSessions'), 0);
   h.run('renderRepositoryTable([{repository:{id:"example",name:"Example"},summary:summarize(sessions)}])');
   const output = h.elements.get("#repository-rows")!.textContent;
-  assert.match(output, /N\/A/); assert.doesNotMatch(output, /complete/); assert.match(output, /1\/2.*parsed/);
+  assert.match(output, /—/); assert.doesNotMatch(output, /complete|N\/A/); assert.match(output, /1\/2.*parsed/);
 });
 
 test("review: actual summary and Tools rendering distinguish unavailable, observed zero and partial totals", async () => {
@@ -86,14 +89,19 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
   for (const sessions of [[activity], [summary], [invalid], [summary, activity]]) {
     h.context["sessions"] = sessions;
     h.run('renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
-    assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? sessions.length === 2 ? "100 · 1/2 sessions" : "100" : "N/A");
-    assert.equal(h.elements.get("#metric-spend")!.textContent, sessions.includes(summary) ? sessions.length === 2 ? "$1.00 · 1/2 sessions" : "$1.00" : "N/A");
-    assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? sessions.length === 2 ? "0 · 1/2 sessions" : "0" : "N/A");
-    assert.equal(h.elements.get("#metric-compactions")!.textContent, "N/A");
+    // Values stay bare; the eligible/selected share moves to the coverage badge beside the value.
+    assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? "100" : "—");
+    const selected = `${sessions.length} selected ${sessions.length === 1 ? "session" : "sessions"}`;
+    assert.equal(h.elements.get("#metric-input-coverage")!.textContent.trim(), sessions.includes(summary) ? sessions.length === 2 ? "1/2" : "" : `No token evidence in ${selected}`);
+    assert.equal(h.elements.get("#metric-spend")!.textContent, sessions.includes(summary) ? "$1.00" : "—");
+    assert.equal(h.elements.get("#metric-spend-coverage")!.textContent.trim(), sessions.includes(summary) ? sessions.length === 2 ? "1/2" : "" : `No priced or reported value in ${selected}`);
+    assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? "0" : "—");
+    assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2" : "" : `No tool evidence in ${selected}`);
+    assert.equal(h.elements.get("#metric-compactions")!.textContent, "—");
     h.run('renderNamedDistribution({view,field:"tools",keyContainer:elements.toolsKey,tableContainer:elements.toolsByRepository,detailContainer:elements.toolsDetail,detailTitle:elements.toolsDetailTitle,providerScope:"tools"})');
     if (!sessions.includes(activity)) {
-      assert.match(h.elements.get("#tools-by-repository")!.textContent, /N\/A/);
-      assert.match(h.elements.get("#tools-detail")!.textContent, /N\/A/);
+      assert.match(h.elements.get("#tools-by-repository")!.textContent, /—/);
+      assert.match(h.elements.get("#tools-detail")!.textContent, /—/);
     }
   }
 });

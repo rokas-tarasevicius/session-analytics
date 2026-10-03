@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+### Changed
+
+- Dashboard design refinement: honesty guardrails moved into progressive disclosure. The coverage banner became a top-bar "Coverage" indicator that opens an Evidence & coverage dialog (coverage notes, per-provider evidence table, interpretation footnotes); inline "n/m sessions" denominators became hover badges beside the number; unavailable values render as an em dash with the reason on hover instead of "N/A"; long evidence paragraphs sit behind per-panel "Evidence & limits" disclosures.
+- One shared component set (`src/public/ui.js`: page header, filter bar with labelled fields, KPI card, panel, data table, evidence disclosure, coverage badge, empty state, stat list) now renders Velocity, Reliability, Limits & cache, Outcomes, Workflow, Insights and Pricing with the same spacing, type scale and controls as the Summary.
+- Fleet table repository IDs show the key's hash tail; the footer collapses rate sources into one disclosure; the donut legend hides empty providers; distinct sidebar icons for the seven newer views; `e` opens the coverage dialog.
+- Demo: Gemini CLI sessions use a rate-card model so the demo is priced across providers.
+
 ## [0.6.0] - 2026-10-03
 
 ### Added

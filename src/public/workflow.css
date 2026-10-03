@@ -1,49 +1,28 @@
-.workflow-view { --workflow-accent: var(--sage); }
-.workflow-view .workflow-provider-label { display: grid; gap: .5rem; color: var(--muted); font-size: .75rem; }
-.workflow-view select { min-height: 44px; padding: .6rem .9rem; border: 1px solid var(--line); background: var(--surface); }
-.workflow-view .workflow-coverage { margin: 0 0 1rem; padding: .8rem 1rem; border-left: 3px solid var(--workflow-accent); background: var(--surface-2); color: var(--muted); line-height: 1.6; font-size: .8rem; }
-.workflow-view .workflow-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 1rem; border: 1px solid var(--line); }
-.workflow-view .workflow-metrics .kpi { border: 0; border-right: 1px solid var(--line); min-height: 155px; }
-.workflow-view .workflow-metrics .kpi:last-child { border-right: 0; }
-.workflow-view .workflow-metrics strong { color: var(--workflow-accent); }
-.workflow-view .workflow-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+/* Workflow: shared KPI cards, panels, stat lists, tables and heatmap cells. */
+.workflow-view .workflow-provider-label { margin-bottom: 2px; }
+.workflow-view #workflow-content { display: grid; gap: var(--gap); }
+.workflow-view .evidence-line { margin: 0; }
+.workflow-view .workflow-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap); }
 .workflow-view .workflow-wide { grid-column: 1 / -1; }
-.workflow-view .panel { min-width: 0; min-height: 0; }
-.workflow-view .panel h2 { font-size: 1.1rem; }
+.workflow-view .panel { min-width: 0; min-height: 0; margin: 0; }
 .workflow-view .workflow-plot-scroll { overflow-x: auto; }
-.workflow-view .workflow-chart { width: 100%; min-width: 900px; height: auto; display: block; overflow: visible; }
-.workflow-view .workflow-chart text { fill: var(--muted); font: 12px var(--font-mono); }
+.workflow-view .workflow-chart { width: 100%; min-width: 760px; height: auto; display: block; overflow: visible; }
+.workflow-view .workflow-chart text { fill: var(--muted); font: 500 11px var(--font-mono); }
 .workflow-view .workflow-chart .workflow-axis { stroke: var(--line); stroke-width: 1; }
-.workflow-view .workflow-chart .workflow-area { fill: var(--workflow-accent); opacity: .25; }
-.workflow-view .workflow-chart .workflow-line { fill: none; stroke: var(--workflow-accent); stroke-width: 2; }
-.workflow-view .workflow-chart .workflow-bar { fill: var(--workflow-accent); }
+.workflow-view .workflow-chart .workflow-area { fill: var(--series-2); opacity: .3; }
+.workflow-view .workflow-chart .workflow-line { fill: none; stroke: var(--series-2); stroke-width: 2; }
+.workflow-view .workflow-chart .workflow-bar { fill: var(--series-2); rx: 2; }
 .workflow-view .workflow-chart [role="button"] { cursor: pointer; }
-.workflow-view .workflow-chart [role="button"]:hover .workflow-bar,
-.workflow-view .workflow-chart [aria-pressed="true"] .workflow-bar { fill: var(--ochre); }
-.workflow-view .workflow-chart [role="button"]:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
-.workflow-view .workflow-day { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: 1rem; }
-.workflow-view .workflow-day h3 { font-size: .9rem; margin: 0; }
-.workflow-view .workflow-stat-list { display: grid; margin: 0; }
-.workflow-view .workflow-stat-list > div { display: flex; justify-content: space-between; gap: 1rem; padding: .8rem 0; border-top: 1px solid var(--line); }
-.workflow-view dt { color: var(--muted); font-size: .8rem; }
-.workflow-view dd { margin: 0; font: 600 .85rem var(--font-mono); text-align: right; }
-.workflow-view .workflow-note { font-size: .78rem; color: var(--muted); line-height: 1.6; }
-.workflow-view .workflow-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: .78rem; }
-.workflow-view .workflow-table th { text-transform: none; letter-spacing: 0; white-space: normal; }
-.workflow-view .workflow-table th, .workflow-view .workflow-table td { padding: .8rem .65rem; border-bottom: 1px solid var(--line); text-align: left; }
-.workflow-view .workflow-table small { display: block; color: var(--muted); margin-top: .3rem; font-size: .72rem; line-height: 1.4; }
-.workflow-view .workflow-scroll { overflow-x: auto; max-height: 420px; }
-.workflow-view .workflow-heat { min-width: 650px; display: grid; grid-template-columns: 45px repeat(24, minmax(16px, 1fr)); gap: 4px; align-items: center; }
-.workflow-view .workflow-heat span { color: var(--muted); font: 10px var(--font-mono); text-align: center; }
-.workflow-view .workflow-heat button { width: 100%; border: 0; aspect-ratio: 1.35; min-height: 20px; padding: 0; }
-.workflow-view .workflow-heat-info { min-height: 2.5rem; margin-bottom: 0; }
-.workflow-view .workflow-streaks { display: flex; flex-wrap: wrap; gap: 1.3rem; font-size: .8rem; color: var(--muted); margin: 1.2rem 0 0; }
-.workflow-view .workflow-streaks strong { color: var(--text); }
-.workflow-view .workflow-inventory { max-height: 260px; overflow: auto; margin-top: .75rem; }
-.workflow-view .workflow-tag { display: inline-block; margin: 0 .4rem .45rem 0; padding: .3rem .45rem; border: 1px solid var(--line); font: .7rem var(--font-mono); }
-.workflow-view details { margin-top: 1rem; }
-.workflow-view summary { cursor: pointer; min-height: 44px; padding: .75rem 0; font-size: .82rem; }
-.workflow-view .workflow-empty { padding: 2rem; border: 1px solid var(--line); line-height: 1.7; }
-@media (max-width: 1100px) { .workflow-view .workflow-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .workflow-view .workflow-grid { grid-template-columns: 1fr; } .workflow-view .workflow-metrics .kpi { padding: 1rem; min-height: 150px; } .workflow-view .workflow-metrics strong { font-size: 1.8rem; } }
-@media (max-width: 400px) { .workflow-view .workflow-metrics { grid-template-columns: 1fr; } }
+.workflow-view .workflow-chart [role="button"]:hover .workflow-bar, .workflow-view .workflow-chart [aria-pressed="true"] .workflow-bar { fill: var(--series-1); }
+.workflow-view .workflow-chart [role="button"]:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; }
+.workflow-view .workflow-day { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.workflow-view .workflow-day h3 { margin: 0 0 6px; font-size: 12.5px; font-weight: 500; color: var(--text-2); }
+.workflow-view .workflow-table small { display: block; margin-top: 2px; color: var(--muted); font: 500 10.5px var(--font-mono); }
+.workflow-view .workflow-scroll { overflow: auto; max-height: 420px; }
+.workflow-view .workflow-heat-info { min-height: 1.4em; margin: 10px 0 0; color: var(--muted); font-size: 11.5px; }
+.workflow-view .workflow-streaks { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+.workflow-view .workflow-streaks strong { color: var(--text); font: 500 12.5px var(--font-mono); }
+.workflow-view .workflow-inventory { display: flex; flex-wrap: wrap; gap: 6px; max-height: 220px; overflow: auto; }
+.workflow-view .workflow-tag { display: inline-block; padding: 3px 8px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface-2); color: var(--text-2); font: 500 11px var(--font-mono); }
+.workflow-view .workflow-empty { padding: 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+@media (max-width: 760px) { .workflow-view .workflow-grid { grid-template-columns: 1fr; } }

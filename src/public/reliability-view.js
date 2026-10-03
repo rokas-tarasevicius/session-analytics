@@ -1,40 +1,28 @@
 import { errorDenominator, errorRate, guardedShare, summarizeReliability, summarizeReliabilityComparisons } from "./reliability-data.js";
+import { DASH, dataTable, el, evidence, kpi, note, selectField } from "./ui.js";
 
 const n = (value) => value.toLocaleString("en");
-const percent = (value) => value === null ? "N/A" : `${(value * 100).toFixed(1)}%`;
-const latency = (value) => value === null ? "N/A" : value < 1000 ? `≈${n(value)} ms` : `≈${(value / 1000).toFixed(1)} s`;
+const percent = (value) => value === null ? DASH : `${(value * 100).toFixed(1)}%`;
+const latency = (value) => value === null ? DASH : value < 1000 ? `≈${n(value)} ms` : `≈${(value / 1000).toFixed(1)} s`;
 const label = (value) => value.replaceAll("_", " ");
-function node(tag, value, className) {
-  const element = document.createElement(tag);
-  if (value !== undefined) element.textContent = value;
-  if (className) element.className = className;
-  return element;
-}
-function table(title, headers, rows, note) {
-  const panel = node("article", undefined, "panel reliability-table-panel");
-  const heading = node("header"); heading.append(node("h3", title)); panel.append(heading);
-  if (note) panel.append(node("p", note, "chart-note"));
-  if (!rows.length) { panel.append(node("p", "No evidence in the selected scope.", "muted")); return panel; }
-  const wrap = node("div", undefined, "reliability-table-scroll"); wrap.tabIndex = 0; wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", title);
-  const table = node("table"), caption = node("caption", title, "reliability-sr-only"), head = node("thead"), headRow = node("tr"), body = node("tbody");
-  for (const title of headers) { const th = node("th", title); th.scope = "col"; headRow.append(th); }
-  head.append(headRow);
-  for (const values of rows) {
-    const row = node("tr");
-    values.forEach((value, i) => { const cell = node(i === 0 ? "th" : "td", String(value)); if (!i) cell.scope = "row"; row.append(cell); });
-    body.append(row);
-  }
-  table.append(caption, head, body); wrap.append(table); panel.append(wrap); return panel;
+function tablePanel(title, headers, rows, caption, { kicker = null } = {}) {
+  const panel = el("article", null, "panel reliability-table-panel");
+  const heading = el("header"), block = el("div");
+  if (kicker) block.append(el("p", kicker, "kicker"));
+  block.append(el("h3", title)); heading.append(block); panel.append(heading);
+  if (!rows.length) { panel.append(note("No evidence in the selected scope.", "empty-line")); if (caption) panel.append(evidence([caption])); return panel; }
+  const wrap = el("div", null, "reliability-table-scroll"); wrap.tabIndex = 0; wrap.setAttribute("role", "region"); wrap.setAttribute("aria-label", title);
+  const table = dataTable(headers.map((header, index) => index === 0 ? { text: header, align: "left" } : header), rows, { rowHeader: true, caption: title });
+  wrap.append(table); panel.append(wrap);
+  if (caption) panel.append(evidence([caption]));
+  return panel;
 }
 function errorCell(stats) {
   return `${percent(errorRate(stats))} · ${n(stats.outcomes.error + stats.outcomes.timeout)}/${n(errorDenominator(stats))}`;
 }
 function coverage(stats) { return `${n(stats.calls - stats.outcomes.unknown)}/${n(stats.calls)}`; }
 function topErrors(stats) {
-  return Object.entries(stats.errors).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([key, count]) => `${label(key)} (${n(count)})`).join(" · ") || "—";
-}
-function card(title, value, detail) {
-  const result = node("article", undefined, "kpi"); result.append(node("span", title), node("strong", value), node("small", detail)); return result;
+  return Object.entries(stats.errors).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([key, count]) => `${label(key)} (${n(count)})`).join(" · ") || DASH;
 }
 
 const viewStates = new WeakMap();
@@ -64,57 +52,63 @@ export function renderReliability(container, scopedSessions) {
   const { state, summary, comparisons, argumentCalls, fileCalls, unmatchedResults } = selection(container, scopedSessions);
   container.replaceChildren();
   const totals = summary.totals, verification = summary.verification;
-  const header = node("header", undefined, "view-header");
-  const title = node("div"); title.append(node("p", "TOOL EVIDENCE", "kicker"));
-  const h2 = node("h2", "Reliability"); h2.id = "reliability-title"; title.append(h2, node("p", "Where tool calls fail, slow down, or repeat. Every comparison keeps its coverage visible."));
-  const filter = node("label", "Agent ", "reliability-provider");
-  const select = node("select"); select.setAttribute("aria-label", "Reliability agent");
-  for (const [value, text] of [["all", "All agents"], ["claude", "Claude"], ["codex", "Codex"], ["cursor", "Cursor"]]) { const option = node("option", text); option.value = value; select.append(option); }
-  select.value = state.provider; select.addEventListener("change", () => { state.provider = select.value; renderReliability(container, scopedSessions); container.querySelector("select").focus(); });
-  filter.append(select); header.append(title, filter); container.append(header);
-  const metrics = node("div", undefined, "kpi-grid compact-metrics");
+  const header = el("header", null, "view-header");
+  const title = el("div"); title.append(el("p", "Tool evidence", "kicker"));
+  const h2 = el("h2", "Reliability"); h2.id = "reliability-title"; title.append(h2, el("p", "Where tool calls fail, slow down, or repeat. Every comparison keeps its coverage visible."));
+  const { select, wrapper } = selectField("reliability-agent", "Agent", [["all", "All agents"], ["claude", "Claude"], ["codex", "Codex"], ["cursor", "Cursor"]], state.provider, (value) => { state.provider = value; renderReliability(container, scopedSessions); container.querySelector("select").focus(); });
+  wrapper.className = "field reliability-provider";
+  header.append(title, wrapper); container.append(header);
+  const covered = summary.coveredSessions > 0;
+  const metrics = el("div", null, "kpi-grid compact-metrics");
   metrics.append(
-    card("Observed outcomes", coverage(totals), `${summary.coveredSessions}/${summary.sessions} sessions supported · ${n(totals.outcomes.unknown)} unknown results`),
-    card("Tool error rate", percent(errorRate(totals)), `${n(totals.outcomes.error + totals.outcomes.timeout)}/${n(errorDenominator(totals))} attempted calls · ${n(totals.outcomes.timeout)} timeouts`),
-    card("Verification share", percent(verification.share), `${n(verification.checks)}/${n(verification.checks + verification.editCalls)} check + edit calls · ${n(verification.passed)} checks passed`),
-    card("Unverified final edits", percent(guardedShare(verification.skippedSessions, verification.eligibleSessions)), `${verification.skippedSessions}/${verification.eligibleSessions} eligible edited sessions`),
+    kpi({ label: "Observed outcomes", value: covered ? coverage(totals) : null, reason: covered ? null : "No supported sessions in this scope", coverage: { eligible: summary.coveredSessions, selected: summary.sessions }, what: "tool reliability evidence", note: `${summary.coveredSessions}/${summary.sessions} sessions supported · ${n(totals.outcomes.unknown)} unknown results`, accent: true }),
+    kpi({ label: "Tool error rate", value: errorRate(totals) === null ? null : percent(errorRate(totals)), reason: "Fewer than 5 eligible attempts", note: `${n(totals.outcomes.error + totals.outcomes.timeout)}/${n(errorDenominator(totals))} attempted calls · ${n(totals.outcomes.timeout)} timeouts` }),
+    kpi({ label: "Verification share", value: verification.share === null ? null : percent(verification.share), reason: "No check or edit calls observed", note: `${n(verification.checks)}/${n(verification.checks + verification.editCalls)} check + edit calls · ${n(verification.passed)} checks passed` }),
+    kpi({ label: "Unverified final edits", value: guardedShare(verification.skippedSessions, verification.eligibleSessions) === null ? null : percent(guardedShare(verification.skippedSessions, verification.eligibleSessions)), reason: "Fewer than 5 eligible edited sessions", note: `${verification.skippedSessions}/${verification.eligibleSessions} eligible edited sessions` }),
   );
   container.append(metrics);
-  const note = node("div", undefined, "reliability-notes");
-  note.append(node("p", `Local content rules (P2): ${summary.contentRuleSessions}/${summary.coveredSessions} sessions. Hash-based flags: ${summary.flagSessions}/${summary.coveredSessions}. ${summary.contentRuleSessions ? "Only class labels and counts leave the parser." : "Enable --reliability-content-rules at launch for command, error-text and behavior rules."}`));
-  note.append(node("p", "Error rates exclude denied, interrupted and unknown calls. Rates need 5 eligible observations. Latencies use reported durations only; ≈ marks merged bucket upper bounds (up to 10% + 1 ms)."));
-  if (summary.truncatedSessions) note.append(node("p", `${summary.truncatedSessions} sessions have incomplete parsing or hit size safeguards. Their behavior flags and verification status are unavailable.`));
-  if (unmatchedResults) note.append(node("p", `${n(unmatchedResults)} results have no matching call. Affected sessions cannot establish complete behavior or verification.`));
-  if (!summary.coveredSessions) note.append(node("p", "Reliability evidence is available for Claude and Codex. Cursor reliability is not yet supported; missing evidence is never counted as a successful call."));
-  container.append(note);
+  const notes = [
+    `Local content rules (P2): ${summary.contentRuleSessions}/${summary.coveredSessions} sessions. Hash-based flags: ${summary.flagSessions}/${summary.coveredSessions}. ${summary.contentRuleSessions ? "Only class labels and counts leave the parser." : "Enable --reliability-content-rules at launch for command, error-text and behavior rules."}`,
+    "Error rates exclude denied, interrupted and unknown calls. Rates need 5 eligible observations. Latencies use reported durations only; ≈ marks merged bucket upper bounds (up to 10% + 1 ms).",
+    summary.truncatedSessions ? `${summary.truncatedSessions} sessions have incomplete parsing or hit size safeguards. Their behavior flags and verification status are unavailable.` : null,
+    unmatchedResults ? `${n(unmatchedResults)} results have no matching call. Affected sessions cannot establish complete behavior or verification.` : null,
+    !summary.coveredSessions ? "Reliability evidence is available for Claude and Codex. Cursor reliability is not yet supported; missing evidence is never counted as a successful call." : null,
+  ];
+  container.append(evidence(notes, { open: !summary.coveredSessions }));
 
-  const toolRows = (rows, classMode = false) => rows.map((row) => [classMode ? label(row.toolClass) : `${row.name} · ${label(row.toolClass)}`, n(row.calls), coverage(row), errorCell(row), `${row.outcomes.denied} / ${row.outcomes.interrupted}`, topErrors(row), `${latency(row.latency.p50Ms)} / ${latency(row.latency.p95Ms)}`, `${row.latency.samples}/${row.calls}`]);
+  const toolRows = (rows, classMode = false) => rows.map((row) => [classMode ? label(row.toolClass) : { text: row.name, detail: label(row.toolClass) }, n(row.calls), coverage(row), errorCell(row), `${row.outcomes.denied} / ${row.outcomes.interrupted}`, topErrors(row), `${latency(row.latency.p50Ms)} / ${latency(row.latency.p95Ms)}`, `${row.latency.samples}/${row.calls}`]);
   const headers = ["Tool / class", "Calls", "Known / calls", "Error % · errors / attempts", "Denied / interrupted", "Top error classes", "p50 / p95", "Timed / calls"];
-  container.append(table("Tool outcomes", headers, toolRows(summary.tools.slice(0, 50)), `${summary.tools.length} tool/class groups. Showing the 50 most used; opaque code-mode wrappers stay separate from inner tools.`));
-  const classes = node("details", undefined, "reliability-details"); classes.append(node("summary", "Compare normalized tool classes"), table("Tool classes", headers, toolRows(summary.classes, true))); container.append(classes);
-  container.append(table("MCP servers", ["Server", "Calls", "Known / calls", "Error % · errors / attempts", "p95", "Timed / calls", "Connection failures"], summary.mcp.map((s) => [s.server, n(s.calls), coverage(s), errorCell(s), latency(s.latency.p95Ms), `${s.latency.samples}/${s.calls}`, n(s.connectionFailures)]), `${summary.mcp.length} servers seen in calls or failed-connection attachments. Connection failures are separate from call errors.`));
+  container.append(tablePanel("Tool outcomes", headers, toolRows(summary.tools.slice(0, 50)), `${summary.tools.length} tool/class groups. Showing the 50 most used; opaque code-mode wrappers stay separate from inner tools.`, { kicker: "Per tool" }));
+  const classes = el("details", null, "evidence reliability-details"); classes.append(el("summary", "Compare normalized tool classes"));
+  const classBody = el("div", null, "evidence-body"); classBody.append(tablePanel("Tool classes", headers, toolRows(summary.classes, true), null)); classes.append(classBody); container.append(classes);
+  container.append(tablePanel("MCP servers", ["Server", "Calls", "Known / calls", "Error % · errors / attempts", "p95", "Timed / calls", "Connection failures"], summary.mcp.map((s) => [s.server, n(s.calls), coverage(s), errorCell(s), latency(s.latency.p95Ms), `${s.latency.samples}/${s.calls}`, n(s.connectionFailures)]), `${summary.mcp.length} servers seen in calls or failed-connection attachments. Connection failures are separate from call errors.`, { kicker: "Integrations" }));
 
   const flagNames = { exact_repeat: "Exact repeats", repeated_failure: "Repeated failing calls", failed_edit_cascade: "Failed edit cascades", edit_thrash: "Edit thrash", reread_churn: "Re-read churn", search_loop: "Search loops" };
-  const flags = node("article", undefined, "panel"); flags.append(node("h3", "Loop and churn signals"));
-  flags.append(node("p", "Flags are prompts for inspection, not verdicts. Repetition can be intentional. Activity counters and passing checks do not prove success, quality, or value.", "chart-note"));
-  const flagGrid = node("dl", undefined, "reliability-flags");
-  for (const [key, title] of Object.entries(flagNames)) { const item = node("div"); item.append(node("dt", title), node("dd", summary.flagSessions ? n(summary.flags[key]) : "N/A")); flagGrid.append(item); }
-  flags.append(flagGrid, node("p", `Episodes across ${summary.flagSessions} eligible sessions. Matching evidence: ${argumentCalls}/${totals.calls} calls with argument hashes; ${fileCalls}/${totals.calls} with file hashes (hashes stay inside the parser). First edit: ${verification.stepsToFirstEdit === null ? "N/A" : verification.stepsToFirstEdit.toFixed(1)} preceding calls on average across ${verification.firstEditSessions} main transcripts; mean observed time ${latency(verification.msToFirstEdit)} across ${verification.timedEditSessions} timed transcripts.`, "chart-note"));
-  flags.append(node("p", "Verification requires a completed test/build that started after the final edit completed. Overlapping executions, missing starts/results, partial streams and active sessions can make status unavailable. A failed check still counts as an attempted verification.", "chart-note"));
+  const flags = el("article", null, "panel");
+  const flagHeader = el("header"), flagBlock = el("div");
+  flagBlock.append(el("p", "Behavior flags", "kicker"), el("h3", "Loop and churn signals")); flagHeader.append(flagBlock);
+  flagHeader.append(el("span", "Prompts for inspection, not verdicts", "panel-meta")); flags.append(flagHeader);
+  const flagGrid = el("dl", null, "reliability-flags");
+  for (const [key, title] of Object.entries(flagNames)) { const item = el("div"); item.append(el("dt", title), el("dd", summary.flagSessions ? n(summary.flags[key]) : DASH)); flagGrid.append(item); }
+  flags.append(flagGrid, evidence([
+    "Flags are prompts for inspection, not verdicts. Repetition can be intentional. Activity counters and passing checks do not prove success, quality, or value.",
+    `Episodes across ${summary.flagSessions} eligible sessions. Matching evidence: ${argumentCalls}/${totals.calls} calls with argument hashes; ${fileCalls}/${totals.calls} with file hashes (hashes stay inside the parser). First edit: ${verification.stepsToFirstEdit === null ? DASH : verification.stepsToFirstEdit.toFixed(1)} preceding calls on average across ${verification.firstEditSessions} main transcripts; mean observed time ${latency(verification.msToFirstEdit)} across ${verification.timedEditSessions} timed transcripts.`,
+    "Verification requires a completed test/build that started after the final edit completed. Overlapping executions, missing starts/results, partial streams and active sessions can make status unavailable. A failed check still counts as an attempted verification.",
+  ]));
   container.append(flags);
 
   const comparisonHeaders = ["Scope", "Covered / sessions", "Known / calls", "Error % · errors / attempts", "p95 · timed / calls", "Unverified / eligible"];
   function comparison(s) {
     return [s.name, `${s.coveredSessions}/${s.sessions}`, coverage(s.totals), errorCell(s.totals), `${latency(s.totals.latency.p95Ms)} · ${s.totals.latency.samples}/${s.totals.calls}`, `${s.verification.skippedSessions}/${s.verification.eligibleSessions}`];
   }
-  container.append(table("By agent", comparisonHeaders, comparisons.providers.map(comparison), "Compare within the same repository and workload. Provider coverage and tool mix differ; these are not agent quality rankings."));
-  const repositoryPanel = node("div");
+  container.append(tablePanel("By agent", comparisonHeaders, comparisons.providers.map(comparison), "Compare within the same repository and workload. Provider coverage and tool mix differ; these are not agent quality rankings.", { kicker: "Comparison" }));
+  const repositoryPanel = el("div");
   let shownRepositories = 50;
   function repositories() {
     repositoryPanel.replaceChildren();
-    repositoryPanel.append(table("By repository", comparisonHeaders, comparisons.repositories.slice(0, shownRepositories).map(comparison), `Showing ${Math.min(shownRepositories, comparisons.repositories.length)} of ${comparisons.repositories.length} repositories.`));
+    repositoryPanel.append(tablePanel("By repository", comparisonHeaders, comparisons.repositories.slice(0, shownRepositories).map(comparison), `Showing ${Math.min(shownRepositories, comparisons.repositories.length)} of ${comparisons.repositories.length} repositories.`, { kicker: "Comparison" }));
     if (shownRepositories < comparisons.repositories.length) {
-      const more = node("button", "Show more repositories");
+      const more = el("button", "Show more repositories", "button reliability-more"); more.type = "button";
       more.addEventListener("click", () => { shownRepositories += 50; repositories(); repositoryPanel.querySelector("button")?.focus(); });
       repositoryPanel.append(more);
     }
@@ -123,6 +117,6 @@ export function renderReliability(container, scopedSessions) {
   const mixes = [
     ["Permission modes", summary.permissions.modes], ["Approval policies", summary.permissions.approvalPolicies], ["Sandbox modes", summary.permissions.sandboxes], ["API error events", summary.apiErrors],
   ].flatMap(([group, mix]) => Object.entries(mix).map(([key, count]) => [group, key, n(count)]));
-  container.append(table("Hooks and permission friction", ["Evidence", "Mode / class", "Observations"], mixes,
-    `${n(summary.hooks.runs)} hook runs · ${n(summary.hooks.blocks)} blocking summaries · p95 ${latency(summary.hooks.latency.p95Ms)} (${summary.hooks.latency.samples}/${summary.hooks.runs} timed). ${n(summary.permissions.denials)} denied calls. Mode counts describe recorded observations, not time or approval prompts. Interrupts rise with expert steering; permission approvals carry little signal.`));
+  container.append(tablePanel("Hooks and permission friction", ["Evidence", "Mode / class", "Observations"], mixes,
+    `${n(summary.hooks.runs)} hook runs · ${n(summary.hooks.blocks)} blocking summaries · p95 ${latency(summary.hooks.latency.p95Ms)} (${summary.hooks.latency.samples}/${summary.hooks.runs} timed). ${n(summary.permissions.denials)} denied calls. Mode counts describe recorded observations, not time or approval prompts. Interrupts rise with expert steering; permission approvals carry little signal.`, { kicker: "Friction" }));
 }

@@ -19,6 +19,7 @@ import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu } from "./export-menu.js";
 import { renderSharedSnapshot } from "./shared-view.js";
+import { DASH, coverageBadge, setValue, valueWithCoverage } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -30,6 +31,9 @@ const elements = {
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
   costApiTotal: $("#cost-api-total"), costCoverage: $("#cost-coverage"),
   costProviderTotal: $("#cost-provider-total"), costUpperTotal: $("#cost-upper-total"),
+  costApiCoverage: $("#cost-api-total-coverage"), costUpperCoverage: $("#cost-upper-total-coverage"), costProviderCoverage: $("#cost-provider-total-coverage"),
+  coverageButton: $("#coverage-button"), coverageClose: $("#coverage-close"), coverageDialog: $("#coverage-dialog"), coverageDot: $("#coverage-dot"), coverageLabel: $("#coverage-label"), coverageSummary: $("#coverage-summary"),
+  spendCoverage: $("#metric-spend-coverage"), inputCoverage: $("#metric-input-coverage"), outputCoverage: $("#metric-output-coverage"), toolsCoverage: $("#metric-tools-coverage"), compactionsCoverage: $("#metric-compactions-coverage"),
   dateRange: $("#date-range"), density: $("#density-switch"),
   distributionCompactions: $("#distribution-compactions"), distributionCost: $("#distribution-cost"),
   distributionDuration: $("#distribution-duration"), distributionKey: $("#distribution-key"),
@@ -71,9 +75,10 @@ const sortButtons = [...document.querySelectorAll("th .sort[data-sort]")];
 
 const viewOrder = ["summary", "distributions", "activity", "velocity", "costs", "models", "pricing", "reliability", "limits-cache", "workflow", "tools", "skills", "outcomes", "insights"];
 const viewLabels = { insights: "Insights", workflow: "Workflow", outcomes: "Outcomes", "limits-cache": "Limits & cache", reliability: "Reliability", velocity: "Velocity", pricing: "Pricing", activity: "Activity", costs: "Costs", distributions: "Distributions", models: "Models", skills: "Skills", summary: "Summary", tools: "Tools" };
-const viewIcons = { pricing: "costs", velocity: "activity", reliability: "tools", "limits-cache": "models", outcomes: "activity", workflow: "tools", insights: "summary" };
+const viewIcons = { pricing: "pricing", velocity: "velocity", reliability: "reliability", "limits-cache": "limits", outcomes: "outcomes", workflow: "workflow", insights: "insights" };
 const viewChords = { i: "insights", w: "workflow", o: "outcomes", l: "limits-cache", r: "reliability", v: "velocity", p: "pricing", a: "activity", c: "costs", d: "distributions", k: "skills", m: "models", s: "summary", t: "tools" };
 const providerScopedViews = ["activity", "tools", "skills"];
+const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
 const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", all: "All observed time", custom: "Custom range" };
 const seriesSlots = 6;
@@ -124,9 +129,9 @@ function svgNode(tag, attributes = {}) {
   return element;
 }
 
-function renderMetricValue(element, value, coverage, format) {
-  element.textContent = coverage.eligible ? format(value) : "N/A";
-  if (coverage.eligible && coverage.eligible < coverage.selected) element.append(node("small", ` · ${coverage.eligible}/${coverage.selected} sessions`));
+/** KPI values stay bare numbers; coverage lives in the badge slot and the tooltip, an unavailable value is an em dash with its reason. */
+function renderMetricValue(element, value, coverage, format, what = "evidence", slot = null) {
+  setValue(element, value, coverage, format, { slot, what });
 }
 
 function icon(name, className) {
@@ -236,7 +241,7 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
       row.addEventListener("click", () => onSelect(item));
     }
     const label = node("div", null, "bar-label");
-    label.append(node("span", item.name), node("strong", item.coverage ? coveredValue(item.value, item.coverage, formatter) : formatter(item.value)));
+    label.append(node("span", item.name), item.coverage ? valueWithCoverage(item.value, item.coverage, formatter, item.what || "evidence") : node("strong", formatter(item.value)));
     const track = node("div", null, "bar-track");
     const fill = node("i");
     if (item.provider) fill.dataset.provider = item.provider;
@@ -450,11 +455,13 @@ function renderDistributionChart(container, series, accessor, formatter, logarit
     values: item.sessions.map(accessor).filter((value) => typeof value === "number" && Number.isFinite(value) && value >= 0),
   }));
   const minimum = 5;
+  const captions = node("div", null, "series-coverage");
   for (const item of valuesBySeries) {
     const count = `${item.values.length}/${item.sessions.length} eligible sessions`;
     const label = item.values.length === 0 ? `N/A · ${count}` : item.values.length < minimum ? `${count} · minimum ${minimum} to draw a distribution` : count;
-    container.append(node("p", `${item.name} · ${label}`, "muted"));
+    const caption = node("span", `${item.name} · ${label}`); caption.title = `${item.name}: ${count}`; captions.append(caption);
   }
+  container.append(captions);
   const drawable = valuesBySeries.filter((item) => item.values.length >= minimum);
   const allValues = drawable.flatMap(({ values }) => values);
   if (allValues.length === 0) return;
@@ -608,7 +615,7 @@ function renderCostRows(container, groups) {
     for (const [name, value] of parts) {
       const bar = node("i"); bar.dataset.component = name; bar.style.width = `${(value / total) * 100}%`; stack.append(bar);
     }
-    row.append(stack, node("strong", group.coverage ? coveredValue(total, group.coverage, money) : money(total))); list.append(row);
+    row.append(stack, group.coverage ? valueWithCoverage(total, group.coverage, money, "priced value") : node("strong", money(total))); list.append(row);
   }
   if (list.childElementCount === 0) emptyState(list, "No priced activity in this view.");
   container.append(list);
@@ -621,8 +628,8 @@ function renderCostRows(container, groups) {
 
 function renderCosts(view) {
   const cost = costTotals(view.sessions);
-  renderMetricValue(elements.costApiTotal, cost.total, metricCoverage(view.sessions, "apiCost"), money); renderMetricValue(elements.costUpperTotal, cost.upper, metricCoverage(view.sessions, "apiCost"), money);
-  renderMetricValue(elements.costProviderTotal, cost.reported, metricCoverage(view.sessions, "reportedCost"), money); elements.costCoverage.textContent = percent(view.summary.pricedTokenCoverage);
+  renderMetricValue(elements.costApiTotal, cost.total, metricCoverage(view.sessions, "apiCost"), money, "API-priced value", elements.costApiCoverage); renderMetricValue(elements.costUpperTotal, cost.upper, metricCoverage(view.sessions, "apiCost"), money, "API-priced value", elements.costUpperCoverage);
+  renderMetricValue(elements.costProviderTotal, cost.reported, metricCoverage(view.sessions, "reportedCost"), money, "provider-reported value", elements.costProviderCoverage); elements.costCoverage.textContent = view.summary.pricedTokenCoverage === null ? DASH : percent(view.summary.pricedTokenCoverage);
   renderCostRows(elements.providerCostComponents, providerOrder.map((provider) => ({
     name: providerLabels[provider], coverage: metricCoverage(view.sessions.filter((session) => session.provider === provider), "cost"), cost: costTotals(view.sessions.filter((session) => session.provider === provider)),
   })));
@@ -656,8 +663,9 @@ function renderModels(view) {
     for (const model of providerModels.sort((left, right) => metric.value(right) - metric.value(left))) {
       const row = node("div", null, "model-row"); row.append(node("span", model.model));
       const track = node("div", null, "model-track"), fill = node("i"); fill.style.width = `${(metric.value(model) / maximum) * 100}%`; if (model.eligible[modelMetric]) track.append(fill);
-      const suffix = `${coveredValue(metric.value(model), { eligible: model.eligible[modelMetric], selected: model.selected }, metric.format)} · ${model.selected} selected sessions${model.priced ? "" : " · unpriced"}`;
-      row.append(track, node("strong", suffix)); group.append(row);
+      const holder = valueWithCoverage(metric.value(model), { eligible: model.eligible[modelMetric], selected: model.selected }, metric.format, modelMetric === "calls" ? "request evidence" : modelMetric === "value" ? "priced value" : "token evidence");
+      holder.append(node("span", ` · ${model.selected} sessions${model.priced ? "" : " · unpriced"}`, "muted"));
+      row.append(track, holder); group.append(row);
     }
     elements.modelsByProvider.append(group);
   }
@@ -701,7 +709,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
     }
     stack.title = parts.join("\n"); stack.setAttribute("role", "img"); stack.setAttribute("aria-label", parts.join(", "));
     const top = [...item.totals.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "—";
-    row.append(stack, node("strong", coveredValue(item.total, { eligible: item.sessions.length, selected: item.selected.length }, (v) => integer.format(v))), node("span", skillMode ? evidenceLabel(item.sessions) : top)); tableContainer.append(row);
+    row.append(stack, valueWithCoverage(item.total, { eligible: item.sessions.length, selected: item.selected.length }, (v) => integer.format(v), `${field} evidence`), node("span", skillMode ? evidenceLabel(item.sessions) : top)); tableContainer.append(row);
   }
   if (rows.length === 0) { clear(tableContainer); emptyState(tableContainer, skillMode ? "No observed skill invocations in this view." : "No tool activity in this view."); }
   for (const [index, { name }] of names.entries()) {
@@ -713,7 +721,7 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
   const selectedRow = rows.find(({ repository }) => repository.id === selectedId);
   detailTitle.textContent = selectedRow?.repository.name || "No repository selected";
   renderBars(detailContainer, selectedRow ? namedTotals(selectedRow.sessions, field) : [], (value) => integer.format(value), 10);
-  if (selectedRow && !selectedRow.sessions.length) { clear(detailContainer); detailContainer.append(node("p", `N/A · 0/${selectedRow.selected.length} sessions with ${field} evidence`, "muted")); }
+  if (selectedRow && !selectedRow.sessions.length) { clear(detailContainer); detailContainer.append(node("p", `${DASH} No ${field} evidence in 0/${selectedRow.selected.length} selected sessions`, "empty-line")); }
 }
 
 function clearInactiveAnalyticsViews(activeName) {
@@ -862,8 +870,9 @@ function renderDonut(sessions) {
   elements.providerDonut.append(svg, center);
   for (const provider of providerOrder) {
     const value = counts[provider];
+    if (!value) continue;
     const row = node("div", null, "legend-row"); const logo = providerMark(provider);
-    row.append(logo, node("span", providerLabels[provider]), node("strong", integer.format(value)), node("small", total ? percent(value / total) : "—"));
+    row.append(logo, node("span", shortProviderLabels[provider] ?? providerLabels[provider]), node("strong", integer.format(value)), node("small", total ? percent(value / total) : "—"));
     row.addEventListener("pointerenter", () => { elements.providerDonut.dataset.hover = provider; for (const path of paths[provider] || []) path.classList.add("active"); });
     row.addEventListener("pointerleave", () => { delete elements.providerDonut.dataset.hover; for (const path of paths[provider] || []) path.classList.remove("active"); });
     elements.providerLegend.append(row);
@@ -893,7 +902,8 @@ function renderRepositoryTable(repositories) {
     if (item.repository.id === selectedId) row.setAttribute("aria-current", "true");
     row.addEventListener("click", () => selectRepository(item.repository.id));
     row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectRepository(item.repository.id); } });
-    row.append(tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`), tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), tableCell(coveredValue(summary.estimatedSpendUsd, summary.coverage.cost, money), null, "money"), tableCell(coveredValue(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v))), tableCell(coveredValue(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v))), tableCell(coveredValue(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v))), tableCell(coveredValue(summary.cacheReadRatio, summary.coverage.tokens, percent)), tableCell(percent(summary.pricedTokenCoverage), `${summary.analyzedSessions}/${summary.sessions} parsed; metric coverage varies`));
+    const covered = (value, coverage, format, what) => { const cell = node("td"); cell.append(valueWithCoverage(value, coverage, format, what, "span")); return cell; };
+    row.append(tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`), tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), covered(summary.estimatedSpendUsd, summary.coverage.cost, money, "priced value"), covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(summary.pricedTokenCoverage === null ? DASH : percent(summary.pricedTokenCoverage), `${summary.analyzedSessions}/${summary.sessions} parsed`));
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
@@ -905,12 +915,39 @@ function renderRepositoryTable(repositories) {
 function renderWarnings(warnings) {
   clear(elements.warningList); elements.warning.hidden = !warnings.length;
   warnings.forEach((warning) => elements.warningList.append(node("li", warning)));
+  elements.coverageLabel.textContent = warnings.length ? `Coverage · ${warnings.length}` : "Coverage";
+  elements.coverageDot.hidden = !warnings.length;
+  elements.coverageButton.setAttribute("aria-label", warnings.length ? `Evidence and coverage: ${warnings.length} coverage note${warnings.length === 1 ? "" : "s"}` : "Evidence and coverage");
 }
+
+/** One sentence for the coverage dialog: what the current selection can establish. */
+function renderCoverageSummary(view) {
+  const sessions = view.sessions.length;
+  if (!sessions) { elements.coverageSummary.textContent = "No sessions in this selection. Widen the window or clear the repository focus."; return; }
+  const part = (metric, what) => { const { eligible } = metricCoverage(view.sessions, metric); return `${eligible} ${what}`; };
+  elements.coverageSummary.textContent = `${sessions} selected session${sessions === 1 ? "" : "s"} across ${view.summary.repositoriesWithSessions} repositor${view.summary.repositoriesWithSessions === 1 ? "y" : "ies"}: ${part("tokens", "carry token evidence")}, ${part("tools", "tool evidence")}, ${part("cost", "priced or reported value")}. Every number is a lower bound from local evidence; badges on the dashboard show the eligible share behind each figure.`;
+}
+
+function openCoverage() { closePalette(); if (elements.help.open) elements.help.close(); if (!elements.coverageDialog.open) elements.coverageDialog.showModal(); }
+function closeCoverage() { if (elements.coverageDialog.open) elements.coverageDialog.close(); }
 
 function renderRateCards(rateCard) {
   clear(elements.rateCardLinks);
-  const sources = new Map(rateCard.models.map((item) => [item.source, item.provenance?.source ?? "reviewed"]));
-  for (const [url, source] of sources) { const link = node("a", `${source} rates ↗`); link.href = url; link.target = "_blank"; link.rel = "noreferrer"; elements.rateCardLinks.append(link); }
+  const groups = new Map();
+  for (const item of rateCard.models) {
+    const source = item.provenance?.source ?? "reviewed";
+    const urls = groups.get(source) ?? new Map();
+    urls.set(item.source, item.model); groups.set(source, urls);
+  }
+  const link = (url, label) => { const anchor = node("a", label); anchor.href = url; anchor.target = "_blank"; anchor.rel = "noreferrer"; return anchor; };
+  for (const [source, urls] of groups) {
+    if (urls.size === 1) { elements.rateCardLinks.append(link([...urls.keys()][0], `${source} rates ↗`)); continue; }
+    const details = node("details", null, "rate-links");
+    details.append(node("summary", `${source} rates · ${urls.size} sources`));
+    const list = node("div");
+    for (const [url, model] of urls) list.append(link(url, `${model} ↗`));
+    details.append(list); elements.rateCardLinks.append(details);
+  }
 }
 
 function populateRepositories() {
@@ -1003,13 +1040,15 @@ function renderSummary(view) {
   // Deltas compare against the equal-length period immediately before the window, only when that period is fully observed.
   const previous = windowPreset === "all" ? null : previousPeriod({ end: elements.windowEnd.value, min: elements.windowStart.min, start: elements.windowStart.value });
   const previousSummary = previous ? summarize(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay)) : null;
-  renderMetricValue(elements.spend, summary.estimatedSpendUsd, summary.coverage.cost, money); elements.spendNote.textContent = `${coveredValue(summary.apiEquivalentSpendUsd, summary.coverage.apiCost, money)} API-equivalent · ${coveredValue(summary.providerReportedSpendUsd, summary.coverage.reportedCost, money)} provider-reported · not an invoice`;
+  renderMetricValue(elements.spend, summary.estimatedSpendUsd, summary.coverage.cost, money, "priced or reported value", elements.spendCoverage);
+  elements.spendNote.textContent = `${summary.coverage.apiCost.eligible ? money(summary.apiEquivalentSpendUsd) : DASH} API-equivalent · ${summary.coverage.reportedCost.eligible ? money(summary.providerReportedSpendUsd) : DASH} provider-reported · not an invoice`;
   if (summary.retainedSessions) elements.spendNote.textContent += " · retained history uses last-ingest prices";
   elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
-  renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v)); elements.cache.textContent = `${coveredValue(summary.cacheReadRatio, summary.coverage.tokens, percent)} cached · repeated context included`;
-  renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v)); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v)); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v)); elements.live.textContent = integer.format(summary.workingSnapshots);
+  renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.inputCoverage);
+  elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached · repeated context included` : "Cache share unavailable · repeated context included";
+  renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer.format(summary.workingSnapshots);
   const metrics = [
     ["spend", "Daily priced usage value", money, summary.estimatedSpendUsd, previousSummary?.estimatedSpendUsd, dailySpendSeries(view.sessions, days)],
     ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
@@ -1023,14 +1062,13 @@ function renderSummary(view) {
     renderSparkline($(`#metric-${name}-spark`), series, days, { format, label });
   }
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
-  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd, coverage: item.summary.coverage.cost })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
-  renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
-  renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd, eligible, selected }) => ({ name: model, value: totalUsd, provider, coverage: { eligible: eligible.value, selected } })), money, 8);
-  renderBars(elements.toolCalls, view.topTools.map((item) => ({ ...item, coverage: summary.coverage.tools })), (value) => integer.format(value), 10);
-  if (!summary.coverage.tools.eligible) { clear(elements.toolCalls); elements.toolCalls.append(node("p", "N/A · no eligible tool evidence", "muted")); }
+  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd, coverage: item.summary.coverage.cost, what: "priced or reported value" })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
+  renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
+  renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd, eligible, selected }) => ({ name: model, value: totalUsd, provider, coverage: { eligible: eligible.value, selected }, what: "priced value" })), money, 8);
+  renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
+  if (!summary.coverage.tools.eligible) { clear(elements.toolCalls); elements.toolCalls.append(node("p", `${DASH} No tool evidence in ${summary.coverage.tools.selected} selected sessions`, "empty-line")); }
   renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.subagentSpendUsd })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
   renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
-  renderProviderEvidence($("#provider-evidence-rows"), view.sessions);
 }
 
 function renderView() {
@@ -1040,6 +1078,8 @@ function renderView() {
   const view = activeView();
   renderWarnings(view.warnings);
   renderSharedView(view);
+  renderProviderEvidence($("#provider-evidence-rows"), view.sessions);
+  renderCoverageSummary(view);
   if (currentViewName() === "summary") {
     clearInactiveAnalyticsViews("summary");
     renderSummary(view);
@@ -1188,6 +1228,7 @@ function paletteItems() {
   items.push({ group: "Appearance", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? "d" : "", keywords: "density spacing compact comfortable", run: toggleDensity });
   items.push({ group: "Keyboard", icon: "help", label: `${shortcutsEnabled ? "Disable" : "Enable"} single-key shortcuts`, keywords: "keyboard shortcuts keys toggle character", state: shortcutsEnabled, run: () => setShortcuts(!shortcutsEnabled) });
   items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? "?" : "", keywords: "help keys shortcuts", run: openHelp });
+  items.push({ group: "Snapshot", icon: "coverage", label: "Evidence & coverage", hint: shortcutsEnabled ? "e" : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
   items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? "r" : "", keywords: "reload rescan refresh", run: () => load(true) });
   return items;
 }
@@ -1228,6 +1269,7 @@ function runPaletteItem(item) {
 
 function openPalette() {
   if (elements.help.open) elements.help.close();
+  closeCoverage();
   if (elements.palette.open) return;
   elements.commandInput.value = "";
   renderPalette("");
@@ -1239,7 +1281,7 @@ function closePalette() { if (elements.palette.open) elements.palette.close(); }
 
 function togglePalette() { if (elements.palette.open) closePalette(); else openPalette(); }
 
-function openHelp() { closePalette(); if (!elements.help.open) elements.help.showModal(); }
+function openHelp() { closePalette(); closeCoverage(); if (!elements.help.open) elements.help.showModal(); }
 
 function closeHelp() { if (elements.help.open) elements.help.close(); }
 
@@ -1255,9 +1297,11 @@ elements.commandInput.addEventListener("keydown", (event) => {
     if (item) runPaletteItem(item);
   }
 });
-for (const dialog of [elements.palette, elements.help]) {
+for (const dialog of [elements.palette, elements.help, elements.coverageDialog]) {
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
 }
+elements.coverageButton.addEventListener("click", openCoverage);
+elements.coverageClose.addEventListener("click", closeCoverage);
 elements.commandButton.addEventListener("click", openPalette);
 elements.helpButton.addEventListener("click", openHelp);
 elements.helpClose.addEventListener("click", closeHelp);
@@ -1278,7 +1322,7 @@ document.addEventListener("keydown", (event) => {
   if (event.defaultPrevented) return;
   const key = event.key;
   if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "k") { event.preventDefault(); togglePalette(); return; }
-  if (elements.palette.open || elements.help.open) return;
+  if (elements.palette.open || elements.help.open || elements.coverageDialog.open) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const target = event.target;
   if (target instanceof HTMLElement && target.matches("input, select, textarea, [contenteditable]")) return;
@@ -1297,6 +1341,7 @@ document.addEventListener("keydown", (event) => {
   const presets = { 1: "7", 2: "30", 3: "90", 4: "all" };
   if (presets[key]) { applyWindowPreset(presets[key]); return; }
   if (key === "?") { event.preventDefault(); openHelp(); return; }
+  if (key === "e") { openCoverage(); return; }
   if (key === "/") { event.preventDefault(); openPalette(); return; }
   if (key === "t") { toggleTheme(); return; }
   if (key === "d") { toggleDensity(); return; }

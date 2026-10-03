@@ -1,17 +1,15 @@
-/* Scoped additions: use the shared theme, leave other lanes' views alone. */
-[data-view-panel="reliability"] .panel { margin-block: 18px; }
-.reliability-notes { margin-block: 16px 24px; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.reliability-notes p { margin-block: 7px; }
+/* Reliability: shared panels, KPI cards, tables and evidence disclosures. */
+[data-view-panel="reliability"] { display: grid; gap: var(--gap); }
+[data-view-panel="reliability"] .panel, [data-view-panel="reliability"] .kpi-grid, [data-view-panel="reliability"] .evidence { margin: 0; }
 .reliability-provider { display: flex; align-items: center; gap: 10px; }
-.reliability-table-scroll { max-width: 100%; overflow-x: auto; }
-.reliability-table-scroll table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.reliability-table-scroll th, .reliability-table-scroll td { padding: 13px 12px; text-align: left; vertical-align: top; }
-.reliability-table-scroll tbody th { font-weight: 500; overflow-wrap: anywhere; max-width: 260px; }
-.reliability-table-scroll td { font-variant-numeric: tabular-nums; }
+.reliability-table-scroll { max-width: 100%; max-height: min(640px, 70vh); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.reliability-table-scroll tbody th { max-width: 260px; overflow-wrap: anywhere; }
 .reliability-table-scroll thead th { white-space: normal; min-width: 90px; }
-.reliability-details summary { cursor: pointer; padding-block: 8px; }
-.reliability-flags { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-block: 24px; }
-.reliability-flags dt { font-size: 13px; color: var(--muted); }
-.reliability-flags dd { font-size: 26px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.reliability-flags { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--gap); margin: 0 0 4px; }
+.reliability-flags > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.reliability-flags dt { color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.reliability-flags dd { margin: 4px 0 0; font: 500 20px/1.1 var(--font-mono); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .reliability-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.reliability-more { margin-top: 10px; }
+@media (max-width: 1120px) { .reliability-flags { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .reliability-flags { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

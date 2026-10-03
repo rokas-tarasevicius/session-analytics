@@ -286,5 +286,5 @@ export function sortRepositories(repositories, key, direction) {
 }
 
 export function repositoryKey(id) {
-  return id.startsWith("discovered-") ? id.slice(-8) : id.slice(0, 8);
+  return id.slice(-8);
 }

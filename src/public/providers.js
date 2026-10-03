@@ -20,7 +20,7 @@ export function providerMark(provider) {
   if (["codex", "claude", "cursor"].includes(provider)) {
     const image = document.createElement("img"); image.src = `/brands/${provider}.svg`; image.alt = ""; return image;
   }
-  const badge = document.createElement("span"); badge.className = "pill"; badge.textContent = { copilot: "CP", opencode: "OC", gemini: "G", unsupported: "?" }[provider]; badge.setAttribute("aria-hidden", "true"); return badge;
+  const badge = document.createElement("span"); badge.className = "pill mark"; badge.textContent = { copilot: "CP", opencode: "OC", gemini: "G", unsupported: "?" }[provider]; badge.setAttribute("aria-hidden", "true"); return badge;
 }
 
 const sourceLabels = { "conductor-result": "Conductor results", "cursor-sdk": "Cursor SDK runs", "cursor-transcript": "Cursor transcripts", "copilot-events": "Copilot events", "opencode-db": "OpenCode database", "gemini-chat": "Gemini chats" };

@@ -37,8 +37,11 @@ class Option extends Element {
 }
 async function view() {
   const source = (await readFile(new URL("../src/public/outcomes.js", import.meta.url), "utf8"))
-    .replace(/^import .*;\n/m, "").replace("export function renderOutcomes", "function renderOutcomes");
-  const context = { document: { createElement: (tag: string) => new Element(tag) }, Option, enrichmentStatuses, mergedOutcomeRefs, outcomeEvidence, summarizeOutcomes };
+    .replace(/^import .*;\n/gm, "").replace("export function renderOutcomes", "function renderOutcomes");
+  const ui = await import(new URL("../src/public/ui.js", import.meta.url).href);
+  const document = { createElement: (tag: string) => new Element(tag) };
+  (globalThis as any).document = document;
+  const context = { ...ui, document, Option, enrichmentStatuses, mergedOutcomeRefs, outcomeEvidence, summarizeOutcomes };
   const render = runInNewContext(`${source}\nrenderOutcomes;`, context) as (container: Element, sessions: SessionAnalytics[]) => void;
   return { render, container: new Element("div") };
 }

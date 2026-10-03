@@ -48,7 +48,7 @@ test("grouped renderer bounds tables, filters/drills scopes, persists independen
   const original = { document: globals["document"], window: globals["window"], fetch: globals["fetch"] };
   const stateSource = await readFile(new URL("../src/public/views/insights-state.js", import.meta.url), "utf8");
   const stateUrl = `data:text/javascript;base64,${Buffer.from(stateSource).toString("base64")}`;
-  const source = (await readFile(new URL("../src/public/views/insights.js", import.meta.url), "utf8")).replace('"./insights-state.js"', JSON.stringify(stateUrl));
+  const source = (await readFile(new URL("../src/public/views/insights.js", import.meta.url), "utf8")).replace('"./insights-state.js"', JSON.stringify(stateUrl)).replace('"../ui.js"', JSON.stringify(new URL("../src/public/ui.js", import.meta.url).href));
   const { renderInsights } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`) as { renderInsights: (root: Element, options: object) => Promise<void> };
   let stored = "{}", drilled = "";
   const requests: string[] = [];

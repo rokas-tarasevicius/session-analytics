@@ -37,7 +37,7 @@ test("Pricing panel renders source age, historical provenance, guarded coverage 
     assert.doesNotMatch(rendered, /cursor-excluded/);
     assert.ok(panel.children.some((node) => node.attributes.role === "status"));
     renderPricingPanel(panel, card, []);
-    assert.match(panel.text(), /N\/A/); assert.match(panel.text(), /No API-priced model usage/);
+    assert.match(panel.text(), /—/); assert.match(panel.text(), /No API-priced tokens in this selection/); assert.match(panel.text(), /No API-priced model usage/);
     assert.doesNotMatch(panel.text(), /gpt-fixture/);
   } finally {
     if (previous === undefined) delete globalWithDocument.document; else globalWithDocument.document = previous;

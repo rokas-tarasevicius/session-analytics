@@ -1,24 +1,17 @@
-/* Scoped to this view so parallel theme work can retain the shared design tokens. */
-#limits-cache-view .lc-panel { min-height: 0; margin: 1rem 0; }
-#limits-cache-view .lc-panel > header { align-items: end; flex-wrap: wrap; margin-bottom: 1rem; }
-#limits-cache-view .lc-panel .chart-note { line-height: 1.55; }
-#limits-cache-view .lc-limit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 1rem; }
-#limits-cache-view .lc-window { min-width: 0; padding: 1.1rem; border: 1px solid var(--line); }
-#limits-cache-view h3 { font-size: .95rem; font-weight: 550; margin: 0 0 .8rem; }
-#limits-cache-view .lc-headroom { font-size: clamp(2rem, 4vw, 3.2rem); font-weight: 550; letter-spacing: -.06em; }
-#limits-cache-view .lc-muted { color: var(--muted); margin: .2rem 0; font-size: .8rem; }
-#limits-cache-view .lc-controls { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 2rem; }
-#limits-cache-view select { max-width: 100%; }
-#limits-cache-view .lc-chart { display: block; width: 100%; height: auto; min-height: 130px; margin-top: .6rem; }
-#limits-cache-view .lc-gridline { stroke: var(--line); stroke-width: 1; opacity: .6; }
-#limits-cache-view .lc-line { stroke: var(--sage); stroke-width: 1.5; fill: none; }
-#limits-cache-view .lc-dot { fill: var(--sage); }
-#limits-cache-view .lc-high { fill: var(--ochre); }
-#limits-cache-view .lc-axis { fill: var(--muted); font: 11px var(--font-mono); }
+/* Limits & cache: headroom tiles, shared KPI cards, panels, tables and evidence disclosures. */
+#limits-cache-view { display: grid; gap: var(--gap); }
+#limits-cache-view .lc-panel, #limits-cache-view .kpi-grid, #limits-cache-view .filter-bar, #limits-cache-view .evidence { margin: 0; min-height: 0; }
+#limits-cache-view .lc-limit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--gap); }
+#limits-cache-view .lc-window { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+#limits-cache-view .lc-window h3 { margin: 0; color: var(--muted); font-size: 11.5px; font-weight: 500; }
+#limits-cache-view .lc-headroom { display: block; margin: 6px 0 2px; font: 500 26px/1.1 var(--font-mono); letter-spacing: -0.03em; }
+#limits-cache-view .lc-muted { margin: 0; color: var(--muted); font-size: 11.5px; }
+#limits-cache-view .lc-chart { display: block; width: 100%; height: auto; margin-top: 8px; }
+#limits-cache-view .lc-gridline { stroke: var(--line); stroke-width: 1; }
+#limits-cache-view .lc-line { stroke: var(--series-2); stroke-width: 1.5; fill: none; }
+#limits-cache-view .lc-dot { fill: var(--series-2); }
+#limits-cache-view .lc-high { fill: var(--series-3); }
+#limits-cache-view .lc-axis { fill: var(--muted); font: 500 10.5px var(--font-mono); }
 #limits-cache-view td { vertical-align: top; }
-@media (max-width: 700px) {
-  #limits-cache-view .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  #limits-cache-view .lc-panel { padding: .8rem; }
-  #limits-cache-view .lc-controls label, #limits-cache-view .lc-panel > header label { width: 100%; }
-  #limits-cache-view select { width: 100%; }
-}
+#limits-cache-view .lc-window .evidence { margin-top: 8px; }
+@media (max-width: 700px) { #limits-cache-view .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

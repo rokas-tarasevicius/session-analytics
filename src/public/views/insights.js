@@ -1,4 +1,5 @@
 import { readDecisions, saveDecision } from "./insights-state.js";
+import { coverageBadge, el, evidence, filterBar, selectField } from "../ui.js";
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -131,18 +132,13 @@ function paint(root, report, options) {
   const hiddenRules = new Set(selected.filter((group) => decisions[group.ruleDecisionId]).map((group) => group.rule)).size;
   const hiddenScopes = report.items.filter((item) => (!ruleFilter || item.rule === ruleFilter) && decisions[item.id]).length;
   const visible = hiddenVisible ? [...selected.filter(hiddenGroup), ...selected.filter((group) => !hiddenGroup(group))] : selected.filter((group) => !hiddenGroup(group));
-  const toolbar = node("div", undefined, "insights-toolbar");
-  const status = node("p", `Showing ${Math.min(visibleLimit, visible.length)} of ${visible.length} distinct insights · ${hiddenRules} rules / ${hiddenScopes} scopes dismissed or snoozed`, "muted"); status.setAttribute("role", "status");
-  const filterLabel = node("label", "Rule", "insight-filter-label");
-  const filter = node("select"); filter.setAttribute("aria-label", "Filter insight rules");
-  const all = node("option", "All rules"); all.value = ""; filter.append(all);
-  for (const row of report.coverage) { const option = node("option", row.rule); option.value = row.rule; filter.append(option); }
-  filter.value = ruleFilter;
-  filter.addEventListener("change", () => { ruleFilter = filter.value; visibleLimit = pageSize; paint(root, report, options); root.querySelector("select")?.focus(); }); filterLabel.append(filter);
+  const status = node("p", `Showing ${Math.min(visibleLimit, visible.length)} of ${visible.length} distinct insights · ${hiddenRules} rules / ${hiddenScopes} scopes dismissed or snoozed`, "status"); status.setAttribute("role", "status");
+  const rule = selectField("insight-rule", "Rule", [["", "All rules"], ...report.coverage.map((row) => [row.rule, row.rule])], ruleFilter, (value) => { ruleFilter = value; visibleLimit = pageSize; paint(root, report, options); root.querySelector("select")?.focus(); });
+  const filter = rule.select; filter.setAttribute("aria-label", "Filter insight rules");
   const showHidden = node("button", hiddenVisible ? "Hide dismissed / snoozed" : "Show dismissed / snoozed", "button"); showHidden.type = "button"; showHidden.setAttribute("aria-pressed", String(hiddenVisible));
   showHidden.addEventListener("click", () => { hiddenVisible = !hiddenVisible; visibleLimit = pageSize; for (const state of scopeStates.values()) state.limit = pageSize; paint(root, report, options); root.querySelector(".insights-toolbar button")?.focus(); });
-  toolbar.append(status, filterLabel, showHidden); root.append(toolbar);
-  root.append(node("p", "One card per rule and scope level. Ranked by estimated USD, then token exposure, then unquantified signals. Rules can overlap; do not add their totals. Repository/date filters recompute evidence and peer baselines.", "insights-note"));
+  const toolbar = filterBar(status, rule.wrapper, showHidden); toolbar.className = "filter-bar insights-toolbar"; root.append(toolbar);
+  root.append(evidence(["One card per rule and scope level. Ranked by estimated USD, then token exposure, then unquantified signals. Rules can overlap; do not add their totals. Repository/date filters recompute evidence and peer baselines.", "Content review is separate and off by default. Session evidence includes copyable review dry-run commands. Only an explicit --send-content flag invokes your agent CLI; this page sends no transcript content."], { title: "How insights are ranked" }));
   if (persistenceMessage) { const note = node("p", persistenceMessage, "insights-note"); note.setAttribute("role", "status"); root.append(note); }
   if (!visible.length) root.append(node("p", hiddenRules || hiddenScopes ? "All matching insights are hidden. Show dismissed / snoozed to restore rules or scopes." : "No signals meet the thresholds in this selection. Check rule coverage below; this is not a verdict on quality or success.", "insights-empty"));
   const list = node("div", undefined, "insights-list");
@@ -152,11 +148,16 @@ function paint(root, report, options) {
     const title = node("h2", group.title); title.id = group.id; article.setAttribute("aria-labelledby", title.id);
     const heading = node("div", undefined, "insight-heading");
     const description = node("div"); description.append(node("p", `${report.groups.indexOf(group) + 1} · ${group.rule} · ${group.scopeKind} scopes`, "insight-scope"), title);
-    heading.append(description, node("strong", amount(group.estimatedImpact), "insight-impact")); article.append(heading);
-    article.append(node("p", group.estimatedImpact.label, "insight-impact-label"));
+    const impactBlock = node("div");
+    const impact = node("strong", amount(group.estimatedImpact), `insight-impact${group.estimatedImpact.value === null ? " not-quantified" : ""}`);
+    impactBlock.append(impact, node("p", group.estimatedImpact.label, "insight-impact-label"));
+    heading.append(description, impactBlock); article.append(heading);
     const evidenceScope = group.rule.startsWith("unused-") ? "Evidence from" : "Affected";
-    article.append(node("p", `${evidenceScope}: ${group.affected.repositories} / ${group.coverage.totalRepositories} repositories · ${group.affected.sessions} / ${group.coverage.totalSessions} selected sessions. ${group.confidence} confidence (lowest among scopes).`, "insight-counts"));
-    article.append(node("p", `Rule evidence: ${group.coverage.eligibleSessions} / ${group.coverage.totalSessions} sessions eligible · ${group.impactCoverage.quantifiedItems} / ${group.impactCoverage.totalItems} scopes quantified. API-equivalent value is not an invoice.`, "insight-coverage"));
+    const counts = node("p", undefined, "insight-counts");
+    counts.append(node("span", `${evidenceScope} ${group.affected.repositories} / ${group.coverage.totalRepositories} repositories · ${group.affected.sessions} / ${group.coverage.totalSessions} selected sessions`), node("span", `${group.confidence} confidence (lowest among scopes)`));
+    const ruleSpan = node("span", `Rule evidence ${group.coverage.eligibleSessions} / ${group.coverage.totalSessions} sessions eligible · ${group.impactCoverage.quantifiedItems} / ${group.impactCoverage.totalItems} scopes quantified`);
+    const badge = coverageBadge({ eligible: group.coverage.eligibleSessions, selected: group.coverage.totalSessions }, "evidence for this rule"); if (badge) ruleSpan.append(badge);
+    counts.append(ruleSpan); article.append(counts);
     const hidden = group.itemIds.filter((id) => decisions[id]).length;
     if (hidden) article.append(node("p", `${hidden} scopes dismissed or snoozed; this summary includes their evidence.`, "insights-note"));
     const change = (id, action) => {
@@ -166,7 +167,7 @@ function paint(root, report, options) {
       (root.querySelector(`[data-insight-id="${id}"] button`) || root.querySelector(`[data-insight-id="${group.id}"] summary`) || root.querySelector(".insights-toolbar button"))?.focus();
     };
     article.append(scopeTable(group, group.itemIds.map((id) => byId.get(id)), options, decisions, change));
-    const action = node("p", group.suggestedAction, "insight-action"); article.append(action);
+    const action = node("div", undefined, "insight-action"); action.append(node("strong", "Suggested next step"), node("p", group.suggestedAction)); article.append(action);
     article.append(decisionControls(group.ruleDecisionId, group.title, "rule", decisions, change)); list.append(article);
   }
   root.append(list);
@@ -174,7 +175,7 @@ function paint(root, report, options) {
     const more = node("button", `Show ${Math.min(pageSize, visible.length - visibleLimit)} more insights`, "button insights-load-more"); more.type = "button";
     more.addEventListener("click", () => { const next = visible[visibleLimit].id; visibleLimit += pageSize; paint(root, report, options); root.querySelector(`[data-insight-id="${next}"]`)?.focus(); }); root.append(more);
   }
-  const details = node("details", undefined, "insights-coverage"); details.append(node("summary", "Rule coverage and thresholds"));
+  const details = node("details", undefined, "evidence insights-coverage"); details.append(node("summary", "Rule coverage and thresholds"));
   const table = node("table"), head = node("tr");
   for (const text of ["Rule", "Status", "Eligible / selected", "Groups / scopes"]) { const cell = node("th", text); cell.scope = "col"; head.append(cell); }
   const thead = node("thead"); thead.append(head); table.append(thead);
@@ -185,7 +186,6 @@ function paint(root, report, options) {
   details.append(node("p", "Unavailable means required evidence is absent. Insufficient means the activity guard has not been met. Confidence describes the interpretation, not task quality."));
   details.append(evidenceList(Object.entries(report.thresholds).map(([label, value]) => ({ label, value, unit: "count", denominator: null })))); root.append(details);
   for (const warning of report.warnings) root.append(node("p", warning, "insights-note"));
-  root.append(node("p", "Content review is separate and off by default. Session evidence includes copyable review dry-run commands. Only an explicit --send-content flag invokes your agent CLI; this page sends no transcript content.", "insights-note"));
 }
 
 export async function renderInsights(root, options) {

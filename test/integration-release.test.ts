@@ -68,7 +68,7 @@ test("release: complete demo API, all fourteen renderers, static modules and pri
     for (const [, specifiers, path] of app.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["'];/g)) {
       let exports;
       if (path === "./outcomes.js") {
-        const source = (await readFile(new URL("../src/public/outcomes.js", import.meta.url), "utf8")).replace('"./outcomes-summary.js"', JSON.stringify(new URL("../src/metrics/outcomes-summary.js", import.meta.url).href));
+        const source = (await readFile(new URL("../src/public/outcomes.js", import.meta.url), "utf8")).replace('"./outcomes-summary.js"', JSON.stringify(new URL("../src/metrics/outcomes-summary.js", import.meta.url).href)).replace('"./ui.js"', JSON.stringify(new URL("../src/public/ui.js", import.meta.url).href));
         exports = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
       } else exports = await import(new URL(`../src/public/${path!.replace(/^\.\//, "").replace(/^\//, "")}`, import.meta.url).href);
       for (const name of specifiers!.split(",").map((s) => s.trim()).filter(Boolean)) helpers[name] = exports[name];
