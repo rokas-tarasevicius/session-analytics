@@ -13,8 +13,21 @@ export interface McpRateWindow {
   resetsAt: string;
 }
 
+export type McpActivityState = "active" | "settled" | "unknown";
+export interface McpPricingDay { day: string; eligibleTokens: number; pricedTokens: number }
+export interface McpSourceHealth {
+  provider: SessionProvider;
+  status: "available" | "incomplete" | "unavailable" | "unknown";
+  sourcesRead: number;
+  missingSources: number;
+  unreadableSources: number;
+}
+
 /** Only structured result flags and numeric quota windows; never result text. */
 export interface McpSessionEvidence {
+  activityState?: McpActivityState;
+  pricingByDay?: McpPricingDay[];
+  undatedTokens?: number;
   toolOutcomes: McpToolOutcome[];
   rateLimits: McpRateWindow[];
   truncated: boolean;
@@ -27,6 +40,8 @@ export interface McpContext {
 export interface McpInventoryProvider {
   provider: SessionProvider;
   skills: string[];
+  skillIdentities?: Array<{ name: string; aliases: string[] }>;
+  unresolvedSkills?: number;
   mcpServers: string[];
   sourcesRead: number;
   unreadableSources: number;
@@ -70,6 +85,7 @@ export interface McpValue {
 }
 
 export interface McpTotals {
+  basis: "session-start";
   sessions: number;
   analyzedSessions: number;
   workingSnapshots: number;
@@ -93,6 +109,7 @@ export interface McpNamedCount { name: string; calls: number }
 
 export interface McpProfile {
   sessions: number;
+  activityStates: Record<McpActivityState, number>;
   apiEquivalentUsd: McpDistribution;
   providerReportedUsd: McpDistribution;
   userTurns: McpDistribution;
@@ -133,6 +150,9 @@ export interface McpBudgetPeriod {
   since: string;
   until: string;
   apiEquivalentUsd: number;
+  pricingCoverage: McpRatio;
+  unpricedTokens: number | null;
+  undatedTokens: number | null;
   datedSessions: number;
   undatedSessions: number;
   excludedProviderReportedUsd: number;
@@ -157,6 +177,8 @@ export interface McpUnusedProvider {
   unreadableSources: number;
   truncated: boolean;
   skillEvidence: SkillEvidence;
+  skillIdentityCoverage: "available" | "partial" | "unavailable";
+  unresolvedSkills: number;
   installedSkills: number;
   configuredMcpServers: number;
   skillsWithoutObservedUse: string[];
@@ -171,6 +193,7 @@ export interface McpPayload {
   tool: McpToolName;
   snapshot: { generatedAt: string; ageSeconds: number; ttlSeconds: number };
   scope: { kind: "repository" | "machine"; repositoryId: string | null };
+  sourceHealth: McpSourceHealth[];
   window: { name: McpWindow; since: string | null; until: string; timezone: "UTC"; basis: "session-start" | "activity-day" };
   totals: McpTotals;
   notes: string[];

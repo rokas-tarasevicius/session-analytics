@@ -10,6 +10,13 @@ All notable changes to this project are documented here. The format follows [Kee
 - Structured tool-result error counts and recorded Codex quota windows in the additive `mcpEvidence` session namespace; MCP answers include coverage, sample guards and separate API-equivalent/provider-reported values.
 - Names-only extension inventory, Claude Code/Codex/Cursor installation instructions, and an isolated `node scripts/demo.ts mcp` demo with synthetic inventories and quota evidence.
 
+### Fixed
+
+- MCP inventory keeps escaped TOML multiline string content private, resolves skill frontmatter names and canonical aliases, and preserves configured MCP server names containing `__`.
+- Budget periods include dated priced/eligible token operands from older sessions; session-cohort totals state their separate basis.
+- Typical-session baselines require settled lifecycle evidence, with active/unknown exclusions. Source discovery health remains visible in empty filtered results.
+- Stdio EOF drains output for at most 250 ms; overflow tears it down immediately. The CLI exits after worker cleanup even when stdout is unread.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

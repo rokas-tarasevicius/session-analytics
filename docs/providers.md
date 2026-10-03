@@ -30,9 +30,10 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | Record | Fields |
 | --- | --- |
 | every record | `type`, `subtype`, `timestamp`, `uuid`, `agentId` |
-| `assistant` | `effort`; `message.id`, `message.model`; `message.usage`: `input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `cache_creation.ephemeral_5m_input_tokens`, `cache_creation.ephemeral_1h_input_tokens`, `output_tokens`, `output_tokens_details.thinking_tokens`; `tool_use` blocks: `id`, `name`, and `input.skill` for the `Skill` tool only |
+| `assistant` | `effort`; `message.id`, `message.model`, lifecycle `message.stop_reason`; `message.usage`: `input_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `cache_creation.ephemeral_5m_input_tokens`, `cache_creation.ephemeral_1h_input_tokens`, `output_tokens`, `output_tokens_details.thinking_tokens`; `tool_use` blocks: `id`, `name`, and `input.skill` for the `Skill` tool only |
 | `user` | whether `message.content` is non-empty text (to count human turns; tool results are not turns); structured `tool_result.tool_use_id`/`is_error` flags feed `mcpEvidence` counters, without result content |
 | `queue-operation`, compaction and summary records | counted by type |
+| `system.turn_duration` | Settled-turn lifecycle evidence; tracked independently for parent and subagent files |
 
 **Fidelity:**
 
@@ -82,7 +83,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 | --- | --- |
 | `session_meta` | `payload.id`, `payload.cwd`, `payload.source.subagent` (sub-agent execution) |
 | `turn_context` | `payload.model`, `payload.effort` |
-| `event_msg` | `payload.type`: `user_message`, `agent_message`, `task_started`, `task_complete`, `context_compacted`, `item_completed` (`item.type` of `UserMessage`, `AgentMessage`, or `ContextCompaction`, and `item.id`), and `token_count` (`info.total_token_usage`, `info.last_token_usage`, `info.model_context_window`) |
+| `event_msg` | `payload.type`: `user_message`, `agent_message`, `task_started`, `task_complete`, `turn_aborted` (settled-turn lifecycle evidence), `context_compacted`, `item_completed` (`item.type` of `UserMessage`, `AgentMessage`, or `ContextCompaction`, and `item.id`), and `token_count` (`info.total_token_usage`, `info.last_token_usage`, `info.model_context_window`) |
 | `compacted` | counted as a compaction |
 | `event_msg` structured MCP evidence | `token_count.rate_limits.primary/secondary`: numeric `window_minutes`, `used_percent`, `resets_at`; `item_completed.McpToolCall`: local join ID, server/tool names, status and `result.isError`. Only bounded names, counters and numeric/timestamp quota samples enter `mcpEvidence`. |
 | `response_item` | `function_call` and `custom_tool_call`: `name`, `call_id`. A `custom_tool_call` input is scanned for code-mode `tools.<name>(` invocations. The input of a read-capable call (`exec_command`, `read_file`, `Bash`, `Read`, or a code-mode call to one of the first two) is scanned for `<skill>/SKILL.md`. Only tool names and skill identifiers are kept. |
@@ -172,3 +173,7 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 ## Adding a provider
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-provider) for the checklist. A new source needs a discovery rule with an explicit override option, an identity check, a parser that only accumulates allowlisted counters, fixtures with sentinel content, and a section on this page.
+
+## MCP coverage refinements
+
+Provider discovery projects only source status enums and read/missing/unreadable counts, independent of the selected sessions. Deduplicated Claude/Codex pricing retains dated eligible/priced token operands so budget coverage includes unpriced activity from older sessions. Profiles require settled lifecycle observations; missing evidence is unknown, including Cursor, and an orchestrator working flag overrides settled observations. These statuses describe recorded turns, not success or live process state. See [metric definitions](metrics.md#mcp-query-semantics).

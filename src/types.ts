@@ -1,4 +1,4 @@
-import type { McpContext, McpSessionEvidence } from "./mcp/types.ts";
+import type { McpContext, McpSessionEvidence, McpSourceHealth } from "./mcp/types.ts";
 export type * from "./mcp/types.ts";
 
 export type SessionProvider = "claude" | "codex" | "cursor";
@@ -162,6 +162,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  mcpSourceHealth?: McpSourceHealth[];
   mcpContext?: McpContext;
   generatedAt: string;
   rateCard: RepositoryAnalytics["rateCard"];

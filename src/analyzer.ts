@@ -8,6 +8,7 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { McpEvidenceCollector } from "./mcp/evidence.ts";
+import { sourceHealth } from "./mcp/source-health.ts";
 
 import type {
   AnalyzeOptions,
@@ -102,6 +103,7 @@ interface TranscriptCandidate {
 }
 
 interface MutableSession {
+  mcpEvidence: McpEvidenceCollector;
   assistantMessages: number;
   compactions: number;
   delegatedAgents: Set<string>;
@@ -313,6 +315,7 @@ function addModelUsage(
   aggregate.calls += 1;
   sumTokens(aggregate, usage);
   const rate = rateCard.models[model];
+  session.mcpEvidence.usage(isoDay(timestamp, fallbackTimestamp), tokenCount(usage), Boolean(rate));
   if (!rate) {
     aggregate.priced = false;
     return;
@@ -327,6 +330,7 @@ function addModelUsage(
 
 function createMutableSession(): MutableSession {
   return {
+    mcpEvidence: new McpEvidenceCollector(),
     assistantMessages: 0,
     compactions: 0,
     delegatedAgents: new Set<string>(),
@@ -599,7 +603,7 @@ async function analyzeCodex(
   claimedCounters: Set<string> = new Set<string>(),
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
-  const mcpEvidence = new McpEvidenceCollector();
+  const mcpEvidence = state.mcpEvidence;
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
   const seenCalls = new Set<string>();
@@ -795,7 +799,7 @@ async function analyzeCodex(
     "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes.",
   );
   const result = finalizeSession(row, state, finalTokens, 1);
-  result.mcpEvidence = mcpEvidence.finish();
+  result.mcpEvidence = mcpEvidence.finish(row.status === "working");
   return result;
 }
 
@@ -849,7 +853,7 @@ async function analyzeClaude(
   inheritedWarnings: string[],
 ): Promise<SessionAnalytics> {
   const state = createMutableSession();
-  const mcpEvidence = new McpEvidenceCollector();
+  const mcpEvidence = state.mcpEvidence;
   state.effort = null;
   state.executionKind = "top-level";
   state.executionKindsSeen.add("top-level");
@@ -882,7 +886,7 @@ async function analyzeClaude(
       path === mainPath ? "top-level" : "subagent";
     state.executionKindsSeen.add(executionKind);
     await visitJsonLines(path, (record, line) => {
-      mcpEvidence.claude(record);
+      mcpEvidence.claude(record, path);
       if (record["__parse_error"] === true) {
         parseErrors += 1;
         return;
@@ -981,7 +985,7 @@ async function analyzeClaude(
   }
   if (parseErrors > 0) state.warnings.push(`${parseErrors} malformed JSONL records were skipped.`);
   const result = finalizeSession(row, state, totals, paths.length);
-  result.mcpEvidence = mcpEvidence.finish();
+  result.mcpEvidence = mcpEvidence.finish(row.status === "working");
   return result;
 }
 
@@ -1726,7 +1730,7 @@ export async function cursorSessions(
     return { sessions: results, warning: null };
   } catch (error) {
     const code = asRecord(error)?.["code"];
-    return { sessions: [], warning: code === "ENOENT" ? null : "Cursor local session history could not be read." };
+    return { sessions: [], warning: code === "ENOENT" ? "Cursor local session history is missing." : "Cursor local session history could not be read." };
   } finally {
     database?.close();
   }
@@ -1986,7 +1990,7 @@ function aggregate(
 
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
-): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[]; mcpContext?: MachineAnalytics["mcpContext"] }> {
+): Promise<{ rateCard: RateCard; repositories: RepositoryAnalytics[]; mcpContext?: MachineAnalytics["mcpContext"]; mcpSourceHealth: MachineAnalytics["mcpSourceHealth"] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadRateCard(options.rateCardPath);
@@ -2186,6 +2190,8 @@ async function analyzeSelectedRepositories(
     const repositoriesForOutput = selectedRepositories;
     return {
       ...(mcpContext ? { mcpContext } : {}),
+      mcpSourceHealth: [sourceHealth("claude", claudeIndexes.map((item) => item.warning)),
+        sourceHealth("codex", codexIndexes.map((item) => item.warning)), sourceHealth("cursor", [cursorResult.warning])],
       rateCard,
       repositories: repositoriesForOutput.map((repository) => {
         const result = aggregate(repository, sessionsByRepository.get(repository.id) ?? [], rateCard);
@@ -2259,6 +2265,7 @@ export async function analyzeMachineSessions(
 ): Promise<MachineAnalytics> {
   const result = await analyzeSelectedRepositories(options);
   const snapshot = aggregateMachine(result.repositories, result.rateCard);
+  snapshot.mcpSourceHealth = result.mcpSourceHealth;
   if (result.mcpContext) snapshot.mcpContext = result.mcpContext;
   return snapshot;
 }

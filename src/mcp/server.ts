@@ -13,6 +13,7 @@ export const PROTOCOL_VERSION = "2026-07-28";
 export const LEGACY_VERSIONS = ["2025-11-25", "2025-06-18"] as const;
 export const MAX_MESSAGE_BYTES = 65_536;
 const MAX_PENDING = 16;
+const OUTPUT_DRAIN_MS = 250;
 const SERVER_INFO = { name: serviceId, title: brand.name, version };
 const CAPABILITIES = { tools: { listChanged: false } };
 const INSTRUCTIONS = "Read-only local metrics. Tools default to the launch repository when known. Paths and transcript content are never tool inputs or outputs. API-equivalent value is not an invoice; inspect coverage, sample sizes, UTC windows and snapshot age.";
@@ -36,26 +37,47 @@ export function serveMcp(options: McpServerOptions): { close: () => void; closed
   const input = options.input ?? process.stdin, output = options.output ?? process.stdout;
   const now = options.now ?? Date.now;
   const controller = new AbortController();
-  const cache = new SnapshotCache(() => options.load ? options.load(controller.signal) : loadSnapshot(options.analysis, controller.signal), options.ttlSeconds * 1000, now);
+  let workerStopped: Promise<void> | undefined;
+  const cache = new SnapshotCache(() => {
+    if (options.load) return options.load(controller.signal);
+    const loading = loadSnapshot(options.analysis, controller.signal);
+    workerStopped = loading.then(() => {}, () => {});
+    return loading;
+  }, options.ttlSeconds * 1000, now);
   const pending = new Map<Id, { cancelled: boolean }>();
   let legacy: "new" | "negotiated" | "ready" = "new";
   let stopped = false, buffer = Buffer.alloc(0), discarding = false;
   let resolveClosed: () => void;
   const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
-  const close = (): void => {
-    if (stopped) return;
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
+  const finishClose = (): void => {
+    clearTimeout(drainTimer);
+    output.off("finish", finishClose); output.off("close", finishClose);
+    output.destroy();
+    // loadSnapshot settles only after its killed worker has actually closed.
+    if (workerStopped) void workerStopped.then(resolveClosed);
+    else resolveClosed();
+  };
+  const stop = (force = false): void => {
+    if (stopped) { if (force) finishClose(); return; }
     stopped = true;
     for (const request of pending.values()) request.cancelled = true;
     controller.abort();
     input.off("data", onData); input.off("end", close); input.off("error", close); input.pause();
     input.destroy();
     buffer = Buffer.alloc(0);
-    resolveClosed();
+    // A client may stop consuming stdout before closing stdin. Give ordinary
+    // replies a short drain, then release the pipe even under backpressure.
+    if (force || output.destroyed) { finishClose(); return; }
+    drainTimer = setTimeout(finishClose, OUTPUT_DRAIN_MS);
+    output.once("finish", finishClose); output.once("close", finishClose);
+    output.end();
   };
+  const close = (): void => stop();
   const send = (message: object): void => {
     if (stopped) return;
     const serialized = `${JSON.stringify(message)}\n`;
-    if (Buffer.byteLength(serialized) + output.writableLength > 4 * 1024 * 1024) { close(); return; }
+    if (Buffer.byteLength(serialized) + output.writableLength > 4 * 1024 * 1024) { stop(true); return; }
     output.write(serialized);
   };
   const error = (id: Id | null, code: number, message: string, data?: object): void => {
@@ -167,6 +189,6 @@ export function serveMcp(options: McpServerOptions): { close: () => void; closed
     }
   };
   input.on("data", onData); input.once("end", close); input.once("error", close);
-  output.on("error", close);
+  output.on("error", () => stop(true));
   return { close, closed };
 }

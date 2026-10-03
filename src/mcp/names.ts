@@ -15,7 +15,14 @@ export function timestamp(value: unknown): string | null {
   return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
 }
 
-export function mcpServerName(tool: string): string | null {
+export function mcpServerName(tool: string, configured?: string[]): string | null {
+  if (configured) {
+    const normalized = tool.replace(/^functions\./, "");
+    // Longest known prefix preserves embedded separators and avoids assigning
+    // team__search's calls to team when both servers are configured.
+    return configured.filter((name) => safeName(name) && normalized.startsWith(`mcp__${name}__`) &&
+      safeName(normalized.slice(name.length + 7))).sort((a, b) => b.length - a.length)[0] ?? null;
+  }
   const match = /^(?:functions\.)?mcp__([A-Za-z0-9][A-Za-z0-9._:-]*?)__/.exec(tool);
   return safeName(match?.[1]);
 }

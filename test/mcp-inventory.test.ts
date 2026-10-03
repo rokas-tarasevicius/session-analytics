@@ -18,6 +18,53 @@ test("names-only TOML scanner recognizes quoted keys without interpreting comman
   assert.doesNotMatch(JSON.stringify(names), /SECRET_|command/);
 });
 
+test("TOML escaped multiline delimiters and quote runs keep content out of inventory", () => {
+  for (const quoteRun of ['\\"""', '"\\""', '""\\"', '\\\\\\"""']) {
+    const text = ['description = """', quoteRun, '[mcp_servers.SECRET_CONTENT]', '"""', '[mcp_servers.real]'].join("\n");
+    assert.deepEqual(tomlServerNames(text), ["real"]);
+  }
+  for (const quotes of ['"', "'"]) for (const run of [3, 4, 5]) {
+    const text = `description = ${quotes.repeat(3)}\n[mcp_servers.SECRET_CONTENT]\n${quotes.repeat(run)}\n[mcp_servers.real]`;
+    assert.deepEqual(tomlServerNames(text), ["real"]);
+  }
+  for (const text of ['[mcp_servers.before]\ndescription = "unterminated\n[mcp_servers.SECRET_CONTENT]',
+    '[mcp_servers.before]\ndescription = """unterminated',
+    '[mcp_servers.before]\ndescription = """bad\\q\n"""\n[mcp_servers.SECRET_CONTENT]',
+    '[mcp_servers.before]\ndescription = """bad""""""\n[mcp_servers.SECRET_CONTENT]']) {
+    assert.throws(() => tomlServerNames(text), /Inventory source unavailable/);
+  }
+});
+
+test("skill inventory resolves frontmatter and canonical aliases without reading names from prose", async () => {
+  const root = await mkdtemp(join(tmpdir(), "mcp-skill-identity-"));
+  try {
+    const skills = join(root, ".claude/skills");
+    await mkdir(join(skills, "release-review"), { recursive: true });
+    await writeFile(join(skills, "release-review/SKILL.md"), '---\nname: review\ndescription: |\n  name: SECRET_DESCRIPTION\n---\nname: SECRET_BODY\n');
+    await symlink(join(skills, "release-review"), join(skills, "alias-review"));
+    await mkdir(join(skills, "ambiguous"));
+    await writeFile(join(skills, "ambiguous/SKILL.md"), '---\nname: |\n  SECRET_NAME_CONTENT\n---\nSECRET_BODY');
+    const unsupported = [
+      '---\ndescription: "unterminated\nname: SECRET_DESCRIPTION\n"\n---\nSECRET_BODY',
+      '---\nname: review\n  SECRET_CONTINUATION\n---',
+      '---\n  name: SECRET_INDENTED_ROOT\n---',
+      '---\nname: first\nname: SECRET_DUPLICATE\n---',
+      '---\ndescription: ' + 'x'.repeat(16_384) + '\nname: SECRET_OVERSIZE\n---',
+    ];
+    for (const [index, content] of unsupported.entries()) {
+      await mkdir(join(skills, `unsupported-${index}`));
+      await writeFile(join(skills, `unsupported-${index}/SKILL.md`), content);
+    }
+    const inventory = await readInventory({ mcpCwd: root }, {}, root);
+    const claude = inventory[0]!;
+    assert.deepEqual(claude.skills, ["review"]);
+    assert.deepEqual(claude.skillIdentities, [{ name: "review", aliases: ["alias-review", "release-review", "review"] }]);
+    assert.equal(claude.unresolvedSkills, 1 + unsupported.length);
+    assert.doesNotMatch(JSON.stringify(inventory), /SECRET_|SKILL\.md/);
+    assert.ok(!JSON.stringify(inventory).includes(root));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("inventory handles profiles, project scope, symlinked skills, malformed sources and bounded names", async () => {
   const root = await mkdtemp(join(tmpdir(), "mcp-inventory-"));
   try {
@@ -42,7 +89,7 @@ test("inventory handles profiles, project scope, symlinked skills, malformed sou
     const inventory = await readInventory({ mcpCwd: nested }, {}, fakeHome);
     assert.deepEqual(inventory[0]!.skills, ["fixture-skill"]);
     assert.deepEqual(inventory[0]!.mcpServers, ["global-server", "local-server", "project-server"]);
-    assert.deepEqual(inventory[1]!.skills, ["linked-skill", "system-skill"]);
+    assert.deepEqual(inventory[1]!.skills, ["fixture-skill", "system-skill"]);
     assert.deepEqual(inventory[1]!.mcpServers, ["fixture-codex"]);
     assert.equal(inventory[1]!.sourcesRead, 4); // shared skills, profile skills, system skills, config; alias deduplicates.
     assert.equal(inventory[2]!.unreadableSources, 1);

@@ -75,6 +75,8 @@ Returned by `/api/analytics` and `report --json`.
 | `topTools[]` | `{ name, value }`, effective tool calls by tool name, descending | P0 |
 | `warnings[]` | Fixed-text coverage notes (unpriced models, missing or unmatched transcripts, unreadable roots) | P0 |
 | `mcpContext.repositoryId` | Optional launch-context repository key, or null outside a repository; requested internally by the MCP worker, never a path | P1 |
+| `mcpSourceHealth[].provider`, `.status` | Provider and available/incomplete/unavailable discovery enum, independent of sessions | P0 |
+| `mcpSourceHealth[].sourcesRead`, `.missingSources`, `.unreadableSources` | Discovery source counts; no paths or error text | P0 |
 
 ### Repository rollup (`RepositoryRollup`)
 
@@ -230,6 +232,10 @@ These fields also appear in the existing JSON/API session projection when suppor
 
 | Field under `mcpEvidence` | Meaning | Tier |
 | --- | --- | --- |
+| `activityState` | Recorded lifecycle enum: active, settled or unknown; never an inferred success | P0 |
+| `pricingByDay[].day` | Valid UTC accounting date shared with the spend ledger | P0 |
+| `pricingByDay[].eligibleTokens`, `.pricedTokens` | Deduplicated API token operands, including unpriced requests | P0 |
+| `undatedTokens` | API tokens with no valid accounting date | P0 |
 | `toolOutcomes[].tool` | Bounded tool name from structured invocation/completion evidence | P0 |
 | `toolOutcomes[].observedResults` | Distinct matched structured outcomes | P0 |
 | `toolOutcomes[].errors` | Outcomes with an explicit error flag/failure status | P0 |
@@ -250,6 +256,8 @@ These fields also appear in the existing JSON/API session projection when suppor
 | `snapshot.ttlSeconds` | Configured in-memory cache TTL | P0 |
 | `scope.kind` | `repository` or `machine` | P0 |
 | `scope.repositoryId` | Pseudonymous repository key or null | P1 |
+| `sourceHealth[].provider`, `.status` | Fixed provider and discovery status enums; unknown for older snapshots | P0 |
+| `sourceHealth[].sourcesRead`, `.missingSources`, `.unreadableSources` | Source counts independent of the selected session cohort | P0 |
 | `window.name` | Enumerated window | P0 |
 | `window.since`, `window.until` | ISO query bounds; lower bound null for all history | P0 |
 | `window.timezone` | Always `UTC` | P0 |
@@ -262,6 +270,7 @@ These fields also appear in the existing JSON/API session projection when suppor
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
+| `McpTotals.basis` | Always `session-start`, distinct from activity-day budget periods | P0 |
 | `McpTotals.sessions`, `.analyzedSessions`, `.workingSnapshots` | Selected, analyzed and working counts | P0 |
 | `McpTotals.inputTokens`, `.outputTokens` | Observed token sums; null for unattributed Cursor model groups | P0 |
 | `McpTotals.userTurns`, `.toolCalls` | Session counter sums; null for model groups | P0 |
@@ -284,6 +293,7 @@ These fields also appear in the existing JSON/API session projection when suppor
 | `groups[].key` | Repository hash (P1), or provider/model/execution-kind identifier (P0) | P0/P1 |
 | `groups[].totals`, `totalGroups`, `nextOffset` | Per-group totals, full group count and next page/null | P0 |
 | `repo_profile`: `sessions` | Selected repository session count | P0 |
+| `activityStates.active`, `.settled`, `.unknown` | Selected session counts by observed lifecycle; only settled sessions enter distributions | P0 |
 | `apiEquivalentUsd`, `providerReportedUsd`, `userTurns`, `durationMilliseconds` | Distribution objects on the named bases | P0 |
 | `cacheHitRate`, `compactionsPerSession` | Ratios with supported-provider denominators | P0 |
 | `toolMix[].name`, `skills[].name` | Bounded metadata names | P0 |
@@ -299,13 +309,16 @@ These fields also appear in the existing JSON/API session projection when suppor
 | `totalSessions`, `nextOffset` | Full selected session count and next page/null | P0 |
 | `budget_status`: `today`, `week` | UTC activity-day period objects | P0 |
 | `today/week.since`, `.until`, `.apiEquivalentUsd` | Period bounds and dated API value | P0 |
-| `today/week.datedSessions`, `.undatedSessions` | API sessions with a dated entry in-period; all scoped sessions without a daily ledger | P0 |
+| `today/week.pricingCoverage` | Dated priced/eligible token ratio qualifying the period value and burn rate | P0 |
+| `today/week.unpricedTokens`, `.undatedTokens` | In-period unpriced tokens and all scoped API tokens without a date; null when operands unavailable | P0 |
+| `today/week.datedSessions`, `.undatedSessions` | API sessions with a dated value/token entry in-period; all scoped sessions without applicable daily ledgers | P0 |
 | `today/week.excludedProviderReportedUsd` | All-history scoped reported value excluded because timing is unavailable | P0 |
 | `today/week.elapsedHours`, `.apiEquivalentUsdPerHour` | UTC wall-hour denominator and guarded historical burn rate/null | P0 |
 | `rateLimits[].provider`, `.status` | Provider and available/unavailable evidence status | P0 |
 | `rateLimits[].windows[]` | The same four numeric/timestamp quota fields as session evidence, plus `remainingPercent` | P0 |
 | `unused_extensions`: `inventoryScope` | Always `launch-context` | P0 |
 | `providers[].provider`, `.inventoryCoverage`, `.skillEvidence` | Provider, always-partial inventory, explicit/inferred/unavailable invocation method | P0 |
+| `providers[].skillIdentityCoverage`, `.unresolvedSkills` | Available/partial/unavailable identity matching and installations excluded for unknown identity | P0 |
 | `providers[].sourcesRead`, `.unreadableSources`, `.truncated` | Readable/unreadable source counts and cap flag; no paths/errors | P0 |
 | `providers[].installedSkills`, `.configuredMcpServers` | Distinct bounded-name counts | P0 |
 | `providers[].skillsWithoutObservedUse[]` | Installed skill names without invocation evidence in the selected scope/window | P0 |
@@ -314,7 +327,7 @@ These fields also appear in the existing JSON/API session projection when suppor
 
 #### Worker inventory and protocol wrapper
 
-The MCP worker returns `{analytics, inventory}` to its parent over an anonymous pipe. `analytics` is the allowlisted machine snapshot above. Each `inventory[]` contains only `provider`, `skills[]`, `mcpServers[]`, `sourcesRead`, `unreadableSources`, and `truncated`; server names are P1, all other inventory fields P0. Skill definitions, config values, URLs, environment values and commands are discarded inside the worker. This inventory is in memory only, never persisted, and bounded to 512 names per list.
+The MCP worker returns `{analytics, inventory}` to its parent over an anonymous pipe. `analytics` is the allowlisted machine snapshot above. Each `inventory[]` contains only `provider`, `skills[]`, `skillIdentities[].name`/`.aliases[]`, `unresolvedSkills`, `mcpServers[]`, `sourcesRead`, `unreadableSources`, and `truncated`; server names are P1, all other inventory fields P0. Skill names come only from bounded scalar frontmatter names and directory aliases, deduplicated by a canonical path that stays inside the worker. At most a 16 KiB skill prefix is read; description/body content is never projected. Unsupported metadata yields an unknown identity count, not a purportedly unused name. TOML escaped delimiters and quote runs cannot turn string values into table names; malformed string syntax rejects the source. Config values, URLs, environment values and commands are discarded inside the worker. This inventory is in memory only, never persisted, and bounded to 512 names/identities and 512 aliases per identity.
 
 The MCP wrapper contains standard JSON-RPC `jsonrpc`, caller-chosen `id` (protocol correlation only), `result` or `error`; errors use fixed `code`/`message` and, for unsupported versions, `data.supported`/`requested` protocol dates. Tool results contain `isError`, `content[].type`/`.text` (a fixed-template summary and serialized `McpPayload`), and `structuredContent` (the same payload). Modern results add `resultType` and `_meta.io.modelcontextprotocol/serverInfo`. Discovery/initialization contain only static product/version identifiers, protocol versions, tool capability declarations, instructions and catalog cache hints (`ttlMs`, `cacheScope`). `tools/list` returns static names/descriptions, JSON input schemas and read-only/idempotent/closed-world annotations. These are P0 and carry no local-history identifiers; caller request IDs are echoed as required by JSON-RPC, never used to query history.
 

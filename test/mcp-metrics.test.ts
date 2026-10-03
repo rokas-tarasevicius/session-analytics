@@ -16,7 +16,7 @@ before(async () => {
   directory = await mkdtemp(join(tmpdir(), "mcp-metrics-"));
   baseline = await analyzeMachineSessions(await createSessionAnalyticsFixture(directory));
 });
-after(async () => { await rm(directory, { force: true, recursive: true }); });
+after(async () => { if (directory) await rm(directory, { force: true, recursive: true }); });
 
 function session(overrides: Partial<SessionAnalytics> = {}): SessionAnalytics {
   const seed = structuredClone(baseline.sessions.find((s) => s.provider === "claude")!);
@@ -25,6 +25,7 @@ function session(overrides: Partial<SessionAnalytics> = {}): SessionAnalytics {
   seed.lastEventAt = "2026-10-02T11:00:00Z";
   seed.metrics.durationMilliseconds = 3_600_000;
   seed.metrics.userTurns = 3;
+  seed.mcpEvidence!.activityState = "settled";
   seed.metrics.compactions = 2;
   seed.tokens.inputTokens = 2000; seed.tokens.cachedInputTokens = 500;
   seed.spendByDay = { "2026-10-02": 2, "2026-10-01": 3, "2026-09-01": 100 };

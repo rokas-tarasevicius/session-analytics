@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { appendFile, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -347,4 +347,112 @@ test("MCP demo serves only synthetic repositories, outcome flags, extension name
     assert.doesNotMatch(JSON.stringify(c.responses), /synthetic demo request|synthetic demo prompt|synthetic-never-executed|\.jsonl|\/repos\//i);
     assert.equal(c.invalid(), "");
   } finally { await c.close(); }
+});
+
+test("spawned inventory keeps escaped TOML description content behind the privacy boundary", async () => {
+  const f = await fixture();
+  await writeFile(join(f.root, "config.toml"), ['description = """', '\\"""', '[mcp_servers.SECRET_CONTENT]', '"""', '[mcp_servers.real]'].join("\n"));
+  const c = client(f.args, f.root);
+  try {
+    await c.initialize();
+    const result = await c.request("tools/call", { name: "unused_extensions", arguments: { provider: "codex", window: "all" } });
+    assert.equal(result.result?.isError, false);
+    const payload = result.result!.structuredContent!;
+    assert.ok("providers" in payload.data);
+    assert.deepEqual(payload.data.providers[0]!.serversWithoutObservedUse, ["real"]);
+    assert.doesNotMatch(JSON.stringify(c.responses) + c.stderr(), /SECRET_/);
+  } finally { await c.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("spawned inventory matches frontmatter names, canonical aliases and embedded MCP separators", async () => {
+  const f = await fixture();
+  await mkdir(join(f.root, "skills/release-review"));
+  await writeFile(join(f.root, "skills/release-review/SKILL.md"), '---\nname: review\ndescription: |\n  SECRET_DESCRIPTION\n---\nSECRET_BODY');
+  await rm(join(f.root, "skills/review"), { recursive: true });
+  await symlink(join(f.root, "skills/release-review"), join(f.root, "skills/review-alias"));
+  await writeFile(join(f.root, ".claude.json"), JSON.stringify({ mcpServers: { team: {}, team__search: {}, "unused-server": {} } }));
+  const directory = join(f.source.claudeRoot, (await readdir(f.source.claudeRoot))[0]!);
+  const file = (await readdir(directory)).find((name) => name.endsWith(".jsonl"))!;
+  await appendFile(join(directory, file), JSON.stringify({ type: "assistant", timestamp: "2026-07-20T12:05:00Z",
+    message: { id: "SECRET_EXTRA_MESSAGE", content: [{ type: "tool_use", id: "SECRET_EXTRA_CALL", name: "mcp__team__search__lookup", input: { query: "SECRET_ARGUMENT" } }] } }) + "\n");
+  const c = client(f.args, f.root);
+  try {
+    await c.initialize();
+    const result = await c.request("tools/call", { name: "unused_extensions", arguments: { provider: "claude", window: "all" } });
+    const payload = result.result!.structuredContent!;
+    assert.ok("providers" in payload.data);
+    const row = payload.data.providers[0]!;
+    assert.deepEqual(row.skillsWithoutObservedUse, ["unused-skill"]);
+    assert.equal(row.installedSkills, 2);
+    assert.deepEqual(row.serversWithoutObservedUse, ["team", "unused-server"]);
+    assert.doesNotMatch(JSON.stringify(c.responses) + c.stderr(), /SECRET_/);
+  } finally { await c.close(); await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("missing and unreadable provider sources stay visible in empty filtered MCP results", async () => {
+  const f = await fixture();
+  const missing = join(f.root, "SECRET_MISSING_SOURCE"), unreadable = join(f.root, "SECRET_UNREADABLE_SOURCE");
+  await writeFile(unreadable, "SECRET_NOT_A_DIRECTORY");
+  try {
+    for (const path of [missing, unreadable]) {
+      const args = [...f.args]; args[args.indexOf("--claude-root") + 1] = path;
+      const c = client(args, f.root);
+      try {
+        await c.initialize();
+        for (const name of ["usage_summary", "budget_status", "compare_agents"]) {
+          const result = await c.request("tools/call", { name, arguments: { ...(name !== "compare_agents" ? { provider: "claude" } : {}), ...(name !== "budget_status" ? { window: "all" } : {}) } });
+          assert.equal(result.result?.isError, false);
+          const payload = result.result!.structuredContent!;
+          assert.ok(payload.notes.some((note) => /sources.*incomplete/i.test(note)));
+          assert.deepEqual(payload.sourceHealth.find((source) => source.provider === "claude"), {
+            provider: "claude", status: "unavailable", sourcesRead: 0,
+            missingSources: path === missing ? 1 : 0, unreadableSources: path === unreadable ? 1 : 0,
+          });
+          if (name !== "compare_agents") assert.equal(payload.totals.sessions, 0);
+        }
+        assert.doesNotMatch(JSON.stringify(c.responses) + c.stderr(), /SECRET_|ENOENT|ENOTDIR/);
+      } finally { await c.close(); }
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("spawned MCP exits after EOF with unread stdout, without a caller-side kill", { timeout: 8000 }, async () => {
+  const child = spawn(process.execPath, [bin, "mcp"], { stdio: ["pipe", "pipe", "pipe"] });
+  let stderr = ""; child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+  const ended = once(child, "exit");
+  // Bound the failing regression too, but record any watchdog kill as failure.
+  let killed = false;
+  const watchdog = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, 3000);
+  try {
+    for (let id = 0; id < 200; id++) child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/list", params: { _meta: modernMeta } }) + "\n");
+    child.stdin.end();
+    const [code, signal] = await ended;
+    assert.equal(killed, false, "EOF must bound stdout draining without help from the caller");
+    assert.equal(code, 0); assert.equal(signal, null); assert.equal(stderr, "");
+  } finally { clearTimeout(watchdog); child.stdout.destroy(); child.stderr.destroy(); if (child.exitCode === null && !child.signalCode) child.kill("SIGKILL"); }
+});
+
+test("output overflow settles shutdown after destroying a blocked writer", async () => {
+  const input = new PassThrough(), output = new PassThrough({ highWaterMark: 1 });
+  const server = serveMcp({ analysis: {}, ttlSeconds: 60, input, output });
+  try {
+    for (let id = 0; id < 1000 && !input.destroyed; id++) input.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/list", params: { _meta: modernMeta } }) + "\n");
+    await server.closed;
+    assert.equal(output.destroyed, true);
+    assert.equal(input.destroyed, true);
+  } finally { server.close(); output.destroy(); }
+});
+
+test("spawned MCP output overflow exits while stdin remains open and stdout unread", { timeout: 8000 }, async () => {
+  const child = spawn(process.execPath, [bin, "mcp"], { stdio: ["pipe", "pipe", "pipe"] });
+  // The server can close stdin while the writer is still feeding the burst.
+  child.stdin.on("error", () => {}); child.stderr.resume();
+  const ended = once(child, "exit");
+  let killed = false;
+  const watchdog = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, 3000);
+  try {
+    for (let id = 0; id < 1000; id++) child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/list", params: { _meta: modernMeta } }) + "\n");
+    const [code, signal] = await ended;
+    assert.equal(killed, false); assert.equal(code, 0); assert.equal(signal, null);
+  } finally { clearTimeout(watchdog); child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy(); if (child.exitCode === null && !child.signalCode) child.kill("SIGKILL"); }
 });

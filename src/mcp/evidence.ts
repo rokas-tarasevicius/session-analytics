@@ -1,4 +1,5 @@
-import type { McpRateWindow, McpSessionEvidence } from "./types.ts";
+import type { McpPricingDay, McpRateWindow, McpSessionEvidence } from "./types.ts";
+import { McpActivityCollector } from "./activity.ts";
 import { record, safeName, timestamp } from "./names.ts";
 
 const MAX_CALLS = 100_000;
@@ -9,6 +10,20 @@ export class McpEvidenceCollector {
   private results = new Map<string, boolean>();
   private limits = new Map<number, McpRateWindow>();
   private truncated = false;
+  private activity = new McpActivityCollector();
+  private pricing = new Map<string, McpPricingDay>();
+  private undatedTokens = 0;
+
+  /** Called only for the same deduplicated usage priced by the analyzer. */
+  usage(day: string, eligibleTokens: number, priced: boolean): void {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(Date.parse(day)) || new Date(day).toISOString().slice(0, 10) !== day) {
+      this.undatedTokens += eligibleTokens; return;
+    }
+    const item = this.pricing.get(day) ?? { day, eligibleTokens: 0, pricedTokens: 0 };
+    item.eligibleTokens += eligibleTokens;
+    if (priced) item.pricedTokens += eligibleTokens;
+    this.pricing.set(day, item);
+  }
 
   private call(id: unknown, name: unknown): void {
     const tool = safeName(name);
@@ -24,7 +39,8 @@ export class McpEvidenceCollector {
     this.results.set(id, error || this.results.get(id) === true);
   }
 
-  claude(raw: Record<string, unknown>): void {
+  claude(raw: Record<string, unknown>, source = "claude"): void {
+    this.activity.claude(raw, source);
     const message = record(raw["message"]);
     const content = message?.["content"];
     if (!Array.isArray(content)) return;
@@ -39,6 +55,7 @@ export class McpEvidenceCollector {
   }
 
   codex(raw: Record<string, unknown>): void {
+    this.activity.codex(raw);
     const payload = record(raw["payload"]);
     if (!payload) return;
     if (raw["type"] === "response_item") {
@@ -79,7 +96,7 @@ export class McpEvidenceCollector {
     }
   }
 
-  finish(): McpSessionEvidence {
+  finish(working = false): McpSessionEvidence {
     const byTool = new Map<string, { tool: string; observedResults: number; errors: number }>();
     for (const [id, error] of this.results) {
       const tool = this.calls.get(id);
@@ -90,6 +107,9 @@ export class McpEvidenceCollector {
       byTool.set(tool, value);
     }
     return {
+      activityState: this.activity.finish(working),
+      pricingByDay: [...this.pricing.values()].sort((a, b) => a.day.localeCompare(b.day)),
+      undatedTokens: this.undatedTokens,
       toolOutcomes: [...byTool.values()].sort((a, b) => a.tool.localeCompare(b.tool)),
       rateLimits: [...this.limits.values()].sort((a, b) => a.windowMinutes - b.windowMinutes),
       truncated: this.truncated,

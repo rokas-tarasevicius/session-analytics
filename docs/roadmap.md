@@ -75,9 +75,9 @@ M2 links agent sessions to the code they produced, retroactively from existing l
 An MCP server that answers with metrics, never transcript text, so an agent cannot be steered by content from another session.
 
 - [x] Dependency-free stdio MCP with strict schemas, repository defaults, bounded requests and a snapshot TTL; current and legacy protocol support.
-- [x] `usage_summary`: repository/provider/model/execution-kind totals with price coverage.
-- [x] `budget_status`: today/this-week dated API value, guarded burn rate, and fresh recorded Codex headroom. Current-session attribution and live quotas remain unavailable.
-- [x] `repo_profile`: typical session value/turns/duration, tool/skill mix, cache hits and compactions with sample guards.
+- [x] `usage_summary`: repository/provider/model/execution-kind totals with price coverage and independent source-health counts, including empty results.
+- [x] `budget_status`: today/this-week dated API value and priced/eligible token coverage, guarded burn rate, and fresh recorded Codex headroom. Current-session attribution and live quotas remain unavailable.
+- [x] `repo_profile`: typical session value/turns/duration, tool/skill mix, cache hits and compactions with sample guards and active/settled/unknown lifecycle coverage.
 - [x] `tool_stats`: call counts and structured outcome flags with coverage; broader reliability remains M1.
 - [x] `recent_sessions`: hashed keys, providers/models, duration and value.
 - [x] `compare_agents`: the three providers in one repository, without quality rankings.
@@ -85,7 +85,7 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 - [ ] `repo_hotspots`
 - [ ] `typical_cost`: by session archetype in this repository.
 - [ ] `mcp_health`
-- [x] `unused_extensions`: names-only conventional local inventory versus observed use, explicitly partial.
+- [x] `unused_extensions`: names-only conventional local inventory versus observed use, with frontmatter/alias identity matching, escaped-string privacy and explicit partial coverage.
 - [x] An agent skill that opens the dashboard or reads the JSON snapshot ([skills/session-analytics](../skills/session-analytics/SKILL.md)).
 - [ ] Optional hooks: pre-tool warnings from historical failure statistics, and a cross-provider budget guard.
 

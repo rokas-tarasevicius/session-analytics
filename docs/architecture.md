@@ -28,7 +28,7 @@
 flowchart TB
   bin["bin/session-analytics.ts"] --> server["src/server.ts<br/>HTTP on 127.0.0.1"]
   bin --> cli["src/cli.ts<br/>report and JSON"]
-  server -- "options on stdin" --> worker["analysis-worker.ts<br/>child, 256 MB heap cap"]
+  server -- "options on stdin" --> worker["analysis-worker.ts<br/>child, 256 MiB V8 old-space limit"]
   cli -- "options on stdin" --> worker
   worker -- "options on stdin" --> cursor["cursor-worker.ts<br/>child, 192 MB heap cap"]
   cursor -- "serialized sessions" --> worker
@@ -36,11 +36,11 @@ flowchart TB
   worker -- "snapshot JSON on stdout" --> cli
 ```
 
-The server and the report never parse transcripts themselves. Each snapshot is computed in a fresh child process started with `--max-old-space-size=256`, and Cursor's composer database is parsed in its own child with a 192 MB cap. This keeps a machine-wide scan from growing the long-running server's memory, releases everything when the child exits, and means only serialized, already-allowlisted results cross the process boundary. A child's standard error is discarded; a failure surfaces as a fixed message.
+The server and the report never parse transcripts themselves. Each snapshot is computed in a fresh child process started with `--max-old-space-size=256`, and Cursor's composer database is parsed in its own child with a 192 MiB V8 old-space limit. This keeps a machine-wide scan from growing the long-running server's memory, releases everything when the child exits, and means only serialized, already-allowlisted results cross the process boundary. A child's standard error is discarded; a failure surfaces as a fixed message. V8 old space is only one memory region; these flags do not cap total V8 heap or resident memory.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
 
-The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 256 MB heap cap, then caches the allowlisted snapshot and names-only inventory for a completion-based TTL. Concurrent calls share the worker. Stdio EOF aborts it; scans have a 180-second deadline. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Structured tool flags and numeric Codex limit samples are collected during the normal transcript pass in `src/mcp/evidence.ts`; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
+The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 256 MiB V8 old-space limit, then caches the allowlisted snapshot and names-only inventory for a completion-based TTL. Concurrent calls share the worker. Stdio EOF/signals abort and reap it; scans have a 180-second deadline. Output drains for at most 250 ms, then the CLI exits to release unread standard-pipe writes; the 4 MiB output overflow path skips the drain. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Structured tool flags, lifecycle observations and numeric Codex limit samples are collected during the normal transcript pass in `src/mcp/evidence.ts` and `activity.ts`. The existing pricing pass supplies dated eligible/priced token operands, including unknown prices; provider source-health counts are retained before repository selection; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
 
 ## Pipeline
 

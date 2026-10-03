@@ -1,6 +1,6 @@
 import type { ModelUsage, SessionAnalytics, SessionProvider } from "../types.ts";
 import type {
-  McpArguments, McpBudget, McpBudgetPeriod, McpDistribution, McpNamedCount, McpPayload,
+  McpActivityState, McpArguments, McpBudget, McpBudgetPeriod, McpDistribution, McpNamedCount, McpPayload,
   McpProfile, McpRatio, McpSnapshot, McpToolName, McpToolStat, McpTotals, McpValue, McpWindow,
 } from "./types.ts";
 import { mcpServerName, safeName, timestamp } from "./names.ts";
@@ -61,6 +61,7 @@ export function totals(sessions: SessionAnalytics[], modelKey?: string): McpTota
   const model = modelKey !== undefined;
   const hasModelTokens = !model || sessions.every((s) => s.provider !== "cursor");
   return {
+    basis: "session-start",
     sessions: sessions.length,
     analyzedSessions: sessions.filter((s) => s.transcript.status === "ok").length,
     workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking).length,
@@ -97,7 +98,9 @@ function duration(session: SessionAnalytics): number | null {
 }
 
 export function profile(sessions: SessionAnalytics[]): McpProfile {
-  const stable = sessions.filter((s) => s.transcript.status === "ok" && !s.transcript.snapshotWhileWorking);
+  const activity = (s: SessionAnalytics): McpActivityState => s.transcript.snapshotWhileWorking ? "active"
+    : s.transcript.status === "ok" ? s.mcpEvidence?.activityState ?? "unknown" : "unknown";
+  const stable = sessions.filter((s) => activity(s) === "settled");
   const api = stable.filter((s) => s.costBasis === "api-list-price-equivalent" && s.costComplete && s.models.some((m) => m.inputTokens + m.outputTokens > 0));
   const reported = stable.filter((s) => s.costBasis === "provider-reported");
   const cache = sessions.filter((s) => s.provider === "claude" || s.provider === "codex");
@@ -105,6 +108,8 @@ export function profile(sessions: SessionAnalytics[]): McpProfile {
   const tools = counts(sessions, "tools"), skills = counts(sessions, "skills");
   return {
     sessions: sessions.length,
+    activityStates: { active: sessions.filter((s) => activity(s) === "active").length,
+      settled: stable.length, unknown: sessions.filter((s) => activity(s) === "unknown").length },
     apiEquivalentUsd: distribution(api.map((s) => s.cost.totalUsd), sessions.length),
     providerReportedUsd: distribution(reported.map((s) => s.cost.totalUsd), sessions.length),
     userTurns: distribution(stable.filter((s) => s.metrics.userTurns > 0).map((s) => s.metrics.userTurns), sessions.length),
@@ -136,17 +141,25 @@ function toolStats(sessions: SessionAnalytics[]): McpToolStat[] {
 
 function budgetPeriod(sessions: SessionAnalytics[], since: number, now: number): McpBudgetPeriod {
   const firstDay = new Date(since).toISOString().slice(0, 10), lastDay = new Date(now).toISOString().slice(0, 10);
-  let api = 0, datedSessions = 0, undatedSessions = 0;
+  let api = 0, datedSessions = 0, undatedSessions = 0, priced = 0, eligible = 0, undated = 0, complete = true;
   for (const session of sessions) {
     const entries = Object.entries(session.spendByDay).filter(([day, usd]) => /^\d{4}-\d{2}-\d{2}$/.test(day) && day >= firstDay && day <= lastDay && usd >= 0);
-    if (session.costBasis === "api-list-price-equivalent" && entries.length) {
-      api += sum(entries, ([, usd]) => usd); datedSessions += 1;
+    const ledger = session.costBasis === "api-list-price-equivalent" ? session.mcpEvidence?.pricingByDay : undefined;
+    const days = ledger?.filter((item) => item.day >= firstDay && item.day <= lastDay) ?? [];
+    if (session.costBasis === "api-list-price-equivalent") {
+      api += sum(entries, ([, usd]) => usd);
+      if (entries.length || days.length) datedSessions += 1;
+      if (!ledger || session.mcpEvidence?.undatedTokens === undefined) complete = false;
+      eligible += sum(days, (item) => item.eligibleTokens); priced += sum(days, (item) => item.pricedTokens);
+      undated += number(session.mcpEvidence?.undatedTokens ?? 0);
     }
-    if (!Object.keys(session.spendByDay).length) undatedSessions += 1;
+    if (!Object.keys(session.spendByDay).length && !ledger?.length) undatedSessions += 1;
   }
   const elapsedHours = (now - since) / 3_600_000;
   return {
     since: new Date(since).toISOString(), until: new Date(now).toISOString(), apiEquivalentUsd: api,
+    pricingCoverage: complete ? ratio(priced, eligible) : { ...ratio(priced, eligible), value: null, status: "unavailable" },
+    unpricedTokens: complete ? eligible - priced : null, undatedTokens: complete ? undated : null,
     datedSessions, undatedSessions,
     excludedProviderReportedUsd: sum(sessions.filter((s) => s.costBasis === "provider-reported"), (s) => s.cost.totalUsd),
     elapsedHours, apiEquivalentUsdPerHour: elapsedHours >= 1 && datedSessions >= 3 ? api / elapsedHours : null,
@@ -188,6 +201,14 @@ export function buildPayload(
   });
   const limit = args.limit ?? 10, offset = args.offset ?? 0;
   const notes = ["API-equivalent value is not an invoice. Activity counters do not prove success, quality, or value delivered."];
+  const sourceHealth = PROVIDERS.filter((provider) => !args.provider || provider === args.provider).map((provider) => {
+    const source = snapshot.analytics.mcpSourceHealth?.find((item) => item.provider === provider);
+    return { provider, status: source?.status ?? "unknown" as const, sourcesRead: number(source?.sourcesRead ?? 0),
+      missingSources: number(source?.missingSources ?? 0), unreadableSources: number(source?.unreadableSources ?? 0) };
+  });
+  if (sourceHealth.some((source) => source.status !== "available") || snapshot.analytics.warnings.length || snapshot.analytics.repositories.some((repo) => repo.warnings.length)) {
+    notes.push("Some evidence sources are incomplete or have coverage notes; empty results do not establish no usage. Source health describes discovery independently of the selected sessions.");
+  }
   if (sessions.some((s) => s.mcpEvidence?.truncated)) notes.push("Structured outcome evidence was capped; coverage is incomplete.");
   if (sessions.some((s) => s.transcript.warnings.length)) notes.push("Some sessions have parser coverage notes; observed history may be incomplete.");
   let data: McpPayload["data"];
@@ -207,6 +228,7 @@ export function buildPayload(
   } else if (tool === "budget_status") {
     data = budget(scoped, now);
     notes.push("Budget periods use dated API value across all scoped sessions, including sessions started earlier. Undated provider-reported value is excluded; no budget or invoice is inferred.",
+      "Each period's pricing coverage qualifies both its value and burn rate; common totals instead describe the session-start cohort. Undated tokens are excluded and cannot be assigned to a period.",
       "Burn rate uses elapsed UTC wall hours, requires at least one hour and three dated sessions, and is not a forecast.",
       "Headroom is a recorded provider-account observation, not a live or repository-specific quota. The most conservative sample within 15 minutes is used across profiles; expired and stale windows are unavailable.");
   } else if (tool === "repo_profile" || tool === "compare_agents") {
@@ -214,7 +236,7 @@ export function buildPayload(
       const selected = sessions.filter((s) => s.provider === provider);
       return { provider, totals: totals(selected), profile: profile(selected) };
     }) };
-    notes.push("Typical values require five eligible, non-working sessions; incomplete prices and missing durations are excluded. Duration includes idle time and task mix is uncontrolled.",
+    notes.push("Typical values require five eligible sessions with settled provider lifecycle evidence. Active and unknown sessions, incomplete prices and missing durations are excluded. Settled describes the recorded turn, not success or a guarantee it cannot resume; duration includes idle time and task mix is uncontrolled.",
       "Cache ratios exclude Cursor and require 1,000 input tokens; compaction rates exclude Cursor and require five sessions. No ranking or causal comparison is implied.");
   } else if (tool === "tool_stats") {
     const rows = toolStats(sessions);
@@ -236,14 +258,18 @@ export function buildPayload(
     data = { inventoryScope: "launch-context", providers: snapshot.inventory.filter((entry) => !args.provider || entry.provider === args.provider).map((entry) => {
       const selected = sessions.filter((s) => s.provider === entry.provider);
       const invoked = new Set(counts(selected, "skills").map((item) => item.name));
-      const used = new Set([...counts(selected, "tools").map((item) => item.name), ...selected.flatMap((s) => (s.mcpEvidence?.toolOutcomes ?? []).map((item) => item.tool))].map(mcpServerName).filter((v): v is string => v !== null));
-      const skills = entry.skills.filter((name) => safeName(name) && !invoked.has(name));
+      const used = new Set([...counts(selected, "tools").map((item) => item.name), ...selected.flatMap((s) => (s.mcpEvidence?.toolOutcomes ?? []).map((item) => item.tool))].map((tool) => mcpServerName(tool, entry.mcpServers)).filter((v): v is string => v !== null));
+      const observed = new Set(entry.skillIdentities?.filter((item) => item.aliases.some((alias) => invoked.has(alias))).map((item) => item.name));
+      const skills = entry.skills.filter((name) => safeName(name) && !invoked.has(name) && !observed.has(name));
       const servers = entry.mcpServers.filter((name) => safeName(name) && !used.has(name));
       return { provider: entry.provider, inventoryCoverage: "partial", sourcesRead: entry.sourcesRead, unreadableSources: entry.unreadableSources, truncated: entry.truncated,
         skillEvidence: entry.provider === "claude" ? "explicit" : entry.provider === "codex" ? "inferred" : "unavailable",
+        skillIdentityCoverage: !entry.skillIdentities || (!entry.skillIdentities.length && entry.unresolvedSkills) ? "unavailable"
+          : entry.unresolvedSkills || entry.truncated ? "partial" : "available",
+        unresolvedSkills: entry.unresolvedSkills ?? entry.skills.length,
         installedSkills: entry.skills.length, configuredMcpServers: entry.mcpServers.length,
-        skillsWithoutObservedUse: entry.provider === "cursor" ? [] : skills.slice(0, limit), serversWithoutObservedUse: servers.slice(0, limit),
-        omittedSkills: entry.provider === "cursor" ? 0 : Math.max(0, skills.length - limit), omittedServers: Math.max(0, servers.length - limit) };
+        skillsWithoutObservedUse: entry.provider === "cursor" || !entry.skillIdentities ? [] : skills.slice(0, limit), serversWithoutObservedUse: servers.slice(0, limit),
+        omittedSkills: entry.provider === "cursor" || !entry.skillIdentities ? 0 : Math.max(0, skills.length - limit), omittedServers: Math.max(0, servers.length - limit) };
     }) };
     notes.push("Inventory covers conventional local configuration in the launch context, not every plugin or managed source. Names without observed use are not proof of disuse; do not remove extensions automatically.",
       "Claude skill evidence is explicit, Codex is an inferred lower bound, and Cursor skill usage is unavailable. A selected repository changes usage scope, not the installed inventory.");
@@ -252,6 +278,7 @@ export function buildPayload(
     schemaVersion: 1, tool,
     snapshot: { generatedAt: timestamp(snapshot.analytics.generatedAt) ?? new Date(now).toISOString(), ageSeconds: Math.max(0, Math.floor((now - Date.parse(snapshot.analytics.generatedAt)) / 1000)) || 0, ttlSeconds },
     scope: { kind: id ? "repository" : "machine", repositoryId: id },
+    sourceHealth,
     window: { name: window, since: since === null ? null : new Date(since).toISOString(), until: new Date(now).toISOString(), timezone: "UTC", basis: tool === "budget_status" ? "activity-day" : "session-start" },
     totals: totals(sessions), notes, data,
   };

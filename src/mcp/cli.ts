@@ -64,5 +64,8 @@ Allow up to 180 seconds for the first scan on large histories. Later calls reuse
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(signal, close);
     await server.closed;
     for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.off(signal, close);
+    // Node deliberately makes process.stdout.destroy() a no-op. After the
+    // server's bounded drain/worker abort, exit releases any blocked fd writes.
+    process.exit(process.exitCode ?? 0);
   }
 }

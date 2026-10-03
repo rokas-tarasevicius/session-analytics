@@ -225,7 +225,7 @@ Analysis runs in a child process with a capped heap, and Cursor's database is pa
 
 ## Use it from an agent
 
-For direct metric queries, run `session-analytics mcp`. Its seven read-only tools cover usage summaries, budget status, repository profiles, tool statistics, recent sessions, extensions without observed use, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes coverage and interpretation notes; no transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](docs/mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
+For direct metric queries, run `session-analytics mcp`. Its seven read-only tools cover usage summaries, budget status, repository profiles, tool statistics, recent sessions, extensions without observed use, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes source health and interpretation notes; budget periods carry their own pricing coverage, and typical-session baselines exclude active or unknown lifecycle evidence. No transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](docs/mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
 
 The repository ships an agent skill at [`skills/session-analytics`](skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
 
