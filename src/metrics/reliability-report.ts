@@ -1,4 +1,4 @@
-import { errorDenominator, errorRate, summarizeReliability } from "../public/reliability-data.js";
+import { errorDenominator, errorRate, summarizeReliability, summarizeReliabilityComparisons } from "../public/reliability-data.js";
 import type { SessionAnalytics } from "../types.ts";
 import type { ReliabilityStats } from "./reliability-types.ts";
 
@@ -10,6 +10,7 @@ function errors(stats: ReliabilityStats): string {
 }
 export function reliabilityReport(sessions: SessionAnalytics[]): string {
   const value = summarizeReliability(sessions), totals = value.totals;
+  const comparisons = summarizeReliabilityComparisons(sessions);
   const known = totals.calls - totals.outcomes.unknown;
   const lines = [
     "", "Reliability · observed tool evidence",
@@ -35,18 +36,17 @@ export function reliabilityReport(sessions: SessionAnalytics[]): string {
   lines.push(`Hooks: ${value.hooks.runs} runs; ${value.hooks.blocks} blocking summaries; p95 ${ms(value.hooks.latency.p95Ms)} [${value.hooks.latency.samples}/${value.hooks.runs} timed].`);
   for (const [label, mix] of [["Permission modes", value.permissions.modes], ["Approval policies", value.permissions.approvalPolicies], ["Sandboxes", value.permissions.sandboxes], ["API error events", value.apiErrors]] as const) lines.push(`${label}: ${Object.entries(mix).map(([key, n]) => `${key} ${n}`).join(", ") || "unavailable"}.`);
   lines.push("By agent (outcome coverage; errors)");
-  for (const provider of ["claude", "codex", "cursor"] as const) {
-    const subset = sessions.filter((s) => s.provider === provider), summary = summarizeReliability(subset);
-    lines.push(`  ${provider}: ${summary.coveredSessions}/${subset.length} sessions; ${summary.totals.calls - summary.totals.outcomes.unknown}/${summary.totals.calls} calls; ${errors(summary.totals)}`);
+  for (const summary of comparisons.providers) {
+    lines.push(`  ${summary.name}: ${summary.coveredSessions}/${summary.sessions} sessions; ${summary.totals.calls - summary.totals.outcomes.unknown}/${summary.totals.calls} calls; ${errors(summary.totals)}`);
   }
   lines.push("By repository (outcome coverage; errors)");
-  const repositories = new Map<string, SessionAnalytics[]>();
-  for (const session of sessions) { const subset = repositories.get(session.repositoryId) ?? []; subset.push(session); repositories.set(session.repositoryId, subset); }
-  for (const subset of repositories.values()) {
-    const summary = summarizeReliability(subset);
-    lines.push(`  ${subset[0]?.repositoryName}: ${summary.totals.calls - summary.totals.outcomes.unknown}/${summary.totals.calls} calls; ${errors(summary.totals)}`);
+  for (const summary of comparisons.repositories) {
+    lines.push(`  ${summary.name}: ${summary.totals.calls - summary.totals.outcomes.unknown}/${summary.totals.calls} calls; ${errors(summary.totals)}`);
   }
   if (value.truncatedSessions) lines.push(`Partial evidence: ${value.truncatedSessions} sessions hit parsing or size safeguards; flags and verification are unavailable there.`);
+  const unmatched = sessions.reduce((n, s) => n + (s.reliability?.coverage.unmatchedResults ?? 0), 0);
+  if (unmatched) lines.push(`Unmatched results: ${unmatched}; affected sessions cannot establish complete behavior or verification.`);
+  lines.push("Following verification requires a completed check that started after the final edit completed; overlap or missing sequence evidence can make status unavailable.");
   lines.push("Flags are prompts for inspection, not verdicts. Interrupts and permission choices do not establish failure. Activity and passing checks do not prove quality or value.");
   lines.push("Latency uses observed durations only; percentiles are merged bucket upper bounds (up to 10% + 1ms). Error rates exclude denials, interruptions and unknown results; fewer than 5 attempts is N/A.");
   return `${lines.join("\n")}\n`;

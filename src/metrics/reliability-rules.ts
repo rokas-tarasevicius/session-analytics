@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { basename, resolve } from "node:path";
 import type { ErrorClass, ToolClass } from "./reliability-types.ts";
 
@@ -17,23 +17,53 @@ export function argumentsValue(value: unknown): unknown {
   try { return JSON.parse(value); } catch { return value; }
 }
 
+export interface HashBudget { bytes: number; references: number; exhausted: boolean }
+export const hashBudget = (): HashBudget => ({ bytes: 32 * 1024 * 1024, references: 16_384, exhausted: false });
+
 /** Object-key order is normalized; string values (including command quoting) are preserved. */
-export function fingerprint(key: Buffer | null, domain: string, value: unknown): string | null {
+export function fingerprint(key: Buffer | null, domain: string, value: unknown, budget?: HashBudget): string | null {
   if (!key || value === undefined) return null;
+  if (budget?.exhausted) return null;
   let entries = 0, bytes = 0;
+  function charge(length: number): void {
+    bytes += length;
+    if (bytes > 1_048_576 || (budget && length * 2 > budget.bytes)) throw new Error("Bounded hashing.");
+    if (budget) budget.bytes -= length * 2;
+  }
   function canonical(item: unknown, depth: number): string {
     if (++entries > 10_000 || depth > 16) throw new Error("Bounded hashing.");
     if (item === null || typeof item !== "object") {
+      // Check before allocating an escaped copy of a large string.
+      if (typeof item === "string") charge(item.length);
       const result = JSON.stringify(item) ?? "null";
-      bytes += result.length;
-      if (bytes > 1_048_576) throw new Error("Bounded hashing.");
+      charge(result.length - (typeof item === "string" ? item.length : 0));
       return result;
     }
-    if (Array.isArray(item)) return `[${item.map((v) => canonical(v, depth + 1)).join(",")}]`;
-    return `{${Object.keys(item).sort().map((k) => `${canonical(k, depth + 1)}:${canonical(record(item)[k], depth + 1)}`).join(",")}}`;
+    charge(2);
+    if (Array.isArray(item)) {
+      const values: string[] = [];
+      for (const value of item) { charge(1); values.push(canonical(value, depth + 1)); }
+      return `[${values.join(",")}]`;
+    }
+    const keys: string[] = [];
+    for (const k in item) if (Object.hasOwn(item, k)) {
+      if (keys.length >= 10_000) throw new Error("Bounded hashing.");
+      charge(2); keys.push(k);
+    }
+    return `{${keys.sort().map((k) => `${canonical(k, depth + 1)}:${canonical(record(item)[k], depth + 1)}`).join(",")}}`;
   }
   try { return createHmac("sha256", key).update(domain).update("\0").update(canonical(value, 0)).digest("hex"); }
-  catch { return null; }
+  catch { if (budget) budget.exhausted = true; return null; }
+}
+
+/** Normalize Claude, direct Codex and typed MCP identities without truncation collisions. */
+export function toolIdentity(raw: string, explicitServer?: string | null): { tool: string; server: string | null } {
+  const qualified = /^(?:functions\.)?mcp__(.+?)__(.+)$/.exec(raw);
+  const server = explicitServer ? name(explicitServer) : qualified ? name(qualified[1]) : null;
+  if (!server) return { tool: name(raw), server: null };
+  const tool = name(qualified?.[2] ?? raw);
+  const identity = `mcp__${server}__${tool}`;
+  return { server, tool: identity.length <= 128 ? identity : `${identity.slice(0, 110)}__${createHash("sha256").update(identity).digest("hex").slice(0, 16)}` };
 }
 
 const namedClasses: Record<string, ToolClass> = {
@@ -52,35 +82,45 @@ export function shellClass(command: unknown): ToolClass {
   if (Array.isArray(command) && command.every((v) => typeof v === "string")) {
     const argv = command as string[];
     if (["bash", "sh", "zsh"].includes(basename(argv[0] ?? "")) && ["-lc", "-c"].includes(argv[1] ?? "") && argv.length === 3) return shellClass(argv[2]);
-    return shellClass(argv.map((v) => `'${v.replaceAll("'", "")}'`).join(" "));
+    return commandClass(argv);
   }
   if (typeof command !== "string" || command.length > 65_536) return "shell";
-  const tokens = command.match(/"[^"\n]*"|'[^'\n]*'|&&|\|\||[;|\n]|[^\s;&|]+/g) ?? [];
+  const tokens = command.match(/"[^"\n]*"|'[^'\n]*'|&&|\|\||[;&|\n]|[^\s;&|]+/g) ?? [];
   if (tokens.some((t) => /[$`<>\\]/.test(t))) return "shell";
   const segments: string[][] = [[]];
   for (const token of tokens) {
     if (["&&", ";", "\n"].includes(token)) segments.push([]);
-    else if (["|", "||"].includes(token)) return "shell";
+    else if (["&", "|", "||"].includes(token)) return "shell";
     else segments.at(-1)?.push(token.replace(/^(["'])(.*)\1$/, "$2"));
   }
-  const classes: ToolClass[] = [];
-  for (const words of segments) {
-    if (words[0] === "env") words.shift();
-    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) words.shift();
-    const executable = basename(words[0] ?? "").toLowerCase();
-    const args = words.slice(1);
-    if (!executable || executable === "cd") continue;
-    if (["git", "gh", "hg", "svn"].includes(executable)) classes.push("vcs");
-    else if (["rg", "grep", "find", "fd", "ag"].includes(executable)) classes.push("search");
-    else if (["cat", "head", "tail", "ls", "pwd", "wc", "stat"].includes(executable) || (executable === "sed" && !args.some((a) => /^-.*i/.test(a)))) classes.push("read");
-    else if (["pytest", "jest", "vitest", "tsc", "eslint", "ruff", "mypy", "make", "cmake", "ninja", "xcodebuild", "mvn", "gradle", "gradlew"].includes(executable) ||
-      (["npm", "pnpm", "yarn", "bun"].includes(executable) && /^(?:run )?(?:test(?::[\w-]+)?|check|typecheck|lint|build)(?: |$)/.test(args.join(" "))) ||
-      (["cargo", "go", "dotnet"].includes(executable) && ["test", "build", "check", "clippy", "vet"].includes(args[0] ?? "")) ||
-      (["python", "python3"].includes(executable) && args[0] === "-m" && ["pytest", "unittest"].includes(args[1] ?? "")) ||
-      (executable === "node" && args.includes("--test"))) classes.push("test_build");
-    else classes.push("shell");
-  }
+  const classes = segments.filter((words) => words.length && words[0] !== "cd").map(commandClass);
   return classes.length && classes.every((c) => c === classes[0]) ? classes[0]! : "shell";
+}
+
+function commandClass(input: string[]): ToolClass {
+  const words = [...input];
+  if (words[0] === "env") words.shift();
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) words.shift();
+  const executable = basename(words[0] ?? "").toLowerCase();
+  const args = words.slice(1);
+  if (["git", "gh", "hg", "svn"].includes(executable)) return "vcs";
+  if (["rg", "grep", "find", "fd", "ag"].includes(executable)) return "search";
+  if (["cat", "head", "tail", "ls", "pwd", "wc", "stat"].includes(executable) || (executable === "sed" && !args.some((a) => /^-.*i/.test(a)))) return "read";
+  if (args.some((a) => /^(?:--?(?:help|version|clean|watch|dry-run|listTests|collect-only|list|showConfig|listFilesOnly|init|fixtures|fixtures-per-test|markers|trace-config|print-config|env-info|inspect-config)|-[hV]|help|version|clean|distclean|mrproper|-list|-show\w+)(?:=|$)/.test(a)) ||
+    (executable === "tsc" && args.includes("-v")) || (executable === "ninja" && args.includes("-t")) ||
+    (["make", "ninja", "mvn", "gradle", "gradlew"].includes(executable) && args.some((a) => /^-[^-]*[nq]/.test(a)))) return "shell";
+  const targets = args.filter((a) => !a.startsWith("-") && !/^\d+$/.test(a));
+  if (["pytest", "jest", "vitest", "tsc", "eslint", "mypy"].includes(executable) ||
+    (executable === "ruff" && args[0] === "check") ||
+    (["make", "ninja"].includes(executable) && targets.length > 0 && targets.every((a) => /^(?:all|test|check|build|lint|typecheck)(?::[\w-]+)?$/.test(a))) ||
+    (executable === "cmake" && args[0] === "--build" && args.length > 1) ||
+    (executable === "xcodebuild" && args.some((a) => ["test", "build", "analyze"].includes(a))) ||
+    (["mvn", "gradle", "gradlew"].includes(executable) && targets.length > 0 && targets.every((a) => ["test", "verify", "package", "compile", "build", "check", "testClasses"].includes(a))) ||
+    (["npm", "pnpm", "yarn", "bun"].includes(executable) && /^(?:run )?(?:test(?::[\w-]+)?|check|typecheck|lint|build)(?: |$)/.test(args.join(" "))) ||
+    (["cargo", "go", "dotnet"].includes(executable) && ["test", "build", "check", "clippy", "vet"].includes(args[0] ?? "")) ||
+    (["python", "python3"].includes(executable) && args[0] === "-m" && ["pytest", "unittest"].includes(args[1] ?? "")) ||
+    (executable === "node" && args.includes("--test"))) return "test_build";
+  return "shell";
 }
 
 export function classifyTool(tool: string, args: unknown, parsed: unknown, contentRules: boolean): ToolClass {
@@ -96,22 +136,31 @@ export function classifyTool(tool: string, args: unknown, parsed: unknown, conte
   return contentRules ? shellClass(record(args)["cmd"] ?? record(args)["command"]) : base;
 }
 
-export function fileFingerprints(key: Buffer | null, args: unknown, cwd: string): string[] {
-  if (!key) return [];
+export function fileFingerprints(key: Buffer | null, args: unknown, cwd: string, parsed?: unknown, budget?: HashBudget): string[] {
+  if (!key || budget?.exhausted) return [];
   const value = record(args);
   const workdir = text(value["workdir"]);
   if (workdir) cwd = resolve(cwd, workdir);
-  const paths: string[] = [];
-  for (const property of ["file_path", "path"]) if (typeof value[property] === "string") paths.push(value[property] as string);
-  // Codex FileChange carries path-keyed changes; retain only hashed paths.
-  for (const path of Object.keys(record(value["changes"]))) paths.push(path);
-  if (typeof args === "string" && args.length <= 1_048_576) {
-    for (const match of args.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)) paths.push(match[1]!);
+  function* paths(): Generator<string> {
+    for (const property of ["file_path", "path"]) if (typeof value[property] === "string") yield value[property] as string;
+    const changes = record(value["changes"]);
+    for (const path in changes) if (Object.hasOwn(changes, path)) yield path;
+    if (Array.isArray(parsed)) for (const entry of parsed) {
+      const command = record(entry);
+      if (command["type"] === "read" && typeof command["path"] === "string") yield command["path"];
+    }
+    if (typeof args === "string" && args.length <= 1_048_576) for (const match of args.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)) yield match[1]!;
   }
-  return [...new Set(paths.slice(0, 1000).flatMap((path) => {
-    const hash = fingerprint(key, "file", resolve(cwd, path));
-    return hash ? [hash] : [];
-  }))];
+  const hashes = new Set<string>();
+  let references = 0;
+  for (const path of paths()) {
+    if (++references > 1000 || (budget && budget.references <= 0) || path.length + cwd.length > 65_536) { if (budget) budget.exhausted = true; break; }
+    if (budget) budget.references -= 1;
+    const hash = fingerprint(key, "file", resolve(cwd, path), budget);
+    if (hash) hashes.add(hash);
+    if (budget?.exhausted) break;
+  }
+  return [...hashes];
 }
 
 /** Runs only over an already-failed tool result, and only with P2 enabled. */

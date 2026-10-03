@@ -36,7 +36,7 @@ The contract applies to every output surface: the dashboard and its `/api/analyt
 - **No exfiltration path.** The tool makes no network requests and has no telemetry. The dashboard is served from `127.0.0.1` with a Content Security Policy that only allows same-origin resources. See [SECURITY.md](../SECURITY.md) for the full threat model.
 - **Read-only access.** JSONL transcripts are streamed and SQLite databases are opened with `readOnly: true`. Nothing is written to provider directories.
 
-Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere. Opt-in reliability matching retains only HMACs and bounded counters until the execution stream finishes, then discards the HMACs. Neither the key nor any path/argument digest enters the public snapshot.
+Content is held in memory only while a line is being parsed. It is not cached, logged, or written anywhere. Opt-in reliability matching retains only HMACs and bounded counters until the execution stream finishes, then discards the HMACs. Out-of-order receipts retain numeric codes/durations and fixed error-rule enums, never result text. Structured Codex read paths enter the bounded HMAC extractor only with P2 enabled. Neither the key nor any path/argument digest enters the public snapshot.
 
 ## Privacy tiers
 
@@ -182,7 +182,7 @@ Public types live in [`src/metrics/reliability-types.ts`](../src/metrics/reliabi
 | `version` | Reliability schema version, currently `1` | P0 |
 | `contentRules` | `enabled` or `disabled` | P0 |
 | `hashing` | `enabled`, `disabled`, or `unavailable`; never key material | P0 |
-| `tools[].name` | Bounded structured tool name | P0 |
+| `tools[].name` | Bounded structured tool name; MCP names are server-qualified (names exceeding 128 characters use a prefix plus a digest of the structured name only) | P0 / P1 for MCP server identity |
 | `tools[].toolClass` | Fixed cross-provider class; shell command inference requires P2 | P0 / P2 when inferred |
 | `tools[].calls`, `mcp[].calls` | Observed calls in this group | P0 |
 | `tools[].outcomes`, `mcp[].outcomes` | Fixed `success`, `error`, `denied`, `interrupted`, `timeout`, `unknown` counters | P0 / P2 when derived from receipt text |
@@ -193,14 +193,14 @@ Public types live in [`src/metrics/reliability-types.ts`](../src/metrics/reliabi
 | `mcp[].server` | Bounded server name from structured tool/attachment evidence | P1 |
 | `mcp[].connectionFailures` | Reported failed connections, separate from call errors | P0 |
 | `coverage.argumentCalls`, `coverage.fileCalls` | Counts of calls with usable argument/file HMACs; never the HMACs themselves | P2 |
-| `coverage.unmatchedResults` | Receipts without a matching call | P0 |
-| `coverage.truncated` | Parsing/size safeguards made the evidence partial | P0 |
+| `coverage.unmatchedResults` | Receipts without a matching call; suppresses sequence claims for the whole composite session | P0 |
+| `coverage.truncated` | Parsing, retained-state or stream-wide hashing safeguards made the evidence partial | P0 |
 | `flags` | Null when disabled/unavailable; otherwise the counters below | P2 |
 | `flags.exact_repeat`, `flags.repeated_failure`, `flags.failed_edit_cascade`, `flags.edit_thrash`, `flags.reread_churn`, `flags.search_loop` | Local detector episode counts; no matching arguments, paths, digests, IDs or excerpts | P2 |
 | `verification.checks`, `verification.passed`, `verification.failed` | Recognized test/build calls and outcomes | P0 / P2 for command classification |
 | `verification.editCalls` | Successful or unresolved edit/write calls | P0 |
 | `verification.share` | Guarded check / (check + edit) ratio, or null | P2 |
-| `verification.skip` | Observed tail has edits after the last check, or null without sufficient evidence | P2 |
+| `verification.skip` | Observed-tail skip; false requires a completed check started after edits completed; null for overlap or insufficient evidence | P2 |
 | `verification.stepsToFirstEdit`, `verification.msToFirstEdit` | Main-stream calls and milliseconds before the first possible edit, or null | P0 |
 | `hooks.runs`, `hooks.blocks` | Hook runs and summaries blocking continuation | P0 |
 | `permissions.denials` | Denied tool calls | P0 / P2 if inferred from failed text |

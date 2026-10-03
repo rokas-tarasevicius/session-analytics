@@ -32,8 +32,8 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 - [x] Tool outcomes/error rates by tool, normalized class and MCP server, with low-cardinality error classes and denominator guards. Environment, policy and interruption evidence stays distinguishable; causal blame is not inferred. Reliability tab, report, and repository/agent comparisons.
 - [ ] Tool reliability attributed to explicit skills (separate from tool-name attribution).
 - [x] Tool latency (mergeable approximate p50/p95 with timing coverage) and timeouts.
-- [x] **Opt-in P2:** Loop and churn episodes from internal keyed hashes: exact repeats, repeated failing calls, failed-edit cascades, edit thrash, re-read churn, and search loops. Persistent 0600 machine key; no digests in outputs.
-- [x] **Opt-in P2:** Verification share and observed-tail skips (a final edit not followed by a test/build attempt), with incomplete/active evidence marked unavailable.
+- [x] **Opt-in P2:** Loop and churn episodes from internal keyed hashes: exact repeats, repeated failing calls, failed-edit cascades, edit thrash, re-read churn, and search loops. Persistent 0600 machine key and stream-wide hashing/reference budgets; no digests in outputs.
+- [x] **Opt-in P2:** Verification share and observed-tail skips (a final edit not followed by a test/build attempt), with incomplete/active evidence and overlapping executions marked unavailable; checks must start after edits complete.
 - [ ] Failing-to-passing test transitions.
 - [x] Steps and time to first possible edit, with main-stream coverage.
 - [x] MCP server table: calls, error rate, latency, connection failure reports and servers seen.

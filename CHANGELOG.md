@@ -10,6 +10,12 @@ All notable changes to this project are documented here. The format follows [Kee
 - Opt-in local reliability content rules (`--reliability-content-rules`): command classification, bounded error-text rules, six HMAC-based loop/churn flags, verification share/skips, and first-edit steps/timing. A persistent 0600 per-machine secret stays in the data directory; arguments, paths and hashes never leave the parser.
 - Synthetic reliability demo episodes, privacy/worker/API regression tests, and documented field-level semantics and interpretation limits. Default analysis leaves content rules off and creates no hashing key.
 
+### Fixed
+
+- Reliability no longer counts asynchronous launch acknowledgments, receipt-like stdout, cleanup/help/version or background shell commands as completed verification. Checks must start after edits complete; overlaps, orphan results and any incomplete constituent suppress definitive sequence claims.
+- Codex structured read paths now feed opt-in re-read detection, MCP repeat/tool identity includes the server, and late receipts preserve content-free outcome/timing evidence until a matching call arrives.
+- Stream-wide hashing and file-reference budgets leave worker heap headroom. Reliability filters reuse bounded summaries and lightweight comparisons; repository tables expand in pages, and switching tabs clears the inactive view.
+
 ## [0.5.0] - 2026-10-02
 
 First standalone release.

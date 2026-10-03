@@ -33,21 +33,25 @@ export function mergeLatency(values) {
   return distribution(buckets);
 }
 function addCounts(target, source) {
-  for (const [key, count] of Object.entries(source)) {
-    // All callers supply fixed enums; still avoid prototype keys at this shared boundary.
-    if (["__proto__", "constructor", "prototype"].includes(key)) continue;
-    target[key] = (target[key] || 0) + count;
+  for (const key in source) {
+    if (!Object.hasOwn(source, key) || key === "__proto__" || key === "constructor" || key === "prototype") continue;
+    target[key] = (target[key] || 0) + source[key];
   }
 }
+function accumulator() { return { ...emptyStats(), buckets: new Map() }; }
+function accumulate(target, value) {
+  target.calls += value.calls;
+  addCounts(target.outcomes, value.outcomes);
+  addCounts(target.errors, value.errors);
+  for (const [upper, count] of value.latency.buckets) target.buckets.set(upper, (target.buckets.get(upper) || 0) + count);
+}
+function finishStats(value) {
+  return { calls: value.calls, outcomes: value.outcomes, errors: value.errors, latency: distribution(value.buckets) };
+}
 export function mergeStats(values) {
-  const result = emptyStats();
-  for (const value of values) {
-    result.calls += value.calls;
-    addCounts(result.outcomes, value.outcomes);
-    addCounts(result.errors, value.errors);
-  }
-  result.latency = mergeLatency(values.map((value) => value.latency));
-  return result;
+  const result = accumulator();
+  for (const value of values) accumulate(result, value);
+  return finishStats(result);
 }
 export function summarizeReliability(sessions) {
   const values = sessions.flatMap((s) => s.reliability ? [s.reliability] : []);
@@ -59,15 +63,16 @@ export function summarizeReliability(sessions) {
   let steps = 0, milliseconds = 0, timedEdits = 0;
   for (const value of values) {
     for (const tool of value.tools) {
-      const key = JSON.stringify([tool.name, tool.toolClass]);
-      const entry = tools.get(key) || [];
-      entry.push(tool); tools.set(key, entry);
-      const group = classes.get(tool.toolClass) || [];
-      group.push(tool); classes.set(tool.toolClass, group);
+      const key = `${tool.name}\0${tool.toolClass}`;
+      let entry = tools.get(key);
+      if (!entry) { entry = { name: tool.name, toolClass: tool.toolClass, stats: accumulator() }; tools.set(key, entry); }
+      accumulate(entry.stats, tool);
     }
     for (const server of value.mcp) {
-      const entry = servers.get(server.server) || [];
-      entry.push(server); servers.set(server.server, entry);
+      let entry = servers.get(server.server);
+      if (!entry) { entry = { connectionFailures: 0, stats: accumulator() }; servers.set(server.server, entry); }
+      entry.connectionFailures += server.connectionFailures;
+      accumulate(entry.stats, server);
     }
     if (value.flags) addCounts(flags, value.flags);
     permissions.denials += value.permissions.denials;
@@ -81,9 +86,15 @@ export function summarizeReliability(sessions) {
     if (value.verification.stepsToFirstEdit !== null) { verification.firstEditSessions += 1; steps += value.verification.stepsToFirstEdit; }
     if (value.verification.msToFirstEdit !== null) { timedEdits += 1; milliseconds += value.verification.msToFirstEdit; }
   }
-  const toolRows = [...tools.values()].map((rows) => ({ name: rows[0].name, toolClass: rows[0].toolClass, ...mergeStats(rows) })).sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name) || a.toolClass.localeCompare(b.toolClass));
+  const toolRows = [...tools.values()].map((rows) => ({ name: rows.name, toolClass: rows.toolClass, ...finishStats(rows.stats) })).sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name) || a.toolClass.localeCompare(b.toolClass));
+  // Tool groups already contain every observation; do not rebuild class histograms per session.
+  for (const tool of toolRows) {
+    let group = classes.get(tool.toolClass);
+    if (!group) { group = accumulator(); classes.set(tool.toolClass, group); }
+    accumulate(group, tool);
+  }
   // Content rules must cover every supported session before making a pooled verification claim.
-  if (values.length && values.every((v) => v.contentRules === "enabled" && !v.coverage.truncated)) verification.share = guardedShare(verification.checks, verification.checks + verification.editCalls);
+  if (values.length && values.every((v) => v.contentRules === "enabled" && !v.coverage.truncated && !v.coverage.unmatchedResults)) verification.share = guardedShare(verification.checks, verification.checks + verification.editCalls);
   verification.stepsToFirstEdit = verification.firstEditSessions ? steps / verification.firstEditSessions : null;
   verification.msToFirstEdit = timedEdits ? milliseconds / timedEdits : null;
   verification.timedEditSessions = timedEdits;
@@ -93,9 +104,42 @@ export function summarizeReliability(sessions) {
     flagSessions: values.filter((v) => v.flags !== null).length,
     truncatedSessions: values.filter((v) => v.coverage.truncated).length,
     tools: toolRows, totals: mergeStats(toolRows),
-    classes: [...classes].map(([toolClass, rows]) => ({ toolClass, ...mergeStats(rows) })).sort((a, b) => b.calls - a.calls || a.toolClass.localeCompare(b.toolClass)),
-    mcp: [...servers].map(([server, rows]) => ({ server, connectionFailures: rows.reduce((n, r) => n + r.connectionFailures, 0), ...mergeStats(rows) })).sort((a, b) => b.calls - a.calls || a.server.localeCompare(b.server)),
+    classes: [...classes].map(([toolClass, rows]) => ({ toolClass, ...finishStats(rows) })).sort((a, b) => b.calls - a.calls || a.toolClass.localeCompare(b.toolClass)),
+    mcp: [...servers].map(([server, rows]) => ({ server, connectionFailures: rows.connectionFailures, ...finishStats(rows.stats) })).sort((a, b) => b.calls - a.calls || a.server.localeCompare(b.server)),
     flags, permissions, verification, apiErrors,
     hooks: { runs: values.reduce((n, v) => n + v.hooks.runs, 0), blocks: values.reduce((n, v) => n + v.hooks.blocks, 0), latency: mergeLatency(values.map((v) => v.hooks.latency)) },
   };
+}
+
+// Comparisons need totals and eligibility only. Cache by immutable public projection;
+// a refresh supplies new objects, and old snapshots can be garbage collected.
+const sessionTotals = new WeakMap();
+export function summarizeReliabilityComparisons(sessions) {
+  const providers = new Map(), repositories = new Map();
+  function group(map, key, name) {
+    let value = map.get(key);
+    if (!value) {
+      value = { name, sessions: 0, coveredSessions: 0, stats: accumulator(), verification: { eligibleSessions: 0, skippedSessions: 0 } };
+      map.set(key, value);
+    }
+    return value;
+  }
+  for (const session of sessions) {
+    const groups = [group(providers, session.provider, session.provider), group(repositories, session.repositoryId, session.repositoryName)];
+    const reliability = session.reliability;
+    let totals = reliability && sessionTotals.get(reliability);
+    if (reliability && !totals) { totals = mergeStats(reliability.tools); sessionTotals.set(reliability, totals); }
+    for (const value of groups) {
+      value.sessions += 1;
+      if (!reliability) continue;
+      value.coveredSessions += 1;
+      accumulate(value.stats, totals);
+      if (reliability.verification.skip !== null) {
+        value.verification.eligibleSessions += 1;
+        value.verification.skippedSessions += Number(reliability.verification.skip);
+      }
+    }
+  }
+  const finish = (map) => [...map.values()].map((v) => ({ name: v.name, sessions: v.sessions, coveredSessions: v.coveredSessions, totals: finishStats(v.stats), verification: v.verification }));
+  return { providers: finish(providers), repositories: finish(repositories) };
 }

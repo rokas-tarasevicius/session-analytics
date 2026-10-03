@@ -1,47 +1,19 @@
 import { emptyLatency, mergeLatency, summarizeReliability, latencyFrom } from "../public/reliability-data.js";
-import { ReliabilityCollector, type CallResult, type ReliabilityContext } from "./reliability.ts";
-import { argumentsValue, errorFromText, name, nonnegative, record, text, timestamp, type RecordValue } from "./reliability-rules.ts";
-import type { ErrorClass, SessionReliability, ToolClass, ToolOutcome } from "./reliability-types.ts";
+import { ReliabilityCollector } from "./reliability.ts";
+import { argumentsValue, name, nonnegative, record, text, timestamp, type RecordValue } from "./reliability-rules.ts";
+import type { SessionReliability } from "./reliability-types.ts";
+import { resultEvidence } from "./reliability-results.ts";
 
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
-function duration(value: unknown): number | null {
-  if (typeof value === "number") return nonnegative(value);
-  const parts = record(value);
-  const seconds = nonnegative(parts["secs"]), nanos = nonnegative(parts["nanos"]);
-  return seconds !== null ? seconds * 1000 + (nanos ?? 0) / 1_000_000 : null;
-}
 function resultText(value: unknown): string {
   if (typeof value === "string") return value.slice(0, 65_536);
-  return array(value).map((block) => text(record(block)["text"]) ?? "").join("\n").slice(0, 65_536);
-}
-function resultFrom(fields: RecordValue, content: string, toolClass: ToolClass, contentRules: boolean, shellReceipt = false): CallResult {
-  const status = text(fields["status"])?.toLowerCase();
-  const denial = text(fields["toolDenialKind"]);
-  const exit = typeof fields["exit_code"] === "number" && Number.isInteger(fields["exit_code"]) ? fields["exit_code"] as number : null;
-  const parsedExit = contentRules && shellReceipt && fields["is_error"] !== false && fields["isError"] !== false && fields["success"] !== true
-    ? /^(?:Exit code|Process exited with code) (-?\d+)\b/m.exec(content)?.[1] : undefined;
-  const code = exit ?? (parsedExit === undefined ? null : Number(parsedExit));
-  const timeout = (nonnegative(fields["timedOutAfterMs"]) ?? 0) > 0 || status === "timeout" || status === "timed_out";
-  let outcome: ToolOutcome = "unknown", error: ErrorClass | null = null;
-  if (timeout) { outcome = "timeout"; error = "timeout"; }
-  else if (denial || status === "denied" || status === "declined") {
-    outcome = "denied";
-    error = denial === "user" || denial === "user_denied" || status === "declined" ? "permission_denied_user"
-      : denial === "hook" || denial === "hook_blocked" ? "hook_blocked"
-      : ["policy", "sandbox", "rules", "rule", "classifier"].includes(denial ?? "") ? "permission_denied_policy" : "unknown";
-  } else if (fields["interrupted"] === true || status === "interrupted" || status === "cancelled" || status === "canceled") {
-    outcome = "interrupted"; error = "interrupted";
-  } else if ((code !== null && code !== 0) || fields["is_error"] === true || fields["isError"] === true || fields["success"] === false || status === "failed" || status === "error") {
-    outcome = "error";
-    error = code === 127 ? "command_not_found" : toolClass === "test_build" ? "test_failed" : code !== null && code !== 0 ? "nonzero_exit" : toolClass === "mcp" ? "mcp_error" : "unknown";
-    if (contentRules) error = errorFromText(content, toolClass) ?? error;
-    if (error === "timeout") outcome = "timeout";
-    else if (error === "interrupted") outcome = "interrupted";
-    else if (error === "permission_denied_policy" || error === "hook_blocked") outcome = "denied";
-  } else if (code === 0 || fields["is_error"] === false || fields["isError"] === false || fields["success"] === true || status === "completed" || status === "success") outcome = "success";
-  const durationMs = nonnegative(fields["duration_ms"]) ?? nonnegative(fields["durationMs"]) ?? nonnegative(fields["totalDurationMs"]) ??
-    (nonnegative(fields["durationSeconds"]) !== null ? Number(fields["durationSeconds"]) * 1000 : null) ?? duration(fields["duration"]);
-  return { outcome, error, durationMs };
+  let content = "";
+  for (const block of array(value)) {
+    if (content.length >= 65_536) break;
+    content += (text(record(block)["text"]) ?? "").slice(0, 65_536 - content.length);
+    if (content.length < 65_536) content += "\n";
+  }
+  return content;
 }
 
 function mix(target: Record<string, number>, value: unknown, allowed: string[]): void {
@@ -77,6 +49,7 @@ export function observeClaude(collector: ReliabilityCollector, event: RecordValu
       const interpretation = structured["returnCodeInterpretation"];
       const interpretedStatus = typeof interpretation === "string" ? interpretation : record(interpretation)["type"];
       const fields: RecordValue = {
+        isAsync: structured["isAsync"], backgroundTaskId: Boolean(structured["backgroundTaskId"]),
         is_error: block["is_error"], status: structured["status"] ?? interpretedStatus, success: structured["success"],
         interrupted: structured["interrupted"], timedOutAfterMs: structured["timedOutAfterMs"],
         toolDenialKind: block["toolDenialKind"] ?? (results.length === 1 ? event["toolDenialKind"] : undefined),
@@ -87,7 +60,7 @@ export function observeClaude(collector: ReliabilityCollector, event: RecordValu
       // except async launches, which acknowledge a start rather than a completed execution.
       if (fields["is_error"] === undefined && structured["isAsync"] !== true && !structured["backgroundTaskId"]) fields["is_error"] = false;
       const content = collector.context.contentRules ? resultText(block["content"]) : "";
-      collector.result(callId, resultFrom(fields, content, collector.toolClass(callId), collector.context.contentRules, collector.isShellCall(callId)));
+      collector.result(callId, resultEvidence(fields, content, collector.context.contentRules));
     }
   }
   if (event["subtype"] === "stop_hook_summary") {
@@ -133,13 +106,7 @@ export function observeCodex(collector: ReliabilityCollector, event: RecordValue
       duration_ms: structured["duration_ms"], duration: structured["duration"],
     };
     const content = collector.context.contentRules ? resultText(output) : "";
-    const result = resultFrom(fields, content, collector.toolClass(id), collector.context.contentRules, collector.isShellCall(id));
-    if (collector.context.contentRules) {
-      // Only receipt headers at line starts; do not treat arbitrary command stdout as a result.
-      const wall = /^Wall time: (\d+(?:\.\d+)?) seconds\s*$/m.exec(content)?.[1];
-      if (wall !== undefined && result.outcome !== "unknown") result.durationMs ??= Number(wall) * 1000;
-    }
-    collector.result(id, result);
+    collector.result(id, resultEvidence(fields, content, collector.context.contentRules));
   }
   if (event["type"] === "event_msg" && type === "item_completed") {
     const item = record(payload["item"]);
@@ -149,13 +116,13 @@ export function observeCodex(collector: ReliabilityCollector, event: RecordValue
     const server = kind === "McpToolCall" ? name(item["server"]) : null;
     collector.add({ id, name: kind === "CommandExecution" ? "exec_command" : kind === "FileChange" ? "apply_patch" : name(item["tool"]),
       args: collector.context.contentRules ? kind === "CommandExecution" ? { command: item["command"] } : kind === "FileChange" ? { changes: item["changes"] } : item["arguments"] : undefined,
-      parsed: item["parsed_cmd"], cwd: text(item["cwd"]) ?? cwd, started: time, server });
+      parsed: item["parsed_cmd"], cwd: text(item["cwd"]) ?? cwd, started: time, server, completionOnly: true });
     const fields: RecordValue = {
       status: item["status"], exit_code: item["exit_code"], duration: item["duration"], duration_ms: item["duration_ms"],
       isError: record(item["result"])["isError"] ?? (item["error"] ? true : undefined),
     };
     const content = collector.context.contentRules ? resultText(item["aggregated_output"] ?? item["stderr"]) : "";
-    collector.result(id, resultFrom(fields, content, collector.toolClass(id), collector.context.contentRules, kind === "CommandExecution"));
+    collector.result(id, resultEvidence(fields, content, collector.context.contentRules, false));
   }
   if (event["type"] === "event_msg" && type === "task_complete" && collector.once(`api:${text(payload["turn_id"]) ?? line}`)) {
     const kind = record(payload["error"])["codex_error_info"];
@@ -169,6 +136,7 @@ export function combineReliability(streams: SessionReliability[], working: boole
   const main = streams[0];
   if (!main) throw new Error("Reliability requires an evidence stream.");
   const summary = summarizeReliability(streams.map((reliability) => ({ reliability })));
+  const incomplete = streams.some((s) => s.coverage.truncated || s.coverage.unmatchedResults > 0);
   const editing = streams.filter((s) => s.verification.editCalls > 0);
   return {
     version: 1, contentRules: main.contentRules, hashing: main.hashing,
@@ -183,7 +151,7 @@ export function combineReliability(streams: SessionReliability[], working: boole
     verification: {
       checks: summary.verification.checks, passed: summary.verification.passed, failed: summary.verification.failed,
       editCalls: summary.verification.editCalls, share: summary.verification.share,
-      skip: working || !editing.length || editing.some((s) => s.verification.skip === null) ? null : editing.some((s) => s.verification.skip),
+      skip: working || incomplete || !editing.length || editing.some((s) => s.verification.skip === null) ? null : editing.some((s) => s.verification.skip),
       stepsToFirstEdit: main.verification.stepsToFirstEdit, msToFirstEdit: main.verification.msToFirstEdit,
     },
     hooks: { runs: summary.hooks.runs, blocks: summary.hooks.blocks, latency: summary.hooks.latency ?? emptyLatency() },

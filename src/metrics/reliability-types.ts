@@ -29,7 +29,7 @@ export interface SessionReliability {
     argumentCalls: number;
     fileCalls: number;
     unmatchedResults: number;
-    /** Safeguard hit: this session is partial and behavior/verification are unavailable. */
+    /** Parsing, retained-state or hashing safeguard hit: behavior/verification are unavailable. */
     truncated: boolean;
   };
   flags: Record<BehaviorFlag, number> | null;
@@ -40,7 +40,7 @@ export interface SessionReliability {
     editCalls: number;
     /** Checks / (edit + write + check calls), guarded below five eligible calls. */
     share: number | null;
-    /** Observed tail has edits after the last check; null for no edits or incomplete coverage. */
+    /** True for a skip; false only for a completed check started after edits completed. Null for overlap/incomplete evidence. */
     skip: boolean | null;
     /** Preceding calls and elapsed time in the main transcript only. */
     stepsToFirstEdit: number | null;

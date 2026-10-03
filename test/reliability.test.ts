@@ -137,7 +137,7 @@ test("Codex typed completions reconcile calls, Duration objects, errors, MCP and
   assert.equal(summary.totals.latency.samples, 4);
   assert.ok((result.tools.find((t) => t.toolClass === "test_build")?.latency.p95Ms ?? 0) >= 1500);
   assert.equal(result.mcp[0]?.calls, 2);
-  assert.equal(result.verification.skip, true);
+  assert.equal(result.verification.skip, null, "completion-only edits have no observed start, so overlap is unknown");
   assert.equal(result.verification.stepsToFirstEdit, 4);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(sentinel));
 });
@@ -179,7 +179,7 @@ test("typed MCP completions enrich generic calls and default structured receipts
   observeCodex(c, { type: "response_item", payload: { type: "function_call_output", call_id: "shell", output: JSON.stringify({ exit_code: 0, duration_ms: 10, output: sentinel }) } }, ++sequence, cwd);
   const result = c.finish();
   assert.equal(result.mcp[0]?.calls, 1);
-  assert.equal(result.tools.find((t) => t.name === "lookup")?.toolClass, "mcp");
+  assert.equal(result.tools.find((t) => t.name === "mcp__sample__lookup")?.toolClass, "mcp");
   assert.equal(summarize(result).totals.outcomes.success, 1);
   assert.equal(summarize(result).totals.outcomes.error, 1);
   assert.equal(summarize(result).totals.latency.samples, 1);

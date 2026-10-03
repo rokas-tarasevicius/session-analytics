@@ -1,4 +1,4 @@
-import { errorDenominator, errorRate, guardedShare, summarizeReliability } from "./reliability-data.js";
+import { errorDenominator, errorRate, guardedShare, summarizeReliability, summarizeReliabilityComparisons } from "./reliability-data.js";
 
 const n = (value) => value.toLocaleString("en");
 const percent = (value) => value === null ? "N/A" : `${(value * 100).toFixed(1)}%`;
@@ -37,20 +37,40 @@ function card(title, value, detail) {
   const result = node("article", undefined, "metric-card"); result.append(node("span", title), node("strong", value), node("small", detail)); return result;
 }
 
-let selectedProvider = "all";
+const viewStates = new WeakMap();
+function selection(container, scopedSessions) {
+  let state = viewStates.get(container);
+  if (!state) { state = { provider: "all", scopes: [] }; viewStates.set(container, state); }
+  let scope = state.scopes.find((s) => s.sessions.length === scopedSessions.length && s.sessions.every((v, i) => v === scopedSessions[i]));
+  if (!scope) {
+    scope = { sessions: scopedSessions.slice(), providers: new Map() };
+    // Bounded scope cache: keep common repository/date round trips, release older snapshots.
+    state.scopes.unshift(scope); state.scopes.length = Math.min(state.scopes.length, 3);
+  }
+  let selected = scope.providers.get(state.provider);
+  if (!selected) {
+    const sessions = state.provider === "all" ? scopedSessions : scopedSessions.filter((s) => s.provider === state.provider);
+    selected = { summary: summarizeReliability(sessions), comparisons: summarizeReliabilityComparisons(sessions), argumentCalls: 0, fileCalls: 0, unmatchedResults: 0 };
+    for (const s of sessions) {
+      selected.argumentCalls += s.reliability?.coverage.argumentCalls || 0;
+      selected.fileCalls += s.reliability?.coverage.fileCalls || 0;
+      selected.unmatchedResults += s.reliability?.coverage.unmatchedResults || 0;
+    }
+    scope.providers.set(state.provider, selected);
+  }
+  return { state, ...selected };
+}
 export function renderReliability(container, scopedSessions) {
+  const { state, summary, comparisons, argumentCalls, fileCalls, unmatchedResults } = selection(container, scopedSessions);
   container.replaceChildren();
-  const sessions = selectedProvider === "all" ? scopedSessions : scopedSessions.filter((s) => s.provider === selectedProvider);
-  const summary = summarizeReliability(sessions), totals = summary.totals, verification = summary.verification;
-  const argumentCalls = sessions.reduce((n, s) => n + (s.reliability?.coverage.argumentCalls || 0), 0);
-  const fileCalls = sessions.reduce((n, s) => n + (s.reliability?.coverage.fileCalls || 0), 0);
+  const totals = summary.totals, verification = summary.verification;
   const header = node("header", undefined, "view-header");
   const title = node("div"); title.append(node("p", "TOOL EVIDENCE", "kicker"));
   const h2 = node("h2", "Reliability"); h2.id = "reliability-title"; title.append(h2, node("p", "Where tool calls fail, slow down, or repeat. Every comparison keeps its coverage visible."));
   const filter = node("label", "Agent ", "reliability-provider");
   const select = node("select"); select.setAttribute("aria-label", "Reliability agent");
   for (const [value, text] of [["all", "All agents"], ["claude", "Claude"], ["codex", "Codex"], ["cursor", "Cursor"]]) { const option = node("option", text); option.value = value; select.append(option); }
-  select.value = selectedProvider; select.addEventListener("change", () => { selectedProvider = select.value; renderReliability(container, scopedSessions); container.querySelector("select").focus(); });
+  select.value = state.provider; select.addEventListener("change", () => { state.provider = select.value; renderReliability(container, scopedSessions); container.querySelector("select").focus(); });
   filter.append(select); header.append(title, filter); container.append(header);
   const metrics = node("div", undefined, "metric-grid compact-metrics");
   metrics.append(
@@ -64,6 +84,7 @@ export function renderReliability(container, scopedSessions) {
   note.append(node("p", `Local content rules (P2): ${summary.contentRuleSessions}/${summary.coveredSessions} sessions. Hash-based flags: ${summary.flagSessions}/${summary.coveredSessions}. ${summary.contentRuleSessions ? "Only class labels and counts leave the parser." : "Enable --reliability-content-rules at launch for command, error-text and behavior rules."}`));
   note.append(node("p", "Error rates exclude denied, interrupted and unknown calls. Rates need 5 eligible observations. Latencies use reported durations only; ≈ marks merged bucket upper bounds (up to 10% + 1 ms)."));
   if (summary.truncatedSessions) note.append(node("p", `${summary.truncatedSessions} sessions have incomplete parsing or hit size safeguards. Their behavior flags and verification status are unavailable.`));
+  if (unmatchedResults) note.append(node("p", `${n(unmatchedResults)} results have no matching call. Affected sessions cannot establish complete behavior or verification.`));
   if (!summary.coveredSessions) note.append(node("p", "Reliability evidence is available for Claude and Codex. Cursor reliability is not yet supported; missing evidence is never counted as a successful call."));
   container.append(note);
 
@@ -79,18 +100,26 @@ export function renderReliability(container, scopedSessions) {
   const flagGrid = node("dl", undefined, "reliability-flags");
   for (const [key, title] of Object.entries(flagNames)) { const item = node("div"); item.append(node("dt", title), node("dd", summary.flagSessions ? n(summary.flags[key]) : "N/A")); flagGrid.append(item); }
   flags.append(flagGrid, node("p", `Episodes across ${summary.flagSessions} eligible sessions. Matching evidence: ${argumentCalls}/${totals.calls} calls with argument hashes; ${fileCalls}/${totals.calls} with file hashes (hashes stay inside the parser). First edit: ${verification.stepsToFirstEdit === null ? "N/A" : verification.stepsToFirstEdit.toFixed(1)} preceding calls on average across ${verification.firstEditSessions} main transcripts; mean observed time ${latency(verification.msToFirstEdit)} across ${verification.timedEditSessions} timed transcripts.`, "chart-note"));
-  flags.append(node("p", "Verification skip means the observed transcript tail has edits after its last completed test/build. Failed or unavailable edits, active sessions, and opaque or missing outcomes limit eligibility. A failed check still counts as an attempted verification.", "chart-note"));
+  flags.append(node("p", "Verification requires a completed test/build that started after the final edit completed. Overlapping executions, missing starts/results, partial streams and active sessions can make status unavailable. A failed check still counts as an attempted verification.", "chart-note"));
   container.append(flags);
 
   const comparisonHeaders = ["Scope", "Covered / sessions", "Known / calls", "Error % · errors / attempts", "p95 · timed / calls", "Unverified / eligible"];
-  function comparison(name, subset) {
-    const s = summarizeReliability(subset);
-    return [name, `${s.coveredSessions}/${s.sessions}`, coverage(s.totals), errorCell(s.totals), `${latency(s.totals.latency.p95Ms)} · ${s.totals.latency.samples}/${s.totals.calls}`, `${s.verification.skippedSessions}/${s.verification.eligibleSessions}`];
+  function comparison(s) {
+    return [s.name, `${s.coveredSessions}/${s.sessions}`, coverage(s.totals), errorCell(s.totals), `${latency(s.totals.latency.p95Ms)} · ${s.totals.latency.samples}/${s.totals.calls}`, `${s.verification.skippedSessions}/${s.verification.eligibleSessions}`];
   }
-  container.append(table("By agent", comparisonHeaders, ["claude", "codex", "cursor"].map((p) => comparison(p, sessions.filter((s) => s.provider === p))), "Compare within the same repository and workload. Provider coverage and tool mix differ; these are not agent quality rankings."));
-  const repos = new Map();
-  for (const s of sessions) { const values = repos.get(s.repositoryId) || []; values.push(s); repos.set(s.repositoryId, values); }
-  container.append(table("By repository", comparisonHeaders, [...repos.values()].map((values) => comparison(values[0].repositoryName, values))));
+  container.append(table("By agent", comparisonHeaders, comparisons.providers.map(comparison), "Compare within the same repository and workload. Provider coverage and tool mix differ; these are not agent quality rankings."));
+  const repositoryPanel = node("div");
+  let shownRepositories = 50;
+  function repositories() {
+    repositoryPanel.replaceChildren();
+    repositoryPanel.append(table("By repository", comparisonHeaders, comparisons.repositories.slice(0, shownRepositories).map(comparison), `Showing ${Math.min(shownRepositories, comparisons.repositories.length)} of ${comparisons.repositories.length} repositories.`));
+    if (shownRepositories < comparisons.repositories.length) {
+      const more = node("button", "Show more repositories");
+      more.addEventListener("click", () => { shownRepositories += 50; repositories(); repositoryPanel.querySelector("button")?.focus(); });
+      repositoryPanel.append(more);
+    }
+  }
+  repositories(); container.append(repositoryPanel);
   const mixes = [
     ["Permission modes", summary.permissions.modes], ["Approval policies", summary.permissions.approvalPolicies], ["Sandbox modes", summary.permissions.sandboxes], ["API error events", summary.apiErrors],
   ].flatMap(([group, mix]) => Object.entries(mix).map(([key, count]) => [group, key, n(count)]));

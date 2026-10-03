@@ -569,6 +569,7 @@ function clearInactiveAnalyticsViews(activeName) {
     costs: [elements.providerCostComponents, elements.repositoryCostComponents],
     distributions: [elements.distributionRepositoryOptions, elements.distributionKey, elements.distributionDuration, elements.distributionCost, elements.distributionTools, elements.distributionCompactions],
     models: [elements.modelsByProvider],
+    reliability: [document.querySelector('[data-view-panel="reliability"]')],
     skills: [elements.skillsProviderFilters, elements.skillsByRepository, elements.skillsKey, elements.skillsDetail],
     tools: [elements.toolsProviderFilters, elements.toolsByRepository, elements.toolsKey, elements.toolsDetail],
   };

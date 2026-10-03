@@ -42,7 +42,7 @@ The server and the report never parse transcripts themselves. Each snapshot is c
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
 
-Reliability observes each record during the existing Claude/Codex pass, without an extra transcript scan. One collector per execution stream retains call IDs for reconciliation, bounded enums/numbers, and optional internal HMACs. Claude subagent streams are finalized separately before their public projections merge, preventing false loops across independent agents. Only `SessionReliability` crosses the worker boundary. Its sparse latency histograms can be merged after repository/time/agent filtering, avoiding statistically invalid averages of session percentiles. Default scans do not write reliability state; P2 scans persist only a random private matching key outside provider stores.
+Reliability observes each record during the existing Claude/Codex pass, without an extra transcript scan. One collector per execution stream retains call IDs for reconciliation, bounded enums/numbers, call-start/result-completion sequence positions, and optional internal HMACs. Receipt parsing keeps only enum/numeric candidates until the tool identity arrives; raw text never enters reconciliation state. Aggregate hashing limits (32 MiB of charged canonical string bytes and 16,384 file references per stream) stop hashing before it can consume the worker heap; limits or orphan results suppress composite sequence claims. Claude subagent streams are finalized separately before their public projections merge, preventing false loops across independent agents. Only `SessionReliability` crosses the worker boundary. Its sparse latency histograms can be merged after repository/time/agent filtering, avoiding statistically invalid averages of session percentiles. Default scans do not write reliability state; P2 scans persist only a random private matching key outside provider stores.
 
 ## Pipeline
 
@@ -105,7 +105,7 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 
 ## Dashboard client
 
-`src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
+`src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Only the active view is rendered. Reliability uses lightweight provider/repository totals, weakly cached session totals and a three-scope selection cache over immutable snapshot objects; repository tables initially render 50 rows. Switching views clears the inactive Reliability DOM. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
 
 ## Design constraints
 
