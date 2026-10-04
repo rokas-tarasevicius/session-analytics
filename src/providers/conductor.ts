@@ -1,5 +1,5 @@
 import { conductorRecords } from "./conductor-records.ts";
-import { conductorMessage, recoverConductorMessages, type ConductorMessage } from "./conductor-messages.ts";
+import { applyConductorReceiptFloor, conductorMessage, recoverConductorMessages, type ConductorMessage } from "./conductor-messages.ts";
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type { DatabaseSync } from "node:sqlite";
@@ -75,7 +75,7 @@ function selectSnapshots(receipts: Receipt[]): { snapshots: Receipt[]; complete:
 }
 
 /** Collect all eligible rows before grouping. Canonical identities are read-only native precedence. */
-export function conductorFallback(database: DatabaseSync | null, rows: SessionDatabaseRow[], canonicalIdentities: ReadonlySet<string>, pricing: Pick<ProviderContext, "rateCard" | "resolveRate" | "price">): SessionAnalytics[] {
+export function conductorFallback(database: DatabaseSync | null, rows: SessionDatabaseRow[], canonicalIdentities: ReadonlySet<string>, pricing: Pick<ProviderContext, "rateCard" | "resolveRate" | "price">, onPaired?: (session: SessionAnalytics) => void): SessionAnalytics[] {
   if (!database) return [];
   const statement = conductorRecords(database);
   if (!statement) return [];
@@ -84,7 +84,8 @@ export function conductorFallback(database: DatabaseSync | null, rows: SessionDa
     // The verified SDK result accounting contract is Claude's; other SDK envelopes are not interchangeable.
     if (row.agent_type !== "claude") continue;
     const receipts: Receipt[] = [], messages: ConductorMessage[] = [], resets: Array<[string, string]> = [], seenInit = new Set<string>();
-    let epoch: string | null = null, version: Receipt["version"] = null;
+    let epoch: string | null = null, version: Receipt["version"] = null, queryStart = 0;
+    const queryReceipts = new Set<string>();
     for (const item of statement.iterate(row.conductor_session_id)) {
       const data = parse(item["data"]); if (!data) continue;
       const id = text(data["uuid"]) ?? `message:${String(item["id"])}`;
@@ -103,7 +104,13 @@ export function conductorFallback(database: DatabaseSync | null, rows: SessionDa
       }
       if (data["type"] !== "result") continue;
       const receipt = project(data, id, timestamp(item["created_at"]) ?? timestamp(row.created_at) ?? "", epoch, version);
-      if (receipt) receipts.push(receipt);
+      if (receipt) {
+        receipts.push(receipt);
+        if (!queryReceipts.has(id)) {
+          for (let i = queryStart; i < messages.length; i++) messages[i]!.queryId = id;
+          queryStart = messages.length; queryReceipts.add(id);
+        }
+      }
     }
     const accepted = new Set(row.provider_session_id ? [row.provider_session_id] : []);
     // Explicit reset links can connect receipts before/after the currently registered identity.
@@ -113,7 +120,7 @@ export function conductorFallback(database: DatabaseSync | null, rows: SessionDa
       if (receipt.providerId && row.provider_session_id && !accepted.has(receipt.providerId)) continue;
       const identity = receipt.providerId ?? row.provider_session_id;
       const key = `claude:${identity ?? `row:${row.conductor_session_id}`}`;
-      if (canonicalIdentities.has(key)) continue;
+      if (canonicalIdentities.has(key) && !onPaired) continue;
       const group: Group = groups.get(key) ?? { provider: "claude", rows: new Map(), receipts: new Map(), messages: [] };
       group.rows.set(row.conductor_session_id, row);
       if ("usageObserved" in receipt && "identityKnown" in receipt) {
@@ -209,9 +216,12 @@ export function conductorFallback(database: DatabaseSync | null, rows: SessionDa
     }
     const finalized = finish(session); finalized.pricedTokenCoverage = null; finalized.costComplete = session.evidence!.accounting === "complete" && (marginalComplete || (complete && allocationsComplete && snapshots.length > 0 && costSnapshots === snapshots.length));
     const messages = group.messages.flatMap((chunk) => JSON.parse(inflateRawSync(chunk).toString("utf8")) as ConductorMessage[]);
-    const recovered = recoverConductorMessages(finalized, messages, pricing);
-    if (recovered) sessions.push(recovered);
-    else if (receipts.length) sessions.push(finalized);
+    const recovered = recoverConductorMessages(finalized, messages, pricing, receipts.map(r => ({ id: r.id, usage: r.localUsage })));
+    const selected = recovered ? applyConductorReceiptFloor(finalized, recovered) : receipts.length ? finalized : null;
+    if (selected) {
+      if (canonicalIdentities.has(key)) onPaired?.(selected);
+      else sessions.push(selected);
+    }
   }
   return sessions;
 }

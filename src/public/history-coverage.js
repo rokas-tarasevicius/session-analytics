@@ -15,6 +15,12 @@ export function renderHistoryCoverage(container, history, sessions = []) {
   title.append(node("p", "Evidence · machine-wide · all months", "kicker"), node("h2", "History coverage"));
   header.append(title); container.append(header);
   container.append(node("p", "Session evidence and unattributed history stay separate. This machine-wide panel is independent of repository and date filters. API-equivalent value is not an invoice.", "chart-note"));
+  const calibration = history.recoveryCalibration;
+  const percent = (value) => `${(value * 100).toFixed(1)}%`;
+  container.append(node("p", calibration?.aggregateValueRatio != null
+    ? `Recovered history remains a lower bound on retained evidence. On ${calibration.comparedSessions} paired sessions it measured ${percent(calibration.aggregateValueRatio)} of native value (${money(calibration.recoveredValueUsd)} / ${money(calibration.nativeValueUsd)}); median ${percent(calibration.medianValueRatio)}, p10–p90 ${percent(calibration.p10ValueRatio)}–${percent(calibration.p90ValueRatio)}. ${calibration.excludedSessions}/${calibration.pairedSessions} pairs were excluded for incomplete, active, unpriced or small native denominators.`
+    : "Recovered history remains a lower bound on retained evidence. Calibration is unavailable until at least five complete, fully priced native pairs with no observed active work each have $1 of value.", "chart-note"));
+  if (calibration?.aggregateValueRatio != null) container.append(node("p", `${calibration.receiptFloorSessions} pairs retained a higher provider-reported receipt floor; ${calibration.aboveNativeSessions} exceeded native value by more than max($0.01, 1%). Receipt prices can differ from API-equivalent prices. Surviving recent transcripts are a selected sample, not a guarantee for deleted history; no calibration multiplier is applied.`, "chart-note"));
   const wrap = node("div", undefined, "table-wrap"), table = node("table"), head = node("thead"), headings = node("tr"), body = node("tbody");
   for (const text of ["UTC month", "Dated session evidence", "Unattributed estimate", "Remainder counters priced", "Possible overlap reserved"]) headings.append(node("th", text));
   head.append(headings);

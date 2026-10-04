@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
 
 export function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
@@ -80,6 +81,19 @@ export interface RepositoryEvidence {
   metadataRemote: string | null;
   metadataDisagrees: boolean;
   evidence: string[];
+}
+
+/** Last-resort bucket only after Git, remote and registered ownership checks. */
+export function localDirectoryAttribution(cwd: string, git: RepositoryEvidence): { root: string; route: 'ephemeral' | 'local-directory' } {
+  // Existing paths canonicalize; deleted CWDs keep their recorded spelling.
+  // The product's fallback contract recognizes the current OS temp root and
+  // literal /tmp, not every missing descendant of a symlinked ancestor.
+  let path = resolve(cwd); try { path = realpathSync(cwd); } catch { /* absent directory */ }
+  const inside = (root: string) => path === root || path.startsWith(root.replace(/\/$/, '') + '/');
+  const temporary = !git.root && !git.remote && (
+    path.startsWith('/private/var/folders/') && path.includes('/T/') ||
+    inside(realOrResolved(tmpdir())) || inside('/tmp'));
+  return { root: temporary ? '/private/var/folders/session-analytics-ephemeral' : path, route: temporary ? 'ephemeral' : 'local-directory' };
 }
 
 /** Resolves nearest Git root, following .git and commondir pointers independently. */

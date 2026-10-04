@@ -52,8 +52,8 @@ export async function evidenceGenerations(options: AnalyzeOptions): Promise<Map<
     const repositories = new Map(rows("repos", ["id", "name", "root_path", "remote_url", "default_branch", "hidden"]).map((r) => [r["id"], r]));
     const workspaces = new Map(rows("workspaces", ["id", "repository_id", "workspace_name", "workspace_path", "branch", "archive_commit", "pr_title", "derived_status"]).map((r) => [r["id"], r]));
     for (const row of rows("sessions", ["id", "status", "agent_type", "title", "created_at", "updated_at", "claude_session_id", "model", "is_hidden", "workspace_id"])) {
-      const version = versions.get(`${row["agent_type"]}:${row["claude_session_id"]}`);
-      if (!version) continue;
+      const provider = ['claude-code', 'claude_code'].includes(String(row["agent_type"])) ? 'claude' : row["agent_type"];
+      const version = versions.get(`${provider}:${row["claude_session_id"]}`) ?? null;
       const workspace = workspaces.get(row["workspace_id"]), repository = repositories.get(workspace?.["repository_id"] ?? null);
       result.set(sessionKey(String(row["id"])), hash([version, row, workspace, repository]));
     }

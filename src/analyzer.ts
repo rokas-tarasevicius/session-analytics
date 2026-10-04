@@ -1,4 +1,5 @@
 import { collectHistoryCoverage } from "./metrics/history-coverage.ts";
+import { calibrateRecovery, type RecoveryComparison } from "./metrics/recovery-calibration.ts";
 import { createHash } from "node:crypto";
 import { canonicalizeRemote, repositoryRemoteAtRoot } from "./repository-remotes.ts";
 import { spawn } from "node:child_process";
@@ -2504,8 +2505,11 @@ async function analyzeSelectedRepositories(
       // Preserve the unique-legacy-match guard for otherwise unidentified rows.
       return !analyzedKeys.has(createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12));
     });
+    const pairedRecovery: RecoveryComparison[] = [];
     try {
-      for (const session of conductorFallback(database, eligibleRows, canonicalIdentities, pricing)) {
+      for (const session of conductorFallback(database, eligibleRows, canonicalIdentities, pricing,
+        explicitRepositoryFilter ? undefined : (session) => { pairedRecovery.push({ sessionKey: session.sessionKey, cost: { totalUsd: session.cost.totalUsd },
+          conductor: { reconciliation: { receiptFloorApplied: session.conductor?.reconciliation?.receiptFloorApplied === true } } }); })) {
         allSessions.push(session);
         if (!repositoryById.has(session.repositoryId)) {
           const root = `unassigned:${session.repositoryId}`;
@@ -2581,7 +2585,10 @@ async function analyzeSelectedRepositories(
     await addRepositorySkills(workflowSources.inventory, selectedRepositories);
     const stableIndex = await index?.commit();
     return {
-      ...(!explicitRepositoryFilter ? { historyCoverage: await collectHistoryCoverage(claudeRoots, retainedPopulation, rateCard, options.claudeRoot ? undefined : { home: homedir(), override: process.env["CLAUDE_CONFIG_DIR"] }) } : {}),
+      ...(!explicitRepositoryFilter ? { historyCoverage: {
+        ...await collectHistoryCoverage(claudeRoots, retainedPopulation, rateCard, options.claudeRoot ? undefined : { home: homedir(), override: process.env["CLAUDE_CONFIG_DIR"] }),
+        recoveryCalibration: calibrateRecovery(retainedPopulation, pairedRecovery),
+      } } : {}),
       ...(mcpContext ? { mcpContext } : {}),
       mcpSourceHealth: [sourceHealth("claude", claudeIndexes.map((item) => item.warning)),
         sourceHealth("codex", codexIndexes.map((item) => item.warning)), sourceHealth("cursor", [cursorResult.warning])],

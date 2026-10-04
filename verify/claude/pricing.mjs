@@ -40,7 +40,7 @@ export function loadReferencePricing({
     const models = snapshot.models ?? JSON.parse(readFileSync(join(cacheDirectory, `rates-${snapshot.modelsSha256}.json`), 'utf8'));
     snapshots.push({ ...snapshot, models });
   }
-  if (snapshots.length !== metadata.pricing.sources.length) throw new Error('Reference pricing evidence is incomplete');
+  if (metadata.pricing.policy !== 'reviewed-only' && snapshots.length !== metadata.pricing.sources.length) throw new Error('Reference pricing evidence is incomplete');
   const bundled = JSON.parse(readFileSync(cardPath, 'utf8'));
   return { sources: metadata.pricing.sources.map(source => source.source), snapshots, reviewed, bundled, policy: metadata.pricing.policy };
 }

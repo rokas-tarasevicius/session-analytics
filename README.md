@@ -208,6 +208,8 @@ Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip se
 
 Developers can run `node scripts/parity.ts --machine` to compare full, cold-index and warm-index accounting. It uses the 256 MB analysis worker, offline pricing, a fresh private index under `.lane/`, and the shared real-scan lock. Output contains month/provider totals and differences by hashed session key, never repository names or transcript content. Live source changes are reported separately and do not suppress the unfiltered diff or a failing exit status. Use `--demo-root PATH` with a retained synthetic demo for repeatable local checks.
 
+Release verification uses `node scripts/verify-real.ts`: independent provider, repository, pricing and time oracles, with recorded source generations and explicit live-session exclusions. See the [verification guide](verify/README.md) for evidence files and saved-artifact rechecks.
+
 ### Options
 
 | Option | Applies to | Description |
@@ -464,6 +466,8 @@ Provider evidence has metric-specific coverage: unavailable observations display
 
 ### History coverage
 
-The Summary panel and terminal report show dated session evidence beside an **unattributed history estimate** for each UTC month. Missing Claude transcripts can be recovered from Conductor assistant usage, with message timestamps, tool names, subagent accounting and comparison to retained SDK receipts. Stripped response IDs use conservative input-counter groups and remain partial. Results remain the fallback when usable assistant usage is absent; native transcripts take precedence.
+The Summary panel and terminal report show dated session evidence beside an **unattributed history estimate** for each UTC month. Missing Claude transcripts can be recovered from Conductor assistant usage, with message timestamps, tool names, subagent accounting and comparison to retained SDK receipts. Stripped response IDs use conservative input-counter groups and remain partial. Query receipts supply finalized output only with exact main-loop input agreement and one known model. A higher cumulative receipt value remains a provider-reported floor; native transcripts take precedence.
+
+History coverage measures the recovery path against surviving native/SDK pairs on this machine, showing the aggregate value ratio, median, p10–p90 and eligible/excluded counts. Recovered history remains incomplete, especially for subagents. Receipt prices can differ from native API prices, and recent surviving transcripts are a selected sample. The measurement never scales or invents usage.
 
 Claude profile statistics are reconciled per day and model using their streamed-block counting convention. These counters can repeat requests, so the remainder is not an exact measure of missing billable usage. Estimates reserve possible overlap for recovered Conductor sessions whose profile is unknown, use the lifetime model token mix, and remain outside session/repository totals. Provider retention may remove transcripts while aggregate statistics survive. Missing statistics and unknown prices stay explicit. The panel covers the entire machine independently of dashboard filters; filtered exports omit it. [Method and limits](docs/metrics.md#history-coverage-and-recovery).

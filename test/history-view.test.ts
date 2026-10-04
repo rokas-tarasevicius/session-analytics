@@ -17,6 +17,9 @@ test("history panel shows estimates, denominators, global scope and missing evid
   for (const term of ["History coverage", "N/A", "0 / 2K", "independent of repository and date filters", "retention", "2026-08-25", "0/1 Claude profiles", "$12.00"]) assert.ok(container.textContent.includes(term), term);
   assert.equal(container.querySelectorAll("table").length, 1);
   assert.equal(container.querySelectorAll("details").length, 1);
+  context.renderHistoryCoverage(container, { ...history, recoveryCalibration: { pairedSessions: 7, comparedSessions: 5, excludedSessions: 2,
+    aggregateValueRatio: .9, nativeValueUsd: 10, recoveredValueUsd: 9, medianValueRatio: .95, p10ValueRatio: .7, p90ValueRatio: 1.01, receiptFloorSessions: 2, aboveNativeSessions: 1 } });
+  for (const term of ["5 paired sessions", "90.0%", "$9.00 / $10.00", "p10–p90 70.0%–101.0%", "2/7 pairs", "provider-reported receipt floor", "no calibration multiplier"]) assert.ok(container.textContent.includes(term), term);
   context.renderHistoryCoverage(container, undefined);
   assert.equal(container.hidden, true); assert.equal(container.children.length, 0);
   assert.ok(!source.includes("innerHTML"));

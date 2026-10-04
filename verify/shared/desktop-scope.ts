@@ -4,10 +4,10 @@ const number = (value: unknown): number => { if (typeof value !== 'number' || !N
 const rows = (value: unknown): Row[] => { if (!Array.isArray(value)) throw new Error('Unavailable Desktop scope rows'); return value; };
 const close = (a: number, b: number): boolean => Math.abs(a - b) < 1e-7;
 const fields = ['inputTokens','uncachedInputTokens','cachedInputTokens','cacheWriteInputTokens','cacheWrite5mInputTokens','cacheWrite1hInputTokens','outputTokens','reasoningOutputTokens'];
-export function desktopScopes(desktop: Row) {
+export function desktopScopes(desktop: Row, excluded: ReadonlySet<string> = new Set()) {
   const sessions = new Map<string, Row>(), days = new Map<string, number>();
   for (const interval of rows(desktop.intervals)) {
-    if (interval.liveAfterReference) continue;
+    if (interval.liveAfterReference || excluded.has(interval.sessionKey)) continue;
     if (!interval.preResumeCarryoverVersion || interval.overlappingNativeMessages || interval.missingNativeMessages) throw new Error('Unproved Desktop ownership');
     for (const model of rows(interval.models)) {
       if (!model.inputsMatch || model.missingApiEquivalentUsd === null) throw new Error('Unproved Desktop usage');
@@ -25,8 +25,8 @@ export function desktopScopes(desktop: Row) {
   }
   return { sessions, days };
 }
-export function compareDesktopDedup(legacy: Row, desktop: Row) {
-  const scope = desktopScopes(desktop), actual = new Map(rows(legacy.tokenMismatches).map(r=>[r.sessionKey,r])), differences: Row[] = [];
+export function compareDesktopDedup(legacy: Row, desktop: Row, excluded: ReadonlySet<string> = new Set()) {
+  const scope = desktopScopes(desktop, excluded), actual = new Map(rows(legacy.tokenMismatches).filter(r=>!excluded.has(r.sessionKey)).map(r=>[r.sessionKey,r])), differences: Row[] = [];
   for (const key of new Set([...actual.keys(),...scope.sessions.keys()])) {
     const a = actual.get(key), expected = scope.sessions.get(key);
     if (!a || !expected) { differences.push({sessionKey:key,field:'unexplained-ownership-delta'}); continue; }
@@ -35,10 +35,11 @@ export function compareDesktopDedup(legacy: Row, desktop: Row) {
   }
   return { differences, receiptOnlyEvidence: [...scope.sessions.values()], historicalDifferences: rows(legacy.tokenMismatches) };
 }
-export function compareTimeScopes(audit: Row, native: Row, desktop: Row, snapshot: Row) {
-  const scope = desktopScopes(desktop), differences: Row[] = [], checked: string[] = [];
+export function compareTimeScopes(audit: Row, native: Row, desktop: Row, snapshot: Row, excluded: ReadonlySet<string> = new Set()) {
+  const scope = desktopScopes(desktop, excluded), differences: Row[] = [], checked: string[] = [];
   const sessions = new Map(rows(snapshot.sessions).map(s=>[s.sessionKey,s]));
   for (const source of rows(native.sessions)) {
+    if (excluded.has(source.sessionKey)) continue;
     const session = sessions.get(source.sessionKey); if (!session) throw new Error('Missing native time identity');
     const usd = new Map<string,number>(), tokens = new Map<string,number>();
     for (const b of rows(session.limitsCache?.buckets)) if (b.day) { usd.set(b.day,(usd.get(b.day)??0)+number(b.apiEquivalentUsd));tokens.set(b.day,(tokens.get(b.day)??0)+number(b.observedTokens)); }
@@ -50,10 +51,11 @@ export function compareTimeScopes(audit: Row, native: Row, desktop: Row, snapsho
   }
   const offsets = new Map<string,number>();
   for (const error of rows(audit.parityErrors)) {
+    if (excluded.has(error.sessionKey)) continue;
     if (error.kind !== 'limits-spend') { differences.push(error); continue; }
     const key=`${error.sessionKey}:${error.day}`;offsets.set(key,number(error.spendUsd)-number(error.limitsUsd));
   }
   for (const key of new Set([...offsets.keys(),...scope.days.keys()])) if (!close(offsets.get(key)??0,scope.days.get(key)??0)) differences.push({cell:key,field:'unexplained-request-scope-delta'});
-  for (const error of rows(audit.discrepancies)) if (error.reconciliationFailure) differences.push(error);
+  for (const error of rows(audit.discrepancies)) if (error.reconciliationFailure && !excluded.has(error.sessionKey)) differences.push(error);
   return { differences, nativeRequestSessions: checked, receiptOnlyEvidence: [...scope.sessions.values()], historicalRequestScopeDifferences: rows(audit.parityErrors) };
 }
