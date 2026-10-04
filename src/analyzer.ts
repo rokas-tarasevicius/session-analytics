@@ -2,9 +2,9 @@ import { collectHistoryCoverage } from "./metrics/history-coverage.ts";
 import { createHash } from "node:crypto";
 import { canonicalizeRemote, repositoryRemoteAtRoot } from "./repository-remotes.ts";
 import { spawn } from "node:child_process";
-import { createReadStream } from "node:fs";
+import { createReadStream, realpathSync } from "node:fs";
 import { opendir, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { readJsonLines } from "./jsonl-lines.ts";
 import type { DatabaseSync } from "node:sqlite";
@@ -1525,6 +1525,19 @@ async function gitRootForPath(rawPath: string): Promise<string | null> {
   }
 }
 
+let cachedTemporaryDirectoryRoot: string | null = null;
+/** The operating system's temporary directory, resolved through symbolic links (e.g. /tmp on Linux). */
+function temporaryDirectoryRoot(): string {
+  if (cachedTemporaryDirectoryRoot === null) {
+    try {
+      cachedTemporaryDirectoryRoot = realpathSync(tmpdir());
+    } catch {
+      cachedTemporaryDirectoryRoot = resolve(tmpdir());
+    }
+  }
+  return cachedTemporaryDirectoryRoot;
+}
+
 function pathInside(path: string, root: string): boolean {
   const resolvedPath = resolve(path), resolvedRoot = resolve(root);
   return resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}/`);
@@ -1575,8 +1588,9 @@ async function repositoryForPath(
   }
   const ephemeralLocalPath =
     !gitRoot && !remoteIdentity &&
-    resolvedCwd.startsWith("/private/var/folders/") &&
-    resolvedCwd.includes("/T/");
+    ((resolvedCwd.startsWith("/private/var/folders/") && resolvedCwd.includes("/T/")) ||
+      pathInside(resolvedCwd, temporaryDirectoryRoot()) ||
+      pathInside(resolvedCwd, "/tmp"));
   const groupingRoot = remoteIdentity ? `remote:${remoteIdentity}` : ephemeralLocalPath
     ? "/private/var/folders/session-analytics-ephemeral"
     : gitRoot ?? resolvedCwd;

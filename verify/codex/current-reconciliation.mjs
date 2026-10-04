@@ -149,7 +149,8 @@ const costFields = ['inputUsd', 'cachedInputUsd', 'cacheWriteUsd', 'outputUsd', 
 const zeroCost = () => Object.fromEntries(costFields.map(field => [field, 0]));
 const stats = () => ({ execution: { topLevelUsd: 0, subagentUsd: 0, unknownUsd: 0 }, cost: zeroCost(), u: Array(9).fill(0), usd: 0, calls: 0, days: {}, models: new Map(), velocity: new Map() });
 const expected = new Map();
-const local = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' });
+// Velocity buckets use the analysis machine's local time zone, so the oracle must too.
+const local = new Intl.DateTimeFormat('en-CA', { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' });
 for (const event of retained) {
   const session = expected.get(event.key) ?? stats(); expected.set(event.key, session);
   for (const field of costFields) session.cost[field] += event.cost[field];
