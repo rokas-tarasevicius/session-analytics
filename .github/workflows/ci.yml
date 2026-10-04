@@ -21,7 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Pull requests run on Linux only to save macOS minutes (billed at 10x on private repositories).
+        # macOS runs on pushes to master, manual runs, and pull requests labelled `macos`.
+        os: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'macos')) && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","macos-latest"]') }}
     steps:
       - name: Check out
         uses: actions/checkout@v7

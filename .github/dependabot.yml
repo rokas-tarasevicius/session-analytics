@@ -14,3 +14,7 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    ignore:
+      # The runtime targets Node 24 (engines >= 24); keep its type definitions on the same major.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
