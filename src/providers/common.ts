@@ -1,5 +1,7 @@
 import { mergeProvenance } from "../pricing/catalog.ts";
 import { priceUsage } from "../pricing/usage.ts";
+import { projectModelId } from "../public/model-id.js";
+import { timestampMilliseconds } from "../public/timestamps.js";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -16,6 +18,9 @@ export const count = (value: unknown): number => Math.min(Number.MAX_SAFE_INTEGE
 export const name = (value: unknown): string | null => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) && !["__proto__", "constructor", "prototype"].includes(value) ? value : null;
 /** Model namespaces are part of identity, never aliases. Reject filesystem/URL/secret shapes. */
 export function modelName(value: unknown): string {
+  // Share the narrow Claude context-selector projection before the adapter
+  // identifier grammar rejects brackets; preserve all other namespace rules.
+  if (typeof value === "string" && /^(?:anthropic\/)?claude-.*\[1m\]$/i.test(value)) value = projectModelId(value);
   if (typeof value !== "string" || value.length > 192 || /^(?:sk-|gh[pousr]_|AKIA|Bearer|token[:_-])/i.test(value)) return "<unknown>";
   const parts = value.split("/");
   if (parts.length > 3 || parts.some((part, index) => !(index === 0 && part === "@cf") && !name(part))) return "<unknown>";
@@ -30,8 +35,9 @@ export const safeTime = (value: unknown): string | null => typeof value === "str
 export const hash = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 12);
 export function timestamp(value: unknown): string | null {
   if (typeof value !== "string" && typeof value !== "number") return null;
-  if (typeof value === "string" && !/^\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)?$/.test(value)) return null;
-  const date = new Date(value);
+  // Match the shared UTC contract, including calendar validation.
+  // Offset-free SQLite/provider times must not inherit the host timezone.
+  const date = new Date(typeof value === "number" ? value : timestampMilliseconds(value));
   return Number.isFinite(date.valueOf()) && date.valueOf() >= 946684800000 ? date.toISOString() : null;
 }
 export function parse(value: unknown): RecordValue | null {
@@ -59,16 +65,17 @@ export function tokens(input: unknown, cached: unknown, writes: unknown, output:
 }
 
 /** Bounded directory traversal; never follow source-controlled symbolic links. */
-export async function* files(root: string, accepts: (file: string) => boolean, depth = 0): AsyncGenerator<string> {
+export async function* files(root: string, accepts: (file: string) => boolean, depth = 0, onWarning?: (warning: string) => void): AsyncGenerator<string> {
   if (depth > 8) return;
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if (onWarning) { onWarning("A provider evidence directory could not be read; sibling directories were retained."); return; }
     throw new Error("Provider evidence directory could not be read.");
   }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const path = join(root, entry.name);
-    if (entry.isDirectory()) yield* files(path, accepts, depth + 1);
+    if (entry.isDirectory()) yield* files(path, accepts, depth + 1, onWarning);
     else if (entry.isFile() && accepts(path)) yield path;
   }
 }
@@ -153,16 +160,35 @@ export function addUsage(session: SessionAnalytics, context: ProviderContext, mo
     mergeProvenance(aggregate, [{ ...selected.provenance, assumptions: projected.assumptions }]);
   }
   const cost = context.price(rate, usage, scope === "request" ? usage.inputTokens : 0);
-  if (scope === "summary" && rate.longContext) {
-    // Request sizes are absent: ordinary rates are a lower estimate, all-premium rates a ceiling.
-    cost.upperEstimateUsd = Math.max(cost.upperEstimateUsd, context.price(rate, usage, rate.longContext.thresholdInputTokens + 1).upperEstimateUsd);
-    session.transcript.warnings.push("Aggregate usage has no per-request context sizes; the upper estimate applies the long-context premium to all usage.");
+  const possibleInputs = scope === "summary"
+    ? [0, ...(rate.contextTiers ?? []).filter((tier) => tier.aboveInputTokens < usage.inputTokens).map((tier) => tier.aboveInputTokens + 1),
+      ...(rate.longContext && rate.longContext.thresholdInputTokens < usage.inputTokens ? [rate.longContext.thresholdInputTokens + 1] : [])]
+    : [usage.inputTokens];
+  const unknownTtl = Math.max(0, usage.cacheWriteInputTokens - usage.cacheWrite5mInputTokens - usage.cacheWrite1hInputTokens);
+  if (scope === "summary" || unknownTtl > 0) {
+    // Without request sizes, each token class may attain its maximum in a
+    // different tier. Keep 5m/1h writes separate: custom prices can cross too.
+    const pieces = [
+      { inputTokens: usage.uncachedInputTokens, uncachedInputTokens: usage.uncachedInputTokens },
+      { inputTokens: usage.cachedInputTokens, cachedInputTokens: usage.cachedInputTokens },
+      { inputTokens: usage.cacheWrite5mInputTokens, cacheWriteInputTokens: usage.cacheWrite5mInputTokens, cacheWrite5mInputTokens: usage.cacheWrite5mInputTokens },
+      { inputTokens: usage.cacheWrite1hInputTokens, cacheWriteInputTokens: usage.cacheWrite1hInputTokens, cacheWrite1hInputTokens: usage.cacheWrite1hInputTokens },
+      { inputTokens: unknownTtl, cacheWriteInputTokens: unknownTtl },
+      { outputTokens: usage.outputTokens, nonReasoningOutputTokens: usage.outputTokens },
+    ].map((piece) => ({ ...zeroTokens(), ...piece })).filter((piece) => piece.inputTokens + piece.outputTokens > 0);
+    const upper = pieces.reduce((sum, piece) => {
+      const unknownWrite = piece.cacheWriteInputTokens > 0 && piece.cacheWrite5mInputTokens + piece.cacheWrite1hInputTokens === 0;
+      const variants = unknownWrite ? [piece, { ...piece, cacheWrite1hInputTokens: piece.cacheWriteInputTokens }] : [piece];
+      return sum + Math.max(...possibleInputs.flatMap((input) => variants.map((variant) =>
+        context.price(rate, variant, input).upperEstimateUsd)));
+    }, 0);
+    cost.upperEstimateUsd = Math.max(cost.upperEstimateUsd, upper);
   }
-  if (usage.cacheWriteInputTokens > 0 && usage.cacheWrite5mInputTokens + usage.cacheWrite1hInputTokens === 0) {
-    const longInput = scope === "summary" && rate.longContext ? rate.longContext.thresholdInputTokens + 1 : usage.inputTokens;
-    const oneHour = { ...usage, cacheWrite1hInputTokens: usage.cacheWriteInputTokens };
-    cost.upperEstimateUsd = Math.max(cost.upperEstimateUsd, context.price(rate, oneHour, longInput).upperEstimateUsd);
-    session.transcript.warnings.push("Cache-write TTL is unavailable; the ordinary estimate uses the default write rate and the upper estimate allows the configured one-hour write rate.");
+  if (scope === "summary" && possibleInputs.length > 1) {
+    session.transcript.warnings.push("Aggregate usage has no per-request context sizes; the conservative upper estimate allows each token class its highest configured context rate.");
+  }
+  if (unknownTtl > 0) {
+    session.transcript.warnings.push("Cache-write TTL is unavailable for some tokens; the ordinary estimate uses the default write rate and the upper estimate allows the configured one-hour write rate.");
   }
   sum(aggregate as CostBreakdown, cost); sum(session.cost, cost);
   session.costBasis = "api-list-price-equivalent";

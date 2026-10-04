@@ -20,21 +20,44 @@ export interface SourceSnapshot {
   rejectedModels: number;
 }
 
-function allowedModel(model: string, provider: "claude" | "codex"): boolean {
-  if (!validModelId(model)) return false;
+function allowedModel(model: string, provider: "claude" | "codex" | "cursor"): boolean {
+  if (!validModelId(model) || /^openai\/(?:claude-|grok-)/i.test(model) || /^anthropic\/(?!claude-)/i.test(model)) return false;
   const normalized = normalizedModelId(model);
-  return provider === "claude" ? /^claude-/.test(normalized) : /^(?:gpt-|chatgpt-|o[1-9](?:-|$))/.test(normalized);
+  return provider === "cursor" ? /^grok-/.test(normalized) : provider === "claude" ? /^claude-/.test(normalized) : /^(?:gpt-|chatgpt-|o[1-9](?:-|$))/.test(normalized);
 }
 
-function cacheDefaults(rate: ModelRate): void {
+// Paid cache writes are model-specific. Legacy OpenAI models have no write fee.
+// Explicit provider feed rates override this reviewed fallback; custom cards do
+// not pass through this normalizer and keep their explicitly supplied policy.
+const paidCacheWriteModels = new Set([
+  "gpt-5-6-sol", "gpt-5-6-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-1-sol",
+]);
+const legacyNoWriteModels = new Set(["gpt-5-3-codex", "gpt-5-4", "gpt-5-4-mini", "gpt-5-5"]);
+/** Re-project old generated assumptions without rewriting immutable source snapshots. */
+export function migrateLegacyCacheWriteRate(modelId: string, rate: ModelRate): ModelRate {
+  const model = normalizedModelId(modelId).replace(/-(?:20\d{2}-\d{2}-\d{2}|20\d{6})$/, "");
+  if (rate.provider !== "codex" || !legacyNoWriteModels.has(model) ||
+      rate.cacheWriteObservable !== false || rate.cacheWriteMultiplier !== 1.25 ||
+      !rate.assumptions?.includes("codex-cache-write-upper-1.25x") ||
+      rate.cacheWrite5mPerMillion !== undefined || rate.cacheWrite1hPerMillion !== undefined) return rate;
+  return { ...rate, cacheWriteMultiplier: 1,
+    assumptions: rate.assumptions.filter(code => code !== "codex-cache-write-upper-1.25x") };
+}
+
+function cacheDefaults(rate: ModelRate, modelId: string): void {
   if (rate.provider === "claude" && rate.cacheWrite5mPerMillion !== undefined && rate.cacheWrite1hPerMillion === undefined) {
     rate.cacheWrite1hPerMillion = rate.inputPerMillion * 2;
     rate.assumptions = ["anthropic-cache-1h-2x"];
   }
   if (rate.provider === "codex") {
     rate.cacheWriteObservable = false;
-    rate.cacheWriteMultiplier = 1.25;
-    rate.assumptions = ["codex-cache-write-upper-1.25x"];
+    const model = normalizedModelId(modelId).replace(/-(?:20\d{2}-\d{2}-\d{2}|20\d{6})$/, "");
+    const explicitWrite = rate.cacheWrite5mPerMillion;
+    rate.cacheWriteMultiplier = explicitWrite !== undefined && rate.inputPerMillion > 0
+      ? Math.max(1, explicitWrite / rate.inputPerMillion)
+      : paidCacheWriteModels.has(model) ? 1.25 : 1;
+    if (rate.cacheWriteMultiplier > 1) rate.assumptions = [rate.cacheWriteMultiplier === 1.25
+      ? "codex-cache-write-upper-1.25x" : "cache-write-upper-multiplier"];
   }
 }
 
@@ -52,7 +75,7 @@ function devTier(value: unknown, aboveInputTokens: unknown, rate: ModelRate): Co
   return tier;
 }
 
-function modelsDevRate(raw: unknown, provider: "claude" | "codex"): ModelRate | undefined {
+function modelsDevRate(raw: unknown, modelId: string, provider: "claude" | "codex" | "cursor"): ModelRate | undefined {
   const model = record(raw), cost = record(model?.cost), modalities = record(model?.modalities);
   if (!cost) return undefined; // Models without prices (e.g. image generators) are not corrupt.
   if (Array.isArray(modalities?.output) && !modalities.output.includes("text")) return undefined;
@@ -60,7 +83,7 @@ function modelsDevRate(raw: unknown, provider: "claude" | "codex"): ModelRate | 
   if (cost.cache_read !== undefined) rate.cacheReadPerMillion = price(cost.cache_read);
   if (cost.cache_write !== undefined) rate.cacheWrite5mPerMillion = price(cost.cache_write);
   if (cost.cache_write_1h !== undefined) rate.cacheWrite1hPerMillion = price(cost.cache_write_1h);
-  cacheDefaults(rate);
+  cacheDefaults(rate, modelId);
   if (cost.tiers !== undefined) {
     if (!Array.isArray(cost.tiers)) throw new Error("Invalid tiers.");
     rate.contextTiers = cost.tiers.map((value) => {
@@ -74,7 +97,7 @@ function modelsDevRate(raw: unknown, provider: "claude" | "codex"): ModelRate | 
   return validateRate(rate, SOURCE_URLS["models.dev"]);
 }
 
-function litellmRate(raw: unknown, provider: "claude" | "codex"): ModelRate | undefined {
+function litellmRate(raw: unknown, modelId: string, provider: "claude" | "codex" | "cursor"): ModelRate | undefined {
   const data = record(raw);
   if (!data || (data.mode !== undefined && data.mode !== "chat" && data.mode !== "responses")) return undefined;
   if (Array.isArray(data.supported_output_modalities) && !data.supported_output_modalities.includes("text")) return undefined;
@@ -86,7 +109,7 @@ function litellmRate(raw: unknown, provider: "claude" | "codex"): ModelRate | un
     ["cache_creation_input_token_cost_above_1hr", "cacheWrite1hPerMillion"],
   ] as const;
   for (const [key, field] of fields) if (data[key] !== undefined) rate[field] = unitPrice(data[key]);
-  cacheDefaults(rate);
+  cacheDefaults(rate, modelId);
   const boundaries = Object.keys(data).flatMap((key) => {
     const match = /^input_cost_per_token_above_(\d+)k_tokens$/.exec(key);
     return match ? [Number(match[1])] : [];
@@ -114,21 +137,22 @@ export function normalizeSource(source: PricingSource, payload: unknown): Pick<S
   if (!root) throw new Error("Invalid public pricing payload.");
   const models: Record<string, ModelRate> = Object.create(null);
   let rejectedModels = 0;
-  const add = (id: string, raw: unknown, provider: "claude" | "codex"): void => {
+  const add = (id: string, raw: unknown, provider: "claude" | "codex" | "cursor"): void => {
     if (!allowedModel(id, provider)) return;
     try {
-      const rate = source === "models.dev" ? modelsDevRate(raw, provider) : litellmRate(raw, provider);
+      const rate = source === "models.dev" ? modelsDevRate(raw, id, provider) : litellmRate(raw, id, provider);
       if (rate) models[id] = rate;
     } catch { rejectedModels += 1; }
   };
   if (source === "models.dev") {
-    for (const [lab, provider] of [["anthropic", "claude"], ["openai", "codex"]] as const) {
+    for (const [lab, provider] of [["anthropic", "claude"], ["openai", "codex"], ["xai", "cursor"]] as const) {
       const entries = record(record(root[lab])?.models);
       if (entries) for (const [model, raw] of Object.entries(entries)) add(model, raw, provider);
     }
   } else {
     for (const [id, raw] of Object.entries(root)) {
       const provider = record(raw)?.litellm_provider;
+      if (provider === "xai" && /^(?:xai\/)?grok-[a-z0-9.-]+$/.test(id)) add(id.replace(/^xai\//, ""), raw, "cursor");
       if (provider === "anthropic" || provider === "openai") add(id, raw, provider === "anthropic" ? "claude" : "codex");
     }
   }

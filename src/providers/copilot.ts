@@ -6,15 +6,19 @@ import { emptySession, files, finish, increment, jsonLines, name, observeTime, r
 export const copilotAdapter: ProviderAdapter = {
   id: "copilot-events", provider: "copilot",
   async discoverRoots({ home, options }) { return [options.copilotRoot ?? join(home, ".copilot/session-state")]; },
-  async *identify(root) {
-    for await (const path of files(root, (p) => basename(p) === "events.jsonl")) {
+  async *identify(root, onWarning) {
+    for await (const path of files(root, (p) => basename(p) === "events.jsonl", 0, onWarning)) {
+      try {
       for await (const event of jsonLines(path)) {
         if (event?.["type"] !== "session.start") continue;
         const data = record(event["data"]), id = text(data?.["sessionId"]), cwd = text(record(data?.["context"])?.["cwd"]);
         const createdAt = timestamp(data?.["startTime"]) ?? timestamp(event["timestamp"]);
-        if (id === basename(dirname(path)) && id && cwd?.startsWith("/") && createdAt) yield { id, path, cwd, createdAt, updatedAt: createdAt };
-        break;
+        if (id === basename(dirname(path)) && id && createdAt) {
+          yield { id, path, cwd: cwd?.startsWith("/") ? cwd : null, createdAt, updatedAt: createdAt };
+          break;
+        }
       }
+      } catch (error) { if (!onWarning) throw error; onWarning("A Copilot history could not be read; sibling histories were retained."); }
     }
   },
   async analyze(identity, context) {

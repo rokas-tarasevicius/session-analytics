@@ -1,0 +1,16 @@
+import './safe-failures.mjs';
+import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+const s=JSON.parse(fs.readFileSync(process.argv[2]||'../reference/snapshot-noindex-51ea561.json','utf8'));
+const key=x=>createHash('sha256').update(x).digest('hex').slice(0,12);
+const sum=(xs,f)=>xs.reduce((n,x)=>n+f(x),0);
+function group(rows,f){const g=new Map;for(const r of rows){const k=f(r),a=g.get(k)||[];a.push(r);g.set(k,a);}return [...g].map(([key,rs])=>({key,sessions:rs.length,tokenDifference:sum(rs,r=>r.tokenDifference||0),usdDifference:sum(rs,r=>r.usdDifference||0),observedUsd:sum(rs,r=>r.usd||0),observedTokens:sum(rs,r=>r.tokens||0)})).sort((a,b)=>a.key.localeCompare(b.key));}
+const velocity=[],velocityModel=[],unpriced=[],model=[];
+for(const a of s.sessions){const base={sessionKey:a.sessionKey,repositoryKey:key(a.repositoryId),provider:a.provider,month:a.createdAt.slice(0,7),usd:a.cost.totalUsd,tokens:a.tokens.inputTokens+a.tokens.outputTokens,source:a.evidence?.source||'native'};
+ if(a.velocity){const target=sum(a.models,m=>m.pricingCoverage?.pricedTokens||0),actual=sum([...a.velocity.buckets.map(c=>c[3]),...a.velocity.undated.map(c=>c[1])],v=>v[10]);if(target!==actual)velocity.push({...base,tokenDifference:actual-target});for(const m of a.models){const cells=[...a.velocity.buckets.filter(c=>a.velocity.dimensions[c[2]].model===m.model).map(c=>c[3]),...a.velocity.undated.filter(c=>a.velocity.dimensions[c[0]].model===m.model).map(c=>c[1])];const delta=sum(cells,v=>v[10])-(m.pricingCoverage?.pricedTokens||0);if(delta)velocityModel.push({...base,model:m.model,tokenDifference:delta,usd:m.totalUsd,tokens:m.inputTokens+m.outputTokens});}}
+ if(!a.costComplete&&(a.pricedTokenCoverage===null||a.pricedTokenCoverage===1||!base.tokens))unpriced.push({...base});
+ const usd=sum(a.models,m=>m.totalUsd)-a.cost.totalUsd,tokens=sum(a.models,m=>m.inputTokens+m.outputTokens)-base.tokens;
+ if(Math.abs(usd)>1e-7||tokens)model.push({...base,usdDifference:Math.abs(usd)>1e-7?usd:0,tokenDifference:tokens});
+}
+const result={generatedAt:s.generatedAt,velocity:{sessions:velocity.length,tokenDifference:sum(velocity,r=>r.tokenDifference),affectedValue:sum(velocity,r=>r.usd),byModel:group(velocityModel,r=>r.model),byMonth:group(velocity,r=>r.month),byRepository:group(velocity,r=>r.repositoryKey),byProvider:group(velocity,r=>r.provider),rows:velocity},unpriced:{sessions:unpriced.length,bySource:group(unpriced,r=>r.source),byMonth:group(unpriced,r=>r.month),byRepository:group(unpriced,r=>r.repositoryKey),byProvider:group(unpriced,r=>r.provider),rows:unpriced},model:{sessions:model.length,usdDifference:sum(model,r=>r.usdDifference),tokenDifference:sum(model,r=>r.tokenDifference),overstated:group(model.filter(r=>r.usdDifference>0),r=>'all'),understated:group(model.filter(r=>r.usdDifference<0),r=>'all'),byMonth:group(model,r=>r.month),byRepository:group(model,r=>r.repositoryKey),byProvider:group(model,r=>r.provider),rows:model}};
+fs.writeFileSync('.lane/snapshot-findings-results.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(Object.fromEntries(Object.entries(result).map(([k,v])=>[k,typeof v==='object'?Object.fromEntries(Object.entries(v).filter(([k])=>!['rows','byRepository'].includes(k))):v])),null,2));

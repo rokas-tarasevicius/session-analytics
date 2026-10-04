@@ -1,10 +1,10 @@
 import type { ModelRate } from "../types.ts";
-import { validModelId } from "../public/model-id.js";
+import { validModelId, projectModelId } from "../public/model-id.js";
 export { validModelId } from "../public/model-id.js";
 
 /** Only lab prefixes are aliases. Never turn a reseller/deployment ID into a direct API price. */
 export function normalizedModelId(model: string): string {
-  return model.toLowerCase().replace(/^(?:anthropic|openai)\//, "")
+  return projectModelId(model).toLowerCase().replace(/^(?:anthropic|openai)\//, "")
     .replace(/(\d)\.(?=\d)/g, "$1-");
 }
 
@@ -26,6 +26,9 @@ function aliasIndex(models: Record<string, ModelRate>): AliasIndex {
   const index: AliasIndex = { normalized: new Map(), dated: new Map(), matches: new Map() };
   const add = (map: Map<string, string | null>, key: string, model: string) => map.set(key, map.has(key) ? null : model);
   for (const model of Object.keys(models)) {
+    // Apply the query trust boundary to candidate IDs too: stripping a conflicting
+    // lab prefix must not turn a rejected ID into a valid unprefixed alias.
+    if (!validModelId(model) || /^openai\/(?:claude-|grok-)/i.test(model) || /^anthropic\/(?!claude-)/i.test(model)) continue;
     const normalized = normalizedModelId(model);
     add(index.normalized, normalized, model);
     add(index.dated, withoutDate(normalized), model);
@@ -36,8 +39,8 @@ function aliasIndex(models: Record<string, ModelRate>): AliasIndex {
 
 export function findModelRate(models: Record<string, ModelRate>, model: string):
   Match | undefined {
-  if (!validModelId(model)) return undefined;
-  if (/^openai\/claude-/i.test(model) || /^anthropic\/(?!claude-)/i.test(model)) return undefined;
+  if (!validModelId(projectModelId(model))) return undefined;
+  if (/^openai\/(?:claude-|grok-)/i.test(model) || /^anthropic\/(?!claude-)/i.test(model)) return undefined;
   if (Object.hasOwn(models, model)) return { model, rate: models[model]!, match: "exact" };
   if (model.includes("/") && !/^(?:anthropic|openai)\//i.test(model)) return undefined;
   const index = aliasIndex(models);

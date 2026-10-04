@@ -55,9 +55,9 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 **Known gaps:**
 
-- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). Retained Conductor result records can recover summary evidence, but not the deleted message/tool history.
-- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). The local index preserves sessions ingested before cleanup, marked `transcript.sourceDeleted`. History deleted before the first ingest cannot be recovered; rebuild and `--no-index` cannot reconstruct it.
-- `stats-cache.json` and other provider-reported totals are not yet used for reconciliation.
+- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). Retained Conductor assistant metadata can recover usage and tool counts; result receipts remain a summary fallback. Missing response identities make recovery conservative and partial.
+- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). The local index preserves sessions ingested before cleanup, marked `transcript.sourceDeleted`. History deleted before the first ingest requires an independent source such as Conductor; the index alone cannot reconstruct it.
+- Profile `stats-cache.json` daily-token version 5 is reconciled against same-profile UTC day/model streamed-block counters, separately from deduplicated session usage; older or unknown versions are labeled unsupported. See [History coverage](metrics.md#history-coverage-and-recovery).
 - Profile labels and keys are available in Limits & cache; other views do not yet expose a profile dimension.
 
 ### Claude reliability evidence
@@ -165,7 +165,7 @@ Owned request peaks exclude foreign broadcast counters. Request-size coverage se
 
 **Outcomes:** composer `totalLinesAdded` / `totalLinesRemoved` are provider-reported session totals. Both must be valid nonnegative integers; zero is distinguishable from unavailable. These records provide no commit/PR association, and Cursor's reported usage value remains excluded from API-equivalent outcome ratios.
 
-## Conductor (optional enrichment and result fallback)
+## Conductor (optional enrichment and history recovery)
 
 **Where:** `~/Library/Application Support/com.conductor.app/conductor.db` (macOS). Override with `--database PATH`. A missing database is normal and changes nothing about provider discovery.
 
@@ -178,7 +178,7 @@ Owned request peaks exclude foreign broadcast counters. Request-size coverage se
 | `repos` | `id`, `name`, `root_path`, `remote_url`, `default_branch`, `hidden` |
 | `workspaces` | `id`, `repository_id`, `workspace_name`, `workspace_path`, `branch` |
 | `sessions` | `id`, `status`, `agent_type`, `title`, `created_at`, `updated_at`, `claude_session_id` (the provider session ID), `model`, `is_hidden`, `workspace_id` |
-| `session_messages` | `id`, `session_id`, `created_at` when present; terminal SDK `result` envelopes in `content` or `full_message` when present |
+| `session_messages` | `id`, `session_id`, `created_at` when present; allowlisted SDK `assistant`, `result`, `system/init` and `conversation_reset` metadata in `content` or `full_message`; optional `sdk_message_id` |
 
 Session titles, workspace names, branches, root paths, and remotes are loaded for correlation inside the analysis process and are never returned.
 
@@ -196,7 +196,9 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 **Known gaps:**
 
 - A result-only session cannot recover missing tools, skills, user messages, request counts, execution kind, or request times. Result `num_turns` counts SDK loop turns, not human turns.
-- Missing/malformed messages, unrecognized agent types, or results whose provider ID conflicts with the registered row do not become evidence. Ordinary stored assistant/user messages are not parsed as fallback transcripts.
+- Missing/malformed messages, unrecognized agent types, or results whose provider ID conflicts with the registered row do not become evidence. Assistant metadata is projected inside SQLite for message recovery; user/assistant prose, reasoning and tool arguments/results are never selected into JavaScript row objects.
+
+**Message recovery:** when native Claude evidence is absent, assistant usage takes precedence over receipt totals. Native and recovered streams share cache/TTL normalization and final/max-output snapshot selection. Tools deduplicate by tool-use ID; explicit `parent_tool_use_id` and sidechain markers attribute subagent requests. Request timestamps prefer the recorded timestamp, then the database event timestamp, never the session update date. Results are compared on their existing conservative cumulative scope, not added to recovered value. Stripped response IDs use conservative groups of matching input counters within each agent; SDK record UUIDs are not response IDs. Missing identities and missing usage are exposed, and retained message history remains partial. Conductor Codex rows never use Claude SDK recovery.
 
 **Result fallback:** canonical native evidence wins. All remaining rows are collected before grouping by the result's provider identity, including legacy rows without a registered ID. UUIDs (message IDs when absent) deduplicate receipt copies; they do not identify independent accounting periods. Rows that disagree about repository attribution use an explicit unassigned group. This parser supports verified Claude SDK results; other providers' superficially similar result envelopes require separate scope verification.
 
@@ -283,7 +285,7 @@ Explicit provider roots also constrain history and profile skill discovery. The 
 
 Malformed primary JSONL records (including truncated tails and non-object rows) mark partial workflow coverage. Claude child-file failures remain separate from the primary interaction clock. Optional metadata validators accept strings only, and workflow observation/finalization failures cannot remove otherwise valid accounting records.
 
-- Conductor's per-session result records (turns, durations, reported cost) are not yet used as fallback evidence when a provider transcript has been deleted.
+- Deleted Claude transcripts can use Conductor assistant metadata, then result receipts as a fallback. Other provider aggregates need independently verified accounting scopes.
 - Agent types other than Claude Code and Codex in Conductor are reported as unsupported evidence. Unknown agent names use the fixed public provider `unsupported`; raw names are omitted. These rows round-trip through interchange and remain outside sharing eligibility.
 
 ## Adding a provider
@@ -309,3 +311,9 @@ behavior, unavailable cache/reasoning fields and the session-start denominator.
 ## MCP coverage refinements
 
 Provider discovery projects only source status enums and read/missing/unreadable counts, independent of the selected sessions. Deduplicated Claude/Codex pricing retains dated eligible/priced token operands so budget coverage includes unpriced activity from older sessions. Profiles require settled lifecycle observations; missing evidence is unknown, including Cursor, and an orchestrator working flag overrides settled observations. These statuses describe recorded turns, not success or live process state. See [metric definitions](metrics.md#mcp-query-semantics).
+
+### Correctness and incomplete evidence
+
+Cursor SDK stores merge distinct runs across copies and keep the latest duplicate run snapshot. Recorded run time selects pricing evidence without inventing request-day allocation. Stable stream-event IDs can recover usage when final run counters are absent; such recovery remains partial. Valid canonical run counters take precedence. Native Cursor excludes empty drafts, preserves explicitly reported zero cost, and replaces stale inline bubbles with their current disk snapshots. Missing provider cost is unavailable, with incomplete cost coverage. Explicit transcript subagent ancestry is retained.
+
+Gemini replay retains non-accounting message identities as rewind/order anchors and follows persisted metadata updates. Copilot's optional context is not required for session identity, and malformed starts do not hide later valid starts. OpenCode excludes inherited boundary-time responses and marks skipped malformed messages/parts as partial accounting. A broken or oversized provider file/store cannot erase already found sessions or prevent healthy siblings from being read; fixed warnings record the discovery gap.

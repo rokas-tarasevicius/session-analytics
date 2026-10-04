@@ -28,6 +28,7 @@ import { claudeReliabilityDemo, codexReliabilityDemo } from "./demo-reliability.
 import { demoRateLimits, writeLimitsDemo } from "./demo-limits-cache.ts";
 import { demoClaudeOutcomes, demoCodexFileChange, demoCodexGit } from "./demo-outcomes.ts";
 import { addWorkflowDemo } from "./demo-workflow.ts";
+import { seedHistoryDemo } from "./demo-history.ts";
 import { seedMcpDemo } from "./mcp-demo.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -626,6 +627,7 @@ try {
 
   await seedDemoPricing(join(root, "analytics-data"));
   seedMcpDemo(root);
+  seedHistoryDemo(root, sources.claudeRoot, Date.now());
 } catch (error) {
   cleanup();
   throw error;

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { timestampMilliseconds } from "../public/timestamps.js";
 
 export const MIN_REQUESTS = 3;
 export const MIN_INPUT_TOKENS = 1_000;
@@ -21,7 +22,7 @@ export function oneOf<T extends string>(value: unknown, values: readonly T[]): T
 export function timestamp(value: unknown): string | null {
   const milliseconds = typeof value === "number" && Number.isFinite(value)
     ? value < 100_000_000_000 ? value * 1000 : value
-    : typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) ? Date.parse(value) : NaN;
+    : timestampMilliseconds(value);
   return Number.isFinite(milliseconds) && milliseconds >= 946_684_800_000 && milliseconds < 4_102_444_800_000
     ? new Date(milliseconds).toISOString() : null;
 }

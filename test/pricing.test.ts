@@ -266,14 +266,14 @@ test("platform data directories and configuration precedence are explicit", () =
   }
 });
 
-test("reviewed exceptions retain their cache ratios, subscription zero and long-context modifiers", async () => {
+test("reviewed exceptions retain cache ratios and context modifiers without inventing a Spark tariff", async () => {
   const card = await loadReviewed();
   const catalog = catalogFromSnapshots(card, [], {}, new Date("2026-10-03"));
   for (const [model, ratio] of [["claude-opus-5-5", 0.05], ["claude-fable-5-1", 0.025]] as const) {
     const result = resolveRate(catalog, model)!;
     assert.equal(result.provenance.kind, "reviewed"); assert.equal(result.rate.cacheReadPerMillion! / result.rate.inputPerMillion, ratio);
   }
-  assert.equal(resolveRate(catalog, "gpt-5.3-codex-spark")?.rate.inputPerMillion, 0);
+  assert.equal(resolveRate(catalog, "gpt-5.3-codex-spark"), undefined);
   assert.deepEqual(resolveRate(catalog, "gpt-6.1-sol")?.rate.longContext,
     { inputMultiplier: 2, outputMultiplier: 1.5, thresholdInputTokens: 272000 });
 });

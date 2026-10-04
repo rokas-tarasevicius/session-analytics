@@ -23,7 +23,7 @@ export function providerMark(provider) {
   const badge = document.createElement("span"); badge.className = "pill mark"; badge.textContent = { copilot: "CP", opencode: "OC", gemini: "G", unsupported: "?" }[provider]; badge.setAttribute("aria-hidden", "true"); return badge;
 }
 
-const sourceLabels = { "conductor-result": "Conductor results", "cursor-sdk": "Cursor SDK runs", "cursor-transcript": "Cursor transcripts", "copilot-events": "Copilot events", "opencode-db": "OpenCode database", "gemini-chat": "Gemini chats" };
+const sourceLabels = { "conductor-messages": "Conductor messages", "conductor-result": "Conductor results", "cursor-sdk": "Cursor SDK runs", "cursor-transcript": "Cursor transcripts", "copilot-events": "Copilot events", "opencode-db": "OpenCode database", "gemini-chat": "Gemini chats" };
 
 /** Coverage uses eligible sessions, not invented zero-valued observations. */
 export function providerEvidenceRows(sessions) {

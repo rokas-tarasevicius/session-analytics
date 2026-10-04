@@ -95,7 +95,7 @@ export function coverageWarnings(sessions) {
   const summaries = sessions.filter((s) => s.evidence?.fidelity === "summary").length;
   if (activityOnly) warnings.push(`${activityOnly}/${sessions.length} sessions have no token evidence; their usage value is unavailable, not zero.`);
   if (summaries) warnings.push(`${summaries}/${sessions.length} sessions use summary evidence with no per-request daily cost attribution. See evidence coverage below.`);
-  if (unpriced) warnings.push(`${unpriced} session${unpriced === 1 ? "" : "s"} include models without a rate card.`);
+  if (unpriced) warnings.push(`${unpriced} sessions have incomplete token pricing.`);
   return warnings;
 }
 
@@ -166,7 +166,10 @@ export function dailyCountSeries(sessions, days, accessor) {
   const index = new Map(days.map((day, position) => [day, position]));
   const values = days.map(() => 0);
   for (const session of sessions) {
-    const position = index.get(session.createdAt.slice(0, 10));
+    if (session.transcript?.startTimeKnown === false || session.evidence?.timing === "file-mtime") continue;
+    const at = timestampMilliseconds(session.createdAt);
+    if (!Number.isFinite(at)) continue;
+    const position = index.get(new Date(at).toISOString().slice(0, 10));
     if (position !== undefined) values[position] += accessor(session);
   }
   return values;

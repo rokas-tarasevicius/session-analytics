@@ -157,10 +157,14 @@ test("review: Conductor versioned restarts, restored resumes and explicit resets
     event("epochs", { type: "conversation_reset", uuid: "reset-id", session_id: "provider-private", new_conversation_id: "after-reset" });
     event("epochs", result("four", 4, 400, "after-reset")); db.close();
     const s = (await analyzeMachineSessions(options(f))).sessions.filter((s) => s.conductor);
-    assert.equal(s.length, 2); assert.equal(s.reduce((n, s) => n + s.cost.totalUsd, 0), 7);
-    assert.equal(s.reduce((n, s) => n + s.tokens.inputTokens, 0), 700);
+    // Init UUIDs do not establish disjoint processes. A lower old-SDK receipt
+    // leaves the observed maximum (2) plus the explicitly separate reset (4).
+    assert.equal(s.length, 2);
+    assert.equal(s.reduce((n, s) => n + s.cost.totalUsd, 0), version === "2.1.276" ? 6 : 7);
+    assert.equal(s.reduce((n, s) => n + s.tokens.inputTokens, 0), version === "2.1.276" ? 600 : 700);
     assert.equal(s.reduce((n, s) => n + s.conductor!.resultRecords, 0), 4);
-    assert.ok(s.every((s) => s.costComplete));
+    assert.equal(s.find((s) => s.conductor!.resultRecords === 3)!.costComplete, false);
+    assert.equal(s.find((s) => s.conductor!.resultRecords === 1)!.costComplete, true);
     assert.equal(s.reduce((n, s) => n + s.conductor!.turnLocalTokens!.inputTokens, 0), 44);
   });
 });

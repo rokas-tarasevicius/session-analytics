@@ -30,6 +30,6 @@ export interface ProviderAdapter<Session = ProviderSession, Context = ProviderCo
   readonly id: string;
   readonly provider: SessionProvider;
   discoverRoots(environment: ProviderEnvironment): Promise<string[]>;
-  identify(root: string): AsyncIterable<Session>;
+  identify(root: string, onWarning?: (warning: string) => void): AsyncIterable<Session>;
   analyze(session: Session, context: Context): Promise<SessionAnalytics | null>;
 }

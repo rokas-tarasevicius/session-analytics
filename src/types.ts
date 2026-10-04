@@ -10,6 +10,7 @@ import type { SessionWorkflow, WorkflowSummary } from "./metrics/workflow-types.
 export type * from "./metrics/workflow-types.ts";
 
 import type { CacheGapSignals } from "./insights/types.ts";
+import type { SessionHistory, HistoryStatistics, HistoryReconciliation, HistoryCoverage } from "./metrics/history-types.ts";
 export type { Insight, InsightGroup, InsightsReport, InsightThresholds, CacheGapSignals } from "./insights/types.ts";
 export type { ReviewPreview } from "./insights/review-context.ts";
 export type { ReviewAssessment } from "./insights/review-agent.ts";
@@ -198,6 +199,10 @@ export interface TokenUsage {
   cacheWrite1hInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
+  /** Known non-reasoning output when a separate reasoning breakdown is exposed.
+   * outputTokens may exceed reasoningOutputTokens + nonReasoningOutputTokens:
+   * the nonnegative remainder has no observed reasoning classification.
+   * Older snapshots/providers may retain a full partition using legacy estimates. */
   nonReasoningOutputTokens: number;
 }
 
@@ -253,6 +258,8 @@ export interface TranscriptHealth {
 }
 
 export interface SessionAnalytics {
+  history?: SessionHistory;
+  historyStatistics?: HistoryStatistics;
   /** Present for added evidence sources; absence preserves the legacy provider contract. */
   evidence?: ProviderEvidence;
   conductor?: ConductorResultMetrics;
@@ -326,7 +333,7 @@ export interface RepositoryAnalytics {
   summary: {
     analyzedSessions: number;
     apiEquivalentSpendUsd: number;
-    cacheReadRatio: number;
+    cacheReadRatio: number | null;
     compactions: number;
     estimatedSpendUsd: number;
     estimatedUpperSpendUsd: number;
@@ -350,6 +357,7 @@ export interface RepositoryAnalytics {
 }
 
 export interface MachineAnalytics {
+  historyCoverage?: HistoryCoverage;
   velocity?: VelocityMetadata;
   limitsCache?: LimitsCacheAnalytics;
   outcomes?: OutcomeSummary;
@@ -438,7 +446,7 @@ export interface AnalyzeOptions extends PricingOptions {
 export interface ProviderEvidence {
   /** Partial means retained usage does not prove a complete, disjoint accounting interval. */
   accounting?: "complete" | "partial";
-  source: "conductor-result" | "cursor-sdk" | "cursor-transcript" | "copilot-events" | "opencode-db" | "gemini-chat";
+  source: "conductor-result" | "conductor-messages" | "cursor-sdk" | "cursor-transcript" | "copilot-events" | "opencode-db" | "gemini-chat";
   fidelity: "message" | "summary" | "activity-only";
   tokens: "reported" | "unavailable";
   tools: "observed" | "unavailable";
@@ -449,6 +457,7 @@ export interface ProviderEvidence {
 
 export type ConductorTerminalReason = "success" | "error_during_execution" | "error_max_turns" | "error_max_budget_usd" | "error_max_structured_output_retries" | "completed" | "cancelled" | "interrupted" | "unknown";
 export interface ConductorResultMetrics {
+  reconciliation?: HistoryReconciliation;
   /** Deduplicated turn-local receipt usage, never added to cumulative model totals. */
   turnLocalTokens?: TokenUsage | null;
   resultRecords: number;

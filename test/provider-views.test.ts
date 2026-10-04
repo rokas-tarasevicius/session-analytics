@@ -31,7 +31,7 @@ async function harness() {
   const evidenceHelpers = await import(new URL("../src/public/evidence.js", import.meta.url).href);
   const exportHelpers = await import(new URL("../src/public/export-data.js", import.meta.url).href);
   const ui = await import(new URL("../src/public/ui.js", import.meta.url).href);
-  const context = createContext({ ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, document, Intl, Set, Map, console, HTMLElement: Element,
+  const context = createContext({ renderHistoryCoverage() {}, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   source = source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
@@ -88,7 +88,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
   const invalid = sample(undefined, true); invalid.tokens = tokens(999, 0, 0, 999); invalid.metrics.toolCalls = 999; invalid.tools = { Read: 999 };
   for (const sessions of [[activity], [summary], [invalid], [summary, activity]]) {
     h.context["sessions"] = sessions;
-    h.run('renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
+    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
     // Values stay bare; the eligible/selected share moves to the coverage badge beside the value.
     assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? "100" : "—");
     const selected = `${sessions.length} selected ${sessions.length === 1 ? "session" : "sessions"}`;

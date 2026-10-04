@@ -26,6 +26,10 @@ async function codexFixture(root: string, unknownSize = false, active = false) {
       { type: "event_msg", timestamp: i === 0 ? "2026-09-01T00:00:59Z" : "2026-09-01T00:00:01Z", payload: { type: "task_started", content: "secret-lifecycle-content" } },
       { type: "event_msg", timestamp: "2026-09-01T00:01:00Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 300_000, output_tokens: 100 }, last_token_usage: { input_tokens: 300_000, output_tokens: 100 }, model_context_window: 1_000_000 } } },
     ];
+    // A shared numeric state alone is ambiguous; the provider receipt proves its producer.
+    if (i === 0) records.splice(3, 0, { type: "token_usage_record", timestamp: "2026-09-01T00:01:00Z",
+      payload: { thread_id: id, response_id: "synthetic-shared-request", usage: { input_tokens: 300_000, output_tokens: 100 },
+        thread_token_usage: { input_tokens: 300_000, output_tokens: 100 } } });
     for (let n = 1; n <= 10; n++) records.push({ type: "event_msg", timestamp: `2026-09-01T00:02:${String(n).padStart(2, "0")}Z`, payload: { type: "token_count", info: { total_token_usage: { input_tokens: 300_000 + i * 1_000_000 + n * 10_000, output_tokens: 100 + i * 1_000 + n * 100 }, last_token_usage: { input_tokens: 10_000, output_tokens: 100 } } } });
     if (unknownSize) records.push({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1_400_000 + i * 1_000_000, output_tokens: 1_100 + i * 1_000 } } } });
     if (!active) records.push({ type: "event_msg", timestamp: "2026-09-01T00:03:00Z", payload: { type: "task_complete" } });

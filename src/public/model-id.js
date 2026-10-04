@@ -16,5 +16,9 @@ export function validModelId(value) {
 }
 
 export function projectModelId(value) {
-  return validModelId(value) ? value : "<unknown>";
+  // Claude Code appends this documented context-selection suffix to full model IDs.
+  // Project its underlying identity; do not broaden the public identifier alphabet.
+  const model = typeof value === "string" && /^(?:anthropic\/)?claude-/i.test(value)
+    ? value.replace(/\[1m\]$/i, "") : value;
+  return validModelId(model) ? model : "<unknown>";
 }

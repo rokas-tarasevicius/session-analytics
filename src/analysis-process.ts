@@ -4,6 +4,14 @@ import { fileURLToPath } from "node:url";
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
 import { indexErrorMessage } from "./store/errors.ts";
 
+export class AnalysisHeapLimitError extends Error {
+  readonly stage: "analysis" | "serialization";
+  constructor(stage: "analysis" | "serialization") {
+    super("Session analysis exceeded its 256 MB worker heap limit.");
+    this.stage = stage;
+  }
+}
+
 export async function analyzeMachineSessionsIsolated(
   options: AnalyzeOptions,
 ): Promise<MachineAnalytics> {
@@ -22,9 +30,12 @@ export async function analyzeMachineSessionsIsolated(
     child.once("error", reject);
     child.once("close", (code) => {
       if (code !== 0) {
-        void errorOutput;
         let message: string | null = null;
         try { message = indexErrorMessage((JSON.parse(output) as { analysisError?: unknown }).analysisError); } catch { /* No raw child error is forwarded. */ }
+        if (!message && /heap out of memory|allocation failed.*heap/i.test(errorOutput)) {
+          reject(new AnalysisHeapLimitError(output.startsWith("{") ? "serialization" : "analysis"));
+          return;
+        }
         reject(new Error(message ?? "Session analysis process exited before returning a result."));
         return;
       }

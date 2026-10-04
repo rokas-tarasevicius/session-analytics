@@ -10,8 +10,9 @@ export function cursorTranscriptAdapter(knownPaths: string[] = []): ProviderAdap
   return {
     id: "cursor-transcript", provider: "cursor",
     async discoverRoots({ home, options }) { return [options.cursorTranscriptRoot ?? join(home, ".cursor/projects")]; },
-    async *identify(root) {
-      for await (const path of files(root, (p) => p.endsWith(".jsonl") && p.includes("/agent-transcripts/"))) {
+    async *identify(root, onWarning) {
+      for await (const path of files(root, (p) => p.endsWith(".jsonl") && p.includes("/agent-transcripts/"), 0, onWarning)) {
+        try {
         const id = basename(path, ".jsonl");
         if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id)) continue;
         const project = relative(root, path).split("/")[0];
@@ -19,10 +20,15 @@ export function cursorTranscriptAdapter(knownPaths: string[] = []): ProviderAdap
         const matches = [...new Set(knownPaths.filter((p) => encode(p) === project))];
         const at = (await stat(path)).mtime.toISOString();
         yield { id, path, cwd: matches.length === 1 ? matches[0]! : null, createdAt: at, updatedAt: at, group: project };
+        } catch (error) { if (!onWarning) throw error; onWarning("A Cursor transcript could not be read; sibling histories were retained."); }
       }
     },
     async analyze(identity, context) {
       const session = emptySession(identity, "cursor", context, { source: "cursor-transcript", fidelity: "activity-only", tokens: "unavailable", tools: "observed", turns: "observed", timing: "file-mtime", usageUnit: "unavailable" });
+      // Cursor's writer uses this hierarchy only for a subagent with a known parent.
+      // Ordinary/legacy paths do not establish top-level execution.
+      const parts = identity.path.split("/");
+      if (parts.at(-4) === "agent-transcripts" && parts.at(-2) === "subagents" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(parts.at(-3) ?? "")) session.executionKind = "subagent";
       const seen = new Set<string>();
       for await (const row of jsonLines(identity.path)) {
         if (!row) { session.transcript.warnings.push("Malformed Cursor transcript records were skipped."); continue; }

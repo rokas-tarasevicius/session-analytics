@@ -1,12 +1,15 @@
+import { canonicalizeRemote } from "../repository-remotes.ts";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type { PricingCatalog } from "../pricing/catalog.ts";
 import type { AnalyzeOptions, RateCard, SessionAnalytics, SessionDatabaseRow } from "../types.ts";
 import { openIndexDatabase, type IndexConnection, type IndexScanStats } from "./database.ts";
 import { fingerprint, keyedHash, stillMatches, type FileFingerprint } from "./fingerprint.ts";
 import { readCodexLedger, type CodexLedgerEvidence } from "./codex-ledger.ts";
-import { projectSession } from "./projection.ts";
+import { projectSession, sessionForIndex } from "./projection.ts";
+import { assertIndexParity, IndexParityError, rotatingSample } from "./parity.ts";
 
 interface StoredSession {
   identity_key: string;
@@ -23,11 +26,11 @@ interface StoredSession {
 }
 interface Exclusion { identity_key: string; signature: string; source_keys: string }
 interface StoredEvidence { fingerprint: string; ledger: string | null; ledger_mac: string | null }
+type PreviousSession = Omit<StoredSession, "payload"> & { payload: Buffer };
+const previousPayload = (row: PreviousSession): string => inflateRawSync(row.payload).toString("utf8");
 export interface CounterOwner { path: string; timestamp: string; modelFallback: string | null }
 
-function normalizeRemote(value: string): string {
-  return value.trim().replace(/^git@([^:]+):/, "https://$1/").replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
-}
+const normalizeRemote = canonicalizeRemote;
 
 /** Retention comparisons use UTC instants; provider timestamps may include an offset. */
 export function lastActivityAt(session: Pick<SessionAnalytics, "lastEventAt" | "updatedAt" | "createdAt">): string {
@@ -45,7 +48,7 @@ export class IndexScan {
   private revision: string;
   private started = performance.now();
   private fingerprints = new Map<string, { path: string; value: FileFingerprint }>();
-  private sessions = new Map<string, StoredSession>();
+  private sessions = new Map<string, PreviousSession>();
   private seen = new Set<string>();
   private pending = new Map<string, string[]>();
   private exclusions = new Map<string, Exclusion>();
@@ -54,15 +57,18 @@ export class IndexScan {
   private components = new Map<string, string>();
   private unobservedClaims = new Map<string, string>();
   private retiredCounters: Set<string>;
-  private ledgerEvidence = new Map<string, CodexLedgerEvidence>();
+  private ledgerPaths = new Set<string>();
+  private retainedOrphanCount = 0;
   private dependencies = new Map<string, string>();
   private ambiguousCounters = false;
   private repositories = new Map<string, { root: string; remote: string }>();
   private committed = false;
   private pruneBefore: string;
+  private auditSessions: Set<string>;
+  private auditLedgers: Set<string>;
   readonly stats: IndexScanStats = {
     fingerprintedFiles: 0, parsedSessions: 0, reusedSessions: 0, retainedSessions: 0, deferredSessions: 0,
-    ledgerReads: 0, ledgerHits: 0, ledgerAppends: 0, elapsedMilliseconds: 0,
+    ledgerReads: 0, ledgerHits: 0, ledgerAppends: 0, auditedSessions: 0, auditedLedgers: 0, elapsedMilliseconds: 0,
   };
 
   private constructor(connection: IndexConnection, scope: string, revision: string) {
@@ -78,14 +84,21 @@ export class IndexScan {
     for (const row of connection.database.prepare("SELECT identity_key,signature,source_keys FROM exclusions WHERE scope=?").all(scope) as unknown as Exclusion[]) {
       this.exclusions.set(row.identity_key, row);
     }
-    for (const row of connection.database.prepare("SELECT * FROM sessions WHERE scope=? ORDER BY rowid").all(scope) as unknown as StoredSession[]) {
+    const nativeIdentities: string[] = [];
+    for (const row of connection.database.prepare("SELECT * FROM sessions WHERE scope=? ORDER BY rowid").iterate(scope) as unknown as Iterable<StoredSession>) {
       // A damaged payload must never cross the projection boundary or silently erase retained history.
       if (this.hash(row.payload) !== row.payload_mac) throw new Error("The local index failed an integrity check; run index rebuild.");
       const session = projectSession(JSON.parse(row.payload) as SessionAnalytics);
-      this.sessions.set(row.identity_key, row);
+      // Rollback needs the prior generation, not a second full JSON graph in V8's heap.
+      this.sessions.set(row.identity_key, { ...row, payload: deflateRawSync(row.payload) });
       if (!row.retention_verified) this.unverifiedRetention.add(session.sessionKey);
       this.repositories.set(session.repositoryId, { root: row.root_key, remote: row.remote_key });
+      if (session.provider === "codex" || session.provider === "claude") nativeIdentities.push(row.identity_key);
     }
+    const cursor = (kind: string) => String(connection.database.prepare("SELECT value FROM metadata WHERE key=?").get(`audit:${kind}:${scope}`)?.["value"] ?? "");
+    this.auditSessions = new Set(rotatingSample(nativeIdentities, cursor("sessions"), 4));
+    const ledgers = connection.database.prepare("SELECT source_key FROM evidence WHERE scope=? AND ledger IS NOT NULL").all(scope).map((row) => String(row["source_key"]));
+    this.auditLedgers = new Set(rotatingSample(ledgers, cursor("ledgers"), 1));
   }
 
   static async open(options: AnalyzeOptions, rateCard: RateCard, includeHidden: boolean): Promise<IndexScan | null> {
@@ -122,7 +135,7 @@ export class IndexScan {
         [options.cursorSdkRoot, options.cursorTranscriptRoot, options.copilotRoot, options.opencodeDatabasePath, options.geminiRoot]
           .map((root) => root ? resolve(root) : "default"),
       ]);
-      return new IndexScan(connection, scope, hash(["parser-v2-utc-extrema", source, ledgerSource, storeSource, projectionSource, parserSources, pricing, options.reliabilityContentRules === true, options.workflowContentRules === true]));
+      return new IndexScan(connection, scope, hash(["parser-v061-native-accounting", source, ledgerSource, storeSource, projectionSource, parserSources, pricing, options.reliabilityContentRules === true, options.workflowContentRules === true]));
     } catch (error) { connection.close(); throw error; }
   }
 
@@ -135,7 +148,9 @@ export class IndexScan {
     const key = this.sourceKey(path);
     const existing = this.fingerprints.get(key);
     if (existing) return existing.value;
-    const value = await fingerprint(path, this.connection.secret);
+    let value: FileFingerprint;
+    try { value = await fingerprint(path, this.connection.secret); }
+    catch { throw new IndexParityError(); }
     this.fingerprints.set(key, { path, value }); this.stats.fingerprintedFiles += 1;
     return value;
   }
@@ -145,8 +160,16 @@ export class IndexScan {
     const row = this.connection.database.prepare("SELECT fingerprint,ledger,ledger_mac FROM evidence WHERE scope=? AND source_key=?").get(this.scope, sourceKey) as unknown as StoredEvidence | undefined;
     let evidence: CodexLedgerEvidence;
     if (row?.ledger && this.hash(row.ledger) !== row.ledger_mac) throw new Error("The local index failed an integrity check; run index rebuild.");
-    if (row?.ledger && row.fingerprint === JSON.stringify(current)) {
+    if (row?.ledger && row.fingerprint === JSON.stringify(current) && JSON.parse(row.ledger).observations.every((observation: { earliestTimestamp?: string }) => typeof observation.earliestTimestamp === "string")) {
       evidence = JSON.parse(row.ledger) as CodexLedgerEvidence; this.stats.ledgerHits += 1;
+      if (this.auditLedgers.has(sourceKey)) {
+        const fresh = (await readCodexLedger(path, current, this.connection.secret)).evidence;
+        // Live appends are handled by component deferral, not diagnosed as cache corruption.
+        if (await stillMatches(path, current)) {
+          assertIndexParity(evidence, fresh);
+          this.stats.auditedLedgers += 1;
+        }
+      }
     } else {
       const result = await readCodexLedger(path, current, this.connection.secret, row?.ledger
         ? { fingerprint: JSON.parse(row.fingerprint) as FileFingerprint, evidence: JSON.parse(row.ledger) as CodexLedgerEvidence } : undefined);
@@ -158,7 +181,7 @@ export class IndexScan {
         ON CONFLICT(scope,source_key) DO UPDATE SET fingerprint=excluded.fingerprint,ledger=excluded.ledger,ledger_mac=excluded.ledger_mac`)
         .run(this.scope, sourceKey, JSON.stringify(current), payload, this.hash(payload));
     }
-    this.ledgerEvidence.set(path, evidence);
+    this.ledgerPaths.add(path);
     return evidence;
   }
 
@@ -167,7 +190,7 @@ export class IndexScan {
     const owners = new Map<string, CounterOwner>();
     const liveSources = new Set(livePaths.map((path) => this.sourceKey(path)));
     for (const [identity, row] of this.sessions) {
-      const session = JSON.parse(row.payload) as SessionAnalytics;
+      const session = JSON.parse(previousPayload(row)) as SessionAnalytics;
       if (session.provider !== "codex" || liveIds.has(identity) || (JSON.parse(row.source_keys) as string[]).some((key) => liveSources.has(key))) continue;
       for (const counter of JSON.parse(row.owned_counters) as Array<[string, string, string | null]>) {
         owners.set(counter[0], { path: `retained:${identity}`, timestamp: counter[1], modelFallback: counter[2] });
@@ -177,7 +200,7 @@ export class IndexScan {
   }
 
   setCounterDependencies(owners: Map<string, CounterOwner>): void {
-    this.ambiguousCounters = [...this.ledgerEvidence.values()].some((evidence) => evidence.unownedCounters);
+    this.ambiguousCounters = false;
     // Connect old owners, new owners and every consumer, even if the old owner stopped
     // observing a counter. Deferral must restore one whole accounting generation.
     const counters = new Map<string, string>();
@@ -191,15 +214,25 @@ export class IndexScan {
       this.joinSources(sources);
       if (sources[0]) for (const [counter] of JSON.parse(row.owned_counters) as Array<[string, string, string | null]>) observe(counter, sources[0]);
     }
-    for (const [path, evidence] of this.ledgerEvidence) {
+    const ledger = this.connection.database.prepare("SELECT ledger FROM evidence WHERE scope=? AND source_key=?");
+    for (const path of this.ledgerPaths) {
       const source = this.sourceKey(path);
+      // Broadcast receivers can repeat millions of observations. Hydrate one file at a time.
+      const evidence = JSON.parse(String(ledger.get(this.scope, source)?.["ledger"])) as CodexLedgerEvidence;
+      this.ambiguousCounters ||= evidence.unownedCounters;
       for (const { fingerprint } of evidence.observations) observe(fingerprint, source);
       for (const fingerprint of evidence.unownedFingerprints) observe(fingerprint, source);
-      this.dependencies.set(path, this.hash(JSON.stringify(evidence.observations.map(({ fingerprint }) => {
+      // Native-only producers can reserve a legacy state observed by another file.
+      // A commit-time source change must defer the entire ownership transfer.
+      for (const fingerprint of evidence.nativeFingerprints ?? []) observe(fingerprint, source);
+      const dependencies = new Set([...evidence.observations.map(({ fingerprint }) => fingerprint), ...(evidence.nativeFingerprints ?? [])]);
+      this.dependencies.set(path, this.hash(JSON.stringify([...dependencies].map((fingerprint) => {
         const owner = owners.get(fingerprint);
         return [fingerprint, owner ? this.sourceKey(owner.path) : "", owner?.timestamp, owner?.modelFallback];
       }))));
     }
+    // Only the derived dependency signatures are needed during session parsing.
+    this.ledgerPaths.clear();
   }
 
   private component(source: string): string {
@@ -228,49 +261,70 @@ export class IndexScan {
     attributedCounters?: Set<string>,
     parseDependencies?: unknown,
   ): Promise<SessionAnalytics | null> {
-    const mainPath = paths[0] as string;
-    const providerId = row.provider_session_id ?? mainPath.match(/([0-9a-f]{8}-[0-9a-f-]{27})\.(?:jsonl|json)$/i)?.[1] ?? row.conductor_session_id;
-    const identity = this.identity(row.agent_type, providerId);
-    this.seen.add(identity);
-    const sources = await Promise.all(paths.map(async (path) => [this.sourceKey(path), await this.file(path)]));
-    const signature = this.hash(JSON.stringify([
-      this.revision, sources, warnings, this.dependencies.get(mainPath), parseDependencies,
-      // Private correlation metadata only influences the keyed signature, never a payload.
-      row.conductor_session_id, row.database_model, row.created_at, row.updated_at, row.status,
-      row.repository_id, row.repository_name, row.root_path, row.repository_remote, row,
-    ]));
-    const previous = this.sessions.get(identity);
-    // A missing-timestamp token record has no ledger owner; preserve the full-scan claimed-counter order.
-    const previousSession = previous ? JSON.parse(previous.payload) as SessionAnalytics : null;
-    // Open workflows age into abandonment flags even when the source file is unchanged.
-    const canReuse = previousSession?.workflow?.abandonment !== "ongoing" &&
-      (row.agent_type !== "codex" || Boolean(this.dependencies.get(mainPath)) && !this.ambiguousCounters);
-    // Exclusion depends on verified activity time, not on which undated request won.
-    // Previously removed ownership is already reserved independently of cache reuse.
-    if (this.exclusions.get(identity)?.signature === signature) {
-      this.stats.reusedSessions += 1;
-      return null;
-    }
-    let result: SessionAnalytics;
-    let owned: Array<[string, string, string | null]> = [];
-    if (previous?.signature === signature && previous.retention_verified && canReuse) {
-      result = projectSession(previousSession!);
-      owned = JSON.parse(previous.owned_counters) as typeof owned;
-      for (const [counter] of owned) claimedCounters?.add(counter);
-      delete result.transcript.sourceDeleted;
-      this.stats.reusedSessions += 1;
-    } else {
-      const analyzed = await analyze();
-      if (!analyzed) return null;
-      result = projectSession(analyzed);
-      for (const counter of attributedCounters ?? []) {
-        const owner = owners?.get(counter);
-        owned.push([counter, owner?.timestamp ?? "", owner?.modelFallback ?? null]);
-        if (!owner) this.unobservedClaims.set(counter, this.sourceKey(mainPath));
+    let sourceFailed = false;
+    try {
+      const mainPath = paths[0] as string;
+      const providerId = row.provider_session_id ?? mainPath.match(/([0-9a-f]{8}-[0-9a-f-]{27})\.(?:jsonl|json)$/i)?.[1] ?? row.conductor_session_id;
+      const identity = this.identity(row.agent_type, providerId);
+      this.seen.add(identity);
+      const sources = await Promise.all(paths.map(async (path) => [this.sourceKey(path), await this.file(path)]));
+      const signature = this.hash(JSON.stringify([
+        this.revision, sources, warnings, paths.map(path => this.dependencies.get(path) ?? null), parseDependencies,
+        // Private correlation metadata only influences the keyed signature, never a payload.
+        row.conductor_session_id, row.database_model, row.created_at, row.updated_at, row.status,
+        row.repository_id, row.repository_name, row.root_path, row.repository_remote, row,
+      ]));
+      const previous = this.sessions.get(identity);
+      // A missing-timestamp token record has no ledger owner; preserve the full-scan claimed-counter order.
+      const previousSession = previous ? JSON.parse(previousPayload(previous)) as SessionAnalytics : null;
+      // Open workflows age into abandonment flags even when the source file is unchanged.
+      const canReuse = previousSession?.workflow?.abandonment !== "ongoing" &&
+        !(previousSession?.transcript.liveness === "active" && !previousSession.transcript.snapshotWhileWorking) &&
+        (row.agent_type !== "codex" || Boolean(this.dependencies.get(mainPath)) && !this.ambiguousCounters);
+      // Exclusion depends on verified activity time, not on which undated request won.
+      // Previously removed ownership is already reserved independently of cache reuse.
+      if (this.exclusions.get(identity)?.signature === signature) {
+        this.stats.reusedSessions += 1;
+        return null;
       }
-      this.stats.parsedSessions += 1;
+      let result: SessionAnalytics;
+      let owned: Array<[string, string, string | null]> = [];
+      if (previous?.signature === signature && previous.retention_verified && canReuse) {
+        result = projectSession(previousSession!);
+        owned = JSON.parse(previous.owned_counters) as typeof owned;
+        if (this.auditSessions.has(identity)) {
+          // Audit before replaying claims: the full parser must see the same prior owners.
+          const fresh = await analyze();
+          const stable = (await Promise.all(paths.map(async (path) => stillMatches(path, await this.file(path))))).every(Boolean);
+          if (stable) {
+            assertIndexParity(result, fresh && projectSession(fresh));
+            this.stats.auditedSessions += 1;
+          } else {
+            // A raced audit must not claim requests absent from the cached response.
+            for (const counter of attributedCounters ?? []) claimedCounters?.delete(counter);
+          }
+        }
+        for (const [counter] of owned) claimedCounters?.add(counter);
+        delete result.transcript.sourceDeleted;
+        this.stats.reusedSessions += 1;
+      } else {
+        let analyzed: SessionAnalytics | null;
+        try { analyzed = await analyze(); }
+        catch (error) { sourceFailed = true; throw error; }
+        if (!analyzed) return null;
+        result = sessionForIndex(analyzed);
+        for (const counter of attributedCounters ?? []) {
+          const owner = owners?.get(counter);
+          owned.push([counter, owner?.timestamp ?? "", owner?.modelFallback ?? null]);
+          if (!owner) this.unobservedClaims.set(counter, this.sourceKey(mainPath));
+        }
+        this.stats.parsedSessions += 1;
+      }
+      return this.save(identity, signature, result, paths.map((path) => this.sourceKey(path)), row.root_path, row.repository_remote, owned) ? result : null;
+    } catch (error) {
+      if (sourceFailed) throw error;
+      throw new IndexParityError();
     }
-    return this.save(identity, signature, result, paths.map((path) => this.sourceKey(path)), row.root_path, row.repository_remote, owned) ? result : null;
   }
 
   private save(
@@ -291,7 +345,7 @@ export class IndexScan {
     this.connection.database.prepare("DELETE FROM exclusions WHERE scope=? AND identity_key=?").run(this.scope, identity);
     const rootKey = root ? this.hash(`root:${resolve(root)}`) : "", remoteKey = remote ? this.hash(`remote:${normalizeRemote(remote)}`) : "";
     this.repositories.set(session.repositoryId, { root: rootKey, remote: remoteKey });
-    const payload = JSON.stringify(projectSession(session));
+    const payload = JSON.stringify(sessionForIndex(session));
     this.connection.database.prepare(`INSERT INTO sessions(scope,identity_key,signature,payload,payload_mac,source_keys,root_key,remote_key,owned_counters,last_event_at,source_deleted,retention_verified)
       VALUES (?,?,?,?,?,?,?,?,?,?,0,1) ON CONFLICT(scope,identity_key) DO UPDATE SET signature=excluded.signature,
       payload=excluded.payload,payload_mac=excluded.payload_mac,source_keys=excluded.source_keys,root_key=excluded.root_key,
@@ -317,12 +371,27 @@ export class IndexScan {
     this.connection.database.prepare("DELETE FROM sessions WHERE scope=? AND identity_key=?").run(this.scope, identity);
   }
 
+  /** Surviving children must not overwrite already retained main-file accounting. */
+  retainedClaudeParent(providerId: string, childPath: string): SessionAnalytics | null {
+    const identity = this.identity("claude", providerId), previous = this.sessions.get(identity);
+    if (!previous) return null;
+    const root = childPath.split("/subagents/")[0]!;
+    const sources = JSON.parse(previous.source_keys) as string[];
+    if (![`${root}.jsonl`, `${root}.json`].some(path => sources.includes(this.sourceKey(path)))) return null;
+    const session = projectSession(JSON.parse(previousPayload(previous)) as SessionAnalytics);
+    session.transcript.sourceDeleted = true;
+    session.transcript.warnings.push("Source-deleted history retains the pricing and parser results from its last successful ingest.");
+    this.seen.add(identity); this.retainedOrphanCount++;
+    this.connection.database.prepare("UPDATE sessions SET source_deleted=1 WHERE scope=? AND identity_key=?").run(this.scope, identity);
+    return session;
+  }
+
   retained(livePaths: string[], complete: boolean, cursorComplete: boolean, additionalComplete = true): SessionAnalytics[] {
     const live = new Set(livePaths.map((path) => this.sourceKey(path)));
     const retained: SessionAnalytics[] = [];
     for (const [identity, row] of this.sessions) {
       if (this.seen.has(identity)) continue;
-      const session = projectSession(JSON.parse(row.payload) as SessionAnalytics);
+      const session = projectSession(JSON.parse(previousPayload(row)) as SessionAnalytics);
       const sourceKeys = JSON.parse(row.source_keys) as string[];
       if (sourceKeys.some((key) => live.has(key))) {
         // Present-but-invalid/mismatched evidence must not resurrect a previously validated session.
@@ -341,7 +410,7 @@ export class IndexScan {
       if (!row.retention_verified) session.transcript.warnings.push("Legacy activity dates could not be verified; history is kept until its source can be read again.");
       retained.push(session);
     }
-    this.stats.retainedSessions = retained.length;
+    this.stats.retainedSessions = retained.length + this.retainedOrphanCount;
     return retained;
   }
 
@@ -376,7 +445,7 @@ export class IndexScan {
       const previous = this.sessions.get(identity);
       this.connection.database.prepare("DELETE FROM sessions WHERE scope=? AND identity_key=?").run(this.scope, identity);
       if (previous) this.connection.database.prepare(`INSERT INTO sessions(scope,identity_key,signature,payload,payload_mac,source_keys,root_key,remote_key,owned_counters,last_event_at,source_deleted,retention_verified)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(this.scope, identity, previous.signature, previous.payload, previous.payload_mac,
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(this.scope, identity, previous.signature, previousPayload(previous), previous.payload_mac,
           previous.source_keys, previous.root_key, previous.remote_key, previous.owned_counters, previous.last_event_at, previous.source_deleted, previous.retention_verified);
       this.connection.database.prepare("DELETE FROM exclusions WHERE scope=? AND identity_key=?").run(this.scope, identity);
       const excluded = this.exclusions.get(identity);
@@ -396,6 +465,10 @@ export class IndexScan {
     }
     const reserve = this.connection.database.prepare("INSERT OR IGNORE INTO retired_counters(scope,counter_key) VALUES (?,?)");
     for (const counters of this.pendingRetirements.values()) for (const counter of counters) reserve.run(this.scope, this.hash(counter));
+    for (const [kind, sample] of [["sessions", this.auditSessions], ["ledgers", this.auditLedgers]] as const) {
+      const last = [...sample].at(-1);
+      if (last) this.connection.database.prepare("INSERT OR REPLACE INTO metadata(key,value) VALUES (?,?)").run(`audit:${kind}:${this.scope}`, last);
+    }
     this.stats.elapsedMilliseconds = Math.round(performance.now() - this.started);
     this.connection.database.prepare(`INSERT INTO scans(scope,completed_at,stats) VALUES (?,?,?)
       ON CONFLICT(scope) DO UPDATE SET completed_at=excluded.completed_at,stats=excluded.stats`)

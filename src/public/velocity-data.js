@@ -1,4 +1,5 @@
 import { providerLabels } from "./providers.js";
+import { normalizeTimestamp } from "./timestamps.js";
 // Pure calendar, aggregation and comparison functions shared by the two charts.
 // All arithmetic on calendar dates uses UTC *as a calendar*, never as the bucket timezone.
 export const metricDefinitions = {
@@ -53,7 +54,9 @@ export function localDay(timestamp, timeZone = "UTC") {
   // Match the ledger's absolute-timestamp contract before Date can apply the
   // browser's timezone (or turn null into the Unix epoch).
   if (typeof timestamp !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)) return null;
-  const date = new Date(timestamp);
+  const normalized = normalizeTimestamp(timestamp.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
+  if (!normalized) return null;
+  const date = new Date(normalized);
   if (!Number.isFinite(date.valueOf())) return null;
   let formatter = dayFormatters.get(timeZone);
   if (!formatter) {

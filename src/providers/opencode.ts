@@ -1,22 +1,24 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+import { openSourceDatabase } from "../source-database.ts";
 import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
 import { addUsage, emptySession, finish, increment, hash, modelName, name, observeTime, parse, record, text, timestamp, tokens } from "./common.ts";
 
 // Forks get fresh message/part IDs but retain original message times and usage.
 // Only compact fingerprints from messages owned by their creation session are indexed.
-const ownerIndexes = new WeakMap<ProviderSession, Set<string>>();
+const ownerIndexes = new WeakMap<ProviderSession, Map<string, string>>();
 function fingerprint(directory: string, message: Record<string, unknown>): string {
   const usage = record(message["tokens"]), cache = record(usage?.["cache"]), time = record(message["time"]);
   return hash(JSON.stringify([directory, timestamp(time?.["created"]), timestamp(time?.["completed"]), modelName(message["modelID"]), tokens(usage?.["input"], cache?.["read"], cache?.["write"], usage?.["output"], usage?.["reasoning"])]));
 }
-function indexOwners(database: DatabaseSync): Set<string> {
-  const owners = new Set<string>();
+function indexOwners(database: DatabaseSync): Map<string, string> {
+  const owners = new Map<string, string>();
   for (const row of database.prepare("SELECT s.directory, s.time_created, m.data FROM message m JOIN session s ON s.id=m.session_id").iterate()) {
     const message = parse(row["data"]), at = timestamp(record(message?.["time"])?.["created"]), created = timestamp(row["time_created"]);
     if (message?.["role"] !== "assistant" || !at || !created || at < created) continue;
-    owners.add(fingerprint(String(row["directory"]), message));
+    const key = fingerprint(String(row["directory"]), message), previous = owners.get(key);
+    if (!previous || created < previous) owners.set(key, created);
     if (owners.size > 200_000) throw new Error("OpenCode ownership index exceeds the memory budget.");
   }
   return owners;
@@ -30,7 +32,7 @@ export const opencodeAdapter: ProviderAdapter = {
   },
   async *identify(path) {
     try { await stat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
-    const database = new DatabaseSync(path, { readOnly: true });
+    const database = openSourceDatabase(path);
     try {
       const owners = indexOwners(database);
       for (const row of database.prepare("SELECT id, directory, time_created, time_updated FROM session ORDER BY id").iterate()) {
@@ -43,7 +45,7 @@ export const opencodeAdapter: ProviderAdapter = {
     } finally { database.close(); }
   },
   async analyze(identity, context) {
-    const database = new DatabaseSync(identity.path, { readOnly: true });
+    const database = openSourceDatabase(identity.path);
     try {
       const session = emptySession(identity, "opencode", context, { source: "opencode-db", fidelity: "message", tokens: "unavailable", tools: "observed", turns: "observed", timing: "provider", usageUnit: "request" });
       const parent = database.prepare("SELECT parent_id FROM session WHERE id = ?").get(identity.id);
@@ -51,12 +53,15 @@ export const opencodeAdapter: ProviderAdapter = {
       const owners = ownerIndexes.get(identity) ?? indexOwners(database);
       const excluded = new Set<string>();
       let inherited = 0, ambiguous = 0;
+      let malformed = false;
       const messages = new Map<string, { model: string; usage: ReturnType<typeof tokens> | null; at: string | null }>();
       for (const row of database.prepare("SELECT id, data FROM message WHERE session_id = ? ORDER BY id").iterate(identity.id)) {
         const message = parse(row["data"]);
-        if (!message) { session.transcript.warnings.push("Malformed OpenCode message records were skipped."); continue; }
+        if (!message) { malformed = true; excluded.add(String(row["id"])); session.transcript.warnings.push("Malformed OpenCode message records were skipped."); continue; }
         const at = timestamp(record(message["time"])?.["created"]);
-        if (!at || at < identity.createdAt) {
+        const ownerCreated = message["role"] === "assistant" ? owners.get(fingerprint(identity.cwd ?? "", message)) : undefined;
+        const copiedAtBoundary = at === identity.createdAt && ownerCreated !== undefined && ownerCreated < identity.createdAt;
+        if (!at || at < identity.createdAt || copiedAtBoundary) {
           excluded.add(String(row["id"]));
           if (message["role"] === "assistant") {
             if (at && owners.has(fingerprint(identity.cwd ?? "", message))) inherited++;
@@ -77,6 +82,7 @@ export const opencodeAdapter: ProviderAdapter = {
       for (const row of database.prepare("SELECT message_id, time_created, data FROM part WHERE session_id = ? ORDER BY id").iterate(identity.id)) {
         if (excluded.has(String(row["message_id"]))) continue;
         const part = parse(row["data"]);
+        if (!part) { malformed = true; session.transcript.warnings.push("Malformed OpenCode part records were skipped."); continue; }
         if (part?.["type"] === "compaction") session.metrics.compactions++;
         // The assistant snapshot contains only its last step. Prefer per-step counters
         // when retained, and never add the assistant snapshot on top of those steps.
@@ -96,6 +102,7 @@ export const opencodeAdapter: ProviderAdapter = {
         session.evidence!.tokens = "reported";
         addUsage(session, context, message.model, message.usage, message.at, "request");
       }
+      if (malformed) { session.evidence!.accounting = "partial"; session.transcript.warnings.push("OpenCode accounting is partial because some records could not be parsed."); }
       if (inherited) session.transcript.warnings.push(`${inherited} inherited assistant records are owned by earlier sessions and excluded here.`);
       if (ambiguous) {
         session.evidence!.accounting = "partial";
@@ -103,7 +110,7 @@ export const opencodeAdapter: ProviderAdapter = {
       }
       session.transcript.warnings.push("OpenCode step counters are priced at reviewed API rates, with assistant snapshots used only where step counters are absent. OpenCode's own cost estimate is not added again.");
       const finalized = finish(session);
-      if (ambiguous) finalized.costComplete = false;
+      if (ambiguous || malformed) finalized.costComplete = false;
       return finalized;
     } finally { database.close(); }
   },

@@ -1,3 +1,4 @@
+import { validHistoryCoverage, validSessionHistory } from "../metrics/history-validation.ts";
 import { InteropError } from "./error.ts";
 import type { CostBreakdown, MachineAnalytics, ModelUsage, NamedMetric, SharedSnapshot, TokenUsage } from "../types.ts";
 import { readJsonFile } from "./files.ts";
@@ -14,7 +15,10 @@ const costKeys = ["inputUsd", "cachedInputUsd", "cacheWriteUsd", "outputUsd", "t
 const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0);
 function tokensReconcile(tokens: TokenUsage): boolean {
   return tokens.inputTokens === tokens.uncachedInputTokens + tokens.cachedInputTokens + tokens.cacheWriteInputTokens &&
-    tokens.outputTokens === tokens.reasoningOutputTokens + tokens.nonReasoningOutputTokens &&
+    // A missing reasoning breakdown leaves an unclassified output remainder.
+    // Reject overlapping subclasses, but do not require unknown output to be
+    // falsely assigned to non-reasoning just to satisfy a complete partition.
+    tokens.outputTokens >= tokens.reasoningOutputTokens + tokens.nonReasoningOutputTokens &&
     tokens.cacheWrite5mInputTokens + tokens.cacheWrite1hInputTokens <= tokens.cacheWriteInputTokens;
 }
 function costReconciles(cost: CostBreakdown, reported: boolean): boolean {
@@ -61,7 +65,9 @@ export function validateSnapshot(value: unknown): MachineAnalytics {
   const repositories = new Map(snapshot.repositories.map(({ repository }) => [repository.id, repository.name]));
   if (repositories.size !== snapshot.repositories.length) fail();
   const sessions = new Set<string>();
+  if (!validHistoryCoverage(snapshot)) fail();
   for (const session of snapshot.sessions) {
+    if (!validSessionHistory(session)) fail();
     const key = `${session.provider}:${session.sessionKey}`;
     if (sessions.has(key) || repositories.get(session.repositoryId) !== session.repositoryName) fail();
     if (![session.createdAt, session.updatedAt, session.firstEventAt, session.lastEventAt].every((value) => value === null || date(value))) fail();
@@ -91,15 +97,31 @@ export function validateSnapshot(value: unknown): MachineAnalytics {
       if (session.pricedTokenCoverage !== null || Object.keys(session.spendByDay).length) fail();
       if (cursor) {
         if (session.models.some((model) => tokenKeys.some((key) => model[key] !== 0))) fail();
-        if (session.costBasis !== (session.cost.totalUsd > 0 ? "provider-reported" : "unavailable")) fail();
-        if (!session.costComplete) fail();
+        if (!["provider-reported", "unavailable"].includes(session.costBasis) || session.cost.totalUsd > 0 && session.costBasis !== "provider-reported") fail();
+        if (!session.costComplete && session.costBasis !== "unavailable") fail();
       } else {
         if (!["provider-reported", "unavailable"].includes(session.costBasis) || session.evidence?.accounting === "partial" && session.costComplete) fail();
       }
     } else {
       for (const key of tokenKeys) if (session.tokens[key] !== sum(session.models.map((model) => model[key]))) fail();
       if (session.metrics.modelCalls !== sum(session.models.map((model) => model.calls))) fail();
-      if (summaryUsage ? Object.keys(session.spendByDay).length > 0 : !close(session.cost.totalUsd, sum(Object.values(session.spendByDay)))) fail();
+      if (summaryUsage) {
+        if (Object.keys(session.spendByDay).length) fail();
+      } else if (session.history) {
+        if (!close(session.cost.totalUsd, sum(Object.values(session.spendByDay)) + (session.history.undatedValueUsd ?? 0))) fail();
+      } else if (!session.velocity) {
+        if (!close(session.cost.totalUsd, sum(Object.values(session.spendByDay)))) fail();
+      } else {
+        const dated = session.velocity.buckets.map(([, , , values]) => values);
+        const undated = session.velocity.undated.map(([, values]) => values);
+        const cells = [...dated, ...undated], datedSpend = sum(Object.values(session.spendByDay));
+        if (!close(datedSpend, sum(dated.map(values => values[0]))) ||
+            !close(session.cost.totalUsd, datedSpend + sum(undated.map(values => values[0]))) ||
+            sum(cells.map(values => values[1])) !== session.tokens.inputTokens ||
+            sum(cells.map(values => values[5])) !== session.tokens.outputTokens ||
+            sum(cells.map(values => values[7])) !== session.metrics.modelCalls ||
+            cells.some(values => values[0] > 0 && values[1] + values[5] === 0)) fail();
+      }
       const denominator = session.tokens.inputTokens + session.tokens.outputTokens;
       const numerator = sum(session.models.map((model) => model.pricingCoverage?.pricedTokens ?? (model.priced ? model.inputTokens + model.outputTokens : 0)));
       if (!Number.isSafeInteger(denominator) || !Number.isSafeInteger(numerator)) fail();
@@ -109,20 +131,52 @@ export function validateSnapshot(value: unknown): MachineAnalytics {
       } else if (activity) {
         if (session.costBasis !== "unavailable" || denominator || session.models.length || session.costComplete) fail();
       } else if (session.costBasis !== "api-list-price-equivalent" && !(source && !session.cost.totalUsd && session.costBasis === "unavailable")) fail();
-      const complete = session.evidence ? denominator > 0 && numerator === denominator && session.evidence.accounting !== "partial" : session.pricedTokenCoverage === null || session.pricedTokenCoverage === 1;
+      const incompleteIterations = session.provider === "claude" && session.transcript.completeness === "partial" && session.transcript.warnings.includes("Iteration billing is incomplete; uncertain attempts were omitted or left unpriced.");
+      const complete = !incompleteIterations && (session.evidence ? denominator > 0 && numerator === denominator && session.evidence.accounting !== "partial" : session.pricedTokenCoverage === null || session.pricedTokenCoverage === 1);
       if (session.costComplete !== complete) fail();
     }
     sessions.add(key);
   }
   const recomputed = filterSnapshot(snapshot);
   const rollups = [snapshot, ...snapshot.repositories], expected = [recomputed, ...recomputed.repositories];
+  const migrated = new Set<number>();
   for (let index = 0; index < rollups.length; index++) {
     const actual = rollups[index]!, canonical = expected[index]!;
-    if (!actual.warnings.every(approvedWarning) || !consistent(actual.summary, canonical.summary) ||
+    let summary = actual.summary;
+    if (!consistent(summary, canonical.summary)) {
+      // v0.6.0 exported these derived fields with older semantics. Accept only
+      // their independently reproducible legacy values, then normalize them;
+      // session evidence and every other arithmetic check remain unchanged.
+      const selected = index === 0 ? snapshot.sessions : snapshot.sessions.filter((session) => session.repositoryId === snapshot.repositories[index - 1]!.repository.id);
+      const legacy = { ...canonical.summary,
+        unpricedSessions: selected.filter((session) => !session.costComplete).length,
+        cacheReadRatio: canonical.summary.cacheReadRatio ?? 0,
+        ...(index === 0 ? { workingSnapshots: selected.filter((session) => session.transcript.snapshotWhileWorking).length } : {}),
+      };
+      const normalized = { ...summary };
+      for (const key of ["unpricedSessions", "cacheReadRatio", "workingSnapshots"] as const) {
+        const old = legacy as unknown as Record<string, unknown>, current = canonical.summary as unknown as Record<string, unknown>;
+        const candidate = normalized as unknown as Record<string, unknown>;
+        if (candidate[key] === old[key]) candidate[key] = current[key];
+      }
+      if (consistent(normalized, canonical.summary)) { summary = canonical.summary; migrated.add(index); }
+    }
+    if (!actual.warnings.every(approvedWarning) || !consistent(summary, canonical.summary) ||
       !namedEqual(actual.spendByDay, canonical.spendByDay) || !namedEqual(actual.topTools, canonical.topTools, true) ||
       !modelsEqual(actual.spendByModel, canonical.spendByModel)) fail();
   }
-  return snapshot;
+  if (!migrated.size) return snapshot;
+  const normalizeWarnings = (warnings: string[], unpriced: number) => [...new Set(warnings.flatMap((warning) =>
+    /^\d+ sessions? include models without a rate card\.$/.test(warning)
+      ? unpriced ? [`${unpriced} sessions have incomplete token pricing.`] : [] : [warning]))];
+  return { ...snapshot,
+    summary: migrated.has(0) ? recomputed.summary : snapshot.summary,
+    warnings: normalizeWarnings(snapshot.warnings, recomputed.summary.unpricedSessions),
+    repositories: snapshot.repositories.map((repository, index) => ({ ...repository,
+      ...(migrated.has(index + 1) ? { summary: recomputed.repositories[index]!.summary } : {}),
+      warnings: normalizeWarnings(repository.warnings, recomputed.repositories[index]!.summary.unpricedSessions),
+    })),
+  };
 }
 
 export async function loadSnapshot(path: string): Promise<MachineAnalytics | SharedSnapshot> {
