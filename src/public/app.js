@@ -1,3 +1,4 @@
+import { renderHistoryCoverage } from "./history-coverage.js";
 import {
   clampWindow, costTotals, coverageWarnings, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample,
   evidenceLabel, groupByRepository, heatLevel, matchesQuery, mergeModels, namedTotals, percent, previousPeriod, providerLabels,
@@ -522,8 +523,8 @@ function renderActivity(view) {
   renderViewProviderFilters(elements.activityProviderFilters, "activity");
   elements.activityTooltip.hidden = true;
   const eligible = sessionsForProviders(view.sessions, "activity");
-  const sessions = eligible.filter((s) => s.evidence?.timing !== "file-mtime");
-  $("#activity-evidence").textContent = `${sessions.length}/${eligible.length} sessions have provider start timestamps. File modification dates are excluded.`;
+  const sessions = eligible.filter((s) => s.transcript?.startTimeKnown !== false && s.evidence?.timing !== "file-mtime" && normalizeTimestamp(s.createdAt) !== null);
+  $("#activity-evidence").textContent = `${sessions.length}/${eligible.length} sessions have provider start timestamps. Unknown starts and file modification dates are excluded.`;
   const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
   for (const session of sessions) {
     const date = new Date(normalizeTimestamp(session.createdAt)); if (Number.isNaN(date.valueOf())) continue;
@@ -646,7 +647,12 @@ function renderModels(view) {
   }[modelMetric];
   for (const provider of providerOrder) {
     const providerModels = models.filter((model) => model.provider === provider);
-    if (providerModels.length === 0) continue;
+    const providerSessions = sessions.filter((session) => session.provider === provider);
+    const sourceMetric = { value: "cost", input: "tokens", output: "tokens", calls: "calls" }[modelMetric];
+    const sourceValue = (session) => ({ value: session.cost.totalUsd, input: session.tokens.inputTokens, output: session.tokens.outputTokens, calls: session.metrics.modelCalls })[modelMetric];
+    const eligibleSessions = providerSessions.filter((session) => metricEligible(session, sourceMetric));
+    const unattributed = Math.max(0, eligibleSessions.reduce((total, session) => total + sourceValue(session), 0) - providerModels.reduce((total, model) => total + metric.value(model), 0));
+    if (providerModels.length === 0 && !unattributed) continue;
     const group = node("section", null, "provider-model-group"); group.style.setProperty("--provider-color", providerColors[provider]);
     const header = node("header"); const title = node("div");
     title.append(node("h2", providerLabels[provider]), node("div", `${sessions.filter((session) => session.provider === provider).length} sessions`));
@@ -658,6 +664,11 @@ function renderModels(view) {
       const track = node("div", null, "model-track"), fill = node("i"); fill.style.width = `${(metric.value(model) / maximum) * 100}%`; if (model.eligible[modelMetric]) track.append(fill);
       const suffix = `${coveredValue(metric.value(model), { eligible: model.eligible[modelMetric], selected: model.selected }, metric.format)} · ${model.selected} selected sessions${model.priced ? "" : " · unpriced"}`;
       row.append(track, node("strong", suffix)); group.append(row);
+    }
+    if (unattributed > 0.000001) {
+      const row = node("div", null, "model-row");
+      row.append(node("span", "Unattributed · no model evidence"), node("div"), node("strong", metric.format(unattributed)));
+      group.append(row);
     }
     elements.modelsByProvider.append(group);
   }
@@ -771,7 +782,15 @@ function renderActiveAnalyticsView(view) {
 }
 
 function dailyProviderSpend(sessions) {
-  return dailySpendByProvider(sessions, elements.windowStart.value, elements.windowEnd.value);
+  const days = new Map(daysBetween(elements.windowStart.value, elements.windowEnd.value).map((name) => [name, { name, ...Object.fromEntries(providerOrder.map((provider) => [provider, 0])) }]));
+  for (const session of sessions) {
+    if (!providerOrder.includes(session.provider)) continue;
+    for (const [day, , , values] of session.velocity?.buckets || []) {
+      const row = days.get(day);
+      if (row) row[session.provider] += values[0];
+    }
+  }
+  return [...days.values()];
 }
 
 function renderLine(items) {
@@ -998,6 +1017,7 @@ function renderDelta(element, delta) {
 }
 
 function renderSummary(view) {
+  renderHistoryCoverage($("#history-coverage"), snapshot.historyCoverage, snapshot.sessions);
   const summary = view.summary;
   const days = windowDays();
   // Deltas compare against the equal-length period immediately before the window, only when that period is fully observed.
@@ -1011,7 +1031,7 @@ function renderSummary(view) {
   renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v)); elements.cache.textContent = `${coveredValue(summary.cacheReadRatio, summary.coverage.tokens, percent)} cached · repeated context included`;
   renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v)); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v)); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v)); elements.live.textContent = integer.format(summary.workingSnapshots);
   const metrics = [
-    ["spend", "Daily priced usage value", money, summary.estimatedSpendUsd, previousSummary?.estimatedSpendUsd, dailySpendSeries(view.sessions, days)],
+    ["spend", "Dated API-equivalent value only (UTC); sessions started in the selected window, undated and out-of-window value excluded", money, summary.estimatedSpendUsd, previousSummary?.estimatedSpendUsd, dailySpendSeries(view.sessions, days)],
     ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
     ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.inputTokens)],
     ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.outputTokens)],
@@ -1058,7 +1078,8 @@ function setWindowPreset(preset) {
 }
 
 function observedRange() {
-  const dates = snapshot.sessions.flatMap(({ createdAt, spendByDay, velocity, limitsCache }) => [createdAt.slice(0, 10), ...Object.keys(spendByDay),
+  const dates = snapshot.sessions.flatMap(({ createdAt, transcript, evidence, spendByDay, velocity, limitsCache }) => [
+    ...(transcript?.startTimeKnown !== false && evidence?.timing !== "file-mtime" && normalizeTimestamp(createdAt) ? [normalizeTimestamp(createdAt).slice(0, 10)] : []), ...Object.keys(spendByDay),
     ...(velocity?.buckets ?? []).map(([day]) => day), ...(limitsCache?.buckets ?? []).flatMap(({ day }) => day ? [day] : []),
     ...(limitsCache?.compactions ?? []).flatMap(({ timestamp }) => timestamp ? [timestamp.slice(0, 10)] : [])]).filter(Boolean).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10);

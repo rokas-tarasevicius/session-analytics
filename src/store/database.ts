@@ -218,6 +218,8 @@ export interface IndexScanStats {
   ledgerReads: number;
   ledgerHits: number;
   ledgerAppends: number;
+  auditedSessions: number;
+  auditedLedgers: number;
   elapsedMilliseconds: number;
 }
 
@@ -266,6 +268,7 @@ export function indexStatus(options: Pick<AnalyzeOptions, "dataDir"> = {}): Inde
         completedAt: scan.completed_at, fingerprintedFiles: stats.fingerprintedFiles, parsedSessions: stats.parsedSessions,
         reusedSessions: stats.reusedSessions, retainedSessions: stats.retainedSessions, ledgerReads: stats.ledgerReads,
         deferredSessions: stats.deferredSessions,
+        auditedSessions: stats.auditedSessions ?? 0, auditedLedgers: stats.auditedLedgers ?? 0,
         ledgerHits: stats.ledgerHits, ledgerAppends: stats.ledgerAppends, elapsedMilliseconds: stats.elapsedMilliseconds,
       };
     }

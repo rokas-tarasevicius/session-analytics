@@ -30,7 +30,7 @@ async function harness() {
   const viewModel = await import(new URL("../src/public/view-model.js", import.meta.url).href);
   const evidenceHelpers = await import(new URL("../src/public/evidence.js", import.meta.url).href);
   const exportHelpers = await import(new URL("../src/public/export-data.js", import.meta.url).href);
-  const context = createContext({ ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, document, Intl, Set, Map, console, HTMLElement: Element,
+  const context = createContext({ renderHistoryCoverage() {}, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   source = source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
@@ -85,7 +85,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
   const invalid = sample(undefined, true); invalid.tokens = tokens(999, 0, 0, 999); invalid.metrics.toolCalls = 999; invalid.tools = { Read: 999 };
   for (const sessions of [[activity], [summary], [invalid], [summary, activity]]) {
     h.context["sessions"] = sessions;
-    h.run('renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
+    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
     assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? sessions.length === 2 ? "100 · 1/2 sessions" : "100" : "N/A");
     assert.equal(h.elements.get("#metric-spend")!.textContent, sessions.includes(summary) ? sessions.length === 2 ? "$1.00 · 1/2 sessions" : "$1.00" : "N/A");
     assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? sessions.length === 2 ? "0 · 1/2 sessions" : "0" : "N/A");

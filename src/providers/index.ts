@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import type { SessionAnalytics } from "../types.ts";
 import type { ProviderAdapter, ProviderContext, ProviderEnvironment, ProviderSession } from "./adapter.ts";
 import { copilotAdapter } from "./copilot.ts";
@@ -31,7 +32,15 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
     const roots = await adapter.discoverRoots(context);
     for (const root of roots) {
       try {
-        for await (const identity of adapter.identify(root)) {
+        const copies = new Map<string, { identity: ProviderSession; modified: number }>();
+        try { for await (const identity of adapter.identify(root, (warning) => warnings.push(warning))) {
+          let modified = 0; try { modified = (await stat(identity.path)).mtimeMs; } catch { /* Analyze reports unreadable evidence. */ }
+          const prior = copies.get(identity.id);
+          const preferredFormat = adapter.id === "gemini-chat" ? Number(identity.path.endsWith(".jsonl")) - Number(prior?.identity.path.endsWith(".jsonl")) : 0;
+          if (!prior || preferredFormat > 0 || (preferredFormat === 0 && (identity.updatedAt > prior.identity.updatedAt || (identity.updatedAt === prior.identity.updatedAt && modified > prior.modified)))) copies.set(identity.id, { identity, modified });
+        }
+        } catch { warnings.push("A provider evidence store could not be fully read; identified sessions were retained."); }
+        for (const { identity } of copies.values()) {
           const key = `${adapter.provider}:${identity.id}`;
           if (seen.has(hash(key))) { identities.add(key); continue; }
           try {

@@ -47,8 +47,10 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
       reasoningOutputTokens: 50,
       uncachedInputTokens: 300,
     });
-    assert.equal(codex.cost.totalUsd, 0.00468);
-    assert.equal(Number(codex.cost.upperEstimateUsd.toFixed(8)), 0.00498);
+    // July Sol rates are $5/$0.50/$30 before the August 21 reduction:
+    // (300 uncached * 5 + 1,200 cached * 0.5 + 150 output * 30) / 1e6.
+    assert.equal(codex.cost.totalUsd, 0.0066);
+    assert.equal(Number(codex.cost.upperEstimateUsd.toFixed(8)), 0.006975);
     assert.deepEqual(codex.tools, { apply_patch: 1, exec_command: 1 });
     assert.deepEqual(codex.skills, { "frontend-design": 1 });
     assert.equal(codex.skillEvidence, "inferred");
@@ -78,7 +80,7 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
       cacheWriteInputTokens: 200,
       cachedInputTokens: 400,
       inputTokens: 750,
-      nonReasoningOutputTokens: 50,
+      nonReasoningOutputTokens: 0,
       outputTokens: 50,
       reasoningOutputTokens: 0,
       uncachedInputTokens: 150,
@@ -318,7 +320,11 @@ test("discovers provider sessions when optional Conductor metadata is absent", a
       repositoryId: cursorSession.repositoryId,
     });
     assert.ok(cursorRepository.summary.sessions >= 1);
-    assert.equal(cursorRepository.sessions.every(({ provider }) => provider === "cursor"), true);
+    // Canonicalization joins /var and /private/var temporary aliases. The
+    // fixture's ephemeral Codex session shares Cursor's temporary-directory group.
+    assert.equal(cursorRepository.repository.name, "Ephemeral automation sessions");
+    assert.equal(cursorRepository.sessions.filter(({ provider }) => provider === "cursor").length, 2);
+    assert.equal(cursorRepository.sessions.filter(({ provider }) => provider === "codex").length, 1);
   } finally {
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
@@ -403,7 +409,8 @@ test("never charges an unobserved process-wide counter baseline to a session or 
     assert.equal(session.tokens.cachedInputTokens, 100_000);
     assert.equal(session.tokens.uncachedInputTokens, 20_000);
     assert.equal(session.tokens.outputTokens, 300);
-    assert.equal(Number(session.cost.totalUsd.toFixed(6)), 0.126);
+    // Only the observed deltas are priced: (20k * $5 + 100k * $0.50 + 300 * $30) / 1e6.
+    assert.equal(Number(session.cost.totalUsd.toFixed(6)), 0.159);
     assert.equal(
       session.transcript.warnings.some((warning) =>
         warning.includes("process-wide counter baseline")

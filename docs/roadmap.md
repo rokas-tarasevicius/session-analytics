@@ -34,10 +34,12 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 - [x] Shared bounded public model IDs, zero-last-usage regression coverage, UTC request chronology, and per-boundary compaction reconciliation.
 - [ ] Golden-fixture parity tests for each supported provider format version.
 - [x] Provider adapter interface and exact synthetic legacy-session parity for the Claude migration.
-- [ ] Reconciliation report: compare computed totals with provider-reported totals where they exist.
+- [x] Claude history reconciliation: recover Conductor assistant usage, compare SDK receipts, and show per-profile/month statistics gaps with separate unattributed estimates.
+- [ ] Extend reconciliation to provider aggregate stores with verified compatible accounting intervals.
 - [x] Persistent content-free SQLite index with incremental ingest (keyed source identity, device/inode, size, nanosecond modification/change times, keyed head/tail fingerprints), session reuse, verified Codex ledger append checkpoints, migrations, WAL, and private permissions.
 - [x] Retain previously indexed source-deleted sessions, reserve shared counter ownership, and provide `index status|path|rebuild|prune` and `--no-index`; fixture/demo parity tests.
 - [x] Atomic ownership-component deferral, UTC-safe pruning with exclusion checkpoints, undated request reservations, key-bound stores, writer corruption recovery, and filtered dashboard retention caveats.
+- [x] Index parity regressions for real-history outcome-reference shapes, atomic full-scan fallback, rotating session/ledger checks, and bounded broadcast-ledger memory; content-free full/cold/warm parity runner.
 - [ ] Incremental Cursor database adapters and resumable session parser checkpoints (the current index refreshes Cursor and reparses changed composite sessions conservatively).
 
 ## M1: Reliability and economics
@@ -204,3 +206,7 @@ Every metric added by this roadmap carries interpretation notes in its registry 
 - [x] One dispatcher, shared options, complete schema/index projection and cross-lane MCP summaries.
 - [x] Cold/warm/full projection parity including pricing, P2 settings and quota replay; one synthetic demo for every view.
 - [x] Reconciled release documentation and explicit privacy/network boundaries.
+
+- [x] v0.6.1: independent regression coverage for repository identity, Cursor and additional-provider replay, partial pricing coverage, aggregate displays, and legacy snapshot normalization.
+- [x] v0.6.1: native continuation/receipt/iteration accounting, historical pricing, retained Conductor message recovery, and complete index dependency signatures.
+- [x] v0.6.1: serialized, content-free real-machine verification with independent raw-data oracles and full/cold/warm comparison; exact unrecoverable historical ownership remains explicitly partial.

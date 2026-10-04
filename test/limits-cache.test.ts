@@ -508,7 +508,7 @@ test("snapshot-wide curve detail is bounded without changing request totals, pea
     for (let s = 0; s < 140; s++) {
       const id = `11111111-aaaa-4111-8111-${String(s).padStart(12, "0")}`;
       await writeFile(join(options.claudeRoot!, `${id}.jsonl`), jsonl(Array.from({ length: 200 }, (_, n) => ({
-        ...assistant(repo, `request-${n}`, n, usage(n === 100 ? 990000 : 1000)), sessionId: id,
+        ...assistant(repo, `request-${s}-${n}`, n, usage(n === 100 ? 990000 : 1000)), sessionId: id,
       }))));
     }
     const snapshot = await analyzeMachineSessions(options);

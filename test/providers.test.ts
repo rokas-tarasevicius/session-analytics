@@ -55,6 +55,8 @@ test("Claude adapter migration preserves legacy fields as the session projection
     const expected = JSON.parse(await readFile(new URL("./provider-fixtures/legacy-sessions.json", import.meta.url), "utf8"));
     // Limits/cache replaces the legacy ratio-of-maxima with per-request context evidence.
     for (const session of expected) if (session.provider === "claude") {
+      session.tokens.nonReasoningOutputTokens = 0;
+      for (const model of session.models) model.nonReasoningOutputTokens = 0;
       session.metrics.contextUtilizationPeak = 0.0006;
       session.metrics.maxContextWindow = 1_000_000;
       session.metrics.maxInputTokensPerCall = 600;

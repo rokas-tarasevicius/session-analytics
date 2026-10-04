@@ -1,11 +1,14 @@
+import { collectHistoryCoverage } from "./metrics/history-coverage.ts";
 import { createHash } from "node:crypto";
+import { canonicalizeRemote, repositoryRemoteAtRoot } from "./repository-remotes.ts";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { opendir, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
-import { createInterface } from "node:readline";
-import { DatabaseSync } from "node:sqlite";
+import { readJsonLines } from "./jsonl-lines.ts";
+import type { DatabaseSync } from "node:sqlite";
+import { openSourceDatabase } from "./source-database.ts";
 import { fileURLToPath } from "node:url";
 import { ReliabilityCollector, type ReliabilityContext } from "./metrics/reliability.ts";
 import { combineReliability, observeClaude, observeCodex } from "./metrics/reliability-providers.ts";
@@ -39,12 +42,14 @@ import { canonicalMcpServer } from "./insights/mcp-attribution.ts";
 
 import { aggregateSessions } from "./public/export-data.js";
 import { normalizeTimestamp, timestampMilliseconds } from "./public/timestamps.js";
-import { modelPattern, metadataPattern, sessionStatuses, scanWarnings } from "./public/evidence.js";
+import { modelPattern, metadataPattern, sessionStatuses, scanWarnings, indexParityWarning } from "./public/evidence.js";
 import { McpEvidenceCollector } from "./mcp/evidence.ts";
 import { sourceHealth } from "./mcp/source-health.ts";
 
 import { IndexScan } from "./store/index.ts";
+import { IndexParityError } from "./store/parity.ts";
 import { codexCounterFingerprint, readCodexLedger } from "./store/codex-ledger.ts";
+import { codexIntervalKey, codexIntervalCovered } from "./metrics/codex-counter-intervals.ts";
 
 import type {
   AgentIdentity, ClaudeSubagentType, VelocityDimension,
@@ -63,10 +68,12 @@ import type {
   TokenUsage,
 } from "./types.ts";
 
+import { desktopMetadataPath } from "./providers/claude-desktop.ts";
 import { createClaudeAdapter } from "./providers/claude.ts";
+import { buildClaudeUsageOwners } from "./providers/claude-ownership.ts";
 import { additionalProviderSessions } from "./providers/index.ts";
 import { modelName, name as safeName, effortName, safeTime, statusName } from "./providers/common.ts";
-import { conductorFallback } from "./providers/conductor.ts";
+import { conductorFallback, conductorLegacyProviderIds } from "./providers/conductor.ts";
 import { loadReviewed, loadPricingCatalog, mergeProvenance, publicRateCard, resolveRate, type PricingCatalog } from "./pricing/catalog.ts";
 import { projectModelId } from "./public/model-id.js";
 import { priceUsage } from "./pricing/usage.ts";
@@ -123,6 +130,9 @@ export interface RepositoryRow {
 }
 
 interface TokenEvent {
+  compactionReceipt?: boolean;
+  nativeCumulative?: TokenUsage | null;
+  turnKey?: string | null;
   dimension: VelocityDimension;
   lastReasoningExposed: boolean;
   lastCacheReadExposed: boolean;
@@ -139,7 +149,16 @@ interface TokenEvent {
   inputForRequest: number;
 }
 
+interface CodexCounterLedger extends Map<string, CodexCounterOwner> {
+  inheritedCallKeysByPath?: Map<string, Set<string>>;
+}
 interface CodexCounterOwner {
+  nativeReceipt?: boolean;
+  identityKey?: string;
+  ancestorKeys?: string[];
+  createdAt?: string | null;
+  /** Earliest evidence of this state, independently of nearest-activity ranking. */
+  earliestTimestamp?: string;
   activityDeltaMilliseconds: number;
   modelFallback: string | null;
   path: string;
@@ -147,6 +166,9 @@ interface CodexCounterOwner {
 }
 
 interface TranscriptCandidate {
+  repositoryRemote?: string | null;
+  /** All validated Codex pages; never crosses the public projection. */
+  paths?: string[];
   cwd: string;
   id: string;
   path: string;
@@ -237,9 +259,9 @@ function tokenCount(usage: TokenUsage): number {
   return usage.inputTokens + usage.outputTokens;
 }
 
-function isoDay(timestamp: string | null, fallback: string): string {
-  const date = new Date(safeTime(timestamp) ?? safeTime(fallback) ?? "2000-01-01T00:00:00Z");
-  return date.toISOString().slice(0, 10);
+function isoDay(timestamp: string | null): string | null {
+  const instant = timestampMilliseconds(timestamp);
+  return Number.isFinite(instant) ? new Date(instant).toISOString().slice(0, 10) : null;
 }
 
 function trackTimestamp(session: MutableSession, timestamp: string | null): void {
@@ -251,12 +273,7 @@ function trackTimestamp(session: MutableSession, timestamp: string | null): void
 }
 
 function normalizeRemote(value: string): string {
-  return value
-    .trim()
-    .replace(/^git@([^:]+):/, "https://$1/")
-    .replace(/\.git$/, "")
-    .replace(/\/$/, "")
-    .toLowerCase();
+  return canonicalizeRemote(value) ?? "";
 }
 
 function durationMilliseconds(start: string | null, end: string | null): number {
@@ -282,12 +299,14 @@ function addModelUsage(
   usage: TokenUsage,
   inputForRequest: number,
   timestamp: string | null,
-  fallbackTimestamp: string,
+  _fallbackTimestamp: string,
   executionKind: SessionAnalytics["executionKind"] = session.executionKind,
   velocityContext?: { dimension: VelocityDimension; reasoning: boolean; cacheRead: boolean; cacheWrite: boolean },
   requestEvidence?: RequestEvidence,
   requestSizeKnown = true,
+  calls = 1,
 ): void {
+  timestamp = normalizeTimestamp(timestamp);
   model = projectModelId(model);
   if (requestSizeKnown) session.maxInputTokensPerCall = Math.max(session.maxInputTokensPerCall, inputForRequest);
   session.requestSizes[requestSizeKnown ? "observedTokens" : "unknownTokens"] += tokenCount(usage);
@@ -304,12 +323,13 @@ function addModelUsage(
     };
     session.models.set(model, aggregate);
   }
-  aggregate.calls += 1;
+  aggregate.calls += calls;
   sumTokens(aggregate, usage);
   aggregate.pricingCoverage!.eligibleTokens += tokenCount(usage);
   const selected = resolveRate(rateCard, model, timestamp);
   const pricedRequest = selected ? priceUsage(selected.rate, usage, inputForRequest) : null;
-  session.mcpEvidence.usage(isoDay(timestamp, fallbackTimestamp), tokenCount(usage), pricedRequest?.pricedTokens ?? 0);
+  const accountingDay = isoDay(timestamp);
+  session.mcpEvidence.usage(accountingDay ?? "", tokenCount(usage), pricedRequest?.pricedTokens ?? 0);
   if (requestEvidence && session.limitsProvider) {
     session.limitsCache.addRequest(model, usage, selected?.rate, pricedRequest?.cost ?? null, timestamp, executionKind, requestEvidence, session.limitsProvider);
     if (requestEvidence.requestInputKnown) {
@@ -318,24 +338,28 @@ function addModelUsage(
         requestEvidence.contextWindow ?? (session.limitsProvider === "claude" ? claudeContextWindow(model) : null) ?? 0);
     }
   }
-  if (velocityContext && !selected) session.velocity.add(timestamp, velocityContext.dimension, usageVelocity(usage, 0, false, velocityContext));
+  if (velocityContext && !selected) session.velocity.add(timestamp, velocityContext.dimension, usageVelocity(usage, 0, 0, velocityContext, calls));
   if (!selected) {
     aggregate.priced = false;
     return;
   }
   const { cost, pricedTokens, assumptions } = pricedRequest!;
+  if (calls === 0 && selected.rate.longContext) {
+    cost.upperEstimateUsd = Math.max(cost.upperEstimateUsd, priceUsage(selected.rate, usage, selected.rate.longContext.thresholdInputTokens + 1).cost.upperEstimateUsd);
+  }
   mergeProvenance(aggregate, [{ ...selected.provenance, assumptions }]);
   aggregate.pricingCoverage!.pricedTokens += pricedTokens;
   aggregate.priced &&= pricedTokens === tokenCount(usage);
-  if (velocityContext) session.velocity.add(timestamp, velocityContext.dimension, usageVelocity(usage, cost.totalUsd, pricedTokens === tokenCount(usage), velocityContext));
+  if (velocityContext) session.velocity.add(timestamp, velocityContext.dimension, usageVelocity(usage, cost.totalUsd, pricedTokens, velocityContext, calls));
   // Claude child transcripts contribute to accounting, but not to their
   // parent's interaction clock. Codex child threads have their own clock.
-  updateWorkflow(session, (workflow) => workflow.value(timestamp, cost.totalUsd, executionKind));
+  if (calls) updateWorkflow(session, (workflow) => workflow.value(timestamp, cost.totalUsd, executionKind));
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
   else session.costByExecution.unknownUsd += cost.totalUsd;
-  increment(session.spendByDay, isoDay(timestamp, fallbackTimestamp), cost.totalUsd);
+  // Undated request value belongs only in all-time totals and velocity.undated.
+  if (accountingDay) increment(session.spendByDay, accountingDay, cost.totalUsd);
 }
 
 function createMutableSession(): MutableSession {
@@ -380,7 +404,7 @@ async function visitJsonLines(
   visitor: (record: JsonRecord, line: number) => void,
 ): Promise<void> {
   const input = createReadStream(path, { encoding: "utf8" });
-  const lines = createInterface({ crlfDelay: Number.POSITIVE_INFINITY, input });
+  const lines = readJsonLines(input);
   let lineNumber = 0;
   for await (const line of lines) {
     lineNumber += 1;
@@ -400,9 +424,9 @@ async function visitJsonLines(
 async function transcriptIdentity(
   path: string,
   provider: SessionProvider,
-): Promise<{ cwd: string | null; id: string | null; timestamp: string | null }> {
+): Promise<{ cwd: string | null; id: string | null; timestamp: string | null; parentId?: string | null; forkCreatedAt?: string | null; repositoryRemote?: string | null }> {
   const input = createReadStream(path, { encoding: "utf8" });
-  const lines = createInterface({ crlfDelay: Number.POSITIVE_INFINITY, input });
+  const lines = readJsonLines(input);
   let claudeCwd: string | null = null;
   let claudeId: string | null = null;
   let claudeTimestamp: string | null = null;
@@ -417,7 +441,10 @@ async function transcriptIdentity(
     if (!record) continue;
     if (provider === "codex" && record["type"] === "session_meta") {
       const payload = asRecord(record["payload"]);
-      return { cwd: stringValue(payload?.["cwd"]), id: stringValue(payload?.["id"]), timestamp: normalizeTimestamp(record["timestamp"]) };
+      return { cwd: stringValue(payload?.["cwd"]), id: stringValue(payload?.["id"]), timestamp: normalizeTimestamp(record["timestamp"]),
+        repositoryRemote: stringValue(asRecord(payload?.["git"])?.["repository_url"]),
+        forkCreatedAt: normalizeTimestamp(payload?.["timestamp"]) ?? normalizeTimestamp(record["timestamp"]),
+        parentId: stringValue(payload?.["forked_from_id"]) ?? stringValue(asRecord(asRecord(asRecord(payload?.["source"])?.["subagent"])?.["thread_spawn"])?.["parent_thread_id"]) };
     }
     if (provider === "claude") {
       claudeId ??= stringValue(record["sessionId"]);
@@ -438,24 +465,20 @@ async function selectTranscript(
   provider: SessionProvider,
   providerSessionId: string,
   workspacePath: string,
-): Promise<{ path: string | null; warnings: string[] }> {
+): Promise<{ path: string | null; paths: string[]; warnings: string[] }> {
   const warnings: string[] = [];
-  let idOnlyMatch: string | null = null;
+  const matching: Array<{ path: string; timestamp: string | null; cwdMatches: boolean }> = [];
   for (const candidate of candidates) {
     const identity = await transcriptIdentity(candidate, provider);
-    if (identity.id === providerSessionId && identity.cwd === workspacePath) {
-      return { path: candidate, warnings };
-    }
-    if (identity.id === providerSessionId) idOnlyMatch = candidate;
+    if (identity.id === providerSessionId) matching.push({ path: candidate, timestamp: identity.timestamp, cwdMatches: identity.cwd === workspacePath });
   }
-  if (idOnlyMatch) {
-    warnings.push("Transcript ID matched, but its recorded working directory did not.");
-    return { path: null, warnings };
-  }
-  if (candidates.length > 0) {
-    warnings.push("Transcript filename matched, but provider metadata validation failed.");
-  }
-  return { path: null, warnings };
+  matching.sort((a, b) => Number(a.path.includes("/subagents/")) - Number(b.path.includes("/subagents/")) || (a.timestamp ?? "").localeCompare(b.timestamp ?? "") || a.path.localeCompare(b.path));
+  const hasPrimary = provider === "claude" && matching.some(item => !item.path.includes("/subagents/"));
+  const selected = matching.find(item => item.cwdMatches && (!hasPrimary || !item.path.includes("/subagents/")));
+  if (selected) return { path: selected.path, paths: matching.map(item => item.path), warnings };
+  if (matching.length) warnings.push("Transcript ID matched, but its recorded working directory did not.");
+  else if (candidates.length) warnings.push("Transcript filename matched, but provider metadata validation failed.");
+  return { path: null, paths: [], warnings };
 }
 
 function codexUsage(raw: JsonRecord | null): TokenUsage {
@@ -541,6 +564,9 @@ function codexCounterOwnerPrecedes(
   current: CodexCounterOwner | undefined,
 ): boolean {
   if (!current) return true;
+  // An observed ancestor request predating child creation is copied history.
+  if (candidate.createdAt && current.identityKey && candidate.ancestorKeys?.includes(current.identityKey) && current.timestamp < candidate.createdAt) return false;
+  if (current.createdAt && candidate.identityKey && current.ancestorKeys?.includes(candidate.identityKey) && candidate.timestamp < current.createdAt) return true;
   if (candidate.activityDeltaMilliseconds !== current.activityDeltaMilliseconds) {
     return candidate.activityDeltaMilliseconds < current.activityDeltaMilliseconds;
   }
@@ -552,17 +578,59 @@ async function buildCodexCounterLedger(
   paths: string[], index: IndexScan | null = null,
   retainedOwners: Map<string, { path: string; timestamp: string; modelFallback: string | null }> = new Map(),
 ): Promise<Map<string, CodexCounterOwner>> {
-  const owners = new Map<string, CodexCounterOwner>();
+  const owners: CodexCounterLedger = new Map<string, CodexCounterOwner>();
+  const identities = new Map<string, Awaited<ReturnType<typeof transcriptIdentity>>>();
+  const parents = new Map<string, string>();
   for (const path of paths) {
+    const identity = await transcriptIdentity(path, "codex"); identities.set(path, identity);
+    if (identity.id && identity.parentId) parents.set(identity.id, identity.parentId);
+  }
+  const ancestorsOf = (id: string | null): Set<string> => {
+    const result = new Set<string>(); let parent = id ? parents.get(id) : null;
+    while (parent && !result.has(parent)) { result.add(parent); parent = parents.get(parent); }
+    return result;
+  };
+  const ancestorIds = new Set(parents.values());
+  const ancestorStates = new Map<string, Map<string, string>>();
+  const ancestorCalls = new Map<string, Array<{ key: string; timestamp: string | null }>>();
+  const nativeReceipts: Array<{ fingerprint: string; key: string; owner: CodexCounterOwner }> = [];
+  owners.inheritedCallKeysByPath = new Map();
+  const ordered = [...paths].sort((a, b) => ancestorsOf(identities.get(a)?.id ?? null).size - ancestorsOf(identities.get(b)?.id ?? null).size || a.localeCompare(b));
+  for (const path of ordered) {
+    const identity = identities.get(path)!;
+    const ancestors = ancestorsOf(identity.id);
+    const created = identity.forkCreatedAt ?? identity.timestamp;
     const evidence = index ? await index.codexLedger(path) : (await readCodexLedger(path)).evidence;
     const modelFallback = evidence.models.length === 1 ? evidence.models[0] ?? null : null;
-    for (const observation of evidence.observations) {
-      const candidate = {
-        activityDeltaMilliseconds: observation.activityDeltaMilliseconds ?? Infinity,
-        modelFallback, path, timestamp: observation.timestamp,
-      };
-      if (codexCounterOwnerPrecedes(candidate, owners.get(observation.fingerprint))) owners.set(observation.fingerprint, candidate);
+    const inherited = new Set<string>();
+    // Only calls physically present in this page can be replayed by it. Keeping
+    // every ancestor call for every descendant grows with the entire fork tree.
+    const observedCalls = new Set((evidence.calls ?? []).map(call => call.key));
+    if (created && observedCalls.size) for (const ancestor of ancestors) for (const call of ancestorCalls.get(ancestor) ?? []) {
+      if (observedCalls.has(call.key) && call.timestamp && call.timestamp < created) inherited.add(call.key);
     }
+    owners.inheritedCallKeysByPath.set(path, inherited);
+    if (identity.id && ancestorIds.has(identity.id)) ancestorCalls.set(identity.id, [...(ancestorCalls.get(identity.id) ?? []), ...(evidence.calls ?? [])]);
+    for (const observation of evidence.observations) {
+      const earliestTimestamp = observation.earliestTimestamp ?? observation.timestamp;
+      if (identity.id && ancestorIds.has(identity.id)) {
+        const states = ancestorStates.get(identity.id) ?? new Map<string, string>();
+        if (!states.has(observation.fingerprint) || earliestTimestamp < states.get(observation.fingerprint)!) states.set(observation.fingerprint, earliestTimestamp);
+        ancestorStates.set(identity.id, states);
+      }
+      const replay = created && [...ancestors].some(ancestor => {
+        const earlier = ancestorStates.get(ancestor)?.get(observation.fingerprint);
+        return earlier && earlier < created;
+      });
+      const candidate = { activityDeltaMilliseconds: observation.activityDeltaMilliseconds ?? Infinity, modelFallback, path, timestamp: observation.timestamp, earliestTimestamp };
+      if (!replay && codexCounterOwnerPrecedes(candidate, owners.get(observation.fingerprint))) owners.set(observation.fingerprint, candidate);
+    }
+    for (const receipt of evidence.receipts ?? []) nativeReceipts.push({ ...receipt,
+      owner: { path, timestamp: receipt.timestamp, modelFallback, activityDeltaMilliseconds: -1, nativeReceipt: true } });
+  }
+  for (const receipt of nativeReceipts) {
+    if (owners.has(receipt.fingerprint)) owners.set(receipt.fingerprint, receipt.owner);
+    owners.set(receipt.key, receipt.owner);
   }
   for (const [fingerprint, owner] of retainedOwners) owners.set(fingerprint, { ...owner, activityDeltaMilliseconds: -1 });
   for (const [fingerprint, owner] of owners) {
@@ -586,12 +654,13 @@ async function analyzeCodex(
   index: IndexScan | null = null,
   attributedCounters: Set<string> | null = null,
   isPrunedCounter: (fingerprint: string) => boolean = () => false,
+  evidencePaths: string[] = [path],
 ): Promise<SessionAnalytics | null> {
   if (index) {
     const attributed = new Set<string>();
-    return index.session(row, [path], inheritedWarnings,
-      () => analyzeCodex(row, path, rateCard, inheritedWarnings, counterLedger, claimedCounters, reliabilityContext, limits, outcomeEnricher, null, attributed, (counter) => index.isPrunedCounter(counter)),
-      claimedCounters, counterLedger, attributed);
+    return index.session(row, evidencePaths, inheritedWarnings,
+      () => analyzeCodex(row, path, rateCard, inheritedWarnings, counterLedger, claimedCounters, reliabilityContext, limits, outcomeEnricher, null, attributed, (counter) => index.isPrunedCounter(counter), evidencePaths),
+      claimedCounters, counterLedger, attributed, evidencePaths.map(page => [...((counterLedger as CodexCounterLedger | null)?.inheritedCallKeysByPath?.get(page) ?? [])].sort()));
   }
   const state = createMutableSession();
   const reliability = new ReliabilityCollector(reliabilityContext);
@@ -604,10 +673,21 @@ async function analyzeCodex(
   const mcpEvidence = state.mcpEvidence;
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
+  let intervalScope: string | null = null, threadCreatedAt: string | null = null;
+  const intervalAncestors = new Set<string>();
+  const receiptEvents = new Map<string, TokenEvent>();
+  const compactionReceipts = new Set<string>();
+  const modelsByTurn = new Map<string, string>();
+  let currentTurn: string | null = null;
+  let ownThread: string | null = null;
+  const usageMatchKey = (turn: string | null | undefined, usage: TokenUsage): string => JSON.stringify([
+    turn ?? null, usage.inputTokens, usage.cachedInputTokens,
+    usage.outputTokens, usage.reasoningOutputTokens,
+  ]);
   const seenCalls = new Set<string>();
   let currentModel = projectModelId(row.database_model);
   let currentIdentity: AgentIdentity = {};
-  const sourceBefore = await stat(path);
+  const sourceBefore = await Promise.all(evidencePaths.map((page) => stat(page)));
   const lifecycle = new TranscriptLifecycle();
   const seenMcp = new Set<string>();
   let parseErrors = 0;
@@ -624,13 +704,31 @@ async function analyzeCodex(
     userMessages: new Set<string>(),
   };
 
-  await visitJsonLines(path, (record, line) => {
+  let lineOffset = 0;
+  for (const path of evidencePaths) {
+  let pageLines = 0;
+  await visitJsonLines(path, (record, pageLine) => {
+    pageLines = pageLine;
+    const line = lineOffset + pageLine;
+    const inherited = (counterLedger as CodexCounterLedger | null)?.inheritedCallKeysByPath?.get(path);
+    if (record["type"] === "response_item" && inherited?.size) {
+      const item = asRecord(record["payload"]), id = stringValue(item?.["call_id"]) ?? stringValue(item?.["id"]);
+      if (id && inherited.has(createHash("sha256").update(id).digest("hex"))) return;
+    }
     mcpEvidence.codex(record);
     if (record["__parse_error"] === true) {
       parseErrors += 1;
       reliability.truncated = true;
       state.workflow?.gap("malformed");
       return;
+    }
+    // A spawned/forked rollout may replay its parent's session_meta after its
+    // own header. Foreign metadata describes inherited context, not a source
+    // transition of this thread. Preserve legitimate same-thread upgrades.
+    if (record["type"] === "session_meta") {
+      const metadataThreadId = stringValue(asRecord(record["payload"])?.["id"]);
+      const expectedThread = ownThread ?? row.provider_session_id;
+      if (metadataThreadId && expectedThread && metadataThreadId !== expectedThread) return;
     }
     if (record["type"] === "session_meta" || record["type"] === "turn_context") {
       reliabilityCwd = stringValue(asRecord(record["payload"])?.["cwd"]) ?? reliabilityCwd;
@@ -647,6 +745,13 @@ async function analyzeCodex(
     sessionLimits?.observe(path, record, row.conductor_session_id);
 
     if (type === "session_meta") {
+      ownThread ??= stringValue(payload?.["id"]);
+      if (!intervalScope) {
+        const parent = asRecord(asRecord(asRecord(payload?.["source"])?.["subagent"])?.["thread_spawn"]);
+        for (const id of [stringValue(payload?.["forked_from_id"]), stringValue(parent?.["parent_thread_id"])]) if (id) intervalAncestors.add(id);
+        intervalScope = createHash("sha256").update(intervalAncestors.values().next().value ?? ownThread ?? row.conductor_session_id).digest("hex");
+        threadCreatedAt = normalizeTimestamp(payload?.["timestamp"]) ?? timestamp;
+      }
       currentIdentity = { codexSource: codexSource(payload?.["source"]), codexOriginator: codexOriginator(payload?.["originator"]) };
       if (!state.agentIdentity.codexSource) state.agentIdentity = currentIdentity;
       state.executionKind = asRecord(payload?.["source"])?.["subagent"]
@@ -657,12 +762,42 @@ async function analyzeCodex(
     }
 
     if (type === "turn_context") {
+      currentTurn = stringValue(payload?.["turn_id"]) ?? currentTurn;
       if (payload && Object.hasOwn(payload, "model")) currentModel = projectModelId(payload["model"]);
+      if (currentTurn) modelsByTurn.set(currentTurn, currentModel);
       state.effort = effortName(payload?.["effort"]) ?? state.effort;
       state.startDimension ??= velocityDimension("codex", currentIdentity, state.executionKind, currentModel, state.effort);
       return;
     }
+    // Explicit receipts identify individual billable responses, including
+    // compaction requests that never enter the legacy cumulative counter.
+    if (type === "token_usage_record" || (type === "event_msg" && payloadType === "token_usage_record")) {
+      const usage = asRecord(payload?.["usage"]);
+      const thread = stringValue(payload?.["thread_id"]);
+      const response = stringValue(payload?.["response_id"]);
+      const turnKey = stringValue(payload?.["turn_id"]);
+      if (!usage || !thread || !response || (ownThread && thread !== ownThread)) return;
+      if (!counterExposed(usage["input_tokens"]) || !counterExposed(usage["output_tokens"])) return;
+      const key = `receipt:${createHash("sha256").update(JSON.stringify([thread, response])).digest("hex")}`;
+      if (receiptEvents.has(key)) return;
+      const tokens = codexUsage(usage);
+      const model = (turnKey ? modelsByTurn.get(turnKey) : null) ?? currentModel;
+      receiptEvents.set(key, {
+        nativeCumulative: asRecord(payload?.["thread_token_usage"]) ? codexUsage(asRecord(payload?.["thread_token_usage"])) : null,
+        turnKey, dimension: velocityDimension("codex", currentIdentity, state.executionKind, model, state.effort),
+        lastReasoningExposed: counterExposed(usage["reasoning_output_tokens"]),
+        lastCacheReadExposed: counterExposed(usage["cached_input_tokens"]),
+        totalReasoningExposed: false, totalCacheReadExposed: false,
+        evidence: { stream: path, contextWindow: null, requestInputKnown: true,
+          compactions: Math.max(legacy.compactions, compactedRecords.count, items.compactions.size), reportedReason: null, ttlMinutes: null },
+        requestSizeKnown: true, executionKind: state.executionKind, fingerprint: null,
+        inputForRequest: tokens.inputTokens, last: tokens, model, timestamp, total: zeroTokens(),
+      });
+      return;
+    }
     if (type === "compacted") {
+      const response = stringValue(payload?.["compaction_response_id"]);
+      if (response && ownThread) compactionReceipts.add(`receipt:${createHash("sha256").update(JSON.stringify([ownThread, response])).digest("hex")}`);
       compactedRecords.count += 1;
       state.limitsCache.addCompaction(path, "compacted", stringValue(record["id"]) ?? stringValue(payload?.["id"]), timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
       return;
@@ -670,7 +805,10 @@ async function analyzeCodex(
     if (type === "event_msg") {
       if (payloadType === "user_message") legacy.userMessages += 1;
       if (payloadType === "agent_message") legacy.agentMessages += 1;
-      if (payloadType === "task_started") state.taskStarts += 1;
+      if (payloadType === "task_started") {
+        state.taskStarts += 1;
+        currentTurn = stringValue(payload?.["turn_id"]) ?? currentTurn;
+      }
       if (payloadType === "task_complete") state.taskCompletions += 1;
       if (payloadType === "context_compacted") {
         legacy.compactions += 1;
@@ -703,6 +841,7 @@ async function analyzeCodex(
             nonNegativeNumberValue(info?.["model_context_window"]),
           );
           tokenEvents.push({
+            turnKey: currentTurn,
             dimension: velocityDimension("codex", currentIdentity, state.executionKind, currentModel, state.effort),
             lastReasoningExposed: counterExposed(last?.["reasoning_output_tokens"]),
             lastCacheReadExposed: counterExposed(last?.["cached_input_tokens"]),
@@ -751,6 +890,8 @@ async function analyzeCodex(
       }
     }
   });
+  lineOffset += pageLines;
+  }
 
   state.userTurns = Math.max(legacy.userMessages, items.userMessages.size);
   state.assistantMessages = Math.max(legacy.agentMessages, items.agentMessages.size);
@@ -760,13 +901,26 @@ async function analyzeCodex(
   let previous = zeroTokens();
   let previousReasoningExposed = false, previousCacheReadExposed = false;
   let baselined = false;
-  let counterResets = 0;
+  let counterResets = 0, repeatedAfterDecrease = 0, unprovenCrossFileCollisions = 0;
+  const observedEpochs = new Map<string, number>();
   let sharedSnapshots = 0;
   let missingLastUsage = 0;
   let unattributableBaselines = 0;
+  const accountedLegacy = new Map<string, number>();
+  const accountedLegacyAcrossTurns = new Map<string, number>();
+  let previousStream: string | null = null;
   for (const event of tokenEvents) {
+    // Cumulative-only baselines must never cross file boundaries.
+    if (previousStream !== event.evidence.stream) {
+      previous = zeroTokens(); baselined = false;
+      previousReasoningExposed = false; previousCacheReadExposed = false;
+      previousStream = event.evidence.stream;
+    }
     const reset = !monotonic(event.total, previous);
     if (reset) counterResets += 1;
+    const priorEpoch = event.fingerprint ? observedEpochs.get(event.fingerprint) : undefined;
+    const repeatedInLaterEpoch = priorEpoch !== undefined && priorEpoch < counterResets;
+    if (event.fingerprint) observedEpochs.set(event.fingerprint, counterResets);
     // A Codex cumulative counter is process-wide, so the first snapshot a file
     // observes - and the first after the counter moves backwards - already
     // contains requests this session never issued. Only the delta between two
@@ -781,6 +935,7 @@ async function analyzeCodex(
       reasoning: baselined && !reset && previousReasoningExposed && event.totalReasoningExposed,
       cacheRead: baselined && !reset && previousCacheReadExposed && event.totalCacheReadExposed,
     };
+    const intervalStart = previous;
     previous = event.total;
     previousReasoningExposed = event.totalReasoningExposed;
     previousCacheReadExposed = event.totalCacheReadExposed;
@@ -789,10 +944,12 @@ async function analyzeCodex(
     const owner = event.fingerprint ? counterLedger?.get(event.fingerprint) : undefined;
     if (event.last && tokenCount(event.last) > 0 && event.fingerprint) {
       if (
-        isPrunedCounter(event.fingerprint) ||
-        (owner && (owner.path !== path || owner.timestamp !== event.timestamp)) ||
+        owner?.nativeReceipt || isPrunedCounter(event.fingerprint) ||
+        (owner && (owner.path !== event.evidence.stream || owner.timestamp !== event.timestamp)) ||
         claimedCounters.has(event.fingerprint)
       ) {
+        if (repeatedInLaterEpoch && !isPrunedCounter(event.fingerprint)) repeatedAfterDecrease++;
+        if (owner && !owner.nativeReceipt && owner.path !== "pruned" && !evidencePaths.includes(owner.path)) unprovenCrossFileCollisions++;
         sharedSnapshots += 1;
         continue;
       }
@@ -805,12 +962,51 @@ async function analyzeCodex(
       // observation, with no evidenced request size for context or pricing.
       event.evidence.requestInputKnown = false;
       missingLastUsage += 1;
+      if (event.fingerprint && tokenCount(attributableDelta) > 0 && (isPrunedCounter(event.fingerprint) ||
+          (owner && (owner.path !== event.evidence.stream || owner.timestamp !== event.timestamp)) || claimedCounters.has(event.fingerprint))) {
+        sharedSnapshots++; continue;
+      }
+      if (tokenCount(attributableDelta) > 0 && [...receiptEvents].some(([key, receipt]) =>
+          compactionReceipts.has(key) && receipt.nativeCumulative && receipt.last &&
+          usageMatchKey(null, receipt.nativeCumulative) === usageMatchKey(null, event.total) &&
+          usageMatchKey(null, receipt.last) === usageMatchKey(null, attributableDelta))) {
+        sharedSnapshots++; continue;
+      }
+      if (tokenCount(attributableDelta) > 0) {
+        const intervalKey = `${intervalScope ?? "unknown"}:${codexIntervalKey(intervalStart, event.total)}`;
+        const eligibleFingerprints = function* (): Generator<string> {
+          if (!event.timestamp || !counterLedger) return;
+          for (const [fingerprint, owner] of counterLedger) {
+            if (owner.timestamp > event.timestamp) continue;
+            if (owner.path === event.evidence.stream) { yield fingerprint; continue; }
+            const id = basename(owner.path).match(/([0-9a-f]{8}-[0-9a-f-]{27})(?:_[0-9a-f]{8}-[0-9a-f-]{27})?\.jsonl$/i)?.[1];
+            if (id && intervalAncestors.has(id) && threadCreatedAt && (owner.earliestTimestamp ?? owner.timestamp) < threadCreatedAt) yield fingerprint;
+          }
+        };
+        const covered = codexIntervalCovered(intervalStart, event.total, eligibleFingerprints());
+        if (claimedCounters.has(intervalKey) || covered) { sharedSnapshots++; continue; }
+        claimedCounters.add(intervalKey); attributedCounters?.add(intervalKey);
+      }
+      if (event.fingerprint && tokenCount(attributableDelta) > 0) {
+        if (isPrunedCounter(event.fingerprint) ||
+          (owner && (owner.path !== event.evidence.stream || owner.timestamp !== event.timestamp)) ||
+          claimedCounters.has(event.fingerprint)) {
+          sharedSnapshots += 1;
+          continue;
+        }
+        claimedCounters.add(event.fingerprint);
+        attributedCounters?.add(event.fingerprint);
+      }
       if (tokenCount(attributableDelta) === 0 && tokenCount(event.total) > 0) {
         unattributableBaselines += 1;
       }
     }
     sumTokens(finalTokens, observed);
     if (tokenCount(observed) > 0) {
+      const matchKey = usageMatchKey(event.turnKey, observed);
+      accountedLegacy.set(matchKey, (accountedLegacy.get(matchKey) ?? 0) + 1);
+      const usageKey = usageMatchKey(null, observed);
+      accountedLegacyAcrossTurns.set(usageKey, (accountedLegacyAcrossTurns.get(usageKey) ?? 0) + 1);
       const model = event.model === "<unknown>"
         ? owner?.modelFallback ?? event.model
         : event.model;
@@ -829,12 +1025,46 @@ async function analyzeCodex(
       );
     }
   }
+  // First consume exact-turn counterparts. A selected repeated counter may
+  // arrive after the context moved to another turn, so reconcile remaining
+  // same-thread usage vectors in a second pass. Every counter funds one match.
+  const unmatchedReceipts: TokenEvent[] = [];
+  for (const [receiptKey, event] of receiptEvents) {
+    if (!event.last || tokenCount(event.last) === 0 || claimedCounters.has(receiptKey) || isPrunedCounter(receiptKey)) continue;
+    claimedCounters.add(receiptKey);
+    attributedCounters?.add(receiptKey);
+    if (compactionReceipts.has(receiptKey)) { event.compactionReceipt = true; unmatchedReceipts.push(event); continue; }
+    const matchKey = usageMatchKey(event.turnKey, event.last);
+    const matches = accountedLegacy.get(matchKey) ?? 0;
+    if (matches > 0) {
+      accountedLegacy.set(matchKey, matches - 1);
+      const usageKey = usageMatchKey(null, event.last);
+      accountedLegacyAcrossTurns.set(usageKey, (accountedLegacyAcrossTurns.get(usageKey) ?? 0) - 1);
+      continue;
+    }
+    unmatchedReceipts.push(event);
+  }
+  for (const event of unmatchedReceipts) {
+    const usage = event.last!;
+    const usageKey = usageMatchKey(null, usage);
+    const matches = accountedLegacyAcrossTurns.get(usageKey) ?? 0;
+    if (matches > 0 && !event.compactionReceipt) {
+      accountedLegacyAcrossTurns.set(usageKey, matches - 1);
+      continue;
+    }
+    sumTokens(finalTokens, usage);
+    const model = (event.turnKey ? modelsByTurn.get(event.turnKey) : null) ?? event.model;
+    addModelUsage(state, rateCard, model, usage, event.inputForRequest, event.timestamp,
+      row.updated_at, event.executionKind,
+      { dimension: { ...event.dimension, model }, reasoning: event.lastReasoningExposed,
+        cacheRead: event.lastCacheReadExposed, cacheWrite: false }, event.evidence, true);
+  }
   if (counterResets > 0) {
     state.warnings.push(
       `${counterResets} cumulative token counter reset${counterResets === 1 ? " was" : "s were"} re-baselined as a new observed segment.`,
     );
   }
-  if (tokenEvents.length === 0) state.warnings.push("No cumulative Codex token counter was found.");
+  if (tokenEvents.length === 0 && receiptEvents.size === 0) state.warnings.push("No cumulative Codex token counter was found.");
   if (sharedSnapshots > 0) {
     state.warnings.push(
       `${sharedSnapshots} repeated process-wide token snapshot${sharedSnapshots === 1 ? " was" : "s were"} excluded from this session.`,
@@ -853,11 +1083,13 @@ async function analyzeCodex(
   state.warnings.push(
     "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes.",
   );
-  const sourceAfter = await stat(path);
-  state.completeness = parseErrors || !sameVersion(sourceBefore, sourceAfter) ? "partial" : "complete";
+  if (unprovenCrossFileCollisions) state.warnings.push("Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters.");
+  if (repeatedAfterDecrease) state.warnings.push("Accounting may be incomplete: a repeated numeric token state after a counter decrease was excluded without a proven reset/request identity. The decrease alone cannot distinguish a new request from replay.");
+  const sourceAfter = await Promise.all(evidencePaths.map((page) => stat(page)));
+  state.completeness = parseErrors || unprovenCrossFileCollisions || repeatedAfterDecrease || sourceBefore.some((before, i) => !sameVersion(before, sourceAfter[i]!)) ? "partial" : "complete";
   state.liveness = lifecycle.liveness();
   state.outcomes = await outcomes.finish(outcomeEnricher, state.firstEventAt, state.lastEventAt);
-  const result = finalizeSession(row, state, finalTokens, 1);
+  const result = finalizeSession(row, state, finalTokens, evidencePaths.length);
   result.reliability = combineReliability([reliability.finish()], row.status === "working");
   if (result.limitsCache && sessionLimits) result.limitsCache.quotaEvidence = sessionLimits.evidence();
   return result;
@@ -873,20 +1105,29 @@ const claudeAdapter = createClaudeAdapter({
 
 async function claudeEvidencePaths(mainPath: string): Promise<string[]> {
   const paths = [mainPath];
-  try { for await (const path of walkJsonl(mainPath.slice(0, -6) + "/subagents")) paths.push(path); }
+  const metadata = desktopMetadataPath(mainPath);
+  if (metadata) for (const evidence of [metadata, join(metadata.slice(0, -5), "audit.jsonl")]) {
+    try { if ((await stat(evidence)).isFile()) paths.push(evidence); } catch { /* Optional evidence is unavailable. */ }
+  }
+  try { for await (const path of walkJsonl(mainPath.replace(/\.(?:jsonl|json)$/i, "") + "/subagents")) paths.push(path); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   return paths;
 }
 
-async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: PricingCatalog, warnings: string[], reliabilityContext: ReliabilityContext = { contentRules: false, secret: null }, limits?: LimitsCollector, outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(), workflowSources?: WorkflowSources, contentRules = false, index: IndexScan | null = null): Promise<SessionAnalytics | null> {
-  if (index) {
+async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: PricingCatalog, warnings: string[], reliabilityContext: ReliabilityContext = { contentRules: false, secret: null }, limits?: LimitsCollector, outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(), workflowSources?: WorkflowSources, contentRules = false, index: IndexScan | null = null, usageOwners?: ReadonlyMap<string, string>, mainPaths: string[] = [path]): Promise<SessionAnalytics | null> {
+  if (index && path.includes("/subagents/") && row.provider_session_id) {
+    const retained = index.retainedClaudeParent(row.provider_session_id, path);
+    if (retained) return retained;
+  }
+  // A changed cross-session owner invalidates session-local index accounting.
+  if (index && !usageOwners?.size) {
     const history = await historyForTranscript(path, workflowSources, row.root_path);
     const dependency = history ? { available: history.available, commands: [...history.commands], registry: [...history.commandNames] } : null;
-    return index.session(row, await claudeEvidencePaths(path), warnings,
-      () => analyzeClaude(row, path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules),
+    return index.session(row, [...new Set((await Promise.all(mainPaths.map(claudeEvidencePaths))).flat())], warnings,
+      () => analyzeClaude(row, path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, null, usageOwners, mainPaths),
       undefined, undefined, undefined, dependency);
   }
-  const session = await claudeAdapter.analyze({ path, cwd: row.workspace_path, id: row.provider_session_id ?? "", provider: "claude", timestamp: row.created_at }, { row, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules });
+  const session = await claudeAdapter.analyze({ path, cwd: row.workspace_path, id: row.provider_session_id ?? "", provider: "claude", timestamp: row.created_at }, { row, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, usageOwners, mainPaths });
   if (!session) throw new Error("Claude evidence could not be analyzed.");
   return session;
 }
@@ -1125,12 +1366,14 @@ async function* walkJsonl(root: string): AsyncGenerator<string> {
 async function* walkProviderTranscripts(
   root: string,
   provider: "claude" | "codex",
+  unavailable: () => void = () => {},
 ): AsyncGenerator<string> {
   const directory = await opendir(root);
   for await (const entry of directory) {
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
-      yield* walkProviderTranscripts(path, provider);
+      try { yield* walkProviderTranscripts(path, provider, unavailable); }
+      catch { unavailable(); }
     } else if (
       entry.isFile() &&
       (entry.name.endsWith(".jsonl") ||
@@ -1147,11 +1390,22 @@ async function indexProviderTranscripts(
   provider: "claude" | "codex",
 ): Promise<{ paths: Map<string, string[]>; warning: string | null }> {
   const index = new Map<string, string[]>();
+  let unreadable = false;
   try {
-    for await (const path of walkProviderTranscripts(root, provider)) {
-      if (provider === "claude" && path.includes("/subagents/")) continue;
+    for await (const path of walkProviderTranscripts(root, provider, () => { unreadable = true; })) {
+      if (provider === "claude" && path.includes("/subagents/")) {
+        const identity = await transcriptIdentity(path, provider);
+        const parent = basename(path.split("/subagents/")[0]!);
+        if (identity.id === parent && identity.cwd && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(parent)) {
+          const mains = index.get(parent) ?? [];
+          mains.push(path); index.set(parent, mains);
+        }
+        continue;
+      }
       if (provider === "claude" && basename(path) === "audit.jsonl") continue;
-      const match = basename(path).match(/([0-9a-f]{8}-[0-9a-f-]{27})\.(?:jsonl|json)$/i);
+      const match = basename(path).match(provider === "codex"
+        ? /([0-9a-f]{8}-[0-9a-f-]{27})(?:_[0-9a-f]{8}-[0-9a-f-]{27})?\.jsonl$/i
+        : /([0-9a-f]{8}-[0-9a-f-]{27})\.(?:jsonl|json)$/i);
       const id = match?.[1];
       if (!id || (ids && !ids.has(id))) continue;
       const paths = index.get(id) ?? [];
@@ -1168,7 +1422,7 @@ async function indexProviderTranscripts(
           : "A provider transcript root could not be read.",
     };
   }
-  return { paths: index, warning: null };
+  return { paths: index, warning: unreadable ? "Some provider evidence directories could not be read." : null };
 }
 
 function mergeTranscriptIndexes(
@@ -1188,24 +1442,50 @@ async function transcriptCandidates(
   index: Map<string, string[]>,
   provider: "claude" | "codex",
 ): Promise<TranscriptCandidate[]> {
+  if (provider === "codex") for (const [filenameId, paths] of [...index]) for (const path of [...paths]) {
+    const identity = await transcriptIdentity(path, provider);
+    if (!identity.id || identity.id === filenameId || !index.has(identity.id)) continue;
+    let conflict = false;
+    await visitJsonLines(path, record => {
+      const payload = asRecord(record["payload"]);
+      if (record["type"] === "session_meta" && payload?.["id"] !== identity.id) conflict = true;
+      if (record["type"] !== "token_usage_record" && record["type"] !== "event_msg") return;
+      for (const field of ["thread_id", "session_id"]) if (typeof payload?.[field] === "string" && payload[field] !== identity.id) conflict = true;
+    });
+    if (!conflict) { index.get(identity.id)!.push(path); index.set(filenameId, paths.filter(item => item !== path)); }
+  }
   const entries = [...index.entries()];
   // A session_meta record can contain several megabytes of prompt context.
   // Keep identity parsing deliberately narrow so concurrent JSON decoding does
   // not multiply that transient allocation during a machine-wide scan.
-  const candidates = await mapConcurrent(entries, 2, async ([filenameId, paths]) => {
+  const candidates = await mapConcurrent(entries, 2, async ([filenameId, paths]): Promise<TranscriptCandidate | null> => {
+    const validated: Array<{ cwd: string; path: string; timestamp: string | null; repositoryRemote?: string | null }> = [];
     for (const path of paths) {
       const identity = await transcriptIdentity(path, provider);
       if (identity.id === filenameId && identity.cwd) {
-        return { cwd: identity.cwd, id: filenameId, path, provider, timestamp: identity.timestamp };
+        validated.push({ cwd: identity.cwd, path, timestamp: identity.timestamp, repositoryRemote: identity.repositoryRemote });
       }
     }
-    return null;
+    validated.sort((a, b) => Number(a.path.includes("/subagents/")) - Number(b.path.includes("/subagents/")) || (a.timestamp ?? "").localeCompare(b.timestamp ?? "") || a.path.localeCompare(b.path));
+    if (provider === "codex" && validated.length > 1) {
+      const hashes = new Set<string>();
+      for (let position = 0; position < validated.length;) {
+        const hash = createHash("sha256");
+        for await (const chunk of createReadStream(validated[position]!.path)) hash.update(chunk);
+        const digest = hash.digest("hex");
+        if (hashes.has(digest)) validated.splice(position, 1);
+        else { hashes.add(digest); position++; }
+      }
+    }
+    const first = validated[0];
+    return first ? { ...first, id: filenameId, provider,
+      paths: validated.map((page) => page.path) } : null;
   });
   return candidates.filter((candidate): candidate is TranscriptCandidate => candidate !== null);
 }
 
 async function gitRootForPath(rawPath: string): Promise<string | null> {
-  let current = resolve(rawPath);
+  let current = await realpath(rawPath).catch(() => resolve(rawPath));
   const filesystemRoot = parse(current).root;
   while (true) {
     try {
@@ -1226,10 +1506,16 @@ async function gitRootForPath(rawPath: string): Promise<string | null> {
         const content = await readFile(marker, "utf8");
         const match = content.match(/^gitdir:\s*(.+)\s*$/m);
         const gitDirectory = match?.[1] ? resolve(current, match[1]) : null;
-        const worktreeMarker = `${join(".git", "worktrees")}/`;
-        const markerIndex = gitDirectory?.indexOf(worktreeMarker) ?? -1;
-        if (gitDirectory && markerIndex >= 0) return gitDirectory.slice(0, markerIndex - 1);
-        return current;
+        if (!gitDirectory) return current;
+        const commonPointer = await readFile(join(gitDirectory, "commondir"), "utf8").catch(() => null);
+        // Older retained markers may lack commondir. Keep the conventional
+        // layout fallback, while explicit pointers also cover nonstandard storage.
+        const conventional = gitDirectory.match(/^(.*)\/\.git\/worktrees\/[^/]+\/?$/);
+        const commonDirectory = commonPointer ? resolve(gitDirectory, commonPointer.trim())
+          : conventional ? join(conventional[1]!, ".git") : gitDirectory;
+        // .git can point at separate storage; commondir is authoritative for linked trees.
+        const canonicalCommon = await realpath(commonDirectory).catch(() => commonDirectory);
+        return basename(canonicalCommon) === ".git" ? dirname(canonicalCommon) : canonicalCommon;
       }
     } catch {
       // Continue toward the filesystem root.
@@ -1249,29 +1535,49 @@ async function repositoryForPath(
   repositories: RepositoryRow[],
   workspaceRepositories: Map<string, RepositoryRow>,
   discovered: Map<string, RepositoryRow>,
+  metadataRemote: string | null = null,
 ): Promise<RepositoryRow> {
-  const resolvedCwd = resolve(cwd);
+  const resolvedCwd = await realpath(cwd).catch(() => resolve(cwd));
   const workspaceMatch = workspaceRepositories.get(resolvedCwd);
   if (workspaceMatch) return workspaceMatch;
+  metadataRemote = canonicalizeRemote(metadataRemote) ? metadataRemote : null;
+  const gitRoot = metadataRemote && !(await stat(resolvedCwd).catch(() => null)) ? null : await gitRootForPath(resolvedCwd);
+  const repositoryRemote = (gitRoot ? await repositoryRemoteAtRoot(gitRoot) : null) ?? metadataRemote;
+  const remoteIdentity = repositoryRemote ? normalizeRemote(repositoryRemote) : null;
+  const workspaceAncestor = [...workspaceRepositories.entries()]
+    .filter(([root]) => pathInside(resolvedCwd, root))
+    .filter(([root, repository]) => {
+      // Explicit workspace ownership survives deletion. A nested independent
+      // Git boundary must retain its own identity, including linked worktrees.
+      const sameRemote = Boolean(remoteIdentity && repository.remote_url && normalizeRemote(repository.remote_url) === remoteIdentity);
+      if (!gitRoot) return !metadataRemote || sameRemote;
+      return resolve(gitRoot) === resolve(root) ||
+        resolve(gitRoot) === resolve(repository.root_path) || sameRemote;
+    })
+    .sort(([left], [right]) => right.length - left.length)[0];
+  if (workspaceAncestor) return workspaceAncestor[1];
   const direct = repositories
     .filter(({ root_path }) => root_path && pathInside(resolvedCwd, root_path))
     .sort((left, right) => resolve(right.root_path).length - resolve(left.root_path).length)[0];
-  if (direct) return direct;
+  if (direct && !gitRoot && !metadataRemote) return direct;
   const workspaceParts = resolvedCwd.match(/\/conductor\/workspaces\/([^/]+)\//);
   const named = workspaceParts?.[1]
     ? repositories.find(({ name }) => name === workspaceParts[1])
     : null;
-  if (named) return named;
-  const gitRoot = await gitRootForPath(resolvedCwd);
+  if (named && !gitRoot && !metadataRemote) return named;
   if (gitRoot) {
     const registered = repositories.find(({ root_path }) => resolve(root_path) === resolve(gitRoot));
     if (registered) return registered;
   }
+  if (remoteIdentity) {
+    const registeredByRemote = repositories.filter(({ remote_url }) => remote_url && normalizeRemote(remote_url) === remoteIdentity);
+    if (registeredByRemote.length === 1) return registeredByRemote[0]!;
+  }
   const ephemeralLocalPath =
-    !gitRoot &&
+    !gitRoot && !remoteIdentity &&
     resolvedCwd.startsWith("/private/var/folders/") &&
     resolvedCwd.includes("/T/");
-  const groupingRoot = ephemeralLocalPath
+  const groupingRoot = remoteIdentity ? `remote:${remoteIdentity}` : ephemeralLocalPath
     ? "/private/var/folders/session-analytics-ephemeral"
     : gitRoot ?? resolvedCwd;
   const existing = discovered.get(groupingRoot);
@@ -1279,15 +1585,15 @@ async function repositoryForPath(
   const localKey = createHash("sha256").update(groupingRoot).digest("hex").slice(0, 4);
   const name = ephemeralLocalPath
     ? "Ephemeral automation sessions"
-    : gitRoot
-      ? basename(groupingRoot)
+    : remoteIdentity ? basename(remoteIdentity) : gitRoot
+      ? basename(gitRoot)
       : `${basename(groupingRoot) || "Local directory"} · ${localKey} (local directory)`;
   const repository: RepositoryRow = {
     default_branch: "",
     id: `discovered-${createHash("sha256").update(groupingRoot).digest("hex").slice(0, 20)}`,
     name,
-    remote_url: null,
-    root_path: groupingRoot,
+    remote_url: repositoryRemote,
+    root_path: ephemeralLocalPath ? groupingRoot : gitRoot ?? resolvedCwd,
   };
   discovered.set(groupingRoot, repository);
   return repository;
@@ -1335,12 +1641,13 @@ async function analyzeTranscriptCandidate(
   workflowSources?: WorkflowSources,
   contentRules = false,
   index: IndexScan | null = null,
+  claudeUsageOwners?: ReadonlyMap<string, string>,
 ): Promise<SessionAnalytics | null> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   const session = candidate.provider === "codex"
-    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index)
-    : await analyzeClaude(row, candidate.path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, index);
+    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index, null, () => false, candidate.paths)
+    : await analyzeClaude(row, candidate.path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, index, claudeUsageOwners, candidate.paths);
   if (session) session.transcript.startTimeKnown = Boolean(safeTime(candidate.timestamp));
   return session;
 }
@@ -1367,7 +1674,6 @@ function cursorPaths(data: JsonRecord): string[] {
   };
   for (const field of [
     "context",
-    "conversation",
     "newlyCreatedFiles",
     "newlyCreatedFolders",
     "originalFileStates",
@@ -1416,8 +1722,9 @@ function addCursorReportedCost(
   for (const [rawModel, rawUsage] of Object.entries(usageData ?? {})) {
     const model = projectModelId(rawModel);
     const usage = asRecord(rawUsage);
-    const value = Math.max(0, numberValue(usage?.["costInCents"]) / 100);
-    if (value === 0) continue;
+    const cents = usage?.["costInCents"];
+    if (typeof cents !== "number" || !Number.isFinite(cents) || cents < 0) continue;
+    const value = cents / 100;
     const aggregate: ModelUsage = state.models.get(model) ?? {
       ...zeroTokens(),
       ...zeroCost(),
@@ -1501,7 +1808,13 @@ function analyzeCursorComposer(
   state.outcomes = outcomes.project();
   const session = finalizeSession(row, state, tokens, 1);
   session.metrics.modelCalls = modelCalls;
-  if (reportedCost > 0) {
+  session.costComplete = session.costBasis !== "unavailable";
+  const hasReportedCost = Object.values(asRecord(data["usageData"]) ?? {}).some((raw) => {
+    const cents = asRecord(raw)?.["costInCents"];
+    return typeof cents === "number" && Number.isFinite(cents) && cents >= 0;
+  });
+  if (hasReportedCost) { session.costBasis = "provider-reported"; session.costComplete = true; }
+  if (hasReportedCost) {
     session.transcript.warnings.push("Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card.");
   } else {
     session.transcript.warnings.push("Cursor retained session metadata without a provider-reported local cost record; no usage value is inferred.");
@@ -1529,10 +1842,28 @@ async function cursorHeaderWorkspaces(
       const workspace = asRecord(
         JSON.parse(await readFile(join(workspaceStorage, workspaceId, "workspace.json"), "utf8")),
       );
-      const uri = stringValue(workspace?.["folder"]) ?? stringValue(workspace?.["workspace"]);
+      const folderUri = stringValue(workspace?.["folder"]);
+      const workspaceUri = stringValue(workspace?.["workspace"]);
+      const uri = folderUri ?? workspaceUri;
       if (!uri) return null;
       const path = uri.startsWith("file://") ? decodeURIComponent(new URL(uri).pathname) : uri;
-      return path.startsWith("/") ? path : null;
+      if (!path.startsWith("/")) return null;
+      if (folderUri) return path;
+      // A saved workspace is a manifest, not a repository path. Only a unique
+      // folder identifies a cwd; multi-root workspaces need separate evidence.
+      const config = asRecord(JSON.parse(await readFile(path, "utf8")));
+      const folders = Array.isArray(config?.["folders"]) ? config["folders"] : [];
+      const roots = new Set<string>();
+      for (const raw of folders) {
+        const folder = asRecord(raw);
+        const folderPath = stringValue(folder?.["path"]);
+        const folderUri = stringValue(folder?.["uri"]);
+        if (folderPath) roots.add(resolve(dirname(path), folderPath));
+        else if (folderUri?.startsWith("file://")) {
+          roots.add(decodeURIComponent(new URL(folderUri).pathname));
+        }
+      }
+      return roots.size === 1 ? [...roots][0]! : null;
     } catch {
       return null;
     }
@@ -1556,9 +1887,7 @@ async function cursorHeaderWorkspaces(
     if (!path) return;
     let workspaceDatabase: DatabaseSync | null = null;
     try {
-      workspaceDatabase = new DatabaseSync(join(workspaceStorage, workspaceId, "state.vscdb"), {
-        readOnly: true,
-      });
+      workspaceDatabase = openSourceDatabase(join(workspaceStorage, workspaceId, "state.vscdb"));
       const row = workspaceDatabase
         .prepare("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
         .get() as { value?: string } | undefined;
@@ -1626,7 +1955,11 @@ export async function cursorSessions(
 ): Promise<{ sessions: SessionAnalytics[]; warning: string | null }> {
   let database: DatabaseSync | null = null;
   try {
-    database = new DatabaseSync(databasePath, { readOnly: true });
+    database = openSourceDatabase(databasePath);
+    repositories = await Promise.all(repositories.map(async (repository) => ({
+      ...repository,
+      root_path: await realpath(repository.root_path).catch(() => resolve(repository.root_path)),
+    })));
     const composerStatement = database.prepare(
       "SELECT value FROM cursorDiskKV WHERE key LIKE 'composerData:%'",
     );
@@ -1635,40 +1968,66 @@ export async function cursorSessions(
       "SELECT value FROM cursorDiskKV WHERE key >= ? AND key < ? ORDER BY key",
     );
     const results: SessionAnalytics[] = [];
+    let partialRead = false;
     for (const { value } of composerStatement.iterate() as Iterable<{ value: string }>) {
       let data: JsonRecord | null = null;
-      try { data = asRecord(JSON.parse(value)); } catch { continue; }
-      if (!data || !stringValue(data["composerId"]) || !millisecondTimestamp(data["createdAt"])) continue;
+      try { data = asRecord(JSON.parse(value)); } catch { partialRead = true; continue; }
+      if (!data || !stringValue(data["composerId"]) || !millisecondTimestamp(data["createdAt"])) { partialRead = true; continue; }
       const id = stringValue(data["composerId"]) as string;
-      const conversation = Array.isArray(data["conversation"]) ? [...data["conversation"]] : [];
+      const conversation: unknown[] = [];
+      const inlinePositions = new Map<string, number>();
+      for (const raw of Array.isArray(data["conversation"]) ? data["conversation"] : []) {
+        const bubble = asRecord(raw);
+        const bubbleId = stringValue(bubble?.["bubbleId"]) ?? stringValue(bubble?.["id"]);
+        const previous = bubbleId ? inlinePositions.get(bubbleId) : undefined;
+        if (previous !== undefined) conversation[previous] = raw;
+        else {
+          if (bubbleId) inlinePositions.set(bubbleId, conversation.length);
+          conversation.push(raw);
+        }
+      }
       const modernBubbles = bubbleStatement
         .all(`bubbleId:${id}:`, `bubbleId:${id};`) as Array<{ value: string }>;
-      if (modernBubbles.length > 0) {
-        const seen = new Set(
-          conversation
-            .map((bubble) => stringValue(asRecord(bubble)?.["bubbleId"]) ?? stringValue(asRecord(bubble)?.["id"]))
-            .filter((bubbleId): bubbleId is string => Boolean(bubbleId)),
-        );
-        for (const { value } of modernBubbles) {
-          let bubble: JsonRecord | null = null;
-          try { bubble = asRecord(JSON.parse(value)); } catch { continue; }
-          if (!bubble) continue;
-          const bubbleId = stringValue(bubble["bubbleId"]) ?? stringValue(bubble["id"]);
-          if (bubbleId && seen.has(bubbleId)) continue;
-          if (bubbleId) seen.add(bubbleId);
+      for (const { value } of modernBubbles) {
+        let bubble: JsonRecord | null = null;
+        try { bubble = asRecord(JSON.parse(value)); } catch { partialRead = true; continue; }
+        if (!bubble) { partialRead = true; continue; }
+        const bubbleId = stringValue(bubble["bubbleId"]) ?? stringValue(bubble["id"]);
+        const previous = bubbleId ? inlinePositions.get(bubbleId) : undefined;
+        // Split disk storage is the current persisted snapshot after migration.
+        if (previous !== undefined) conversation[previous] = bubble;
+        else {
+          if (bubbleId) inlinePositions.set(bubbleId, conversation.length);
           conversation.push(bubble);
         }
       }
-      const paths = cursorPaths(data);
+      const hasReportedUsage = Object.values(asRecord(data["usageData"]) ?? {}).some((raw) => {
+        const cents = asRecord(raw)?.["costInCents"];
+        return typeof cents === "number" && Number.isFinite(cents) && cents >= 0;
+      });
+      const hasReportedEdits = nonNegativeNumberValue(data["totalLinesAdded"]) + nonNegativeNumberValue(data["totalLinesRemoved"]) > 0;
+      if (data["isDraft"] === true && conversation.length === 0 && !hasReportedUsage && !hasReportedEdits) continue;
       const headerPath = headerWorkspaces.workspaces.get(id);
-      if (headerPath) paths.push(headerPath);
+      // The session workspace is authoritative; references can point to other repos.
+      const paths = headerPath ? [headerPath] : cursorPaths(data);
       let cwd = join(homedir(), ".cursor", "unassigned");
       for (const path of paths) {
         const gitRoot = await gitRootForPath(path);
         if (gitRoot) { cwd = gitRoot; break; }
         if (cwd.endsWith("/.cursor/unassigned")) cwd = path.endsWith(".code-workspace") ? dirname(path) : path;
       }
-      const repository = await repositoryForPath(cwd, repositories, workspaceRepositories, discovered);
+      let repository: RepositoryRow;
+      if (cwd === join(homedir(), ".cursor", "unassigned")) {
+        const key = createHash("sha256").update("cursor-composer:unassigned").digest("hex").slice(0, 20);
+        const root = `unassigned:${key}`;
+        repository = discovered.get(root) ?? {
+          id: `discovered-${key}`, name: `Cursor · unassigned ${key.slice(0, 4)}`,
+          root_path: root, remote_url: null, default_branch: "",
+        };
+        discovered.set(root, repository);
+      } else {
+        repository = await repositoryForPath(cwd, repositories, workspaceRepositories, discovered);
+      }
       const executionKind =
         data["isBestOfNSubcomposer"] === true ||
         Boolean(data["subagentInfo"]) ||
@@ -1678,7 +2037,7 @@ export async function cursorSessions(
       const session = analyzeCursorComposer(data, repository, cwd, executionKind, conversation);
       if (session) results.push(session);
     }
-    return { sessions: results, warning: null };
+    return { sessions: results, warning: partialRead ? "Cursor local session history could not be read." : null };
   } catch (error) {
     const code = asRecord(error)?.["code"];
     return { sessions: [], warning: code === "ENOENT" ? "Cursor local session history is missing." : "Cursor local session history could not be read." };
@@ -1739,13 +2098,13 @@ async function mapConcurrent<T, R>(
 }
 
 function sessionRows(database: DatabaseSync, repositoryIds: string[], includeHidden: boolean) {
-  if (repositoryIds.length === 0) return [];
+  // Retained result receipts remain evidence after repository/workspace deletion.
   // Optional workspace columns vary by Conductor version. Older schemas remain supported.
   const workspaceColumns = new Set((database.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>).map(({ name }) => name));
   const archiveCommit = workspaceColumns.has("archive_commit") ? "w.archive_commit" : "NULL";
   const prPresent = workspaceColumns.has("pr_title") ? "CASE WHEN length(trim(w.pr_title)) > 0 THEN 1 ELSE 0 END" : "0";
   const workspaceStatus = workspaceColumns.has("derived_status") ? "w.derived_status" : "NULL";
-  const placeholders = repositoryIds.map(() => "?").join(", ");
+  const placeholders = repositoryIds.map(() => "?").join(", ") || "NULL";
   const rows = database
     .prepare(`
       SELECT
@@ -1771,13 +2130,17 @@ function sessionRows(database: DatabaseSync, repositoryIds: string[], includeHid
         r.remote_url AS repository_remote,
         r.default_branch
       FROM sessions AS s
-      JOIN workspaces AS w ON w.id = s.workspace_id
-      JOIN repos AS r ON r.id = w.repository_id
-      WHERE r.id IN (${placeholders}) AND (? = 1 OR s.is_hidden = 0)
+      LEFT JOIN workspaces AS w ON w.id = s.workspace_id
+      LEFT JOIN repos AS r ON r.id = w.repository_id
+      WHERE (r.id IN (${placeholders}) OR r.id IS NULL) AND (? = 1 OR s.is_hidden = 0)
       ORDER BY datetime(s.created_at) DESC
     `)
     .all(...repositoryIds, includeHidden ? 1 : 0);
-  return rows as unknown as SessionDatabaseRow[];
+  return (rows as unknown as SessionDatabaseRow[]).map((row) => row.repository_id ? row : {
+    ...row, repository_id: "unassigned:conductor", repository_name: "Conductor · unassigned",
+    root_path: "unassigned:conductor", repository_remote: "", default_branch: "",
+    workspace_path: row.workspace_path || "unassigned:conductor",
+  });
 }
 
 function chooseRepository(
@@ -1802,11 +2165,11 @@ function chooseRepository(
   throw new Error("The requested Git remote matches more than one evidenced repository.");
 }
 
-function selectRepositories(
+async function selectRepositories(
   repositories: RepositoryRow[],
   options: AnalyzeOptions,
   index: IndexScan | null = null,
-): RepositoryRow[] {
+): Promise<RepositoryRow[]> {
   if (options.repositoryId) {
     const repository = repositories.find(({ id }) => id === options.repositoryId);
     if (!repository) throw new Error("No evidenced repository has the requested ID.");
@@ -1816,15 +2179,22 @@ function selectRepositories(
     return [chooseRepository(repositories, options.repositoryName, options.repositoryRemote ?? "")];
   }
   if (options.repositoryRemote) {
+    const requestedRemote = normalizeRemote(options.repositoryRemote);
+    if (!requestedRemote) throw new Error("No unique evidenced repository has the requested remote.");
     const matches = repositories.filter((repository) =>
-      normalizeRemote(repository.remote_url ?? "") === normalizeRemote(options.repositoryRemote as string) ||
+      normalizeRemote(repository.remote_url ?? "") === requestedRemote ||
       index?.matchesRemote(repository.id, options.repositoryRemote as string));
     if (matches.length !== 1) throw new Error("No unique evidenced repository has the requested remote.");
     return matches;
   }
   if (options.repositoryRoot) {
-    const canonicalRoot = resolve(options.repositoryRoot);
-    const matches = repositories.filter(({ id, root_path }) => (root_path && resolve(root_path) === canonicalRoot) || index?.matchesRoot(id, canonicalRoot));
+    const canonicalRoot = await realpath(options.repositoryRoot).catch(() => resolve(options.repositoryRoot!));
+    const gitRoot = await gitRootForPath(canonicalRoot);
+    const remote = gitRoot ? await repositoryRemoteAtRoot(gitRoot) : null;
+    const remoteIdentity = remote ? normalizeRemote(remote) : null;
+    const matches = repositories.filter(({ id, root_path, remote_url }) =>
+      (root_path && resolve(root_path) === canonicalRoot) || index?.matchesRoot(id, canonicalRoot) ||
+      Boolean(remoteIdentity && remote_url && normalizeRemote(remote_url) === remoteIdentity));
     if (matches.length !== 1 || !matches[0]) {
       throw new Error(
         matches.length === 0
@@ -1872,7 +2242,7 @@ async function analyzeObservedEvidence(path: string, provider: "claude" | "codex
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
   observeEvidence?: EvidenceObserver,
-): Promise<{ rateCard: PricingCatalog; repositories: RepositoryAnalytics[]; providerWarnings: string[]; limitsCache: LimitsCacheAnalytics; workflowInventory: WorkflowInventory; mcpContext?: MachineAnalytics["mcpContext"]; mcpSourceHealth: MachineAnalytics["mcpSourceHealth"] }> {
+): Promise<{ historyCoverage?: MachineAnalytics["historyCoverage"]; rateCard: PricingCatalog; repositories: RepositoryAnalytics[]; providerWarnings: string[]; limitsCache: LimitsCacheAnalytics; workflowInventory: WorkflowInventory; mcpContext?: MachineAnalytics["mcpContext"]; mcpSourceHealth: MachineAnalytics["mcpSourceHealth"] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadPricingCatalog(options);
@@ -1885,7 +2255,7 @@ async function analyzeSelectedRepositories(
   let index: IndexScan | null = null;
   try {
     await stat(databasePath);
-    database = new DatabaseSync(databasePath, { readOnly: true });
+    database = openSourceDatabase(databasePath);
   } catch (error) {
     const code = asRecord(error)?.["code"];
     if (code !== "ENOENT") {
@@ -1908,9 +2278,16 @@ async function analyzeSelectedRepositories(
           )
           .all(includeHidden ? 1 : 0) as unknown as RepositoryRow[]
       : [];
+    for (const repository of availableRepositories) {
+      repository.root_path = await realpath(repository.root_path).catch(() => resolve(repository.root_path));
+    }
     const rows = database
       ? sessionRows(database, availableRepositories.map(({ id }) => id), includeHidden)
       : [];
+    if (rows.some((row) => row.repository_id === "unassigned:conductor")) {
+      availableRepositories.push({ id: "unassigned:conductor", name: "Conductor · unassigned",
+        root_path: "unassigned:conductor", remote_url: null, default_branch: "" });
+    }
     // Conductor repository IDs are raw application identifiers. Replace them
     // with stable pseudonymous keys before anything reaches the projection.
     const publicRepositoryIds = new Map(
@@ -1924,12 +2301,25 @@ async function analyzeSelectedRepositories(
     }
     for (const row of rows) {
       row.repository_id = publicRepositoryIds.get(row.repository_id) ?? row.repository_id;
+      row.root_path = availableRepositories.find((repository) => repository.id === row.repository_id)?.root_path ?? row.root_path;
     }
     const repositoryById = new Map(availableRepositories.map((repository) => [repository.id, repository]));
     const workspaceRepositories = new Map<string, RepositoryRow>();
-    for (const row of rows) {
-      const repository = repositoryById.get(row.repository_id);
-      if (repository) workspaceRepositories.set(resolve(row.workspace_path), repository);
+    if (database) {
+      // Workspace ownership exists independently of Conductor session records.
+      const columns = new Set((database.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>).map(({ name }) => name));
+      const secondary = columns.has("secondary_directory_name") ? "secondary_directory_name" : "NULL";
+      const workspaceRows = database.prepare(`SELECT repository_id, workspace_path, ${secondary} AS secondary_directory_name FROM workspaces`).all() as unknown as Array<{ repository_id: string; workspace_path: string | null; secondary_directory_name: string | null }>;
+      for (const workspace of workspaceRows) {
+        const repository = repositoryById.get(publicRepositoryIds.get(workspace.repository_id) ?? workspace.repository_id);
+        if (!repository || !workspace.workspace_path) continue;
+        const workspacePath = await realpath(workspace.workspace_path).catch(() => resolve(workspace.workspace_path!));
+        workspaceRepositories.set(workspacePath, repository);
+        if (workspace.secondary_directory_name) {
+          const alias = resolve(dirname(workspace.workspace_path), workspace.secondary_directory_name);
+          workspaceRepositories.set(await realpath(alias).catch(() => alias), repository);
+        }
+      }
     }
     const discovered = new Map<string, RepositoryRow>();
     // Keep Cursor's hydrated composer objects serialized until the much larger
@@ -1966,69 +2356,83 @@ async function analyzeSelectedRepositories(
       transcriptCandidates(codexIndex.paths, "codex"),
       transcriptCandidates(claudeIndex.paths, "claude"),
     ]);
+    const claudeUsageOwners = await buildClaudeUsageOwners(claudeCandidates, claudeEvidencePaths, visitJsonLines);
     const codexCounterLedger = await buildCodexCounterLedger(
-      codexCandidates.map(({ path }) => path), index,
+      codexCandidates.flatMap(({ path, paths }) => paths ?? [path]), index,
       index?.retainedCounterOwners(new Set(codexCandidates.map(({ id }) => index!.identity("codex", id))), [...codexIndex.paths.values()].flat()),
     );
     const claimedCodexCounters = new Set<string>();
     const candidates = [...codexCandidates, ...claudeCandidates];
     const claimed = new Set<string>();
     const registeredOwners = new Set<string>();
-    const registeredRows = rows.filter((row) => {
-      if (!row.provider_session_id || (row.agent_type !== "codex" && row.agent_type !== "claude")) return Boolean(row.provider_session_id);
-      const key = `${row.agent_type}:${row.provider_session_id}`;
-      if (registeredOwners.has(key)) return false;
-      registeredOwners.add(key);
-      return true;
-    });
+    const registeredRows: SessionDatabaseRow[] = [];
+    const registeredSelections = new Map<string, Awaited<ReturnType<typeof selectTranscript>>>();
+    for (const row of rows) {
+      // Orphan metadata cannot override a repository inferred from native evidence.
+      if (row.root_path === "unassigned:conductor" || !row.provider_session_id) continue;
+      if (row.agent_type === "codex" || row.agent_type === "claude") {
+        const identity = `${row.agent_type}:${row.provider_session_id}`;
+        if (registeredOwners.has(identity)) continue;
+        const paths = row.agent_type === "codex" ? codexIndex.paths : claudeIndex.paths;
+        const selected = await selectTranscript(paths.get(row.provider_session_id) ?? [], row.agent_type, row.provider_session_id, row.workspace_path);
+        if (!selected.path) continue;
+        registeredSelections.set(row.conductor_session_id, selected);
+        registeredOwners.add(identity);
+      }
+      registeredRows.push(row);
+    }
     const analyzedRows = await mapConcurrent(registeredRows, 1, async (row) => {
       if (row.agent_type !== "codex" && row.agent_type !== "claude") {
         return ["cursor", "copilot", "opencode", "gemini"].includes(row.agent_type) ? null : unavailableSession(row, "unsupported", ["Unsupported Conductor agent type."]);
       }
       const provider = row.agent_type as SessionProvider;
-      const transcriptPaths = provider === "codex" ? codexIndex.paths : claudeIndex.paths;
-      const selected = await selectTranscript(
-        transcriptPaths.get(row.provider_session_id as string) ?? [],
-        provider,
-        row.provider_session_id as string,
-        row.workspace_path,
-      );
-      if (!selected.path) {
-        // Result-only evidence is considered after all canonical providers.
-        return null;
-      }
+      const selected = registeredSelections.get(row.conductor_session_id)!;
       try {
-        const session = await analyzeObservedEvidence(selected.path, provider as "claude" | "codex", row.provider_session_id!, row.workspace_path, async () => provider === "codex"
-          ? await analyzeCodex(row, selected.path!, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index)
-          : await analyzeClaude(row, selected.path!, rateCard, selected.warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index), observeEvidence, row.conductor_session_id);
+        const session = await analyzeObservedEvidence(selected.path!, provider as "claude" | "codex", row.provider_session_id!, row.workspace_path, async () => provider === "codex"
+          ? await analyzeCodex(row, selected.path!, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index, null, () => false, selected.paths)
+          : await analyzeClaude(row, selected.path!, rateCard, selected.warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index, claudeUsageOwners, selected.paths), observeEvidence, row.conductor_session_id);
         claimed.add(`${provider}:${row.provider_session_id}`);
         return session;
       } catch (error) {
-        void error;
+        if (error instanceof IndexParityError) throw error;
         return unavailableSession(row, "invalid", [
           "Transcript parsing failed without exposing local error details.",
         ]);
       }
     });
-    const recovered = await mapConcurrent(rows.filter(({ provider_session_id, agent_type }) =>
-      !provider_session_id && (agent_type === "codex" || agent_type === "claude")), 1, async (row) => {
-      const matches = candidates.filter((candidate) => {
-        if (candidate.provider !== row.agent_type || claimed.has(`${candidate.provider}:${candidate.id}`)) return false;
-        if (resolve(candidate.cwd) !== resolve(row.workspace_path) || !candidate.timestamp) return false;
-        return Math.abs(timestampMilliseconds(candidate.timestamp) - timestampMilliseconds(row.created_at)) <= 15 * 60_000;
-      });
-      if (matches.length !== 1 || !matches[0]) return null;
+    const legacyRows = rows.filter(({ provider_session_id, agent_type }) =>
+      !provider_session_id && (agent_type === "codex" || agent_type === "claude"));
+    const legacyProviderIds = conductorLegacyProviderIds(database, legacyRows);
+    const legacyMatches = new Map(legacyRows.map((row) => [row.conductor_session_id, candidates.filter((candidate) => {
+      if (candidate.provider !== row.agent_type || claimed.has(`${candidate.provider}:${candidate.id}`)) return false;
+      const explicit = legacyProviderIds.get(row.conductor_session_id);
+      if (explicit?.size && (explicit.size !== 1 || !explicit.has(candidate.id))) return false;
+      if (resolve(candidate.cwd) !== resolve(row.workspace_path) || !candidate.timestamp) return false;
+      return Math.abs(timestampMilliseconds(candidate.timestamp) - timestampMilliseconds(row.created_at)) <= 15 * 60_000;
+    })]));
+    const possibleLegacyOwners = new Map<string, number>();
+    for (const matches of legacyMatches.values()) for (const candidate of matches) {
+      const identity = `${candidate.provider}:${candidate.id}`;
+      possibleLegacyOwners.set(identity, (possibleLegacyOwners.get(identity) ?? 0) + 1);
+    }
+    const recovered = await mapConcurrent(legacyRows, 1, async (row) => {
+      const matches = legacyMatches.get(row.conductor_session_id) ?? [];
+      if (matches.length !== 1 || !matches[0] || possibleLegacyOwners.get(`${matches[0].provider}:${matches[0].id}`) !== 1) return null;
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
         return await analyzeObservedEvidence(candidate.path, candidate.provider, candidate.id, candidate.cwd, async () => candidate.provider === "codex"
-          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index), observeEvidence, row.conductor_session_id);
-      } catch { return null; }
+          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index, null, () => false, candidate.paths)
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index, claudeUsageOwners, candidate.paths), observeEvidence, row.conductor_session_id);
+      } catch (error) { if (error instanceof IndexParityError) throw error; return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
-      const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered);
-      try { return await analyzeObservedEvidence(candidate.path, candidate.provider, candidate.id, candidate.cwd, () => analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index), observeEvidence); } catch { return null; }
+      const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered, candidate.repositoryRemote);
+      try {
+        const session = await analyzeObservedEvidence(candidate.path, candidate.provider, candidate.id, candidate.cwd, () => analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index, claudeUsageOwners), observeEvidence);
+        return session;
+      }
+      catch (error) { if (error instanceof IndexParityError) throw error; return null; }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {
@@ -2064,19 +2468,27 @@ async function analyzeSelectedRepositories(
         const root = `unassigned:${key}`;
         let repository = discovered.get(root);
         if (!repository) {
-          repository = { id: `discovered-${key}`, name: `${source === "gemini-chat" ? "Gemini" : "Cursor"} · unassigned ${key.slice(0, 4)}`, root_path: root, remote_url: null, default_branch: "" };
+          repository = { id: `discovered-${key}`, name: `${source === "gemini-chat" ? "Gemini" : source === "copilot-events" ? "Copilot" : source === "opencode-db" ? "OpenCode" : "Cursor"} · unassigned ${key.slice(0, 4)}`, root_path: root, remote_url: null, default_branch: "" };
           discovered.set(root, repository);
         }
         return repository;
       },
     });
-    allSessions.push(...additional.sessions);
+    const knownSessionKeys = new Set(allSessions.map((session) => session.sessionKey));
+    for (const session of additional.sessions) {
+      const owners = rows.filter((row) => row.agent_type === session.provider && row.provider_session_id &&
+        createHash("sha256").update(`${row.agent_type}:${row.provider_session_id}`).digest("hex").slice(0, 12) === session.sessionKey);
+      if (owners.length === 1) session.sessionKey = createHash("sha256").update(owners[0]!.conductor_session_id).digest("hex").slice(0, 12);
+      if (!knownSessionKeys.has(session.sessionKey)) { allSessions.push(session); knownSessionKeys.add(session.sessionKey); }
+    }
     const canonicalIdentities = new Set([...candidates.map((c) => `${c.provider}:${c.id}`), ...additional.identities]);
     const analyzedKeys = new Set(allSessions.map((s) => s.sessionKey));
     const eligibleRows = rows.filter((row) => {
-      if (analyzedKeys.has(createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12))) return false;
-      const identity = `${row.agent_type}:${row.provider_session_id}`;
-      return !row.provider_session_id || (!canonicalIdentities.has(identity) && !analyzedKeys.has(createHash("sha256").update(identity).digest("hex").slice(0, 12)));
+      // A registered row can contain earlier identities connected by explicit
+      // resets. Let the fallback filter each receipt against canonical evidence.
+      if (row.provider_session_id) return true;
+      // Preserve the unique-legacy-match guard for otherwise unidentified rows.
+      return !analyzedKeys.has(createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12));
     });
     try {
       for (const session of conductorFallback(database, eligibleRows, canonicalIdentities, pricing)) {
@@ -2112,7 +2524,7 @@ async function analyzeSelectedRepositories(
       ![codexIndex.warning, claudeIndex.warning].some((warning) => warning?.includes("could not be read")),
       cursorComplete, additional.warnings.length === 0,
     ) ?? [];
-    for (const session of retainedSessions) {
+    for (const session of [...retainedSessions, ...allSessions.filter(session => session.transcript.sourceDeleted)]) {
       const currentRepository = [...availableRepositories, ...discovered.values()].find((repository) =>
         repository.id === session.repositoryId || Boolean(repository.root_path && index?.matchesRoot(session.repositoryId, repository.root_path)));
       if (currentRepository) {
@@ -2128,7 +2540,7 @@ async function analyzeSelectedRepositories(
     allSessions.push(...retainedSessions);
     const retainedPopulation = allSessions.filter((session) => !index || index.inRetention(session));
     const allRepositories = [...availableRepositories, ...discovered.values()].sort((left, right) => left.name.localeCompare(right.name));
-    const selectedRepositories = selectRepositories(allRepositories, options, index);
+    const selectedRepositories = await selectRepositories(allRepositories, options, index);
     // Resolve launch context after all provider adapters assigned repositories.
     let mcpContext: MachineAnalytics["mcpContext"];
     if (options.mcpCwd) {
@@ -2155,6 +2567,7 @@ async function analyzeSelectedRepositories(
     await addRepositorySkills(workflowSources.inventory, selectedRepositories);
     const stableIndex = await index?.commit();
     return {
+      ...(!explicitRepositoryFilter ? { historyCoverage: await collectHistoryCoverage(claudeRoots, retainedPopulation, rateCard, options.claudeRoot ? undefined : { home: homedir(), override: process.env["CLAUDE_CONFIG_DIR"] }) } : {}),
       ...(mcpContext ? { mcpContext } : {}),
       mcpSourceHealth: [sourceHealth("claude", claudeIndexes.map((item) => item.warning)),
         sourceHealth("codex", codexIndexes.map((item) => item.warning)), sourceHealth("cursor", [cursorResult.warning])],
@@ -2175,6 +2588,15 @@ async function analyzeSelectedRepositories(
         return result;
       }),
     };
+  } catch (error) {
+    if (!(error instanceof IndexParityError) || options.noIndex) throw error;
+    // Discard every partial claim and close the writer before a fresh, unindexed scan.
+    const failedIndex = index; index = null; failedIndex?.close();
+    const failedDatabase = database; database = null; failedDatabase?.close();
+    const result = await analyzeSelectedRepositories({ ...options, noIndex: true }, observeEvidence);
+    result.providerWarnings.push(indexParityWarning);
+    for (const repository of result.repositories) repository.warnings.push(indexParityWarning);
+    return result;
   } finally {
     database?.close();
     index?.close();
@@ -2244,6 +2666,7 @@ export async function analyzeMachineSessions(
   const result = await analyzeSelectedRepositories(options, observeEvidence);
   const machine = aggregateMachine(result.repositories, result.rateCard);
   machine.warnings = [...new Set([...machine.warnings, ...result.providerWarnings])];
+  if (result.historyCoverage) machine.historyCoverage = result.historyCoverage;
   machine.limitsCache = result.limitsCache;
   machine.workflow = summarizeWorkflow(machine.sessions, result.workflowInventory, machine.generatedAt, machine.repositories.map((r) => r.repository.id));
   machine.mcpSourceHealth = result.mcpSourceHealth;

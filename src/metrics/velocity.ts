@@ -4,6 +4,8 @@ import type {
   VelocityDimension, VelocityEffort, VelocityMetadata, VelocityValues,
 } from "../types.ts";
 
+import { normalizeTimestamp } from "../public/timestamps.js";
+
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
@@ -70,7 +72,9 @@ export function velocityMetadata(): VelocityMetadata {
 /** Require an absolute, evidenced timestamp. Never substitute a file mtime or an invalid raw string. */
 export function localClock(timestamp: string | null): { day: string; hour: number } | null {
   if (!timestamp || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)) return null;
-  const date = new Date(timestamp);
+  const normalized = normalizeTimestamp(timestamp.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
+  if (!normalized) return null;
+  const date = new Date(normalized);
   if (!Number.isFinite(date.valueOf())) return null;
   return {
     day: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
@@ -80,11 +84,11 @@ export function localClock(timestamp: string | null): { day: string; hour: numbe
 
 export const zeroVelocity = (): VelocityValues => [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-export function usageVelocity(usage: TokenUsage, value: number, priced: boolean, coverage: { reasoning: boolean; cacheRead: boolean; cacheWrite: boolean }): VelocityValues {
+export function usageVelocity(usage: TokenUsage, value: number, pricedTokens: number, coverage: { reasoning: boolean; cacheRead: boolean; cacheWrite: boolean }, calls = 1): VelocityValues {
   return [
     value, usage.inputTokens, usage.uncachedInputTokens, usage.cachedInputTokens,
-    usage.cacheWriteInputTokens, usage.outputTokens, usage.reasoningOutputTokens, 1, 0, 0,
-    priced ? usage.inputTokens + usage.outputTokens : 0,
+    usage.cacheWriteInputTokens, usage.outputTokens, usage.reasoningOutputTokens, calls, 0, 0,
+    pricedTokens,
     coverage.reasoning ? usage.outputTokens : 0,
     coverage.cacheRead ? usage.inputTokens : 0,
     coverage.cacheWrite ? usage.inputTokens : 0,

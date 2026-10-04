@@ -95,7 +95,7 @@ test("invalid provider models are redacted in report, status, API and Pricing vi
     const timestamp = `2026-07-22T10:00:${String(index).padStart(2, "0")}Z`;
     const id = `aaaa0000-0000-4000-8000-${String(index).padStart(12, "0")}`;
     await writeFile(join(claudeRoot, `${id}.jsonl`), JSON.stringify({ type: "assistant", timestamp, sessionId: id,
-      cwd: fixture.repositoryRoot, message: { id: "synthetic-response", model,
+      cwd: fixture.repositoryRoot, message: { id: `synthetic-response-${index}`, model,
         content: [{ type: "text", text: "PRIVATE_REVIEW_CONTENT" }], usage: { input_tokens: 100, output_tokens: 10 } } }) + "\n");
     const codexId = `bbbb0000-0000-4000-8000-${String(index).padStart(12, "0")}`;
     const usage = { input_tokens: 200 + index, output_tokens: 20, cached_input_tokens: 0 };

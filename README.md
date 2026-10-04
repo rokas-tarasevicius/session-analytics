@@ -52,7 +52,7 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 
 1. **Content-free by contract.** The parser reads transcripts locally and returns only allowlisted counters, names, validated model IDs, timestamps, and hashed keys. Malformed model metadata becomes `<unknown>`. The contract is written down in [docs/privacy.md](docs/privacy.md), every public field is listed there, and tests plant sentinel strings in fixtures and fail if any of them reaches an output.
 2. **Accounting you can reproduce.** Costs come from a versioned rate card in this repository with a source URL for every model. Streamed and broadcast token records are deduplicated, unknown models stay visibly unpriced, and each figure says whether it is exact, estimated, or unavailable for that provider.
-3. **Repository first, across agents.** Every session is assigned to a Git repository from its recorded working directory, so Claude Code, Codex, and Cursor work on the same codebase lands in one row. Linked worktrees fold into their main repository, and the [Conductor](https://conductor.build) app's workspace database is used as optional enrichment when present.
+3. **Repository first, across agents.** Every session is assigned to a Git repository from its recorded working directory, so Claude Code, Codex, and Cursor work on the same codebase lands in one row. Linked worktrees and clones with the same complete Git remote fold into one logical repository, and the [Conductor](https://conductor.build) app's workspace database is used as optional enrichment when present.
 
 ## Features
 
@@ -189,6 +189,8 @@ Try synthetic insights with `npm run demo -- insights`, or open the demo dashboa
 
 The first launch builds the index; later launches and dashboard refreshes fingerprint evidence and reuse unchanged session facts. Claude main and subagent files form one invalidation group. Codex ownership is recomputed from cached counter evidence so a changed rollout can invalidate another session without re-parsing unrelated files. Cursor's mutable databases and repository assignments are refreshed on every scan.
 
+Each warm scan checks a rotating sample of up to four cached native sessions and one Codex ledger against fresh parsing. A consistency failure rolls back the ingest and runs a full scan with a visible warning; that fallback includes present sources only. Key/MAC corruption still fails closed. `--no-index` remains available on both dashboard and report commands.
+
 ```bash
 session-analytics index status             # counts, schema, and last-ingest statistics
 session-analytics index status --json
@@ -203,6 +205,8 @@ The default data directory is `~/Library/Application Support/session-analytics/`
 Previously indexed sessions survive provider cleanup and carry `transcript.sourceDeleted: true`; their facts and prices remain those of their last successful ingest. Prune removes sessions whose last observed event is **strictly before UTC midnight** on the given date and keeps a retention floor for future indexed scans. It does not delete provider files. Rebuild resets that floor and discards retained history that no longer has source evidence. An unreadable index fails with a fixed error; rebuild recovers it, while `--no-index` bypasses it. A corrupt database is quarantined privately during recovery; quarantine files are not part of the active index.
 
 Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip session parsing; new activity can re-enter. Event extrema are compared as UTC instants. Legacy dates that cannot be verified are kept until their sources can be read again. Key mismatches fail an integrity check before selecting history, and rebuild also repairs damaged writer coordination. The dashboard shows filtered retention counts and frozen-pricing notes and excludes historical working observations from live snapshots. Direct machine and repository analyzer calls share the same visibility default.
+
+Developers can run `node scripts/parity.ts --machine` to compare full, cold-index and warm-index accounting. It uses the 256 MB analysis worker, offline pricing, a fresh private index under `.lane/`, and the shared real-scan lock. Output contains month/provider totals and differences by hashed session key, never repository names or transcript content. Live source changes are reported separately and do not suppress the unfiltered diff or a failing exit status. Use `--demo-root PATH` with a retained synthetic demo for repeatable local checks.
 
 ### Options
 
@@ -339,11 +343,13 @@ Analysis runs in a child process with a capped heap, and Cursor's database is pa
 - **API-equivalent is not an invoice.** Dollar figures price observed tokens at public API list prices. They do not model subscription plans, discounts, batch or priority tiers, regional pricing, taxes, or credits. Under a subscription, read them as the value of the usage, not as money spent.
 - **Price evidence is versioned.** API snapshots record fetch time, public source URL and payload SHA-256; [`data/rate-cards.json`](data/rate-cards.json) keeps reviewed exceptions and fallback rates. Unknown or ambiguous models remain unpriced. Preserve the pricing directory and reviewed card to reproduce results, or use `--rate-card` to pin a reviewed card.
 - **Coverage is shown, not hidden.** Pricing coverage is the share of observed tokens with explicit rates for their token classes. Substituted cache prices stay in estimated totals with visible assumptions, and their tokens are excluded from the coverage numerator. Invalid model labels become `<unknown>` without dropping tokens. Sessions without validated provider evidence are excluded rather than counted as zero.
-- **Codex cache writes are not recorded**, so Codex has an ordinary estimate and an upper estimate that charges the cache-write premium on all uncached input.
+- **Codex cache writes are not recorded.** Its upper estimate applies an additional write premium only where an explicit model tariff establishes one; legacy models without a write fee receive no invented surcharge.
 - **Processed input repeats context.** Input totals count cached context every time a request processes it. They measure consumption, not unique text.
 - **Long-context premiums apply per request**, using the input size of that request, never the session or repository total.
 - **Cost basis follows the evidence source.** Cursor's composer database and Conductor results retain provider-reported values. Cursor SDK run counters use reviewed API rates, with aggregate-context uncertainty labeled. Summary values are not allocated to days; activity-only evidence has no usage value.
 - **Sub-agent value is a lower bound.** It counts only usage with explicit sub-agent evidence.
+
+The v0.6.1 correctness suite includes independent raw-data oracles under `verify/`. On the maintainer's machine, `npm run verify:real` compares a full scan with cold and warm disposable indexes, runs all ten oracle areas, and writes a monthly before/after table. It uses offline prices from a copied local pricing cache, reads provider history without modifying it, and emits content-free diagnostics. A shared lock serializes real scans. Exact source changes are identified separately; unexplained differences fail the command. The retained reference snapshot and platform-specific provider stores are required for this release audit.
 
 ## Use it from an agent
 
@@ -455,3 +461,9 @@ Please report vulnerabilities privately through [GitHub private vulnerability re
 [MIT](LICENSE). Bundled fonts (Geist and Geist Mono) are licensed under the [SIL Open Font License 1.1](src/public/fonts/OFL-1.1.txt). Provider names and marks shown in the dashboard identify the data source and remain trademarks of their owners; see [src/public/brands/NOTICE.md](src/public/brands/NOTICE.md).
 
 Provider evidence has metric-specific coverage: unavailable observations display **N/A**, partial totals show eligible/selected session counts, and distributions require five eligible observations. Conductor recovery groups cumulative Claude SDK receipts and labels uncertain accounting partial; reported USD is not an invoice. OpenCode forks exclude inherited requests. See [provider fidelity and resource limits](docs/providers.md#review-hardening-and-resource-limits).
+
+### History coverage
+
+The Summary panel and terminal report show dated session evidence beside an **unattributed history estimate** for each UTC month. Missing Claude transcripts can be recovered from Conductor assistant usage, with message timestamps, tool names, subagent accounting and comparison to retained SDK receipts. Stripped response IDs use conservative input-counter groups and remain partial. Results remain the fallback when usable assistant usage is absent; native transcripts take precedence.
+
+Claude profile statistics are reconciled per day and model using their streamed-block counting convention. These counters can repeat requests, so the remainder is not an exact measure of missing billable usage. Estimates reserve possible overlap for recovered Conductor sessions whose profile is unknown, use the lifetime model token mix, and remain outside session/repository totals. Provider retention may remove transcripts while aggregate statistics survive. Missing statistics and unknown prices stay explicit. The panel covers the entire machine independently of dashboard filters; filtered exports omit it. [Method and limits](docs/metrics.md#history-coverage-and-recovery).

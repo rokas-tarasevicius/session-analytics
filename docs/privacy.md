@@ -43,7 +43,7 @@ The default content-free index lives in `~/Library/Application Support/session-a
 
 The directory is mode `0700`. `index.sqlite`, WAL/SHM/journal files, the SQLite writer-coordination file, transient filesystem writer tickets, and a 32-byte random `index.key` are mode `0600`. Symbolic links, hard-linked files, and foreign ownership are rejected. These permissions and the key protect against other accounts; this is not encryption and does not protect against a process running as your user.
 
-The following is the complete disk field manifest. Keys and fingerprints use HMAC-SHA-256 with `index.key`, which is never exported. A domain-separated verification MAC binds the database, all scopes, and pruning reservations to that key before scope selection. Legacy migration authenticates existing payloads first; it refuses unverifiable keyed-only state. Rebuild preserves a usable key; deleting or replacing the key does not make an existing database safe to reuse. Integrity MACs detect unintended changes but are not protection from an attacker who can read the key.
+The following is the complete disk field manifest. Index source keys and integrity fingerprints use HMAC-SHA-256 with `index.key`, which is never exported. Internal Codex identity hashes are explicitly listed as unkeyed below. A domain-separated verification MAC binds the database, all scopes, and pruning reservations to that key before scope selection. Legacy migration authenticates existing payloads first; it refuses unverifiable keyed-only state. Rebuild preserves a usable key; deleting or replacing the key does not make an existing database safe to reuse. Integrity MACs detect unintended changes but are not protection from an attacker who can read the key.
 
 | Stored data | Contents | Tier |
 | --- | --- | --- |
@@ -56,19 +56,41 @@ The following is the complete disk field manifest. Keys and fingerprints use HMA
 | `evidence.fingerprint.device`, `.inode` | Filesystem identity numbers encoded losslessly as strings | P1 |
 | `evidence.fingerprint.size`, `.mtime`, `.ctime` | Byte count and nanosecond modification/change times | P0 |
 | `evidence.fingerprint.head`, `.tail` | Keyed first/last 4 KiB digests; bytes are discarded | P1 |
-| `evidence.ledger.observations[]` | Numeric total/last counter fingerprint, activity gap (`null` for unknown), timestamp | P0 |
+| `evidence.ledger.observations[]` | Numeric total/last counter fingerprint, activity gap (`null` for unknown), selected and earliest observed timestamps | P0 |
+| `evidence.ledger.identity.key`, `.parents[]`, `.createdAt` | SHA-256 thread/ancestor identities and normalized creation time; unkeyed and linkable, with no raw IDs | P1/P0 |
+| `evidence.ledger.receipts[].key`, `.fingerprint`, `.timestamp` | SHA-256 of the thread/response identity pair, numeric counters, and normalized receipt time | P1/P0 |
+| `evidence.ledger.calls[].key`, `.timestamp` | SHA-256 transport-call identity and normalized time or null, used to exclude proven inherited calls | P1/P0 |
+| `evidence.ledger.nativeFingerprints[]` | Numeric counter fingerprints proven to alias explicit request receipts | P0 |
 | `evidence.ledger.unownedFingerprints[]` | Numeric total/last fingerprints with no event timestamp, used to connect ownership dependencies | P0 |
 | `evidence.ledger.models`, `.lastLocalActivityTimestamp`, `.bytes`, `.newlineTerminated`, `.unownedCounters` | Model IDs, continuation timestamp/byte offset, and boolean checkpoint guards | P0 |
 | `evidence.ledger.prefixHash` | Keyed digest of the complete old prefix; no transcript bytes | P1 |
 | `sessions.owned_counters` | Attributed numeric counter fingerprints, timestamps, and fallback model IDs, for deleted-owner reservations | P0 |
 | `retired_counters.counter_key` | Keyed counter-membership reservations kept after pruning, without usage values or timestamps, solely to prevent rebilling | P1 |
 | `metadata` | Keyed parser/rate revision, domain-separated key-verification MAC, and the UTC retention floor; no source configuration in plaintext | P0/P1 |
+| `metadata.audit:sessions:<scope>`, `.audit:ledgers:<scope>` | Keyed scope and last selected keyed session/source identity in the rotating verification sample; committed only with a successful ingest | P1 |
 | `scans` | Keyed source scope, completion time, and counters/timing from the status manifest below | P0/P1 |
 | `index.key` | Private random HMAC key, never part of output | Private key |
 | SQLite metadata / `writer.sqlite` | Schema version, transaction metadata, and local writer coordination; no transcript data | P0 |
 | `writer-ticket-*` / `.next` | Transient process ID, random nonce, and numeric mutex order; no provider data, paths, or session IDs; removed on release or dead-process recovery | P0 |
 
 The index retains previously observed history after provider deletion. `index prune --before YYYY-MM-DD` removes old verified session facts, clears reusable evidence, vacuums the active database, and keeps a retention floor, minimal keyed exclusion checkpoints, and keyed anti-rebilling reservations. Subsequent scans may rebuild ledger evidence from surviving provider files; unchanged exclusion checkpoints skip session parsing without restoring session facts. The cutoff is exclusive UTC midnight; provider files are untouched. Unverified legacy dates are kept until the source can be reparsed. Rebuild discards retained history and resets the floor. Corruption recovery places unreadable main or writer databases in private `.rebuild-*` quarantine files, which are excluded from analysis, status, and prune; remove those separately when no longer needed. Retention is of derived facts, never a raw transcript archive. P2 settings partition indexed history, so disabling rules cannot replay earlier rule-derived facts. Deleted-source facts from a different P2 setting are unavailable in that scope. No P3 content is indexed.
+
+### Parity audit diagnostics
+
+The development-only `scripts/parity.ts` runner reads real sources without writing to them. It uses offline prices and a fresh private index inside `.lane/`; it never serializes the real snapshot or source content into its report. The metadata-only generation check hashes native file identities/versions (including Claude children) and an explicit Conductor session/workspace/repository metadata allowlist in memory. It never queries message tables. These hashes are used to detect live changes, not exported as paths or raw IDs.
+
+| Diagnostic field | Contents | Tier |
+| --- | --- | --- |
+| `phase`, `milliseconds`, `sessions`, `unchangedSessions`, `fellBack`, `failure`, `stage` | Fixed full/cold/warm phase, failure category and analysis/serialization stage, wall time, counts and fallback flag | P0 |
+| `index` | The existing index scan statistics including the audit counts, or null for a full scan | P0 |
+| `invalidSchemaFields` | Schema-owned field names mapped to failure counts; dynamic keys and source values are omitted | P0 |
+| `totals[]` | UTC session-start month, provider, sessions/invalid counts and existing token/cost-class totals | P0 |
+| `differences[]`, `unchangedDifferences[]` | Existing 12-hex session keys and names of differing allowlisted fields; no source values | P1 |
+| `monthlyDifferences[]`, `unchangedMonthlyDifferences[]` | Month/provider and names of differing total fields | P0 |
+| `changedEvidenceSessions[]` | Existing hashed session keys whose native evidence or correlation metadata changed between phases | P1 |
+| `unverifiedEvidenceSessions[]` | Existing hashed session keys outside the native-file/correlation generation inventory; these are excluded from the unchanged-evidence comparison | P1 |
+
+No new processing tier or network access is introduced. A consistency fallback uses a fixed allowlisted warning; the worker's heap-limit diagnostic is also fixed text and never forwards child stderr.
 
 ## Privacy tiers
 
@@ -131,8 +153,8 @@ Returned by `/api/analytics` and `report --json`.
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
-| `repository.id` | Stable repository key. For a repository registered in Conductor, `conductor-` followed by 20 hex characters of a SHA-256 hash of Conductor's repository record ID; the raw ID is never returned. Otherwise `discovered-` followed by 20 hex characters of a SHA-256 hash of the canonical root directory | P1 |
-| `repository.name` | Display name: Conductor's repository name, or the basename of the Git root. Non-Git directories show `<basename> · <4 hex> (local directory)`; macOS temporary directories show `Ephemeral automation sessions` | P1 |
+| `repository.id` | Stable repository key. For a registered repository, `conductor-` plus the first 20 hex characters of SHA-256 of `conductor:<private repository record ID>`. Otherwise `discovered-` plus 20 hex characters of SHA-256 of the grouping identity: `remote:<normalized full remote>` when available, else the canonical Git/common directory or local directory. Unassigned native Cursor composers share a fixed hashed group; adapters hash their source plus private project/group identity, or session identity when no group is available. Raw identity inputs never leave the parser | P1 |
+| `repository.name` | Display name: Conductor's repository name, the final normalized remote component, or the basename of the Git root. Non-Git directories show `<basename> · <4 hex> (local directory)`; macOS temporary directories show `Ephemeral automation sessions`; unassigned groups use a fixed provider label with an optional hash suffix | P1 |
 | `spendByDay[]` | Priced usage by UTC day for this repository | P0 |
 | `spendByModel[]` | Model usage for this repository | P0 |
 | `summary` | Repository totals; see [Summary](#summary) | P0 |
@@ -148,7 +170,7 @@ Repository summaries and the machine summary share these fields.
 | --- | --- | --- |
 | `analyzedSessions` | Sessions whose evidence validated and parsed | P0 |
 | `apiEquivalentSpendUsd` | Sum of API list-price-equivalent session values across sources with reviewed rates | P0 |
-| `cacheReadRatio` | Cache-read tokens divided by uncached input plus cache reads plus cache writes; `0` with no input | P0 |
+| `cacheReadRatio` | Cache-read tokens divided by uncached input plus cache reads plus cache writes; `null` with no input | P0 |
 | `compactions` | Sum of session compactions | P0 |
 | `estimatedSpendUsd` | Priced usage value: API-equivalent plus provider-reported | P0 |
 | `estimatedUpperSpendUsd` | Sum of session upper estimates | P0 |
@@ -339,7 +361,7 @@ Appears as `session.tokens` and inside every model usage entry.
 | `cacheWrite1hInputTokens` | Cache writes with a 1-hour TTL | P0 |
 | `outputTokens` | Output, including reasoning | P0 |
 | `reasoningOutputTokens` | Reasoning or thinking output, where recorded separately | P0 |
-| `nonReasoningOutputTokens` | Output minus reasoning output | P0 |
+| `nonReasoningOutputTokens` | Output explicitly classified as non-reasoning; the remainder after both known classes is unknown | P0 |
 
 ### Cost breakdown (`CostBreakdown`)
 
@@ -360,9 +382,9 @@ Appears in `session.models[]` and every `spendByModel[]`. Includes every `TokenU
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
-| `model` | Bounded model ID; `<unknown>` for absent or rejected values, retaining their token counters | P0 |
+| `model` | Bounded model ID; `<unknown>` for absent or rejected values, retaining their token counters, and for provider-reported value without a supported model allocation | P0 |
 | `calls` | Requests attributed to this model; zero when aggregate sources cannot establish request counts | P0 |
-| `priced` | `true` when every observed token class has an explicit rate across all requests (always `true` for Cursor provider-reported values) | P0 |
+| `priced` | `true` when every observed token class has an explicit rate across all requests, or when the model row carries an explicit provider-reported value (including recorded zero) | P0 |
 | `pricing[]` | Distinct rate provenance used across this model's requests; empty when no request was API-priced; see below | P0 |
 | `pricingCoverage.pricedTokens`, `pricingCoverage.eligibleTokens` | Explicitly priced and eligible observed token counts for API usage; estimated cache classes and unknown models remain in the denominator only; absent for provider-reported usage | P0 |
 
@@ -459,7 +481,7 @@ the browser's daily, period and group evidence guards.
 | `values[7]` | Model calls | P0 |
 | `values[8]` | Effective tool calls | P0 |
 | `values[9]` | Public sessions started | P0 |
-| `values[10]` | Tokens assigned to a model price; coverage numerator | P0 |
+| `values[10]` | Observed tokens in classes with explicit rates; coverage numerator. Estimated or unavailable classes remain outside this count even when other classes in the request are priced | P0 |
 | `values[11]` | Output with reasoning exposed by the charged usage; a cumulative difference requires both endpoints; coverage numerator | P0 |
 | `values[12]` | Input with cache reads exposed by the charged usage; a cumulative difference requires both endpoints; coverage numerator | P0 |
 | `values[13]` | Input tokens with a cache-write counter; coverage numerator | P0 |
@@ -469,9 +491,6 @@ Week/month/hour series, rolling means, changes, movers and projection bands are 
 in the browser from these cells and are not additional exported fields. Definitions,
 minimum-activity guards and unknown-data rules are in [metrics.md](metrics.md#velocity-snapshot-version-1).
 
-| `model` | Bounded validated model identifier (`<unknown>` when missing or rejected); same policy for rate-card labels and all model dimensions | P0 |
-| `calls` | Requests attributed to this model | P0 |
-| `priced` | `true` when the rate card has an entry for this model (always `true` for Cursor provider-reported values) | P0 |
 
 ### Limits and cache
 
@@ -580,7 +599,7 @@ All fields below are inside `session.outcomes`. Names and semantics are declared
 | `lineSource` | claude-cost-state, claude-structured-patch, codex-file-change, cursor-composer, mixed, unavailable | P0 |
 | `operations.commits`, `operations.pushes` | Deduplicated successful structured Git operation counts | P0 |
 | `operations.prsCreated`, `operations.prsEdited`, `operations.prsMerged`, `operations.prsClosed` | Structured PR operation counts, not unique artifacts | P0 |
-| `links[].ref` | Kind prefix plus 24 hex characters of SHA-256 over a qualified artifact/observation identity | P1 |
+| `links[].ref` | Fixed prefix (`branch`, `commit`, `pr`, `commit-event`, `pr-event`, `workspace-pr`) plus 24 hex characters of SHA-256 over a qualified artifact/observation identity; legacy `pull-request` hashes remain readable | P1 |
 | `links[].kind` | branch, commit, pull-request | P0 |
 | `links[].role` | outcome or context | P0 |
 | `links[].identity` | artifact or observation (no reliable artifact identity) | P0 |
@@ -940,6 +959,7 @@ The dashboard stores two values in browser `localStorage`: the selected view (`s
 | `lastScan.retainedSessions` | Prior sessions returned after source absence/unavailability | P0 |
 | `lastScan.deferredSessions` | Session groups in unstable ownership components; prior facts/exclusions were preserved together | P0 |
 | `lastScan.ledgerReads`, `.ledgerHits`, `.ledgerAppends` | Codex ledger files read, reused, and the read subset continued from a verified prefix | P0 |
+| `lastScan.auditedSessions`, `.auditedLedgers` | Cached native session/ledger projections independently reparsed and matched in the rotating verification sample; zero for older scan records | P0 |
 | `lastScan.elapsedMilliseconds` | Ingest wall time after opening the index, excluding process startup | P0 |
 
 ## What this does not protect against
@@ -1026,3 +1046,70 @@ These optional, bounded summaries use the selected sessions except explicitly gl
 | `outcomes` | Existing `OutcomeSummary` field contract | P0 |
 | `workflow.coverage`, `.humanTurns`, `.toolRuns`, `.turnWallTime`, `.time`, `.interruptions`, `.archetypes`, `.abandonment`, `.concurrency` | Existing workflow summary fields; histograms expose only samples/p50/p95/max, concurrency only peak/eligible/effective parallelism | P0/P2 when enabled |
 | `insightSignals.coveredSessions`, `.selectedSessions`, `.knownRequestSizeTokens`, `.unknownRequestSizeTokens`, `.cacheGapTransitions`, `.estimatedCacheGapPremiumUsd` | Coverage and existing signal counters/value estimates | P0 |
+
+### History recovery and coverage
+
+All new data is P0 counters/enums/model IDs/timestamps except the existing-style pseudonymous profile key (P1). Provider paths, profile directory names, message/session/request IDs and raw exceptions stay private. SQLite projects fixed metadata fields before SDK rows reach the JavaScript parser; message prose, reasoning, tool arguments/results and result text are never selected. Statistics files are read-only, size-bounded and explicitly projected. No network calls, P2 content rules or new secret are introduced. Recovery's public session namespace passes the same schema allowlist into and out of the index.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `historyCoverage.version`, `historyCoverage.scope` | Optional machine-wide reconciliation version 1 and fixed machine scope | P0 |
+| `historyCoverage.profiles[]` | Discovered/deduplicated Claude statistics profile projections | P0/P1 |
+| `historyCoverage.profiles[].profileKey` | `profile-` plus 20 hex characters, same directory identity convention as Limits; no raw profile name/path | P1 |
+| `historyCoverage.profiles[].ordinal` | Scan-local profile number used for a neutral display label | P0 |
+| `historyCoverage.profiles[].status` | available/missing/unsupported/unreadable statistics status | P0 |
+| `historyCoverage.profiles[].dailyTokensVersion` | Numeric daily statistics format version, or null | P0 |
+| `historyCoverage.profiles[].statisticsThrough` | Valid UTC-day cache watermark, or null | P0 |
+| `historyCoverage.profiles[].firstStatisticsDay` | Earliest valid daily statistics day, or null | P0 |
+| `historyCoverage.profiles[].firstTranscriptDay` | Earliest present native transcript event day for this profile; excludes source-deleted index facts | P0 |
+| `historyCoverage.profiles[].lifetimeTokens` | Sum of validated lifetime counter observations, potentially repeated per streamed block; not assigned to months | P0 |
+| `historyCoverage.profiles[].sessionsWithoutStatisticsCounters` | Indexed native sessions lacking matching stream counters; deduplicated evidence provides a partial subtraction | P0 |
+| `historyCoverage.profiles[].months[].month` | UTC `YYYY-MM` month | P0 |
+| `historyCoverage.profiles[].months[].models[].model` | Bounded public model ID | P0 |
+| `historyCoverage.profiles[].months[].models[].statisticsDays` | Number of reported day/model cells in the comparison | P0 |
+| `historyCoverage.profiles[].months[].models[].providerTokens` | Provider-reported stream counter totals over those cells; may repeat requests | P0 |
+| `historyCoverage.profiles[].months[].models[].sessionTokens` | Same-profile deduplicated native session tokens over those cells | P0 |
+| `historyCoverage.profiles[].months[].models[].sessionStatisticsTokens` | Same-profile native streamed-block counters, matching the provider statistics basis | P0 |
+| `historyCoverage.profiles[].months[].models[].gapTokens` | Sum of daily max(0, provider minus matching session stream counters) | P0 |
+| `historyCoverage.profiles[].months[].models[].possibleOverlapTokens` | Conservative share of unknown-profile recovered stream counters reserved once across profiles | P0 |
+| `historyCoverage.profiles[].months[].models[].unattributedTokens` | Gap less possible overlap | P0 |
+| `historyCoverage.profiles[].months[].models[].pricedUnattributedTokens` | Remainder token estimate covered by explicit rates for the imputed token classes | P0 |
+| `historyCoverage.profiles[].months[].models[].unattributedEstimateUsd` | Separately labeled API-equivalent estimate; never included in session/repository totals | P0 |
+| `historyCoverage.profiles[].months[].models[].tokenMixSource` | lifetime-model or unavailable estimate basis | P0 |
+| `historyCoverage.months[].month` | UTC month across dated session evidence and statistics | P0 |
+| `historyCoverage.months[].sessionsWithDatedValue` | Number of distinct sessions supplying a dated monetary observation in this month | P0 |
+| `historyCoverage.months[].statisticsCells` | Number of reported profile/day/model statistics cells; zero means comparison unavailable | P0 |
+| `historyCoverage.months[].sessionEvidenceUsd` | Actually dated session value from all providers | P0 |
+| `historyCoverage.months[].recoveredMessageUsd` | Recovered Claude message value, already included in dated evidence | P0 |
+| `historyCoverage.months[].unattributedEstimateUsd` | Sum of profile/model estimates | P0 |
+| `historyCoverage.months[].unattributedTokens` | Sum of remaining profile/model gap tokens | P0 |
+| `historyCoverage.months[].pricedUnattributedTokens` | Sum of priced remainder token estimates | P0 |
+| `historyCoverage.months[].possibleOverlapTokens` | Sum of conservative overlap reservations | P0 |
+| `historyCoverage.undatedSessionValueUsd` | Session value with no request day, including result-only summaries | P0 |
+| `historyCoverage.unassignedProfileTokens` | Recovered Claude tokens whose profile is unknown, including undated tokens | P0 |
+| `historyStatistics.basis` | Fixed `claude-stream-snapshots-v5` counter observation basis; never used to price sessions | P0 |
+| `historyStatistics.days[].day`, `historyStatistics.days[].model`, `historyStatistics.days[].tokens` | UTC day, bounded model ID and repeated streamed-block counters for native/recovered Claude sessions | P0 |
+| `history.days[].day`, `history.days[].model` | Recovered session UTC day and bounded model ID | P0 |
+| `history.days[].tokens`, `history.days[].valueUsd` | Deduplicated recovered input-plus-output tokens and API-equivalent value | P0 |
+| `history.undatedTokens`, `history.undatedValueUsd` | Recovered usage without trustworthy request timestamps | P0 |
+| `conductor.reconciliation` | Optional message-versus-receipt comparison; result cost is not added to message cost | P0 |
+| `conductor.reconciliation.messageValueUsd` | Recovered API-equivalent message value | P0 |
+| `conductor.reconciliation.reportedUsd` | Conservative receipt value, or null | P0 |
+| `conductor.reconciliation.differenceUsd` | Message minus reported value, or null | P0 |
+| `conductor.reconciliation.relativeDifference` | Difference divided by positive reported value, or null | P0 |
+| `conductor.reconciliation.status` | agrees/differs/partial/unavailable | P0 |
+| `conductor.reconciliation.receiptScope` | complete/partial/unavailable receipt accounting scope | P0 |
+| `conductor.reconciliation.messages` | Recovered assistant response/group count; partial when identities are missing | P0 |
+| `conductor.reconciliation.messagesWithoutUsage` | Assistant messages without usable token counters | P0 |
+| `conductor.reconciliation.messagesWithoutIdentity` | Recovered groups containing usage without a stable upstream response ID | P0 |
+| `evidence.source` | Additionally accepts `conductor-messages`; message fidelity, request usage units, partial accounting | P0 |
+
+Machine history coverage is omitted from repository-filtered analysis and filtered exports. Full snapshot exports preserve it; aggregate-only team sharing does not include the new namespace. The panel explicitly labels machine scope independently of interactive filters. See [the method and uncertainty](metrics.md#history-coverage-and-recovery), including provider retention and uncertain profile overlap.
+
+### v0.6.1 correctness audit boundary
+
+`verify/` and `npm run verify:real` read local provider evidence and emit only allowlisted numerical operands, model IDs, timestamps, enums, and existing hashed correlation keys. The release runner uses a throwaway private analytics data directory and serializes real analysis with the shared audit lock. Provider stores remain read-only. Persisted audit snapshots replace repository names with hashed labels; raw transcript paths, provider IDs, content and local exception text never enter audit reports. Public model residuals use the existing `<unknown>` sentinel, never a guessed model name. Unique registered recovered/additional-provider sessions preserve the established SHA-256 registered session key contract.
+
+New fixed warnings disclose partial reported model allocations, retained main-loop token lower bounds and unallocated unknown-model balances. They are P0 enumerated explanations, with no raw text. Version-qualified Conductor marginal values and result identity correlations remain internal. Per-model historical tariff provenance uses existing P0/P1 price metadata; no new content tier or network request at analysis time is introduced.
+
+External SQLite readers remain read-only when a checkpointed WAL database has no sidecars in a non-writable source directory. The guarded immutable fallback reads the original file without creating sidecars; it rejects a newly appeared WAL/journal or any main-file generation change. Its fixed error contains no path, schema value or source text. Generation metadata stays inside the reader and adds no public field.

@@ -1,6 +1,6 @@
 {
   "name": "session-analytics",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Content-free analytics for local coding-agent sessions: Claude Code, Codex, and Cursor usage, cost, tools, and reliability by repository.",
   "license": "MIT",
   "author": "Rokas Tarasevi\u010dius",
@@ -43,9 +43,10 @@
     "start": "node bin/session-analytics.ts",
     "report": "node bin/session-analytics.ts report",
     "demo": "node scripts/demo.ts",
-    "test": "node --test test/*.test.ts",
+    "test": "node --test --test-concurrency=2 test/*.test.ts test/validation/*.test.ts verify/*/*.test.ts verify/*/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "verify:real": "node scripts/verify-real.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.1",

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { normalizeTimestamp } from "../src/public/timestamps.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -142,7 +143,7 @@ async function appFunction(name: string, globals: Record<string, unknown>) {
   const source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   const fn = source.match(new RegExp(`function ${name}\\([^]*?\\n}`))?.[0];
   assert.ok(fn, `Missing shared control ${name}`);
-  return runInNewContext(`(${fn})`, globals);
+  return runInNewContext(`(${fn})`, { normalizeTimestamp, ...globals });
 }
 
 test("shared date bounds include trailing compactions even for sessions without usage", async () => {

@@ -1,0 +1,51 @@
+/** Independent retained-statistics arithmetic. No production imports.
+ * Session stream counters are separately certified by the native/SDK raw oracles.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { createHash } from 'node:crypto';
+import { price } from '../claude/pricing.mjs';
+import '../aggregation/safe-failures.mjs';
+const snapshot=JSON.parse(fs.readFileSync('../reference/snapshot-noindex-51ea561.json','utf8'));
+const expected=snapshot.historyCoverage;if(!expected||!Array.isArray(expected.profiles)||!Array.isArray(expected.months))throw new Error('Coverage unavailable');
+const integer=v=>Number.isSafeInteger(v)&&v>=0;
+const day=v=>typeof v==='string'&&/^\d{4}-\d\d-\d\d$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00Z'))&&new Date(v+'T00:00Z').toISOString().slice(0,10)===v;
+const safeModel=v=>typeof v==='string'&&/^[A-Za-z][A-Za-z0-9._-]{0,159}$/.test(v)&&!v.includes('..')?v:'<unknown>';
+const digest=v=>createHash('sha256').update(v).digest('hex').slice(0,20);
+const home=process.env.HISTORY_ORACLE_HOME??os.homedir(), candidates=[path.join(home,'.claude'),path.join(home,'.config/claude'),path.join(home,'Library/Application Support/Claude/local-agent-mode-sessions'),path.join(home,'Library/Application Support/Claude/claude-code-sessions'),...(process.env.CLAUDE_CONFIG_DIR?[process.env.CLAUDE_CONFIG_DIR]:[])];
+for(const entry of fs.readdirSync(home,{withFileTypes:true}))if(entry.name.startsWith('.claude-')&&(entry.isDirectory()||entry.isSymbolicLink()))candidates.push(path.join(home,entry.name));
+const roots=new Map();for(const candidate of candidates){let canonical;try{canonical=fs.realpathSync(candidate);}catch{canonical=path.resolve(candidate);}roots.set('profile-'+digest('claude:directory:'+canonical),canonical);}
+const differences=[],stores=[],cells=[],monthRows=new Map();
+const check=(scope,field,actual,wanted)=>{if(actual===wanted)return;if(field.endsWith('Usd')&&typeof actual==='number'&&typeof wanted==='number'&&Math.abs(actual-wanted)<=1e-7)return;differences.push({scope,field,actual:actual??null,expected:wanted??null});};
+const month=id=>{let row=monthRows.get(id);if(!row){row={month:id,sessionsWithDatedValue:0,statisticsCells:0,sessionEvidenceUsd:0,unattributedEstimateUsd:0,unattributedTokens:0,pricedUnattributedTokens:0,possibleOverlapTokens:0,recoveredMessageUsd:0};monthRows.set(id,row);}return row;};
+for(const profile of expected.profiles){
+ const directory=roots.get(profile.profileKey);if(!directory){differences.push({scope:profile.profileKey,field:'raw-profile-unavailable'});continue;}
+ const p={profileKey:profile.profileKey,status:'missing',dailyTokensVersion:null,statisticsThrough:null,firstStatisticsDay:null,firstTranscriptDay:null,lifetimeTokens:0,sessionsWithoutStatisticsCounters:0,months:[]};stores.push(p);
+ let raw;try{const file=path.join(directory,'stats-cache.json');if(fs.statSync(file).size>8*1024*1024){p.status='unsupported';continue;}raw=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){p.status=e.code==='ENOENT'?'missing':'unreadable';continue;}
+ p.dailyTokensVersion=integer(raw.dailyModelTokensVersion)?raw.dailyModelTokensVersion:null;p.statisticsThrough=day(raw.lastComputedDate)?raw.lastComputedDate:null;
+ if(p.dailyTokensVersion!==5||!Array.isArray(raw.dailyModelTokens)||raw.dailyModelTokens.length>20000||Object.keys(raw.modelUsage??{}).length>256){p.status='unsupported';continue;}p.status='available';
+ const mixtures=new Map();for(const [rawModel,u]of Object.entries(raw.modelUsage??{})){const model=safeModel(rawModel),v=['inputTokens','cacheReadInputTokens','cacheCreationInputTokens','outputTokens'].map(k=>u?.[k]);if(model==='<unknown>'||!v.every(integer)||!integer(v.reduce((n,x)=>n+x,0))||!v.some(x=>x>0))continue;p.lifetimeTokens+=v.reduce((n,x)=>n+x,0);mixtures.set(model,v);}
+ const daily=new Map();for(const entry of raw.dailyModelTokens){if(!day(entry.date)||p.statisticsThrough&&entry.date>p.statisticsThrough||!entry.tokensByModel||Object.keys(entry.tokensByModel).length>256)continue;for(const [rawModel,n]of Object.entries(entry.tokensByModel)){const model=safeModel(rawModel);if(!integer(n)||model==='<unknown>')continue;const key=entry.date+':'+model;if((daily.get(key)?.provider??-1)<n)daily.set(key,{profile:p,day:entry.date,model,provider:n,mix:mixtures.get(model),session:0,statistics:0,gap:0,overlap:0});}}
+ const rows=[...daily.values()].sort((a,b)=>a.day.localeCompare(b.day)||a.model.localeCompare(b.model));p.firstStatisticsDay=rows[0]?.day??null;cells.push(...rows);
+}
+// Statistics stores can survive deletion of the projects directory. Prove discovery.
+for(const [key,dir]of roots)if(fs.existsSync(path.join(dir,'stats-cache.json'))&&!expected.profiles.some(p=>p.profileKey===key))differences.push({scope:key,field:'retained-statistics-profile-missing'});
+const profiles=new Map(stores.map(p=>[p.profileKey,p])),observed=new Map(),physical=new Map(),unknown=new Map();let undated=0,unassigned=0;
+const add=(map,key,n)=>{if(!Number.isFinite(n)||n<0)throw new Error('Counter unavailable');map.set(key,(map.get(key)??0)+n);};
+for(const s of snapshot.sessions){let dated=0;const months=new Set();for(const [at,value]of Object.entries(s.spendByDay)){if(!day(at))continue;month(at.slice(0,7)).sessionEvidenceUsd+=value;dated+=value;months.add(at.slice(0,7));}for(const id of months)month(id).sessionsWithDatedValue++;undated+=Math.max(0,s.cost.totalUsd-dated);if(s.provider!=='claude')continue;
+ const profile=profiles.get(s.limitsCache?.profileKey);if(profile){const first=s.firstEventAt?.slice(0,10);if(!s.transcript.sourceDeleted&&day(first)&&(!profile.firstTranscriptDay||first<profile.firstTranscriptDay))profile.firstTranscriptDay=first;for(const b of s.limitsCache?.buckets??[])if(day(b.day))add(observed,profile.profileKey+':'+b.day+':'+b.model,b.observedTokens);if(!s.historyStatistics&&s.limitsCache?.buckets?.length)profile.sessionsWithoutStatisticsCounters++;
+ for(const b of s.historyStatistics?.days??(s.limitsCache?.buckets??[]).filter(b=>b.day).map(b=>({...b,tokens:b.observedTokens})))add(physical,profile.profileKey+':'+b.day+':'+b.model,b.tokens);
+ }else if(s.history){for(const b of s.history.days){unassigned+=b.tokens;month(b.day.slice(0,7)).recoveredMessageUsd+=b.valueUsd;}unassigned+=s.history.undatedTokens;for(const b of s.historyStatistics?.days??s.history.days)add(unknown,b.day+':'+b.model,b.tokens);}
+}
+const overlapGroups=new Map();for(const c of cells){const k=c.profile.profileKey+':'+c.day+':'+c.model;c.session=observed.get(k)??0;c.statistics=physical.get(k)??0;c.gap=Math.max(0,c.provider-c.statistics);const id=c.day+':'+c.model;overlapGroups.set(id,[...(overlapGroups.get(id)??[]),c]);}
+for(const [id,group]of overlapGroups){const gap=group.reduce((n,c)=>n+c.gap,0),reserve=Math.min(gap,unknown.get(id)??0);if(!reserve)continue;for(const c of group)c.overlap=Math.floor(reserve*c.gap/gap);const ranked=[...group].sort((a,b)=>(reserve*b.gap/gap-b.overlap)-(reserve*a.gap/gap-a.overlap)||a.profile.profileKey.localeCompare(b.profile.profileKey));const remaining=reserve-group.reduce((n,c)=>n+c.overlap,0);for(let i=0;i<remaining;i++)ranked[i].overlap++;}
+const profileModels=new Map();for(const c of cells){const id=c.profile.profileKey+':'+c.day.slice(0,7)+':'+c.model;let row=profileModels.get(id);if(!row){row={profileKey:c.profile.profileKey,month:c.day.slice(0,7),model:c.model,statisticsDays:0,providerTokens:0,sessionTokens:0,sessionStatisticsTokens:0,gapTokens:0,possibleOverlapTokens:0,unattributedTokens:0,pricedUnattributedTokens:0,unattributedEstimateUsd:0,tokenMixSource:c.mix?'lifetime-model':'unavailable'};profileModels.set(id,row);}
+ const remainder=c.gap-c.overlap;let usd=0,priced=0;if(remainder&&c.mix){const [input,read,write,output]=c.mix,total=input+read+write+output;const estimate=price(c.model,{input,cacheRead:read,cacheWriteUnknown:write,output,contextInput:0},c.day+'T12:00:00Z');usd=estimate.costUSD*remainder/total;priced=Math.floor(remainder*estimate.pricedTokens/total);}
+ row.statisticsDays++;row.providerTokens+=c.provider;row.sessionTokens+=c.session;row.sessionStatisticsTokens+=c.statistics;row.gapTokens+=c.gap;row.possibleOverlapTokens+=c.overlap;row.unattributedTokens+=remainder;row.pricedUnattributedTokens+=priced;row.unattributedEstimateUsd+=usd;
+ const global=month(c.day.slice(0,7));global.statisticsCells++;global.unattributedTokens+=remainder;global.possibleOverlapTokens+=c.overlap;global.pricedUnattributedTokens+=priced;global.unattributedEstimateUsd+=usd;
+}
+for(const p of stores){const actual=expected.profiles.find(x=>x.profileKey===p.profileKey);for(const f of ['status','dailyTokensVersion','statisticsThrough','firstStatisticsDay','firstTranscriptDay','lifetimeTokens','sessionsWithoutStatisticsCounters'])check(p.profileKey,f,actual[f],p[f]);const a=new Map(actual.months.flatMap(m=>m.models.map(r=>[m.month+':'+r.model,r]))),b=new Map([...profileModels.values()].filter(r=>r.profileKey===p.profileKey).map(r=>[r.month+':'+r.model,r]));for(const id of new Set([...a.keys(),...b.keys()]))for(const f of ['statisticsDays','providerTokens','sessionTokens','sessionStatisticsTokens','gapTokens','possibleOverlapTokens','unattributedTokens','pricedUnattributedTokens','unattributedEstimateUsd','tokenMixSource'])check(p.profileKey+':'+id,f,a.get(id)?.[f],b.get(id)?.[f]);}
+const actualMonths=new Map(expected.months.map(m=>[m.month,m]));for(const id of new Set([...actualMonths.keys(),...monthRows.keys()])){const a=actualMonths.get(id),b=monthRows.get(id);for(const f of ['sessionsWithDatedValue','statisticsCells','sessionEvidenceUsd','unattributedEstimateUsd','unattributedTokens','pricedUnattributedTokens','possibleOverlapTokens','recoveredMessageUsd'])check(id,f,a?.[f],b?.[f]);}
+check('machine','undatedSessionValueUsd',expected.undatedSessionValueUsd,undated);check('machine','unassignedProfileTokens',expected.unassignedProfileTokens,unassigned);
+const result={generatedAt:snapshot.generatedAt,rawProfiles:stores.length,rawStatisticsCells:cells.length,differences,months:[...monthRows.values()],profileModels:[...profileModels.values()]};fs.writeFileSync('.lane/history-coverage-current.json',JSON.stringify(result,null,2));console.log(JSON.stringify({rawProfiles:stores.length,rawStatisticsCells:cells.length,differences:differences.length}));

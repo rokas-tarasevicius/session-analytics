@@ -34,7 +34,9 @@ test("request-time prices and all provenance survive session/repository/machine 
     // January: 100K uncached at $2 + 100K cached at $0.2 + 100 output at $10.
     // February: 200K uncached above 272K at $8 + 100K cache at $0.3 + 100 output at $15.
     assert.ok(Math.abs(session.cost.totalUsd - (0.221 + 1.6315)) < 1e-10);
-    assert.ok(Math.abs(session.cost.upperEstimateUsd - (0.271 + 2.0315)) < 1e-10);
+    // This synthetic model has no explicit write tariff or reviewed paid-write rule.
+    // A generic OpenAI identity must not invent a 25% cache-write premium.
+    assert.ok(Math.abs(session.cost.upperEstimateUsd - (0.221 + 1.6315)) < 1e-10);
     assert.equal(session.models[0]?.pricing?.length, 2);
     const aggregated = snapshot.spendByModel.find(({ model }) => model === "openai/gpt-fixture");
     assert.deepEqual(aggregated?.pricing, session.models[0]?.pricing);

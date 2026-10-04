@@ -12,7 +12,8 @@ interface Message {
 /** Discard content immediately; JSONL checkpoints/rewinds retain only this projection. */
 function projectMessage(raw: unknown): Message | null {
   const message = record(raw), id = text(message?.["id"]);
-  if (!message || !id || !["user", "gemini"].includes(String(message["type"]))) return null;
+  if (!message || !id) return null;
+  // Keep every message identity as a replay anchor; only user/gemini contribute metrics.
   const usage = record(message["tokens"]);
   const calls = Array.isArray(message["toolCalls"]) ? message["toolCalls"] : [];
   if (calls.length > 1_000 || id.length > 512) throw new Error("Gemini message projection exceeds the memory budget.");
@@ -37,15 +38,25 @@ async function legacyProjection(path: string): Promise<Legacy | null> {
   return { metadata, messages };
 }
 async function header(path: string): Promise<RecordValue | null> {
-  for await (const row of jsonLines(path, legacyByteLimit)) if (text(row?.["sessionId"]) && text(row?.["projectHash"])) return row;
-  return null;
+  // Resuming a JSONL session appends $set.sessionId; the initial header can be stale.
+  const metadata: RecordValue = {};
+  for await (const row of jsonLines(path, legacyByteLimit)) {
+    if (!row) continue;
+    const update = record(row["$set"]) ?? (text(row["sessionId"]) && text(row["projectHash"]) ? row : null);
+    if (!update) continue;
+    for (const key of ["sessionId", "projectHash", "startTime", "lastUpdated", "kind"]) {
+      if (Object.hasOwn(update, key)) metadata[key] = update[key];
+    }
+  }
+  return text(metadata["sessionId"]) && text(metadata["projectHash"]) ? metadata : null;
 }
 
 export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
   return {
     id: "gemini-chat", provider: "gemini",
     async discoverRoots({ home, options }) { return [options.geminiRoot ?? join(home, ".gemini/tmp")]; },
-    async *identify(root) {
+    async *identify(root, onWarning) {
+      let skippedFiles = false;
       const registry = record((await readJson(join(dirname(root), "projects.json")))?.["projects"]);
       const directories = new Map<string, string[]>();
       const assign = (key: string, path: string): void => { directories.set(key, [...new Set([...(directories.get(key) ?? []), path])]); };
@@ -55,13 +66,20 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
         assign(slug, path); assign(createHash("sha256").update(path).digest("hex"), path);
       }
       const paths: string[] = [];
-      for await (const path of files(root, (p) => /\/chats\/session-[^/]+\.jsonl?$/.test(p))) paths.push(path);
+      for await (const path of files(root, (p) => /\/chats\/session-[^/]+\.jsonl?$/.test(p), 0, onWarning)) paths.push(path);
       // During migration both formats can coexist; the append-only format is canonical.
       paths.sort((a, b) => Number(b.endsWith(".jsonl")) - Number(a.endsWith(".jsonl")) || a.localeCompare(b));
       const checkedMarkers = new Set<string>();
       for (const path of paths) {
-        const legacy = path.endsWith(".json") ? await legacyProjection(path) : null;
-        const metadata = legacy?.metadata ?? (path.endsWith(".json") ? null : await header(path)), id = text(metadata?.["sessionId"]), project = text(metadata?.["projectHash"]);
+        try {
+        let legacy: Legacy | null = null;
+        let metadata: RecordValue | null = null;
+        try {
+          legacy = path.endsWith(".json") ? await legacyProjection(path) : null;
+          metadata = legacy?.metadata ?? (path.endsWith(".json") ? null : await header(path));
+        } catch { skippedFiles = true; continue; }
+        if (!metadata) { skippedFiles = true; continue; }
+        const id = text(metadata["sessionId"]), project = text(metadata["projectHash"]);
         const createdAt = timestamp(metadata?.["startTime"]);
         if (!id || !project || !createdAt) continue;
         const projectDirectory = dirname(dirname(path)), key = basename(projectDirectory);
@@ -83,7 +101,10 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
         const identity = { id, path, cwd, createdAt, updatedAt: timestamp(metadata?.["lastUpdated"]) ?? createdAt, group: project };
         if (legacy) legacyProjections.set(identity, legacy);
         yield identity;
+        } catch (error) { if (!onWarning) throw error; onWarning("A Gemini history could not be read or exceeded its budget; sibling histories were retained."); }
       }
+      // Report partial discovery only after all valid files have been yielded.
+      if (skippedFiles) throw new Error("Some Gemini history files could not be read.");
     },
     async analyze(identity, context) {
       const session = emptySession(identity, "gemini", context, { source: "gemini-chat", fidelity: "message", tokens: "unavailable", tools: "observed", turns: "observed", timing: "provider", usageUnit: "request" });
@@ -110,7 +131,7 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
       } else {
         for await (const row of jsonLines(identity.path, legacyByteLimit)) {
           if (!row) { session.evidence!.accounting = "partial"; session.transcript.warnings.push("Malformed or oversized Gemini records were skipped; accounting is partial."); continue; }
-          if (row["sessionId"] === identity.id) applyMetadata(row);
+          if (text(row["sessionId"]) && text(row["projectHash"])) applyMetadata(row);
           else if (record(row["$set"])) applyMetadata(record(row["$set"])!);
           else if (typeof row["$rewindTo"] === "string") {
             const keys = [...messages.keys()], index = keys.indexOf(row["$rewindTo"]);
@@ -133,6 +154,7 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
       for (const message of messages.values()) {
         observeTime(session, message.at);
         if (message.type === "user") { session.metrics.userTurns++; continue; }
+        if (message.type !== "gemini") continue;
         session.metrics.assistantMessages++;
         if (message.usage) { session.evidence!.tokens = "reported"; addUsage(session, context, message.model, message.usage, message.at, "request"); }
         for (const tool of message.tools) if (!seenTools.has(tool.id)) { seenTools.add(tool.id); increment(session.tools, tool.name); }

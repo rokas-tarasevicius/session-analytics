@@ -40,7 +40,9 @@ after(async () => { await rm(directory, { recursive: true, force: true }); });
 function cohort(size = 5): MachineAnalytics {
   const session = snapshot.sessions.find((s) => s.provider === "claude")!;
   const sessions = Array.from({ length: size }, (_, i) => ({ ...structuredClone(session), sessionKey: createHash("sha256").update(`synthetic-${i}`).digest("hex").slice(0, 12) }));
-  return filterSnapshot({ ...snapshot, sessions });
+  // A synthetic cohort has no corresponding machine-wide statistics cache.
+  const { historyCoverage, ...source } = snapshot;
+  return filterSnapshot({ ...source, sessions });
 }
 
 // Decode actual RFC 4180 quoting, including embedded CRLF and escaped double quotes.

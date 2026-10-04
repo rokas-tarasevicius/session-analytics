@@ -1,0 +1,27 @@
+process.on('unhandledRejection',()=>{console.error('Conductor review failed; private details suppressed.');process.exit(1);});
+process.on('uncaughtException',()=>{console.error('Conductor review failed; private details suppressed.');process.exit(1);});
+// Read-only schema/usage audit. Never emits raw identities or bodies.
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import {DatabaseSync} from '../shared/sqlite.ts';
+const ref=JSON.parse(fs.readFileSync('.lane/conductor-reference.json','utf8'));const cutoff=Date.parse(ref.generatedAt);const hash=s=>crypto.createHash('sha256').update(s).digest('hex').slice(0,12);const refs=new Map(ref.sessions.map(x=>[x.sessionKey,x]));
+const db=new DatabaseSync(path.join(os.homedir(),'Library/Application Support/com.conductor.app/conductor.db'),{readOnly:true});
+const sessions=db.prepare("select id,created_at,updated_at,claude_session_id from sessions where agent_type='claude'").all();
+const query=db.prepare(`with envelopes as (select created_at,role,case when json_valid(full_message) then full_message when json_valid(content) then content else '{}' end as payload from session_messages where session_id=?) select created_at,role,
+ json_extract(payload,'$.type') kind,
+ json_type(payload,'$.message') messageType,
+ json_type(payload,'$.message.usage') usageType,
+ json_extract(payload,'$.message.id') mid,
+ json_extract(payload,'$.message.model') model,
+ json_extract(payload,'$.message.usage') usage,
+ json_extract(payload,'$.usage') outerUsage,
+ json_extract(payload,'$.parent_tool_use_id') parent
+ from envelopes where json_extract(payload,'$.type')='assistant'`);
+const n=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0?v:0;const models={};const months={};const counts={rows:0,withoutUsage:0,outerUsage:0,missingIds:0,unknownModels:0,cacheSplitMismatch:0,cacheSplitOverTotal:0,usageKeys:{},speeds:{},serviceTiers:{},iterations:0,iterationTokens:0,webSearch:0,webFetch:0,modelChanges:0,inputChanges:0,outputDecreases:0,cacheTtlChanges:0,duplicateIdsAcrossSessions:0,withoutIdTokens:0,withoutIdPositiveRows:0,withoutIdUsageKeys:{},modelChangeExamples:[]};
+const globalIds=new Map();
+for(const s of sessions){if(Date.parse(s.updated_at)>cutoff)continue;const rows=[...query.iterate(s.id)];if(rows.some(x=>Date.parse(x.created_at)>cutoff))continue;const byId=new Map();const month=s.created_at.slice(0,7);const m=months[month]??={rows:0,withUsage:0,withoutUsage:0,outerUsage:0,models:{},webSearch:0,webFetch:0};
+for(const r of rows){counts.rows++;m.rows++;if(r.outerUsage!==null){counts.outerUsage++;m.outerUsage++;}if(!r.usage){counts.withoutUsage++;m.withoutUsage++;continue;}m.withUsage++;const u=JSON.parse(r.usage);if(!r.mid){counts.missingIds++;for(const k of Object.keys(u))counts.withoutIdUsageKeys[k]=(counts.withoutIdUsageKeys[k]??0)+1;const missingTotal=n(u.input_tokens)+n(u.output_tokens)+n(u.cache_read_input_tokens)+n(u.cache_creation_input_tokens);counts.withoutIdTokens+=missingTotal;if(missingTotal>0)counts.withoutIdPositiveRows++;continue;}for(const k of Object.keys(u))counts.usageKeys[k]=(counts.usageKeys[k]??0)+1;const model=/^claude-[a-z0-9.-]+(?:\[\d+[mk]\])?$/.test(r.model??'')?r.model:'unknown';m.models[model]=(m.models[model]??0)+1;const mod=models[model]??={rows:0,usageRows:0,calls:0,webSearch:0,webFetch:0,inputOver200k:0,fastCalls:0};mod.rows++;mod.usageRows++;if(model==='unknown')counts.unknownModels++;
+const t={input:n(u.input_tokens),read:n(u.cache_read_input_tokens),write:n(u.cache_creation_input_tokens),w5:n(u.cache_creation?.ephemeral_5m_input_tokens),w1:n(u.cache_creation?.ephemeral_1h_input_tokens),out:n(u.output_tokens),search:n(u.server_tool_use?.web_search_requests),fetch:n(u.server_tool_use?.web_fetch_requests)};const split=t.w5+t.w1;if(split!==t.write)counts.cacheSplitMismatch++;if(split>t.write)counts.cacheSplitOverTotal++;if(u.speed){const speed=['fast','standard'].includes(u.speed)?u.speed:'other';counts.speeds[speed]=(counts.speeds[speed]??0)+1;}if(u.service_tier){const tier=['standard','priority','batch'].includes(u.service_tier)?u.service_tier:'other';counts.serviceTiers[tier]=(counts.serviceTiers[tier]??0)+1;}if(Array.isArray(u.iterations)){counts.iterations+=u.iterations.length;for(const it of u.iterations)counts.iterationTokens+=n(it.input_tokens)+n(it.output_tokens);}
+const old=byId.get(r.mid);if(old){if(old.model!==model){counts.modelChanges++;counts.modelChangeExamples.push({sessionKey:hash(s.id),before:old.model,after:model,tokens:t});}if(old.t.input!==t.input||old.t.read!==t.read||old.t.write!==t.write)counts.inputChanges++;if(old.t.out>t.out)counts.outputDecreases++;if(old.t.w5!==t.w5||old.t.w1!==t.w1)counts.cacheTtlChanges++;for(const k of Object.keys(t))old.t[k]=Math.max(old.t[k],t[k]);old.fast||=u.speed==='fast';}else {byId.set(r.mid,{model,t,fast:u.speed==='fast'});const prev=globalIds.get(r.mid);if(prev&&prev!==s.id)counts.duplicateIdsAcrossSessions++;else globalIds.set(r.mid,s.id);}
+}
+for(const v of byId.values()){const mod=models[v.model];mod.calls++;mod.webSearch+=v.t.search;mod.webFetch+=v.t.fetch;if(v.t.input+v.t.read+v.t.write>200000)mod.inputOver200k++;if(v.fast)mod.fastCalls++;counts.webSearch+=v.t.search;counts.webFetch+=v.t.fetch;m.webSearch+=v.t.search;m.webFetch+=v.t.fetch;}
+}
+db.close();const out={cutoff:ref.generatedAt,counts,models,months};fs.writeFileSync('.lane/conductor-oracle-review-evidence.json',JSON.stringify(out,null,2));console.log(JSON.stringify(out));

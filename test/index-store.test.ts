@@ -13,7 +13,7 @@ import { analyzeOptionsFrom } from "../src/options.ts";
 import { dataDirectory, indexPath, indexStatus, migrate, openIndexDatabase, pruneIndex, resetIndex, SCHEMA_VERSION, validatePruneDate } from "../src/store/database.ts";
 import { fingerprint } from "../src/store/fingerprint.ts";
 import { IndexScan, lastActivityAt } from "../src/store/index.ts";
-import { projectSession } from "../src/store/projection.ts";
+import { projectSession, sessionForIndex } from "../src/store/projection.ts";
 import type { AnalyzeOptions, MachineAnalytics, RateCard, SessionAnalytics } from "../src/types.ts";
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
 
@@ -290,7 +290,7 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
       renderSharedView(all); renderSummary(all);
       windowPreset = 'custom'; elements.windowStart.value = '2027-01-01';
       [all, activeView()];`, {
-      ...helpers, fixture: retained, document, window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, URLSearchParams, localStorage: { getItem: () => null, setItem() {} }, fetch: () => new Promise(() => {}),
+      ...helpers, renderHistoryCoverage() {}, fixture: retained, document, window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, URLSearchParams, localStorage: { getItem: () => null, setItem() {} }, fetch: () => new Promise(() => {}),
     });
     assert.ok(view.warnings.some((s: string) => s.includes("source-deleted")));
     assert.ok(view.warnings.includes(deferred));
@@ -349,6 +349,31 @@ test("the disk allowlist, warm results, and management status contain no fixture
       if (path.endsWith(".key")) continue;
       assert.doesNotMatch((await readFile(path)).toString("utf8"), /secret-command|secret-path|content-is-not-returned|\/fixtures\/workspaces/);
     }
+  });
+});
+
+test("index validation retains plain public graphs while copying private fields and serialization hooks", async () => {
+  await withFixture(async (fixture) => {
+    const session = (await analyzeMachineSessions({ ...options(fixture), noIndex: true })).sessions.find(value => value.provider === "codex")!;
+    assert.equal(sessionForIndex(session), session);
+    assert.notEqual(projectSession(session), session);
+    const poisoned = { ...session, metrics: { ...session.metrics, privateContent: "PRIVATE_PROJECTION_SENTINEL" } };
+    const cleaned = sessionForIndex(poisoned);
+    assert.notEqual(cleaned, poisoned);
+    assert.deepEqual(cleaned, session);
+    for (const object of [
+      Object.assign(Object.create({ toJSON() { return "PRIVATE_PROJECTION_SENTINEL"; } }), session),
+      Object.defineProperty({ ...session }, "toJSON", { value() { return "PRIVATE_PROJECTION_SENTINEL"; } }),
+      { ...session, metrics: Object.defineProperty({ ...session.metrics }, "toJSON", { value() { return "PRIVATE_PROJECTION_SENTINEL"; } }) },
+    ]) {
+      const projected = sessionForIndex(object);
+      assert.notEqual(projected, object);
+      assert.deepEqual(projected, session);
+      assert.doesNotMatch(JSON.stringify(projected), /PRIVATE_PROJECTION_SENTINEL/);
+    }
+    const accessor = Object.defineProperty({ ...session }, "metrics", { enumerable: true, get: () => session.metrics });
+    assert.notEqual(sessionForIndex(accessor), accessor);
+    assert.deepEqual(sessionForIndex(accessor), session);
   });
 });
 

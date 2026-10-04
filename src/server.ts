@@ -123,6 +123,7 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
 }
 
 const staticFiles = new Map<string, string>([
+  ["/history-coverage.js", join(publicRoot, "history-coverage.js")],
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
   ["/view-model.js", join(publicRoot, "view-model.js")],

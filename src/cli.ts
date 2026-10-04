@@ -1,3 +1,4 @@
+import { historyReport } from "./report/history.ts";
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, argument } from "./options.ts";
 import { outcomeReport } from "./metrics/outcomes-report.ts";
@@ -163,10 +164,11 @@ if (analytics && process.argv.includes("--json")) {
       `${metricValue(analytics.summary.outputTokens, "tokens")} output\n`,
   );
   process.stdout.write(
-    `Cache reads: ${analytics.summary.totalInputTokens ? metricValue(analytics.summary.cacheReadRatio, "tokens", (value) => `${(value * 100).toFixed(1)}%`) : "N/A"}; ` +
+    `Cache reads: ${analytics.summary.cacheReadRatio !== null ? metricValue(analytics.summary.cacheReadRatio, "tokens", (value) => `${(value * 100).toFixed(1)}%`) : "N/A"}; ` +
       `tools: ${metricValue(analytics.summary.toolCalls, "tools")}; ` +
       `compactions: ${metricValue(analytics.sessions.filter((s) => metricEligible(s, "compactions")).reduce((n, s) => n + s.metrics.compactions, 0), "compactions")}\n`,
   );
+  process.stdout.write(historyReport(analytics));
   process.stdout.write(limitsCacheReport(analytics));
   process.stdout.write(outcomeReport(analytics.sessions));
   if (analytics.workflow) process.stdout.write(workflowReport(analytics.workflow, analytics.repositories));

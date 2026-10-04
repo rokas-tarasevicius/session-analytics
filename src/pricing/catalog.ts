@@ -1,16 +1,21 @@
 import { readFile, stat } from "node:fs/promises";
 import type { AnalyzeOptions, ModelRate, ModelUsage, PricingCoverage, PricingPolicy,
   PricingSource, PricingStatus, RateCard, RateProvenance, RepositoryAnalytics } from "../types.ts";
-import { findModelRate } from "./aliases.ts";
+import { findModelRate, normalizedModelId } from "./aliases.ts";
 import { diffSource, type PriceChange } from "./diff.ts";
-import { DEFAULT_SOURCES, SOURCE_URLS, sha256, type SourceSnapshot } from "./sources.ts";
+import { DEFAULT_SOURCES, SOURCE_URLS, sha256, migrateLegacyCacheWriteRate, type SourceSnapshot } from "./sources.ts";
 import { pricingDirectory, readSnapshots, type ReviewedSnapshot, type StoredSnapshot } from "./store.ts";
 import { MAX_PAYLOAD_BYTES, validateCard } from "./validation.ts";
+import { applyBundledReviewedHistory } from "./reviewed-history.ts";
 import { projectModelId } from "../public/model-id.js";
 
 export interface PricingCatalog extends RateCard {
   history: StoredSnapshot[];
+  /** Only default bundled cards opt into model-specific reviewed tariff history. */
+  bundledReviewedHistory?: boolean;
   status: PricingStatus;
+  /** Explicit custom cards may define a user-chosen equivalent for non-API models. */
+  customRateCard?: boolean;
 }
 export interface ResolvedRate { rate: ModelRate; provenance: RateProvenance }
 export const defaultRateCardPath = new URL("../../data/rate-cards.json", import.meta.url);
@@ -60,21 +65,28 @@ function atTime<T extends StoredSnapshot>(observations: Observation<T>[], timest
 }
 
 export function resolveRate(catalog: PricingCatalog, model: string, timestamp?: string | null): ResolvedRate | undefined {
+  // No published API tariff: a subscription preview cannot establish zero-dollar API coverage.
+  const canonicalModel = normalizedModelId(model).replace(/-(?:20\d{2}-\d{2}-\d{2}|20\d{6})$/, "");
+  if (!catalog.customRateCard && canonicalModel === "gpt-5-3-codex-spark") return undefined;
   const parsed = timestamp ? Date.parse(timestamp) : NaN;
   const time = Number.isFinite(parsed) ? parsed : Infinity;
   const index = historyIndexes.get(catalog)!;
   const reviewed = atTime(index.reviewed, time);
   const match = reviewed ? findModelRate(reviewed.card.models, model) : undefined;
   const resolved = (snapshot: StoredSnapshot, found: NonNullable<typeof match>, kind: RateProvenance["kind"]): ResolvedRate => ({
-    rate: found.rate,
+    rate: snapshot.source === "reviewed" ? found.rate : migrateLegacyCacheWriteRate(found.model, found.rate),
     provenance: {
       source: snapshot.source, kind, snapshotDate: snapshot.fetchedAt, payloadSha256: snapshot.payloadSha256,
       rateModel: found.model, match: found.match,
       temporal: !Number.isFinite(parsed) ? "undated" : index.times.get(snapshot)! <= time ? "at-or-before" : "oldest",
-      assumptions: found.rate.assumptions ?? [],
+      assumptions: (snapshot.source === "reviewed" ? found.rate : migrateLegacyCacheWriteRate(found.model, found.rate)).assumptions ?? [],
     },
   });
-  const reviewedMatch = (): ResolvedRate | undefined => match && reviewed ? resolved(reviewed, match, "reviewed") : undefined;
+  const reviewedMatch = (): ResolvedRate | undefined => {
+    if (!match || !reviewed) return undefined;
+    const selected = resolved(reviewed, match, "reviewed");
+    return catalog.bundledReviewedHistory ? applyBundledReviewedHistory(selected, timestamp) : selected;
+  };
   const pinned = match && (reviewed?.card.reviewedOverrides ?? Object.keys(reviewed?.card.models ?? {})).includes(match.model);
   if (catalog.status.policy === "reviewed-only") return reviewedMatch();
   if (catalog.status.policy === "reviewed-first" && pinned) return reviewedMatch();
@@ -87,7 +99,9 @@ export function resolveRate(catalog: PricingCatalog, model: string, timestamp?: 
   // A newly introduced preferred feed must not replace earlier observed prices from another feed.
   const api = candidates.find(({ provenance }) => provenance.temporal !== "oldest") ?? candidates[0];
   if (api) return api;
-  return match && reviewed ? resolved(reviewed, match, pinned ? "reviewed" : "fallback") : undefined;
+  if (!match || !reviewed) return undefined;
+  const fallback = resolved(reviewed, match, pinned ? "reviewed" : "fallback");
+  return catalog.bundledReviewedHistory ? applyBundledReviewedHistory(fallback, timestamp) : fallback;
 }
 
 export function catalogFromSnapshots(reviewed: ReviewedSnapshot, snapshots: StoredSnapshot[],
@@ -95,6 +109,9 @@ export function catalogFromSnapshots(reviewed: ReviewedSnapshot, snapshots: Stor
   const config = pricingConfiguration(options);
   const history = config.policy === "reviewed-only" ? [reviewed] : [
     ...snapshots.filter((snapshot) => snapshot.payloadSha256 !== reviewed.payloadSha256 &&
+      // The active card is the revision for its effective date. An archived
+      // definition on that same date must not win the oldest-rate fallback.
+      !(snapshot.source === "reviewed" && snapshot.fetchedAt === reviewed.fetchedAt) &&
       (snapshot.source === "reviewed" || (config.sources.includes(snapshot.source) && Date.parse(snapshot.fetchedAt) <= now.valueOf()))),
     reviewed,
   ].sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt));
@@ -115,7 +132,7 @@ export function catalogFromSnapshots(reviewed: ReviewedSnapshot, snapshots: Stor
     sources, warnings: [...warnings],
   };
   const catalog: PricingCatalog = { currency: "USD", effectiveDate: reviewed.card.effectiveDate,
-    models: Object.create(null), reviewedOverrides: reviewed.card.reviewedOverrides, history, status };
+    models: Object.create(null), reviewedOverrides: reviewed.card.reviewedOverrides, history, status, customRateCard: !!options.rateCardPath };
   const index: HistoryIndex = { reviewed: [], sources: new Map(), times: new Map() };
   for (const snapshot of history) {
     const time = Date.parse(snapshot.fetchedAt);
@@ -147,7 +164,9 @@ export async function loadPricingCatalog(options: AnalyzeOptions = {}): Promise<
   const reviewed = await loadReviewed(options.rateCardPath);
   const cache = pricingConfiguration(options).policy === "reviewed-only"
     ? { snapshots: [], warnings: [] } : await readSnapshots(pricingDirectory(options));
-  return catalogFromSnapshots(reviewed, cache.snapshots, options, new Date(), cache.warnings);
+  const catalog = catalogFromSnapshots(reviewed, cache.snapshots, options, new Date(), cache.warnings);
+  catalog.bundledReviewedHistory = !options.rateCardPath;
+  return catalog;
 }
 
 export function latestDiff(catalog: PricingCatalog): PriceChange[] {

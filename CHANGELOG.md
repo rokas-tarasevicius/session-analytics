@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
 
+## [Unreleased]
+
+## [0.6.1] - 2026-10-04
+
+### Fixed
+
+- Read checkpointed external SQLite sources in read-only directories without losing sessions when WAL sidecars are absent; reject concurrent source changes (`INTEGRATION-SQLITE-01`).
+
+- Reconcile native request identities, continuation files, billing iterations, replay, output classification and strict request dates across full and indexed scans.
+- Correct historical tariffs, conservative receipt scope, partial pricing, repository ownership, provider snapshots and aggregate displays. Preserve unknown evidence and unattributed estimates explicitly.
+- Run every imported validation regression in `npm test`; add `npm run verify:real` for independent raw-data comparisons and disposable full/cold/warm index checks.
+
+Fixed or superseded bug IDs by validation area (superseded findings are resolved by a stronger combined fix):
+
+- **aggregation:** `AGG-001`, `AGG-002`, `AGG-003`, `AGG-004`, `AGG-005`, `AGG-006`, `AGG-007`, `AGG-008`, `AGG-009`.
+- **claude:** `CLAUDE-D01`, `CLAUDE-TIED-BREAKDOWNS`, `CLAUDE-UNKNOWN-REASONING`, `VC-CROSS-SESSION`, `VC-ITERATIONS`, `VC-STUB`, `VC-UNDATED`.
+- **codex:** `CODEX-01`, `CODEX-02`, `CODEX-03`, `CODEX-04`, `CODEX-05`, `CODEX-06`, `CODEX-07`.
+- **conductor:** `VC-001`, `VC-O1`, `VC-O2`, `VC-O3`, `VC-P1`, `VC-P2`, `VC-P3`, `VC-P4`.
+- **dedup:** `DEDUP-AD-01`, `DEDUP-AD-02`, `DEDUP-AD-03`, `DEDUP-AD-04`, `DEDUP-AD-05`, `DEDUP-CD-01`, `DEDUP-CD-02`, `DEDUP-CD-03`, `DEDUP-CD-04`, `DEDUP-CL-01`, `DEDUP-CL-02`, `DEDUP-CL-03`, `DEDUP-CL-04`, `DEDUP-CX-02`, `DEDUP-CX-03`, `DEDUP-CX-04`, `DEDUP-CX-05`, `DEDUP-CX-07`, `DEDUP-CX-08`, `DEDUP-CX-09`, `DEDUP-CX-10`.
+- **history recovery:** `HISTORY-MESSAGE-RECOVERY`, `HISTORY-STREAM-COUNTERS`, `HISTORY-STRIPPED-IDENTITY`.
+- **index:** `INDEX-CLAIM-ROLLBACK`, `INDEX-MEMORY-LEDGER`, `INDEX-MEMORY-PROJECTION`, `INDEX-MEMORY-ROLLBACK`, `INDEX-MEMORY-SERIALIZATION`, `INDEX-OUTCOME-SCHEMA`, `INDEX-STALE-AUDIT`.
+- **integration:** `INTEGRATION-CLAUDE-MEMORY`, `INTEGRATION-CLAUDE-PRIMARY`, `INTEGRATION-CODEX-FORK-MEMORY`, `INTEGRATION-CODEX-INDEX-CALLS`, `INTEGRATION-CODEX-INDEX-PAGES`, `INTEGRATION-CONDUCTOR-01`, `INTEGRATION-CONDUCTOR-MEMORY`, `INTEGRATION-INDEX-PROJECTION-MEMORY`, `INTEGRATION-PRICE-01`, `INTEGRATION-PRICE-02`, `INTEGRATION-PRICE-03`, `INTEGRATION-PRICE-04`.
+- **other-providers:** `ADAPTER-001`, `ADAPTER-002`, `ADAPTER-003`, `ADAPTER-004`, `ADAPTER-005`, `CURSOR-01`, `CURSOR-02`, `CURSOR-03`, `CURSOR-04`, `CURSOR-05`, `CURSOR-06`, `CURSOR-NATIVE-01`, `CURSOR-NATIVE-02`, `CURSOR-NATIVE-03`, `CURSOR-NATIVE-04`, `CURSOR-NATIVE-05`, `CURSOR-NATIVE-06`, `CURSOR-NATIVE-07`, `DESKTOP-01`, `DESKTOP-02`.
+- **pricing:** `PRICING-1M-ALIAS`, `PRICING-ITERATIONS`, `PRICING-LAB-PREFIX`, `PRICING-MESSAGE-ITERATIONS`, `PRICING-SPARK`, `PRICING-SUMMARY-TIERS`, `PRICING-TIER-WRITE-UPPER`, `VP-CODEX-HISTORY`, `VP-CODEX-UPPER`.
+- **reconcile:** `RC-CODEX-01`, `RC-CODEX-02`, `RC-CONDUCTOR-CARRYOVER`, `RC-CONDUCTOR-LOCAL`, `RC-CONDUCTOR-REPLAY`, `RC-MODEL-01`.
+- **repos:** `R-CONDUCTOR-01`, `R-CONDUCTOR-02`, `R-CURSOR-01`, `R-CURSOR-02`, `R-CURSOR-03`, `R-GIT-01`, `R-GIT-02`, `R-GIT-03`, `R-GIT-04`, `R-GIT-05`, `R-GIT-06`.
+- **time:** `TIME-01`, `TIME-02`, `TIME-03`, `TIME-04`, `TIME-05`, `TIME-06`, `TIME-07`, `TIME-08`, `TIME-09`, `TIME-10`, `TIME-11`, `TIME-12`.
+- **verification:** `INTEGRATION-VERIFY-01`, `INTEGRATION-VERIFY-02`, `INTEGRATION-VERIFY-03`, `INTEGRATION-VERIFY-04`, `INTEGRATION-VERIFY-05`, `INTEGRATION-VERIFY-06`, `INTEGRATION-VERIFY-07`, `INTEGRATION-VERIFY-08`, `INTEGRATION-VERIFY-09`, `INTEGRATION-VERIFY-10`, `INTEGRATION-VERIFY-11`, `INTEGRATION-VERIFY-12`.
+
+### Evidence limits
+
+- `VC-002`, `PRICING-OWNERSHIP-CONTRACT`, `DEDUP-CX-01`, and `DEDUP-CX-06`: retained legacy receipts/counters do not establish exact additional billing or ownership. Diagnostic fixes expose partial evidence; no speculative correction is added.
+- `R-SHARED-01`: later reuse of the same missing cwd does not prove repository ownership, so the suspected reattribution is rejected.
+- Grok models remain unpriced when the existing offline normalized cache lacks their rates; the fixed xAI importer takes effect on an explicit or subsequently due public-rate refresh.
+
+### Index integrity and recovered history
+
+- Accept the outcome hash formats already emitted by the parsers in the persistent projection schema. Indexed Codex and Claude composite sessions no longer become invalid or lose tokens/value when they carry PR or observation-only outcome references.
+- Roll back index-only failures and retry full-scan accounting with a fixed warning, preventing duplicate retries and lost Codex counter ownership. Add rotating warm-cache session/ledger verification and a content-free full/cold/warm parity runner.
+- Bound Codex dependency reconstruction to one cached ledger at a time instead of retaining every broadcast receiver's observations in the 256 MB analysis worker.
+- Stream and compress prior cached payloads in memory so warm scans can retain rollback evidence without holding a second full JSON string graph; the on-disk format is unchanged.
+- Stream worker snapshot output with backpressure instead of allocating the entire serialized history as one string; the JSON format and 256 MB heap cap are unchanged.
+- Construct compact allowlisted session objects so cold indexed populations fit the same heap budget as full-scan results, without weakening schema validation.
+- Recover missing Claude transcripts from Conductor assistant usage with deduplicated request pricing, dates, tool names, subagent attribution, and explicit receipt reconciliation. Add machine-wide History coverage from Claude statistics with separate, conservatively overlap-adjusted unattributed estimates. Statistics compare matching streamed-block counters, avoiding false gaps from response deduplication; stripped SDK response IDs remain conservative and partial. Previously result-only usage lacked daily attribution; recovered values can increase or decrease when message evidence replaces cumulative receipts.
+
 ## [0.6.0] - 2026-10-03
 
 ### Added

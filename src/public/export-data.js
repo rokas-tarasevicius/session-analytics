@@ -85,7 +85,7 @@ export function csvTables(snapshot) {
 export function aggregateSessions(sessions) {
   /** @type {import("../types.ts").RepositoryAnalytics["summary"]} */
   const summary = {
-    analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: 0, compactions: 0,
+    analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: null, compactions: 0,
     estimatedSpendUsd: 0, estimatedUpperSpendUsd: 0, missingTranscripts: 0, outputTokens: 0,
     pricedTokenCoverage: null, providerReportedSpendUsd: 0, sessions: sessions.length, subagentSessions: 0,
     subagentSpendUsd: 0, topLevelSessions: 0, topLevelSpendUsd: 0, toolCalls: 0, totalInputTokens: 0, unpricedSessions: 0,
@@ -105,7 +105,7 @@ export function aggregateSessions(sessions) {
     summary.estimatedSpendUsd += s.cost.totalUsd; summary.estimatedUpperSpendUsd += s.cost.upperEstimateUsd;
     summary.compactions += s.metrics.compactions; summary.toolCalls += s.metrics.toolCalls;
     summary.outputTokens += s.tokens.outputTokens; summary.totalInputTokens += s.tokens.inputTokens;
-    summary.unpricedSessions += s.costComplete ? 0 : 1;
+    summary.unpricedSessions += s.pricedTokenCoverage !== null && s.pricedTokenCoverage < 1 && s.tokens.inputTokens + s.tokens.outputTokens > 0 ? 1 : 0;
     summary.subagentSessions += ["mixed", "subagent"].includes(s.executionKind) ? 1 : 0;
     summary.topLevelSessions += ["mixed", "top-level"].includes(s.executionKind) ? 1 : 0;
     summary.subagentSpendUsd += s.costByExecution.subagentUsd; summary.topLevelSpendUsd += s.costByExecution.topLevelUsd;
@@ -131,7 +131,7 @@ export function aggregateSessions(sessions) {
       models.set(source.model, row);
     }
   }
-  summary.cacheReadRatio = cacheDenominator ? cached / cacheDenominator : 0;
+  summary.cacheReadRatio = cacheDenominator ? cached / cacheDenominator : null;
   summary.pricedTokenCoverage = priceable ? priced / priceable : null;
   /** @param {Map<string, number>} map */
   const named = (map) => [...map].map(([name, value]) => ({ name, value }));
@@ -168,6 +168,7 @@ export function filterSnapshot(snapshot, filters = {}) {
   const discovery = scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]);
   const repositoryScope = repositories.map((r) => r.repository.id);
   const extras = {
+    ...(snapshot.historyCoverage && !Object.values(filters).some((value) => value !== null && value !== undefined) ? { historyCoverage: snapshot.historyCoverage } : {}),
     ...(snapshot.mcpSourceHealth ? { mcpSourceHealth: snapshot.mcpSourceHealth } : {}),
     ...(snapshot.mcpContext ? { mcpContext: snapshot.mcpContext } : {}),
     ...(snapshot.velocity ? { velocity: snapshot.velocity } : {}),
@@ -175,7 +176,7 @@ export function filterSnapshot(snapshot, filters = {}) {
     ...(snapshot.workflow ? { workflow: summarizeWorkflow(sessions, { ...snapshot.workflow.inventory, skills: snapshot.workflow.installedSkills }, snapshot.generatedAt, repositoryScope) } : {}),
     ...(snapshot.limitsCache ? { limitsCache: { ...snapshot.limitsCache, subscriptions: subscriptionSelection(snapshot, sessions, Boolean(repositoryId || repositoryIds)) } } : {}),
   };
-  return { ...extras, schemaVersion: 1, generatedAt: snapshot.generatedAt, rateCard: snapshot.rateCard, repositories, sessions, ...combined, summary: { ...combined.summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter((r) => r.summary.sessions > 0).length, workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking).length }, warnings: [...new Set([...discovery, ...combined.warnings, filteredWarning])] };
+  return { ...extras, schemaVersion: 1, generatedAt: snapshot.generatedAt, rateCard: snapshot.rateCard, repositories, sessions, ...combined, summary: { ...combined.summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter((r) => r.summary.sessions > 0).length, workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking && !s.transcript.sourceDeleted && !s.transcript.warnings.includes("Source availability could not be checked; showing the last indexed facts.")).length }, warnings: [...new Set([...discovery, ...combined.warnings, filteredWarning])] };
 }
 
 /** Quota observations are global; subscription values follow the selected sessions.

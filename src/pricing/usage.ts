@@ -1,6 +1,5 @@
 import type { CostBreakdown, ModelRate, PricingAssumption, TokenUsage } from "../types.ts";
 import { rateForContext } from "./catalog.ts";
-import { upperEstimateAssumption } from "./validation.ts";
 
 /** Keep estimates in value totals, but count only token classes with explicit rates as priced evidence. */
 export function priceUsage(original: ModelRate, usage: TokenUsage, inputForRequest: number): {
@@ -21,8 +20,12 @@ export function priceUsage(original: ModelRate, usage: TokenUsage, inputForReque
   const cacheWriteUsd = (fiveMinuteTokens * fiveMinuteWriteRate + usage.cacheWrite1hInputTokens * oneHourWriteRate) * inputMultiplier / 1e6;
   const outputUsd = usage.outputTokens * rate.outputPerMillion * outputMultiplier / 1e6;
   const totalUsd = inputUsd + cachedInputUsd + cacheWriteUsd + outputUsd;
-  const adjustment = rate.cacheWriteObservable === false && rate.cacheWriteMultiplier
-    ? usage.uncachedInputTokens * rate.inputPerMillion * (rate.cacheWriteMultiplier - 1) * inputMultiplier / 1e6 : 0;
+  // The selected tier can supply an absolute write price unrelated to the base
+  // multiplier. Unknown write volume is bounded by that effective tariff, with
+  // ordinary input retained as the lower bound when writes are cheaper.
+  const writePremium = Math.max(0, fiveMinuteWriteRate - rate.inputPerMillion);
+  const adjustment = rate.cacheWriteObservable === false
+    ? usage.uncachedInputTokens * writePremium * inputMultiplier / 1e6 : 0;
   let pricedTokens = usage.inputTokens + usage.outputTokens;
   const assumptions: PricingAssumption[] = [];
   const estimate = (tokens: number, code: PricingAssumption) => {
@@ -50,8 +53,13 @@ export function priceUsage(original: ModelRate, usage: TokenUsage, inputForReque
   } else if (tier && tier.cacheWrite1hPerMillion === undefined) {
     estimate(usage.cacheWrite1hInputTokens, "context-cache-write-1h-at-base");
   }
-  const upper = upperEstimateAssumption(rate);
-  if (adjustment > 0 && upper) assumptions.push(upper);
+  if (adjustment > 0) {
+    const standardPremium = rate.inputPerMillion * 0.25;
+    const isStandard = rate.inputPerMillion > 0 &&
+      Math.abs(writePremium - standardPremium) <= Math.max(1, standardPremium) * 1e-12;
+    assumptions.push(rate.provider === "codex" && isStandard
+      ? "codex-cache-write-upper-1.25x" : "cache-write-upper-multiplier");
+  }
   return { cost: { cacheWriteUsd, cachedInputUsd, inputUsd, outputUsd, totalUsd, upperEstimateUsd: totalUsd + adjustment },
     pricedTokens, assumptions };
 }

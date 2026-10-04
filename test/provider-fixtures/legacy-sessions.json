@@ -99,16 +99,16 @@
   {
     "cost": {
       "cacheWriteUsd": 0,
-      "cachedInputUsd": 0.000032,
-      "inputUsd": 0.00008,
-      "outputUsd": 0.0002,
-      "totalUsd": 0.000312,
-      "upperEstimateUsd": 0.000332
+      "cachedInputUsd": 0.00004,
+      "inputUsd": 0.0001,
+      "outputUsd": 0.0003,
+      "totalUsd": 0.00043999999999999996,
+      "upperEstimateUsd": 0.00046499999999999997
     },
     "costBasis": "api-list-price-equivalent",
     "costByExecution": {
       "subagentUsd": 0,
-      "topLevelUsd": 0.000312,
+      "topLevelUsd": 0.00043999999999999996,
       "unknownUsd": 0
     },
     "costComplete": true,
@@ -147,11 +147,11 @@
         "reasoningOutputTokens": 0,
         "uncachedInputTokens": 20,
         "cacheWriteUsd": 0,
-        "cachedInputUsd": 0.000032,
-        "inputUsd": 0.00008,
-        "outputUsd": 0.0002,
-        "totalUsd": 0.000312,
-        "upperEstimateUsd": 0.000332,
+        "cachedInputUsd": 0.00004,
+        "inputUsd": 0.0001,
+        "outputUsd": 0.0003,
+        "totalUsd": 0.00043999999999999996,
+        "upperEstimateUsd": 0.00046499999999999997,
         "calls": 1,
         "model": "gpt-5.6-sol",
         "priced": true
@@ -165,7 +165,7 @@
     "skillEvidence": "inferred",
     "skills": {},
     "spendByDay": {
-      "2026-07-18": 0.000312
+      "2026-07-18": 0.00043999999999999996
     },
     "status": "idle",
     "tokens": {
@@ -196,16 +196,16 @@
   {
     "cost": {
       "cacheWriteUsd": 0,
-      "cachedInputUsd": 0.00048000000000000007,
-      "inputUsd": 0.0012000000000000001,
-      "outputUsd": 0.003,
-      "totalUsd": 0.00468,
-      "upperEstimateUsd": 0.004980000000000001
+      "cachedInputUsd": 0.0006000000000000001,
+      "inputUsd": 0.0015,
+      "outputUsd": 0.0045000000000000005,
+      "totalUsd": 0.0066,
+      "upperEstimateUsd": 0.006975
     },
     "costBasis": "api-list-price-equivalent",
     "costByExecution": {
       "subagentUsd": 0,
-      "topLevelUsd": 0.00468,
+      "topLevelUsd": 0.0066,
       "unknownUsd": 0
     },
     "costComplete": true,
@@ -244,11 +244,11 @@
         "reasoningOutputTokens": 50,
         "uncachedInputTokens": 300,
         "cacheWriteUsd": 0,
-        "cachedInputUsd": 0.00048000000000000007,
-        "inputUsd": 0.0012000000000000001,
-        "outputUsd": 0.003,
-        "totalUsd": 0.00468,
-        "upperEstimateUsd": 0.004980000000000001,
+        "cachedInputUsd": 0.0006000000000000001,
+        "inputUsd": 0.0015,
+        "outputUsd": 0.0045000000000000005,
+        "totalUsd": 0.0066,
+        "upperEstimateUsd": 0.006975,
         "calls": 2,
         "model": "gpt-5.6-sol",
         "priced": true
@@ -264,7 +264,7 @@
       "frontend-design": 1
     },
     "spendByDay": {
-      "2026-07-20": 0.00468
+      "2026-07-20": 0.0066
     },
     "status": "idle",
     "tokens": {
