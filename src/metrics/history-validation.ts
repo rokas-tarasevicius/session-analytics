@@ -18,18 +18,24 @@ export function validSessionHistory(session: SessionAnalytics): boolean {
     }
   }
   const history = session.history, comparison = session.conductor?.reconciliation;
-  if (session.evidence?.source !== "conductor-messages") return !history && !comparison;
-  if (!history || !comparison || !close(comparison.messageValueUsd, session.cost.totalUsd) || comparison.messages !== session.metrics.assistantMessages ||
+  if (comparison?.outputTokensRecovered !== undefined && comparison.outputTokensRecovered > session.tokens.outputTokens) return false;
+  const floor = comparison?.receiptFloorApplied === true;
+  if (floor ? session.evidence?.source !== "conductor-result" : session.evidence?.source !== "conductor-messages") return !history && !comparison;
+  if (!comparison || (floor ? history || session.costBasis !== "provider-reported" || comparison.reportedUsd === null ||
+      !close(comparison.reportedUsd, session.cost.totalUsd) || comparison.messageValueUsd >= session.cost.totalUsd :
+      !history || !close(comparison.messageValueUsd, session.cost.totalUsd)) || comparison.messages !== session.metrics.assistantMessages ||
       comparison.messagesWithoutIdentity > comparison.messages || comparison.messagesWithoutUsage > comparison.messages) return false;
   if (comparison.reportedUsd === null) {
     if (comparison.receiptScope !== "unavailable" || comparison.status !== "unavailable" || comparison.differenceUsd !== null || comparison.relativeDifference !== null) return false;
   } else {
-    if (comparison.receiptScope === "unavailable" || comparison.differenceUsd === null || !close(comparison.differenceUsd, session.cost.totalUsd - comparison.reportedUsd)) return false;
+    if (comparison.receiptScope === "unavailable" || comparison.differenceUsd === null || !close(comparison.differenceUsd, comparison.messageValueUsd - comparison.reportedUsd)) return false;
     if (comparison.reportedUsd === 0 ? comparison.relativeDifference !== null : comparison.relativeDifference === null || !close(comparison.relativeDifference, comparison.differenceUsd / comparison.reportedUsd)) return false;
-    const partial = comparison.receiptScope === "partial" || comparison.messagesWithoutIdentity > 0 || comparison.messagesWithoutUsage > 0 || session.pricedTokenCoverage !== 1;
+    const partial = floor || comparison.receiptScope === "partial" || comparison.messagesWithoutIdentity > 0 || comparison.messagesWithoutUsage > 0 || session.pricedTokenCoverage !== 1;
     const status = partial ? "partial" : Math.abs(comparison.differenceUsd) <= Math.max(0.01, comparison.reportedUsd * 0.01) ? "agrees" : "differs";
     if (comparison.status !== status) return false;
   }
+  if (floor) return true;
+  if (!history) return false;
   const keys = new Set<string>(), costs = new Map<string, number>();
   let tokens = history.undatedTokens, value = history.undatedValueUsd;
   for (const row of history.days) {
@@ -47,6 +53,16 @@ export function validSessionHistory(session: SessionAnalytics): boolean {
 export function validHistoryCoverage(snapshot: MachineAnalytics): boolean {
   const history = snapshot.historyCoverage;
   if (!history) return true;
+  const calibration = history.recoveryCalibration;
+  if (calibration) {
+    const c = calibration;
+    if (c.comparedSessions + c.excludedSessions !== c.pairedSessions || c.receiptFloorSessions > c.comparedSessions || c.aboveNativeSessions > c.comparedSessions ||
+        c.minimumNativeValueUsd !== 1 || c.nativeValueUsd < c.comparedSessions * c.minimumNativeValueUsd) return false;
+    if (!c.comparedSessions && (c.nativeValueUsd !== 0 || c.recoveredValueUsd !== 0)) return false;
+    const ratios = [c.aggregateValueRatio, c.p10ValueRatio, c.medianValueRatio, c.p90ValueRatio];
+    if (c.comparedSessions < 5) { if (ratios.some(r => r !== null)) return false; }
+    else if (ratios.some(r => r === null) || !close(c.aggregateValueRatio!, c.recoveredValueUsd / c.nativeValueUsd) || c.p10ValueRatio! > c.medianValueRatio! || c.medianValueRatio! > c.p90ValueRatio!) return false;
+  }
   const profiles = new Set<string>(), totals = new Map<string, { tokens: number; priced: number; overlap: number; usd: number; cells: number }>();
   for (const profile of history.profiles) {
     if (profiles.has(profile.profileKey) || [profile.firstStatisticsDay, profile.firstTranscriptDay, profile.statisticsThrough].some((day) => day !== null && !validDay(day))) return false;

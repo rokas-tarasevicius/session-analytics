@@ -1,6 +1,6 @@
 {
   "name": "session-analytics",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Content-free analytics for local coding-agent sessions: Claude Code, Codex, and Cursor usage, cost, tools, and reliability by repository.",
   "license": "MIT",
   "author": "Rokas Tarasevi\u010dius",

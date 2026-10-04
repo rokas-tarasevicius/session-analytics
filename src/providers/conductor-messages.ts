@@ -4,12 +4,15 @@ import { priceUsage } from "../pricing/usage.ts";
 import { projectModelId } from "../public/model-id.js";
 import { normalizeTimestamp } from "../public/timestamps.js";
 import { VelocityAccumulator, usageVelocity, velocityDimension } from "../metrics/velocity.ts";
-import { addUsage, emptySession, finite, finish, hasCounters, increment, name, observeTime, record, text, zeroTokens, type RecordValue } from "./common.ts";
+import { addUsage, emptySession, finite, finish, hasCounters, increment, name, observeTime, record, reportedModel, text, zeroTokens, type RecordValue } from "./common.ts";
 import { claudeUsage, replacesClaudeUsage } from "./claude-usage.ts";
 import type { HistoryReconciliation, HistoryUsageDay } from "../metrics/history-types.ts";
 import { HistoryStatisticsCollector } from "../metrics/history-statistics.ts";
+import { conductorOutputSupplements, type ConductorQueryReceipt } from "./conductor-output.ts";
 
 export interface ConductorMessage {
+  /** Private query boundary established by a unique result receipt, never init. */
+  queryId?: string;
   id: string;
   recordId: string;
   inputKey: string;
@@ -55,7 +58,7 @@ export function conductorMessage(data: RecordValue, item: RecordValue): Conducto
 }
 
 /** The receipt session is a comparison baseline, never added to message usage. */
-export function recoverConductorMessages(base: SessionAnalytics, messages: ConductorMessage[], pricing: Pick<ProviderContext, "rateCard" | "resolveRate" | "price">): SessionAnalytics | null {
+export function recoverConductorMessages(base: SessionAnalytics, messages: ConductorMessage[], pricing: Pick<ProviderContext, "rateCard" | "resolveRate" | "price">, receipts: ConductorQueryReceipt[] = []): SessionAnalytics | null {
   if (!messages.some((message) => message.usageObserved)) return null;
   const usage = new Map<string, ConductorMessage>(), tools = new Map<string, { name: string; message: ConductorMessage }>();
   // Prefer a retained response ID in either representation of the same record.
@@ -128,6 +131,25 @@ export function recoverConductorMessages(base: SessionAnalytics, messages: Condu
       bucket.tokens += total; bucket.valueUsd += value; days.set(key, bucket);
     } else { session.history.undatedTokens += total; session.history.undatedValueUsd += value; }
   }
+  let outputTokensRecovered = 0;
+  for (const supplement of conductorOutputSupplements(messages, receipts)) {
+    const { model, usage: extra, day, at } = supplement;
+    const pricedAt = at ?? (day ? `${day}T12:00:00.000Z` : null);
+    const before = session.cost.totalUsd;
+    addUsage(session, context, model, extra, pricedAt, "summary", 0);
+    const value = session.cost.totalUsd - before;
+    outputTokensRecovered += extra.outputTokens;
+    executionCost.topLevelUsd += value;
+    const rate = context.resolveRate ? context.resolveRate(model, pricedAt)?.rate : context.rateCard.models[model];
+    const priced = rate ? priceUsage(rate, extra, 0).pricedTokens : 0;
+    velocity.add(at, velocityDimension("claude", session.agentIdentity, "top-level", model, null),
+      usageVelocity(extra, value, priced, { reasoning: false, cacheRead: true, cacheWrite: true }, 0));
+    if (day) {
+      session.spendByDay[day] = (session.spendByDay[day] ?? 0) + value;
+      const key = `${day}:${model}`, bucket = days.get(key) ?? { day, model, tokens: 0, valueUsd: 0 };
+      bucket.tokens += extra.outputTokens; bucket.valueUsd += value; days.set(key, bucket);
+    } else { session.history.undatedTokens += extra.outputTokens; session.history.undatedValueUsd += value; }
+  }
   for (const { name, message } of tools.values()) {
     increment(session.tools, name);
     increment(session.transportTools, name);
@@ -146,13 +168,53 @@ export function recoverConductorMessages(base: SessionAnalytics, messages: Condu
     status: reported === null ? "unavailable" : receiptScope === "partial" || missingUsage || missingIdentity || session.pricedTokenCoverage !== 1 ? "partial" :
       Math.abs(delta!) <= Math.max(0.01, reported * 0.01) ? "agrees" : "differs",
     receiptScope, messages: usage.size, messagesWithoutUsage: missingUsage, messagesWithoutIdentity: missingIdentity,
+    ...(outputTokensRecovered ? { outputTokensRecovered } : {}),
   };
   session.conductor = { ...base.conductor!, reconciliation };
   session.transcript.warnings.push("Recovered from Conductor assistant usage. API-equivalent value is not an invoice; retained messages may not cover the full session. Human turns are unavailable.");
   if (missingIdentity) session.transcript.warnings.push("Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial.");
+  if (outputTokensRecovered) session.transcript.warnings.push("Final output was recovered only from single-model query receipts with exactly matching main-loop input counters. No input or request count was added; uncertain day, hour and reasoning splits remain unavailable.");
   if (base.repositoryName === "Conductor · unassigned") session.transcript.warnings.push("Conductor rows disagree on repository attribution; the recovered identity is grouped as unassigned.");
   session.velocity = velocity.finish(session.createdAt, velocityDimension("claude", session.agentIdentity, "top-level", "<unknown>", null));
   session.costByExecution = executionCost;
   session.costComplete = false; // Agreement of values does not prove complete retained history.
   return session;
+}
+
+/** Select a monetary basis without discarding independently recovered tokens.
+ * Receipt value/model allocations may describe a different retained interval;
+ * coverage stays partial and no receipt dollars acquire invented request dates. */
+export function applyConductorReceiptFloor(base: SessionAnalytics, messages: SessionAnalytics): SessionAnalytics {
+  if (base.costBasis !== "provider-reported" || base.cost.totalUsd <= messages.cost.totalUsd + 1e-9) return messages;
+  base.conductor = { ...base.conductor!, reconciliation: { ...messages.conductor!.reconciliation!, receiptFloorApplied: true, status: "partial" } };
+  const receiptModels = new Map(base.models.map(m => [m.model, m]));
+  base.models = messages.models.map(m => {
+    const observed = zeroTokens();
+    for (const key of Object.keys(observed) as Array<keyof TokenUsage>) observed[key] = m[key];
+    const receipt = receiptModels.get(m.model); receiptModels.delete(m.model);
+    const model = reportedModel(m.model, observed, receipt?.totalUsd ?? 0);
+    model.calls = m.calls; model.priced = receipt?.priced ?? false;
+    return model;
+  });
+  for (const receipt of receiptModels.values()) {
+    const model = reportedModel(receipt.model, zeroTokens(), receipt.totalUsd);
+    model.priced = receipt.priced; base.models.push(model);
+  }
+  base.tokens = messages.tokens;
+  base.metrics.modelCalls = messages.metrics.modelCalls;
+  base.metrics.maxInputTokensPerCall = messages.metrics.maxInputTokensPerCall;
+  base.metrics.assistantMessages = messages.metrics.assistantMessages;
+  base.tools = messages.tools; base.transportTools = messages.transportTools;
+  base.metrics.toolCalls = messages.metrics.toolCalls; base.metrics.transportToolCalls = messages.metrics.transportToolCalls;
+  base.evidence!.tools = "observed";
+  base.historyStatistics = messages.historyStatistics;
+  base.firstEventAt = messages.firstEventAt; base.lastEventAt = messages.lastEventAt;
+  base.metrics.eventSpanMilliseconds = messages.metrics.eventSpanMilliseconds;
+  base.costComplete = false; base.evidence!.accounting = "partial";
+  base.models.sort((a, b) => b.totalUsd - a.totalUsd || a.model.localeCompare(b.model));
+  base.transcript.warnings = [...new Set([...base.transcript.warnings.filter(w =>
+    !w.startsWith("Recovered from Conductor result receipts.") && !w.startsWith("Token totals retain the observed main-loop lower bound")),
+    ...messages.transcript.warnings,
+    "A higher cumulative receipt lower bound was retained instead of message prices. Tokens and request counts retain message evidence; provider-reported value and model cost allocations can cover a different retained interval and have no request dates."] )];
+  return base;
 }

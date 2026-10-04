@@ -142,11 +142,13 @@ export async function collectHistoryCoverage(roots: string[], sessions: SessionA
         result.unassignedProfileTokens += bucket.tokens;
         month(bucket.day.slice(0, 7)).recoveredMessageUsd += bucket.valueUsd;
       }
-      for (const bucket of session.historyStatistics?.days ?? session.history.days) {
-        const id = `${bucket.day}:${bucket.model}`;
-        unknown.set(id, (unknown.get(id) ?? 0) + bucket.tokens);
-      }
       result.unassignedProfileTokens += session.history.undatedTokens;
+    }
+    // Selecting the higher receipt basis must not discard retained SDK stream
+    // overlap evidence or create a new apparent statistics gap.
+    if (!profile) for (const bucket of session.historyStatistics?.days ?? session.history?.days ?? []) {
+      const id = `${bucket.day}:${bucket.model}`;
+      unknown.set(id, (unknown.get(id) ?? 0) + bucket.tokens);
     }
   }
   const byDayModel = new Map<string, Cell[]>();

@@ -8,7 +8,7 @@ import { loadNative } from './native-oracle.ts';
 import { loadNativeHeads } from './native-heads.ts';
 import { loadConductor } from './conductor-oracle.ts';
 import { loadCursor } from './cursor-oracle.ts';
-import { canonicalizeRemote, resolveRepository as resolveUncachedRepository } from './git-oracle.ts';
+import { canonicalizeRemote, localDirectoryAttribution, resolveRepository as resolveUncachedRepository } from './git-oracle.ts';
 async function main(): Promise<void> {
 const hashCache=new Map<string,string>();
 const hash=(s:string,n=12)=>{const key=`${n}:${s}`;let value=hashCache.get(key);if(!value){value=createHash('sha256').update(s).digest('hex').slice(0,n);hashCache.set(key,value);}return value;};
@@ -79,7 +79,7 @@ for(const s of snapshot.sessions){
  } else if(dbRepoIds.size===1){candidates=dbRepoIds;identity=byRepoId.get([...candidates][0]!)!;route='registered-session';}
  else if(directRootIds.length){candidates=new Set(directRootIds);identity=byRepoId.get(directRootIds[0]!)!;route='registered-root';}
  else if(r.source==='conductor-only'&&r.dbRows?.length){identity='unassigned:conductor';const id=repoId(identity);candidates.add(id);addIdentity(identity,id);route='registered-unassigned';}
- else if(r.cwd){const temp=!git.root&&r.cwd.startsWith('/private/var/folders/')&&r.cwd.includes('/T/');candidates.add(discoveredId(temp?'/private/var/folders/session-analytics-ephemeral':canonical(r.cwd)));route=temp?'ephemeral':'local-directory';}
+ else if(r.cwd){const local=localDirectoryAttribution(r.cwd,git);candidates.add(discoveredId(local.root));route=local.route;}
  const actualIdentity=byRepoId.get(s.repositoryId);
  const active=priorRows.has(s.sessionKey)?priorRows.get(s.sessionKey).active:(r.lastAt&&Date.parse(r.lastAt)>Date.parse(cutoff))||(s.lastEventAt&&Date.parse(s.lastEventAt)>Date.parse(cutoff));
  const allIdentities=new Set(cwds.map(c=>resolveRepository(c,remote).identity));

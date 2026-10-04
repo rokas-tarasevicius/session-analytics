@@ -1,5 +1,7 @@
 # Privacy contract
 
+The local real-machine verification harness also writes audit-only evidence: hashed session keys, metadata signatures and capture timestamps (P1); exclusion counts, public context counters/curve points and independently reconstructed calibration values (P0, with hashed identities and event timestamps treated as P1). Source generations, pre-budget context inputs and calibration pairs stay in `.lane/`; they contain no source paths, raw session IDs or transcript content and add no public snapshot fields. Provider histories are read-only throughout verification.
+
 `session-analytics` reads coding-agent transcripts that already exist on your machine. Those transcripts contain everything you and your agents have written: prompts, responses, reasoning, commands, file paths, diffs, and tool output. This document defines exactly what the tool may return from them, how that boundary is enforced, and what it does not protect against.
 
 The content-free contract covers dashboard/API, reports, pricing commands, insights, MCP, exports/sharing, the agent skill and the persisted index. `index path` deliberately prints only the index location for local management. The separate P3 review exception requires an explicit per-run `--send-content`; analytics never invoke it.
@@ -1102,9 +1104,19 @@ All new data is P0 counters/enums/model IDs/timestamps except the existing-style
 | `conductor.reconciliation.messages` | Recovered assistant response/group count; partial when identities are missing | P0 |
 | `conductor.reconciliation.messagesWithoutUsage` | Assistant messages without usable token counters | P0 |
 | `conductor.reconciliation.messagesWithoutIdentity` | Recovered groups containing usage without a stable upstream response ID | P0 |
+| `conductor.reconciliation.outputTokensRecovered` | Optional finalized output added to the alternate message reconstruction after exact query-input/model agreement; no content or identity | P0 |
+| `conductor.reconciliation.receiptFloorApplied` | Optional flag selecting higher provider-reported receipt dollars while retaining message token/request evidence; comparison can also appear on `conductor-result` | P0 |
+| `historyCoverage.recoveryCalibration.version`, `.basis` | Version 1 and fixed `paired-surviving-native` comparison basis | P0 |
+| `historyCoverage.recoveryCalibration.pairedSessions`, `.comparedSessions`, `.excludedSessions` | Surviving paired population and guarded eligible/excluded denominators | P0 |
+| `historyCoverage.recoveryCalibration.receiptFloorSessions`, `.aboveNativeSessions` | Eligible pairs using a monetary floor and exceeding native value beyond the documented tolerance | P0 |
+| `historyCoverage.recoveryCalibration.minimumNativeValueUsd` | Fixed $1 per-pair native denominator guard | P0 |
+| `historyCoverage.recoveryCalibration.nativeValueUsd`, `.recoveredValueUsd` | Eligible paired-value operands; the recovered operand can contain explicitly counted provider-reported floors | P0 |
+| `historyCoverage.recoveryCalibration.aggregateValueRatio`, `.medianValueRatio`, `.p10ValueRatio`, `.p90ValueRatio` | Pooled ratio and interpolated per-session quantiles; null with fewer than five eligible pairs | P0 |
 | `evidence.source` | Additionally accepts `conductor-messages`; message fidelity, request usage units, partial accounting | P0 |
 
 Machine history coverage is omitted from repository-filtered analysis and filtered exports. Full snapshot exports preserve it; aggregate-only team sharing does not include the new namespace. The panel explicitly labels machine scope independently of interactive filters. See [the method and uncertainty](metrics.md#history-coverage-and-recovery), including provider retention and uncertain profile overlap.
+
+Calibration uses the same locally projected SDK metadata and already analyzed native sessions; only aggregate counters reach the snapshot. Query/response/record identities remain private, including the internal query-boundary field. No prompts, SDK result text, source paths, raw IDs or per-pair keys enter the calibration namespace. The local verifier emits hashed keys and numerical operands only. Receipt-floor selection preserves stream counters for statistics overlap; summary-only token evidence has no invented profile/day allocation. These additions are P0, require no secret or network request, and are not a P3 content review.
 
 ### v0.6.1 correctness audit boundary
 

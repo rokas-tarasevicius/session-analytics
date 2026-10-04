@@ -75,14 +75,16 @@ test("RC-CONDUCTOR-REPLAY: a restored epoch can grow after replay without rebill
   assert.equal(result.costComplete, false);
 });
 
-test("RC-CONDUCTOR-REPLAY control: retained assistant usage supersedes ambiguous receipts", () => {
+test("RC-CONDUCTOR-REPLAY control: retained assistant tokens survive a higher cumulative receipt floor", () => {
   const first = receipt(1, 100, 20, true);
   const same = { ...first, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } };
   const assistant = { type: "assistant", message: { usage: { input_tokens: 100, output_tokens: 20 } } };
   const result = recover([init, first, init, assistant, same]);
-  assert.equal(result.evidence?.source, "conductor-messages");
-  assert.equal(result.cost.totalUsd, 0); // No model/rate was retained in this synthetic message.
+  assert.equal(result.evidence?.source, "conductor-result");
+  assert.equal(result.cost.totalUsd, 1); // The same cumulative receipt is retained once.
   assert.equal(result.tokens.inputTokens, 100);
   assert.equal(result.conductor?.reconciliation?.reportedUsd, 1);
+  assert.equal(result.conductor?.reconciliation?.messageValueUsd, 0); // No message model/rate was retained.
+  assert.equal(result.conductor?.reconciliation?.receiptFloorApplied, true);
   assert.equal(result.costComplete, false);
 });

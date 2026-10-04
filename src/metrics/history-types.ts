@@ -15,6 +15,8 @@ export interface SessionHistory {
   undatedValueUsd: number;
 }
 export interface HistoryReconciliation {
+  outputTokensRecovered?: number;
+  receiptFloorApplied?: boolean;
   messageValueUsd: number;
   reportedUsd: number | null;
   differenceUsd: number | null;
@@ -67,10 +69,28 @@ export interface HistoryMonth {
   recoveredMessageUsd: number;
 }
 export interface HistoryCoverage {
+  recoveryCalibration?: RecoveryCalibration;
   version: 1;
   scope: "machine";
   profiles: HistoryProfile[];
   months: HistoryMonth[];
   undatedSessionValueUsd: number;
   unassignedProfileTokens: number;
+}
+
+export interface RecoveryCalibration {
+  version: 1;
+  basis: "paired-surviving-native";
+  pairedSessions: number;
+  comparedSessions: number;
+  excludedSessions: number;
+  receiptFloorSessions: number;
+  aboveNativeSessions: number;
+  minimumNativeValueUsd: number;
+  nativeValueUsd: number;
+  recoveredValueUsd: number;
+  aggregateValueRatio: number | null;
+  medianValueRatio: number | null;
+  p10ValueRatio: number | null;
+  p90ValueRatio: number | null;
 }

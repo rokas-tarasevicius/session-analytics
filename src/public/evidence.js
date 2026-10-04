@@ -35,6 +35,8 @@ export const fixedWarnings = [
   "Primary transcript is unavailable; surviving child evidence is partial.",
 
   "Recovered from Conductor assistant usage. API-equivalent value is not an invoice; retained messages may not cover the full session. Human turns are unavailable.",
+  "Final output was recovered only from single-model query receipts with exactly matching main-loop input counters. No input or request count was added; uncertain day, hour and reasoning splits remain unavailable.",
+  "A higher cumulative receipt lower bound was retained instead of message prices. Tokens and request counts retain message evidence; provider-reported value and model cost allocations can cover a different retained interval and have no request dates.",
   "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial.",
   ...discoveryWarnings, filteredWarning,
   "Source availability could not be checked; showing the last indexed facts.",

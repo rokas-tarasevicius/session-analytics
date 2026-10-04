@@ -42,7 +42,22 @@ for(const s of snapshot.sessions){const extra=scopeSession(s),scope=`session:${e
  check(scope,'metrics.toolCalls',s.metrics.toolCalls,sum(Object.values(s.tools),x=>x),extra);
  check(scope,'metrics.modelCalls',s.metrics.modelCalls,sum(s.models,m=>m.calls),extra);
  if(api(s))check(scope,'pricedTokenCoverage',s.pricedTokenCoverage,coverage([s]).ratio,extra);
- const dated=sum(Object.values(s.spendByDay),x=>x);const undated=sum(s.velocity?.undated??[],c=>c[1][0]);if(s.velocity)check(scope,'cost.datedAndUndatedUsd',dated+undated,s.cost.totalUsd,extra);else check(scope,'cost.datedWithinTotal',dated<=s.cost.totalUsd+1e-7,true,extra);
+ // Daily recovery evidence and hourly velocity have different time precision.
+ // A query may prove one UTC day without proving an hour; its hourly-undated
+ // value is already in spendByDay and must not be added to that day again.
+ const dated=sum(Object.values(s.spendByDay),x=>x);
+ if(s.history){
+  check(scope,'cost.datedAndUndatedUsd',dated+s.history.undatedValueUsd,s.cost.totalUsd,extra);
+  check(scope,'history.tokens',sum(s.history.days,d=>d.tokens)+s.history.undatedTokens,s.tokens.inputTokens+s.tokens.outputTokens,extra);
+  const days=grouped(s.history.days,d=>d.day);
+  for(const day of new Set([...days.keys(),...Object.keys(s.spendByDay)]))check(scope,`spendByDay.${day}`,s.spendByDay[day]??0,sum(days.get(day)??[],d=>d.valueUsd),extra);
+ }else if(s.velocity)check(scope,'cost.datedAndUndatedUsd',dated+sum(s.velocity.undated,c=>c[1][0]),s.cost.totalUsd,extra);
+ else check(scope,'cost.datedWithinTotal',dated<=s.cost.totalUsd+1e-7,true,extra);
+ if(s.conductor?.reconciliation?.receiptFloorApplied){
+  check(scope,'cost.receiptFloorBasis',s.costBasis,'provider-reported',extra);
+  check(scope,'cost.receiptFloorUndated',dated,0,extra);
+  check(scope,'cost.receiptFloorValue',s.cost.totalUsd,s.conductor.reconciliation.reportedUsd,extra);
+ }
  if(s.mcpEvidence&&api(s)){check(scope,'mcp.pricing.eligible',sum(s.mcpEvidence.pricingByDay,d=>d.eligibleTokens)+s.mcpEvidence.undatedTokens,s.tokens.inputTokens+s.tokens.outputTokens,extra);}
  if(s.velocity){const values=[...s.velocity.buckets.map(b=>b[3]),...s.velocity.undated.map(b=>b[1])],v=Array.from({length:14},(_,i)=>sum(values,x=>x[i]));
   for(const [i,f]of [[1,'inputTokens'],[2,'uncachedInputTokens'],[3,'cachedInputTokens'],[4,'cacheWriteInputTokens'],[5,'outputTokens'],[6,'reasoningOutputTokens']])check(scope,`velocity.${f}`,v[i],s.tokens[f],extra);

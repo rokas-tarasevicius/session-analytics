@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -10,6 +10,25 @@ export function seedHistoryDemo(root: string, claudeRoot: string, now: number): 
     lastComputedDate: days[0]!.date, dailyModelTokens: days, modelUsage: { [model]: { inputTokens: 6_000_000, outputTokens: 9_000_000, cacheReadInputTokens: 120_000_000, cacheCreationInputTokens: 15_000_000, costUSD: 0 } } }));
   const db = new DatabaseSync(join(root, "conductor.db"));
   try {
+    // Surviving synthetic native/SDK pairs exercise measured calibration. These
+    // receipts finalize only part of native output, so the demo shows a range.
+    for (let index = 0; index < 5; index++) {
+      const id = `calibration-demo-${index}`, providerId = `f0000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      const time = new Date(now - (index + 7) * 86_400_000).toISOString();
+      const workspace = db.prepare("SELECT workspace_path FROM workspaces WHERE id=?").get(`workspace-${index}`) as { workspace_path: string };
+      const usage = { input_tokens: 100_000, cache_read_input_tokens: 200_000, cache_creation_input_tokens: 40_000,
+        cache_creation: { ephemeral_5m_input_tokens: 40_000, ephemeral_1h_input_tokens: 0 }, output_tokens: 100_000 };
+      const directory = join(claudeRoot, "synthetic-recovery-calibration"); mkdirSync(directory, { recursive: true });
+      const path = join(directory, `${providerId}.jsonl`);
+      writeFileSync(path, JSON.stringify({ type: "assistant", sessionId: providerId, uuid: `${id}-native`, timestamp: time, cwd: workspace.workspace_path,
+        entrypoint: "sdk-ts", message: { id: `${id}-response`, model, role: "assistant", stop_reason: "end_turn", usage, content: [{ type: "text", text: "Synthetic calibration example" }] } }) + "\n");
+      utimesSync(path, new Date(time), new Date(time));
+      db.prepare("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?)").run(id, "claude", "completed", "Synthetic paired session", time, time, providerId, model, 0, `workspace-${index}`);
+      const insert = db.prepare("INSERT INTO session_messages VALUES (?,?,?,?)");
+      insert.run(`${id}-assistant`, id, JSON.stringify({ type: "assistant", uuid: `${id}-assistant`, session_id: providerId, message: { model, usage: { ...usage, output_tokens: 2 } } }), time);
+      insert.run(`${id}-result`, id, JSON.stringify({ type: "result", uuid: `${id}-result`, session_id: providerId, subtype: "success",
+        usage: { ...usage, output_tokens: 70_000 + 5_000 * index }, total_cost_usd: index === 4 ? 1.30 : 0 }), time);
+    }
     for (let index = 0; index < 3; index++) {
       const id = `history-demo-${index}`, providerId = `history-provider-${index}`, start = now - (70 + index * 5) * 86_400_000;
       const first = new Date(start).toISOString(), last = new Date(start + 86_400_000).toISOString();

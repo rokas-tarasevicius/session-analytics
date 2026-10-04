@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Verify recovered daily value against its UTC history remainder while independently conserving hourly velocity, including finalized output whose day is known but hour is not.
+- Recognize canonical OS temporary directories in the independent repository oracle and carry recorded source changes through all native verification comparisons.
+- Prove live changes to shared context-curve sampling and recovery calibration from saved public context facts and independently reconstructed SDK pairs, while retaining strict counters and accounting checks.
+
+## [0.6.2] - 2026-10-04
+
+### Fixed
+
+- Recover finalized Claude output from query receipts only when their main-loop input counters and model agree with retained assistant evidence. Preserve cumulative receipt scope and unknown timing/reasoning details.
+- Retain a higher Conductor receipt value as a provider-reported floor without discarding recovered message tokens or adding the two monetary sources together.
+
+### Added
+
+- Measure recovery against every surviving native/SDK pair during analysis. History coverage exposes guarded value ratios, denominators, quantiles, receipt floors and above-native exceptions; no multiplier inflates deleted history.
+
 ## [0.6.1] - 2026-10-04
 
 ### Fixed
