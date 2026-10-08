@@ -343,7 +343,7 @@ Public types live in [`src/metrics/reliability-types.ts`](../src/metrics/reliabi
 | `permissions.sandboxes` | Counts of `read-only`, `workspace-write`, `danger-full-access`, `external-sandbox`, `unknown` observations | P0 |
 | `apiErrors` | Structured `api_rate_limit`, `api_server_error`, `unknown` counts | P0 |
 
-The dashboard and report derive class/repository/agent comparisons, coverage denominators, episode totals and guarded rates from these fields. The public JSON contains no per-call events and no additional reliability root rollup. Tests in `test/reliability.test.ts` and `test/server.test.ts` cover sentinels through the parser, child worker, API and report, including error text, diffs, command arguments, hooks and MCP results.
+The report derives class/repository/agent comparisons, coverage denominators, episode totals and guarded rates from these fields. The public JSON contains no per-call events and no additional reliability root rollup. Tests in `test/reliability.test.ts` and `test/server.test.ts` cover sentinels through the parser, child worker, API and report, including error text, diffs, command arguments, hooks and MCP results.
 
 | `maxContextWindow` | Largest context window the provider reported | P0 |
 | `maxInputTokensPerCall` | Largest owned, deduplicated request with known input size; a lower bound when request-size coverage is partial | P0 |
@@ -586,7 +586,7 @@ Context totals in `context` and `buckets[].context`:
 | `context.curveSampled` | Curve reduced by the 240-point session cap and/or 20,000-point snapshot cap; aggregate counts/peaks remain exact | P0 |
 | `context.curve[].request`, `timestamp`, `executionKind`, `inputTokens`, `windowTokens`, `fill` | Request ordinal (not raw ID), nullable time, execution enum, input/window counts and paired ratio | P0 |
 
-Sentinel tests in `test/limits-cache.test.ts` place content in diagnostics, quotas, unknown limit/plan IDs, credits metadata, Desktop organization IDs, compaction summaries and configuration. `test/model-privacy-fixture.ts` also plants paths, URLs, control characters, error text and oversized strings directly in Claude/Codex model metadata and Cursor cost keys. Tests cover serialized analytics, terminal output, the actual isolated-worker HTTP API and executed dashboard renderer, including cache-break/model dimensions.
+Sentinel tests in `test/limits-cache.test.ts` place content in diagnostics, quotas, unknown limit/plan IDs, credits metadata, Desktop organization IDs, compaction summaries and configuration. `test/model-privacy-fixture.ts` also plants paths, URLs, control characters, error text and oversized strings directly in Claude/Codex model metadata and Cursor cost keys. Tests cover serialized analytics, terminal output, the actual isolated-worker HTTP API, including cache-break/model dimensions.
 
 ### Session outcomes (`SessionOutcomes`)
 
@@ -736,9 +736,9 @@ The following paths are relative to `MachineAnalytics.workflow` or `RepositoryAn
 | `installedSkills[].repositoryId` | Existing repository key for project installations; null for provider profile/shared inventory | P1 |
 | `inventory.directoriesRead`, `.directoriesUnavailable`, `.historyFilesRead`, `.historyFilesUnavailable`, `.malformedHistoryRecords` | Inventory coverage counters; no directory names, history filenames or errors | P0 |
 
-Derived timing/turn/heuristic fields can incorporate P2 interruption control events **only when enabled**, as indicated by coverage. All such values remain counters, enums and timestamps. No P3 content is introduced. New workflow controls persist no extra browser state; only the existing selected-tab/theme storage is used.
+Derived timing/turn/heuristic fields can incorporate P2 interruption control events **only when enabled**, as indicated by coverage. All such values remain counters, enums and timestamps. No P3 content is introduced.
 
-Malformed primary evidence makes timing partial and ending unavailable. Tool-run, inferred-turn, activity, waiting and abandonment estimates are suppressed; independent provider durations retain their evidence count. Enum fields accept strings only, and optional observer failures cannot discard accounting. The browser worker receives only the existing public projection, never provider records. Its cache is in memory, bounded to eight filtered aggregates, and invalidated with each new snapshot.
+Malformed primary evidence makes timing partial and ending unavailable. Tool-run, inferred-turn, activity, waiting and abandonment estimates are suppressed; independent provider durations retain their evidence count. Enum fields accept strings only, and optional observer failures cannot discard accounting.
 
 ### Cache-gap signals
 
@@ -756,7 +756,7 @@ Malformed primary evidence makes timing partial and ending unavailable. Tool-run
 
 ### Insights report (`InsightsReport`)
 
-Returned by `insights --json` and `GET /api/insights`; public types are re-exported from `src/types.ts` and defined under `src/insights/`. Configuration file paths and settings contents are never returned.
+Returned by `insights --json`; public types are re-exported from `src/types.ts` and defined under `src/insights/`. Configuration file paths and settings contents are never returned.
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
@@ -831,7 +831,7 @@ Returned by `insights --json` and `GET /api/insights`; public types are re-expor
 
 ### Browser storage
 
-The dashboard stores the selected view (`session-analytics-view`), theme (`session-analytics-theme`), and insight decisions (`session-analytics-insights-v1`). Insight decisions map opaque P1 scope IDs (`insight-…`) and rule IDs (`insight-rule-…`) to `dismissed` or a snooze-expiry timestamp; legacy scope decisions are retained. Rule choices apply across all scopes; restoring one does not erase independent scope choices; no card evidence, names, prose or settings are persisted. They can be restored from the Insights tab and do not affect API/CLI results.
+The dashboard stores the selected view (`session-analytics-view`), theme (`session-analytics-theme`), density (`session-analytics-density`), and shortcut preference (`session-analytics-shortcuts`). The time window and session data are not persisted in browser storage. The removed Insights view’s legacy decision key is no longer read or written.
 
 ### MCP fields
 
@@ -941,7 +941,7 @@ These fields also appear in the existing JSON/API session projection when suppor
 The MCP worker returns `{analytics, inventory}` to its parent over an anonymous pipe. `analytics` is the allowlisted machine snapshot above. Each `inventory[]` contains only `provider`, `skills[]`, `skillIdentities[].name`/`.aliases[]`, `unresolvedSkills`, `mcpServers[]`, `sourcesRead`, `unreadableSources`, and `truncated`; server names are P1, all other inventory fields P0. Skill names come only from bounded scalar frontmatter names and directory aliases, deduplicated by a canonical path that stays inside the worker. At most a 16 KiB skill prefix is read; description/body content is never projected. Unsupported metadata yields an unknown identity count, not a purportedly unused name. TOML escaped delimiters and quote runs cannot turn string values into table names; malformed string syntax rejects the source. Config values, URLs, environment values and commands are discarded inside the worker. This inventory is in memory only, never persisted, and bounded to 512 names/identities and 512 aliases per identity.
 
 The MCP wrapper contains standard JSON-RPC `jsonrpc`, caller-chosen `id` (protocol correlation only), `result` or `error`; errors use fixed `code`/`message` and, for unsupported versions, `data.supported`/`requested` protocol dates. Tool results contain `isError`, `content[].type`/`.text` (a fixed-template summary and serialized `McpPayload`), and `structuredContent` (the same payload). Modern results add `resultType` and `_meta.io.modelcontextprotocol/serverInfo`. Discovery/initialization contain only static product/version identifiers, protocol versions, tool capability declarations, instructions and catalog cache hints (`ttlMs`, `cacheScope`). `tools/list` returns static names/descriptions, JSON input schemas and read-only/idempotent/closed-world annotations. These are P0 and carry no local-history identifiers; caller request IDs are echoed as required by JSON-RPC, never used to query history.
-The dashboard stores two values in browser `localStorage`: the selected view (`session-analytics-view`) and the theme (`session-analytics-theme`). No session data is persisted in the browser. The separate local SQLite index is described above.
+The dashboard stores view, theme, density and shortcut preferences in browser `localStorage`. No session data or time window is persisted in the browser. The separate local SQLite index is described above.
 
 ### Index management status (`IndexStatus`)
 

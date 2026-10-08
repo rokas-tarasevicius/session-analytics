@@ -36,7 +36,6 @@ export function namedTotals(sessions: SessionLike[], field: string): NamedMetric
 export function spendDays(sessions: SessionLike[]): NamedMetric[];
 export function coverageWarnings(sessions: SessionLike[]): string[];
 export function costTotals(sessions: SessionLike[]): { cached: number; input: number; output: number; reported: number; total: number; upper: number; write: number };
-export function evidenceLabel(sessions: SessionLike[]): string;
 export function groupByRepository(sessions: SessionLike[]): Map<string, SessionLike[]>;
 export function sessionsInRange(sessions: SessionLike[], startDay: string | null, endDay: string | null): SessionLike[];
 export function daysBetween(startDay: string, endDay: string, cap?: number): string[];

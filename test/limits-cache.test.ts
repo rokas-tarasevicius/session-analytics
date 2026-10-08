@@ -296,13 +296,6 @@ test("subscriptions use request months, configured prices, coverage guards and a
     const cli = await promisify(execFile)(process.execPath, ["src/cli.ts", "--claude-root", options.claudeRoot!, "--codex-root", options.codexRoot!, "--codex-archive-root", options.codexArchiveRoot!, "--database", options.databasePath!, "--cursor-database", options.cursorDatabasePath!, "--data-dir", options.dataDir!]);
     assert.match(cli.stdout, /Limits & cache/); assert.match(cli.stdout, /Personal/); assert.match(cli.stdout, /not an invoice/);
     assert.doesNotMatch(cli.stdout, new RegExp(`${secret}|${claudeId}|${repo}`));
-    // Exercise the dependency-free browser aggregation without requiring a DOM.
-    const { economicsForView } = await import(new URL("../src/public/views/limits-cache.js", import.meta.url).href);
-    const view = economicsForView(result.sessions, { start: "2026-10-01", end: "2026-10-01", grouping: "model", execution: "all" });
-    assert.equal(view.cache.requests, 1);
-    assert.equal(view.months[0].month, "2026-10");
-    assert.equal(economicsForView(result.sessions, { start: "2026-10-01", execution: "subagent" }).cache.requests, 0);
-    assert.equal(economicsForView(result.sessions, { repositoryId: "not-selected" }).cache.requests, 0);
   });
 });
 

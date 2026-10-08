@@ -58,7 +58,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 - Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). Retained Conductor assistant metadata can recover usage and tool counts; result receipts remain a summary fallback. Missing response identities make recovery conservative and partial.
 - Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). The local index preserves sessions ingested before cleanup, marked `transcript.sourceDeleted`. History deleted before the first ingest requires an independent source such as Conductor; the index alone cannot reconstruct it.
 - Profile `stats-cache.json` daily-token version 5 is reconciled against same-profile UTC day/model streamed-block counters, separately from deduplicated session usage; older or unknown versions are labeled unsupported. See [History coverage](metrics.md#history-coverage-and-recovery).
-- Profile labels and keys are available in Limits & cache; other views do not yet expose a profile dimension.
+- Profile labels and keys are available in limits/cache report and snapshot data; dashboard views do not expose a profile dimension.
 
 ### Claude reliability evidence
 
@@ -269,7 +269,7 @@ Every added store has its own explicit option and `SESSION_ANALYTICS_*` variable
 
 ## Workflow evidence
 
-The Workflow view, report and JSON add a separate primary-transcript projection. Claude's sub-agent files still enter accounting but not the parent's human-turn, timing or metadata measures. Codex sub-agent threads retain their own activity spans; their inputs are not human turns. Cursor workflow timing is unavailable. Full definitions, thresholds and guards are in [metrics.md](metrics.md#workflow-human-and-agent-interaction).
+The workflow report and JSON add a separate primary-transcript projection. Claude's sub-agent files still enter accounting but not the parent's human-turn, timing or metadata measures. Codex sub-agent threads retain their own activity spans; their inputs are not human turns. Cursor workflow timing is unavailable. Full definitions, thresholds and guards are in [metrics.md](metrics.md#workflow-human-and-agent-interaction).
 
 | Source | Additional fields inspected locally | Retained evidence |
 | --- | --- | --- |

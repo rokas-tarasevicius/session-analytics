@@ -57,13 +57,6 @@ test("review: mixed reported/API cost stacks represent the displayed total", asy
   assert.equal(bars.find((b) => b.dataset["component"] === "reported")!.style["width"], "90%");
 });
 
-test("review: distributions label zero/one/sufficient eligible denominators and draw only sufficient series", async () => {
-  const h = await harness(), container = new Element(); h.context["container"] = container;
-  h.run('snapshot = { repositories: [{repository:{id:"a"}},{repository:{id:"b"}},{repository:{id:"c"}}] }; renderDistributionChart(container, [{id:"a", name:"Missing", sessions:Array(100).fill(null)}, {id:"b",name:"Tiny",sessions:[2]}, {id:"c",name:"Observed",sessions:[1,2,3,4,5]}], x=>x, String)');
-  assert.equal(descend(container).filter((n) => n.tag === "polyline").length, 1);
-  assert.match(container.textContent, /Missing.*N\/A.*0\/100/); assert.match(container.textContent, /Tiny.*1\/1.*minimum 5/); assert.match(container.textContent, /Observed.*5\/5/);
-});
-
 test("review: models display N/A requests for run summaries and coverage for mixed evidence", async () => {
   const h = await harness(); const summary = sample(evidence()); summary.tokens = tokens(100, 0, 0, 20); summary.models = [reportedModel("claude-opus-5", summary.tokens, 1)]; summary.costBasis = "provider-reported";
   h.context["sessions"] = [summary]; h.run('modelMetric="calls"; renderModels({sessions})');
@@ -98,7 +91,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
     assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? "0" : "—");
     assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2" : "" : `No tool evidence in ${selected}`);
     assert.equal(h.elements.get("#metric-compactions")!.textContent, "—");
-    h.run('renderNamedDistribution({view,field:"tools",keyContainer:elements.toolsKey,tableContainer:elements.toolsByRepository,detailContainer:elements.toolsDetail,detailTitle:elements.toolsDetailTitle,providerScope:"tools"})');
+    h.run('renderTools(view)');
     if (!sessions.includes(activity)) {
       assert.match(h.elements.get("#tools-by-repository")!.textContent, /—/);
       assert.match(h.elements.get("#tools-detail")!.textContent, /—/);

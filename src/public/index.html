@@ -10,11 +10,6 @@
     <link rel="stylesheet" href="/interop.css" />
     <link rel="stylesheet" href="/pricing.css" />
     <link rel="stylesheet" href="/velocity.css" />
-    <link rel="stylesheet" href="/reliability.css" />
-    <link rel="stylesheet" href="/views/limits-cache.css" />
-    <link rel="stylesheet" href="/outcomes.css" />
-    <link rel="stylesheet" href="/workflow.css" />
-    <link rel="stylesheet" href="/views/insights.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -22,19 +17,12 @@
     <svg hidden aria-hidden="true" focusable="false">
       <defs>
         <symbol id="i-summary" viewBox="0 0 16 16"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1.25"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1.25"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1.25"/><rect x="9" y="9" width="5.5" height="5.5" rx="1.25"/></symbol>
-        <symbol id="i-distributions" viewBox="0 0 16 16"><path d="M1.5 13.5c2.5 0 3-9 5.5-9s3.5 6 5 6 2-3.5 2.5-3.5"/><path d="M1.5 14.5h13"/></symbol>
         <symbol id="i-activity" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><path d="M1.5 6.5h13M5 1.5v2M11 1.5v2"/><path d="M4.5 10h2v2h-2zM9.5 10h2v2h-2z" class="fill"/></symbol>
         <symbol id="i-velocity" viewBox="0 0 16 16"><path d="M1.5 12.5l4-5 3 3 6-7"/><path d="M10.5 3.5h4v4"/></symbol>
         <symbol id="i-costs" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.2v7.6M10.2 6.2c0-.9-1-1.5-2.2-1.5s-2.2.6-2.2 1.4c0 2.1 4.4 1 4.4 3.2 0 .9-1 1.5-2.2 1.5s-2.2-.6-2.2-1.5"/></symbol>
         <symbol id="i-models" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><rect x="6" y="6" width="4" height="4" rx=".75" class="fill"/><path d="M6 1v2.5M10 1v2.5M6 12.5V15M10 12.5V15M1 6h2.5M1 10h2.5M12.5 6H15M12.5 10H15"/></symbol>
         <symbol id="i-pricing" viewBox="0 0 16 16"><path d="M2 8.5V2.8c0-.4.4-.8.8-.8h5.7l5.9 5.9a1 1 0 0 1 0 1.4l-4.9 4.9a1 1 0 0 1-1.4 0z"/><circle cx="5.5" cy="5.5" r="1" class="fill"/></symbol>
-        <symbol id="i-reliability" viewBox="0 0 16 16"><path d="M8 1.5l5.5 2v4.2c0 3.3-2.3 5.6-5.5 6.8-3.2-1.2-5.5-3.5-5.5-6.8V3.5z"/><path d="M5.5 8l1.8 1.8L10.8 6"/></symbol>
-        <symbol id="i-limits" viewBox="0 0 16 16"><path d="M2 11.5a6 6 0 1 1 12 0"/><path d="M8 11.5l3-4.5"/><circle cx="8" cy="11.5" r="1.2" class="fill"/></symbol>
-        <symbol id="i-workflow" viewBox="0 0 16 16"><circle cx="4" cy="4" r="1.8"/><circle cx="4" cy="12" r="1.8"/><circle cx="12" cy="8" r="1.8"/><path d="M5.8 4H8a2 2 0 0 1 2 2v0a2 2 0 0 0 2 2M5.8 12H8a2 2 0 0 0 2-2v0a2 2 0 0 1 2-2"/></symbol>
         <symbol id="i-tools" viewBox="0 0 16 16"><path d="M10.2 2.3a3.4 3.4 0 0 0-3.9 4.5L2 11.1a1.4 1.4 0 0 0 2 2l4.3-4.3a3.4 3.4 0 0 0 4.5-3.9l-2.2 2.2-1.9-.5-.5-1.9z"/></symbol>
-        <symbol id="i-skills" viewBox="0 0 16 16"><path d="M8 1.5l1.6 4 4 1.6-4 1.6L8 12.7l-1.6-4-4-1.6 4-1.6z"/><path d="M13 11.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" class="fill"/></symbol>
-        <symbol id="i-outcomes" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5 8.3l2.1 2.1L11.2 6"/></symbol>
-        <symbol id="i-insights" viewBox="0 0 16 16"><path d="M5.5 11.5a4.5 4.5 0 1 1 5 0v1.5h-5z"/><path d="M6.5 14.5h3"/></symbol>
         <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.75"/><path d="M10.5 10.5 14 14"/></symbol>
         <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3.3h-3.3"/></symbol>
         <symbol id="i-export" viewBox="0 0 16 16"><path d="M8 2v8M4.8 6.8L8 10l3.2-3.2"/><path d="M2.5 11v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/></symbol>
@@ -72,8 +60,6 @@
           <div class="nav-section" role="group" aria-label="Overview">
             <p class="nav-heading">Overview</p>
             <button type="button" data-view-button="summary" data-label="Summary" aria-current="page"><svg aria-hidden="true"><use href="#i-summary"/></svg><span>Summary</span><kbd aria-hidden="true">G S</kbd></button>
-            <button type="button" data-view-button="distributions" data-label="Distributions"><svg aria-hidden="true"><use href="#i-distributions"/></svg><span>Distributions</span><kbd aria-hidden="true">G D</kbd></button>
-            <button type="button" data-view-button="activity" data-label="Activity"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span><kbd aria-hidden="true">G A</kbd></button>
             <button type="button" data-view-button="velocity" data-label="Velocity"><svg aria-hidden="true"><use href="#i-velocity"/></svg><span>Velocity</span><kbd aria-hidden="true">G V</kbd></button>
           </div>
           <div class="nav-section" role="group" aria-label="Economics">
@@ -82,21 +68,10 @@
             <button type="button" data-view-button="models" data-label="Models"><svg aria-hidden="true"><use href="#i-models"/></svg><span>Models</span><kbd aria-hidden="true">G M</kbd></button>
             <button type="button" data-view-button="pricing" data-label="Pricing"><svg aria-hidden="true"><use href="#i-pricing"/></svg><span>Pricing</span><kbd aria-hidden="true">G P</kbd></button>
           </div>
-          <div class="nav-section" role="group" aria-label="Reliability">
-            <p class="nav-heading">Reliability</p>
-            <button type="button" data-view-button="reliability" data-label="Reliability"><svg aria-hidden="true"><use href="#i-reliability"/></svg><span>Reliability</span><kbd aria-hidden="true">G R</kbd></button>
-            <button type="button" data-view-button="limits-cache" data-label="Limits &amp; cache"><svg aria-hidden="true"><use href="#i-limits"/></svg><span>Limits &amp; cache</span><kbd aria-hidden="true">G L</kbd></button>
-          </div>
-          <div class="nav-section" role="group" aria-label="Workflow &amp; outcomes">
-            <p class="nav-heading">Workflow &amp; outcomes</p>
-            <button type="button" data-view-button="workflow" data-label="Workflow"><svg aria-hidden="true"><use href="#i-workflow"/></svg><span>Workflow</span><kbd aria-hidden="true">G W</kbd></button>
+          <div class="nav-section" role="group" aria-label="Usage">
+            <p class="nav-heading">Usage</p>
             <button type="button" data-view-button="tools" data-label="Tools"><svg aria-hidden="true"><use href="#i-tools"/></svg><span>Tools</span><kbd aria-hidden="true">G T</kbd></button>
-            <button type="button" data-view-button="skills" data-label="Skills"><svg aria-hidden="true"><use href="#i-skills"/></svg><span>Skills</span><kbd aria-hidden="true">G K</kbd></button>
-            <button type="button" data-view-button="outcomes" data-label="Outcomes"><svg aria-hidden="true"><use href="#i-outcomes"/></svg><span>Outcomes</span><kbd aria-hidden="true">G O</kbd></button>
-          </div>
-          <div class="nav-section" role="group" aria-label="Insights">
-            <p class="nav-heading">Insights</p>
-            <button type="button" data-view-button="insights" data-label="Insights"><svg aria-hidden="true"><use href="#i-insights"/></svg><span>Insights</span><kbd aria-hidden="true">G I</kbd></button>
+            <button type="button" data-view-button="activity" data-label="Activity"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span><kbd aria-hidden="true">G A</kbd></button>
           </div>
         </nav>
 
@@ -121,9 +96,9 @@
             <label class="repository-select-wrap"><span class="sr-only">Repository view</span><select id="repository-filter" aria-label="Repository view"><option value="all">All repositories</option></select></label>
             <div class="segmented" role="group" aria-label="Time window" id="window-segment">
               <button type="button" data-window-preset="7" aria-pressed="false">7d</button>
-              <button type="button" data-window-preset="30" aria-pressed="false">30d</button>
+              <button type="button" data-window-preset="30" aria-pressed="true">30d</button>
               <button type="button" data-window-preset="90" aria-pressed="false">90d</button>
-              <button type="button" data-window-preset="all" aria-pressed="true">All</button>
+              <button type="button" data-window-preset="all" aria-pressed="false">All</button>
               <button type="button" data-window-preset="custom" aria-pressed="false">Custom</button>
             </div>
             <div class="date-range" id="date-range" hidden>
@@ -227,18 +202,6 @@
             </section>
           </div>
 
-          <section class="analytics-view" data-view-panel="distributions" hidden aria-labelledby="distributions-title">
-            <header class="view-header"><div><p class="kicker">Compare repositories</p><h2 id="distributions-title">Distributions</h2><p>Each line is normalized to the share of sessions in its repository.</p></div></header>
-            <fieldset class="compare-repositories"><legend>Repositories to compare · up to 6</legend><div id="distribution-repository-options"></div></fieldset>
-            <div class="comparison-key" id="distribution-key"></div>
-            <div class="view-grid">
-              <article class="panel"><header><div><p class="kicker">Duration</p><h2>Session duration</h2></div><span>Minutes · log bins</span></header><div class="distribution-chart chart-slot" id="distribution-duration"></div></article>
-              <article class="panel"><header><div><p class="kicker">Usage value</p><h2>API-equivalent value</h2></div><span>USD · log bins</span></header><div class="distribution-chart chart-slot" id="distribution-cost"></div></article>
-              <article class="panel"><header><div><p class="kicker">Tools</p><h2>Effective tool calls</h2></div><span>Calls · log bins</span></header><div class="distribution-chart chart-slot" id="distribution-tools"></div></article>
-              <article class="panel"><header><div><p class="kicker">Compactions</p><h2>Context boundaries</h2></div><span>Count</span></header><div class="distribution-chart chart-slot" id="distribution-compactions"></div></article>
-            </div>
-          </section>
-
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
             <header class="view-header"><div><p class="kicker">Session starts</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <article class="panel activity-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
@@ -270,15 +233,6 @@
             <article class="panel detail-panel"><header><div><p class="kicker">Selected repository</p><h2 id="tools-detail-title">—</h2></div></header><div class="bar-list sage chart-slot" id="tools-detail"></div></article>
           </section>
 
-          <section class="analytics-view" data-view-panel="skills" hidden aria-labelledby="skills-title">
-            <header class="view-header"><div><p class="kicker">Repositories</p><h2 id="skills-title">Skills</h2><p>Observed skill invocations with provider-specific evidence coverage.</p></div><div class="provider-key" id="skills-provider-filters" role="group" aria-label="Filter skill invocations by provider"></div></header>
-            <article class="panel"><div class="distribution-table chart-slot" id="skills-by-repository"></div><div class="comparison-key" id="skills-key"></div></article>
-            <div class="view-grid skills-detail-grid">
-              <article class="panel"><header><div><p class="kicker">Selected repository</p><h2 id="skills-detail-title">—</h2></div></header><div class="bar-list chart-slot" id="skills-detail"></div></article>
-              <article class="panel"><header><div><p class="kicker">Provider coverage</p><h2>Skill detection</h2></div></header><div class="coverage-list"><div><strong>Claude</strong><span>Explicit Skill tool</span><em data-status="ok">Reliable</em></div><div><strong>Codex</strong><span>Canonical SKILL.md reads</span><em data-status="warning">Lower bound</em></div><div><strong>Cursor</strong><span>No stable local signal</span><em>N/A</em></div></div><p class="chart-note">Skill names are allowlisted derived identifiers. Tool arguments and file paths are never returned.</p></article>
-            </div>
-          </section>
-
           <section class="analytics-view" data-view-panel="pricing" hidden aria-labelledby="pricing-title">
             <header class="view-header"><div><p class="kicker">Price evidence</p><h2 id="pricing-title">Pricing</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
             <div id="pricing-panel"></div>
@@ -287,25 +241,6 @@
           <section class="analytics-view" data-view-panel="velocity" hidden aria-labelledby="velocity-title">
             <header class="view-header"><div><p class="kicker">Activity over time</p><h2 id="velocity-title">Velocity</h2><p>Where usage is moving, by agent and every evidenced dimension.</p></div></header>
             <div id="velocity-view"></div>
-          </section>
-
-          <section class="analytics-view" data-view-panel="reliability" hidden aria-labelledby="reliability-title"></section>
-
-          <section class="analytics-view" data-view-panel="limits-cache" id="limits-cache-view" hidden aria-label="Limits and cache analytics"></section>
-
-          <section class="analytics-view" data-view-panel="outcomes" hidden aria-labelledby="outcomes-title">
-            <header class="view-header"><div><p class="kicker">From activity to evidence</p><h2 id="outcomes-title">Outcomes</h2><p>Recorded edits, commits, and pull requests. Evidence of an artifact does not prove quality or value delivered.</p></div></header>
-            <div id="outcomes-content"></div>
-          </section>
-
-          <section class="analytics-view workflow-view" data-view-panel="workflow" hidden aria-labelledby="workflow-title">
-            <header class="view-header"><div><p class="kicker">Humans, agents &amp; parallel work</p><h2 id="workflow-title">Workflow</h2><p>How work unfolds, from one human turn to a fleet of agents.</p></div><label class="field workflow-provider-label"><span class="field-label">Provider</span><select id="workflow-provider"><option value="all">All providers</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="cursor">Cursor</option><option value="copilot">Copilot CLI</option><option value="opencode">OpenCode</option><option value="gemini">Gemini CLI</option><option value="unsupported">Unsupported</option></select></label></header>
-            <div id="workflow-content" aria-live="polite"></div>
-          </section>
-
-          <section class="analytics-view" data-view-panel="insights" aria-label="Measured insights" hidden>
-            <header class="view-header insights-intro"><div><p class="kicker">Evidence into action</p><h2>Insights</h2><p>Signals worth a closer look, with the evidence and limits beside them. Content-free, local rules; API-equivalent value is not an invoice.</p></div></header>
-            <div id="insights-root" aria-busy="false"></div>
           </section>
 
           <footer><p>Read-only local analysis. No prompts, messages, reasoning, tool payloads, transcript paths, credentials, or remote telemetry. API-equivalent value is not an invoice; activity counters do not prove quality or value.</p><div id="rate-card-links"></div></footer>
@@ -345,7 +280,6 @@
             <li>API-equivalent value is a list-price equivalent of observed tokens, not an invoice. Provider-reported value is kept separate.</li>
             <li>Coverage badges such as <small class="coverage">87/116</small> show how many selected sessions carry the evidence behind a number; hover one for the sentence.</li>
             <li>Ratios with tiny denominators are withheld; a dash means not applicable, never zero.</li>
-            <li>Session length, interrupt rate, and permission approvals need a same-repository baseline; loop and churn flags are prompts for inspection, not verdicts.</li>
             <li>Activity counters do not prove success, quality, or value delivered.</li>
           </ul>
         </section>
@@ -357,19 +291,12 @@
       <div class="help-grid">
         <section><h3>Navigate</h3><dl>
           <div><dt>Summary</dt><dd><kbd>g</kbd><kbd>s</kbd></dd></div>
-          <div><dt>Distributions</dt><dd><kbd>g</kbd><kbd>d</kbd></dd></div>
-          <div><dt>Activity</dt><dd><kbd>g</kbd><kbd>a</kbd></dd></div>
           <div><dt>Velocity</dt><dd><kbd>g</kbd><kbd>v</kbd></dd></div>
           <div><dt>Costs</dt><dd><kbd>g</kbd><kbd>c</kbd></dd></div>
           <div><dt>Models</dt><dd><kbd>g</kbd><kbd>m</kbd></dd></div>
           <div><dt>Pricing</dt><dd><kbd>g</kbd><kbd>p</kbd></dd></div>
-          <div><dt>Reliability</dt><dd><kbd>g</kbd><kbd>r</kbd></dd></div>
-          <div><dt>Limits &amp; cache</dt><dd><kbd>g</kbd><kbd>l</kbd></dd></div>
-          <div><dt>Workflow</dt><dd><kbd>g</kbd><kbd>w</kbd></dd></div>
           <div><dt>Tools</dt><dd><kbd>g</kbd><kbd>t</kbd></dd></div>
-          <div><dt>Skills</dt><dd><kbd>g</kbd><kbd>k</kbd></dd></div>
-          <div><dt>Outcomes</dt><dd><kbd>g</kbd><kbd>o</kbd></dd></div>
-          <div><dt>Insights</dt><dd><kbd>g</kbd><kbd>i</kbd></dd></div>
+          <div><dt>Activity</dt><dd><kbd>g</kbd><kbd>a</kbd></dd></div>
           <div><dt>Previous / next view</dt><dd><kbd>[</kbd><kbd>]</kbd></dd></div>
         </dl></section>
         <section><h3>Control</h3><dl>

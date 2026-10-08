@@ -8,8 +8,6 @@ import { spawn } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { setTimeout as delay } from 'node:timers/promises';
 import { aggregate,select,bounds,velocity,windows,providers,counters,velocityGroups } from './browser-oracle.mjs';
-import { insightsForSnapshot } from '../../src/insights/service.ts';
-import { parseInsightConfig } from '../../src/insights/config.ts';
 import { createDomRuntime } from './browser-dom-runtime.mjs';
 const domMode=process.env.DOM==='1';
 const outputFile=domMode?'.lane/browser-dom-matrix.json':'.lane/browser-matrix.json';
@@ -35,8 +33,8 @@ try{
  if(!domMode){if(!tabs)throw Error('Chrome exited before publishing DevTools endpoint');ws=new WebSocket(tabs.find(x=>x.type==='page').webSocketDebuggerUrl);await new Promise(r=>ws.addEventListener('open',r,{once:true}));}
  let id=0;const pending=new Map();
  const send=(method,params={})=>domMode?Promise.resolve({}):new Promise((resolve,reject)=>{const key=++id;const timer=setTimeout(()=>{pending.delete(key);reject(Error(`CDP timeout ${method}`))},90000);pending.set(key,m=>{clearTimeout(timer);m.error?reject(Error(`CDP ${method} ${m.error.code}`)):resolve(m.result)});ws.send(JSON.stringify({id:key,method,params}))});
- ws?.addEventListener('message',async event=>{const m=JSON.parse(event.data);if(m.id){pending.get(m.id)?.(m);pending.delete(m.id);return}if(m.method==='Runtime.exceptionThrown')output.exceptions.push({...context,type:'runtime',line:m.params.exceptionDetails.lineNumber,column:m.params.exceptionDetails.columnNumber});if(m.method==='Fetch.requestPaused'){const req=m.params;try{const url=new URL(req.request.url);if(url.pathname==='/api/analytics'){await send('Fetch.fulfillRequest',{requestId:req.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'},{name:'Content-Encoding',value:'gzip'}],body:responseBody});}else if(url.pathname==='/api/insights'){const report=insightsForSnapshot(snapshot,{...parseInsightConfig({}),rateCard:snapshot.rateCard,inventory:[],warnings:[]},{from:url.searchParams.get('from')||undefined,through:url.searchParams.get('through')||undefined,repositoryId:url.searchParams.get('repo-id')||undefined});await send('Fetch.fulfillRequest',{requestId:req.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify(report)).toString('base64')});}else await send('Fetch.continueRequest',{requestId:req.requestId})}catch{output.exceptions.push({...context,type:'interception'});await send('Fetch.failRequest',{requestId:req.requestId,errorReason:'Failed'})}}});
- const domRuntime=domMode?await createDomRuntime(snapshot,async input=>{const url=new URL(input,origin);const report=insightsForSnapshot(snapshot,{...parseInsightConfig({}),rateCard:snapshot.rateCard,inventory:[],warnings:[]},{from:url.searchParams.get('from')||undefined,through:url.searchParams.get('through')||undefined});return {ok:true,json:async()=>report}}):null;
+ ws?.addEventListener('message',async event=>{const m=JSON.parse(event.data);if(m.id){pending.get(m.id)?.(m);pending.delete(m.id);return}if(m.method==='Runtime.exceptionThrown')output.exceptions.push({...context,type:'runtime',line:m.params.exceptionDetails.lineNumber,column:m.params.exceptionDetails.columnNumber});if(m.method==='Fetch.requestPaused'){const req=m.params;try{const url=new URL(req.request.url);if(url.pathname==='/api/analytics'){await send('Fetch.fulfillRequest',{requestId:req.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'},{name:'Content-Encoding',value:'gzip'}],body:responseBody});}else await send('Fetch.continueRequest',{requestId:req.requestId})}catch{output.exceptions.push({...context,type:'interception'});await send('Fetch.failRequest',{requestId:req.requestId,errorReason:'Failed'})}}});
+ const domRuntime=domMode?await createDomRuntime(snapshot,()=>{throw Error('No network expected')}):null;
  const evaluate=async expression=>{if(domRuntime)return domRuntime.evaluate(expression);const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error('DOM expression failed');return r.result?.value};
  const click=selector=>evaluate(`document.querySelector(${JSON.stringify(selector)})?.click()`);
  const change=(selector,value)=>evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return false;e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`);
@@ -50,28 +48,26 @@ try{
  const providerLabels={codex:'Codex',claude:'Claude',cursor:'Cursor',copilot:'Copilot CLI',opencode:'OpenCode',gemini:'Gemini CLI',unsupported:'Unsupported'};
  const providerControls=async(view,provider)=>{
   const label=providerLabels[provider];
-  if(['activity','tools','skills','summary','velocity'].includes(view)){
+  if(['activity','tools','summary','velocity'].includes(view)){
    const selector=view==='summary'?'#daily-provider-filters input':view==='velocity'?'.velocity-providers input':`#${view}-provider-filters input`;
    // Summary markup uses the data attribute rather than a named wrapper.
    const finalSelector=view==='summary'?'[data-provider-filter]':selector;
    return evaluate(`(()=>{const sel=${JSON.stringify(finalSelector)},provider=${JSON.stringify(provider)},label=${JSON.stringify(label)};const count=document.querySelectorAll(sel).length;for(let i=0;i<count;i++){const e=document.querySelectorAll(sel)[i];const target=provider==='all'||(e.dataset.providerFilter?e.dataset.providerFilter===provider:e.closest('label').textContent.trim()===label);if(e.checked!==target){e.checked=target;e.dispatchEvent(new Event('change',{bubbles:true}));}}return count})()`);
   }
-  const selector={workflow:'#workflow-provider',reliability:'.reliability-provider select',outcomes:'.outcome-controls select'}[view];
-  if(selector)return change(selector,provider);return false;
+  return false;
  };
  await send('Page.enable');await send('Runtime.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*/api/*',requestStage:'Request'}]});await send('Emulation.setTimezoneOverride',{timezoneId:'Europe/London'});await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
  await send('Page.navigate',{url:origin+'/?view=summary'});
  for(let i=0;i<240;i++){if(await text('#metric-sessions')!=='—')break;await delay(250)}
  check('snapshotLoaded',await evaluate(`document.querySelector('#sync-context')?.dataset.state`),'live');
- const views=['summary','distributions','activity','velocity','costs','models','pricing','reliability','limits-cache','workflow','tools','skills','outcomes','insights'];
+ const views=['summary','velocity','costs','models','pricing','tools','activity'];
  for(const window of windows){
   context={window};await click(`[data-window-preset="${window.replace('d','')}"]`);if(window==='custom'){await change('#window-start','2026-09-01');await change('#window-end','2026-09-30')}
   const range=await evaluate(`({start:document.querySelector('#window-start').value,end:document.querySelector('#window-end').value})`);
   const expectedBounds=bounds(snapshot,window);if(window!=='all'){check('window.start',range.start,expectedBounds.start);check('window.end',range.end,expectedBounds.end)}
   const cohort=select(snapshot,window),expect=aggregate(cohort);
   for(const view of views){
-   context={window,view,provider:'all'};writeFileSync('.lane/browser-progress.json',JSON.stringify(context));await click(`[data-view-button="${view}"]`);await delay(view==='workflow'?200:20);await providerControls(view,'all');
-   if(['workflow','insights'].includes(view)){for(let i=0;i<100;i++){const busy=await evaluate(`!!document.querySelector('[data-view-panel="${view}"] [aria-busy="true"]')`);if(!busy)break;await delay(100)}}
+   context={window,view,provider:'all'};writeFileSync('.lane/browser-progress.json',JSON.stringify(context));await click(`[data-view-button="${view}"]`);await delay(20);await providerControls(view,'all');
    const shape=await evaluate(`(()=>{const p=document.querySelector('[data-view-panel="${view}"]');return {visible:!p.hidden,children:p.querySelectorAll('*').length,alerts:p.querySelectorAll('[role="alert"]').length,busy:!!p.querySelector('[aria-busy="true"]')}})()`);output.views.push({...context,...shape});
    check('panel.visible',shape.visible,true);check('panel.alerts',shape.alerts,0);
    if(view==='summary'){
@@ -87,9 +83,8 @@ try{
     const rows=await evaluate(`Array.from(document.querySelectorAll('.provider-model-group')).flatMap(g=>Array.from(g.querySelectorAll('.model-row')).map(r=>({provider:g.querySelector('h2').textContent,model:r.firstElementChild.textContent,value:r.lastElementChild.textContent})))`);
     for(const r of rows){const m=expect.models.find(m=>providerLabels[m.provider]===r.provider&&m.model===r.model);if(!m)continue;const value={value:money(m.totalUsd),calls:`${integer(m.calls)} calls`,input:`${compact(m.inputTokens)} tokens`,output:`${compact(m.outputTokens)} tokens`}[metric];if(head(r.value)==='N/A'&&((metric==='value'&&m.totalUsd===0)||(metric==='calls'&&m.calls===0)||(metric!=='value'&&m.inputTokens+m.outputTokens===0)))continue;check(`models.${metric}.${m.provider}.${m.model}`,head(r.value),value)}
    }
-   if(['summary','activity','velocity','tools','skills','reliability','workflow','outcomes'].includes(view))for(const provider of providers){
-    if(view==='reliability'&&!['all','claude','codex','cursor'].includes(provider))continue;
-    context={window,view,provider};await providerControls(view,provider);if(view==='workflow')await delay(100);
+   if(['summary','activity','velocity','tools'].includes(view))for(const provider of providers){
+    context={window,view,provider};await providerControls(view,provider);
     const selected=select(snapshot,window,provider);
     if(view==='activity')check('activity.starts',await evaluate(`Array.from(document.querySelectorAll('#activity-heatmap [data-value]')).reduce((a,e)=>a+Number(e.dataset.value),0)`),selected.filter(s=>s.evidence?.timing!=='file-mtime'&&Number.isFinite(Date.parse(s.createdAt))).length);
     if(view==='summary'){

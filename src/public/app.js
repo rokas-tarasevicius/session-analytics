@@ -1,7 +1,7 @@
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
   clampWindow, costTotals, coverageWarnings, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample,
-  evidenceLabel, groupByRepository, heatLevel, matchesQuery, mergeModels, namedTotals, percent, previousPeriod, providerLabels,
+  groupByRepository, heatLevel, matchesQuery, mergeModels, namedTotals, percent, previousPeriod, providerLabels,
   providerOrder, repositoryKey, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, spendDays, summarize, tickScale,
   windowStartFor,
 } from "./view-model.js";
@@ -10,11 +10,6 @@ import { providerColors, providerMark, renderProviderEvidence, dailySpendByProvi
 import { renderPricingPanel } from "./pricing.js";
 import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
 import { localDay, sessionStartWindow } from "./velocity-data.js";
-import { renderReliability } from "./reliability-view.js";
-import { clearLimitsCacheView, renderLimitsCache } from "./views/limits-cache.js";
-import { renderOutcomes } from "./outcomes.js";
-import { clearWorkflow, renderWorkflow } from "./workflow.js";
-import { renderInsights } from "/views/insights.js";
 import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
 import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
@@ -36,9 +31,6 @@ const elements = {
   coverageButton: $("#coverage-button"), coverageClose: $("#coverage-close"), coverageDialog: $("#coverage-dialog"), coverageDot: $("#coverage-dot"), coverageLabel: $("#coverage-label"), coverageSummary: $("#coverage-summary"),
   spendCoverage: $("#metric-spend-coverage"), inputCoverage: $("#metric-input-coverage"), outputCoverage: $("#metric-output-coverage"), toolsCoverage: $("#metric-tools-coverage"), compactionsCoverage: $("#metric-compactions-coverage"),
   dateRange: $("#date-range"), density: $("#density-switch"),
-  distributionCompactions: $("#distribution-compactions"), distributionCost: $("#distribution-cost"),
-  distributionDuration: $("#distribution-duration"), distributionKey: $("#distribution-key"),
-  distributionRepositoryOptions: $("#distribution-repository-options"), distributionTools: $("#distribution-tools"),
   error: $("#error-banner"),
   generated: $("#generated-at"), help: $("#help-overlay"), helpButton: $("#help-button"), helpClose: $("#help-close"),
   input: $("#metric-input"), live: $("#metric-live"), main: $("#main"),
@@ -59,8 +51,6 @@ const elements = {
   sessionNote: $("#metric-session-note"), sessions: $("#metric-sessions"),
   shortcutsToggle: $("#shortcuts-toggle"),
   spend: $("#metric-spend"), spendNote: $("#metric-spend-note"),
-  skillsByRepository: $("#skills-by-repository"), skillsDetail: $("#skills-detail"),
-  skillsDetailTitle: $("#skills-detail-title"), skillsKey: $("#skills-key"), skillsProviderFilters: $("#skills-provider-filters"),
   sync: $("#sync-context"), syncLabel: $("#sync-label"),
   theme: $("#theme-switch"), themeLabel: $("#theme-label"), toolCalls: $("#tool-calls"),
   toolsByRepository: $("#tools-by-repository"), toolsDetail: $("#tools-detail"),
@@ -74,11 +64,10 @@ const viewPanels = [...document.querySelectorAll("[data-view-panel]")];
 const windowButtons = [...elements.windowSegment.querySelectorAll("[data-window-preset]")];
 const sortButtons = [...document.querySelectorAll("th .sort[data-sort]")];
 
-const viewOrder = ["summary", "distributions", "activity", "velocity", "costs", "models", "pricing", "reliability", "limits-cache", "workflow", "tools", "skills", "outcomes", "insights"];
-const viewLabels = { insights: "Insights", workflow: "Workflow", outcomes: "Outcomes", "limits-cache": "Limits & cache", reliability: "Reliability", velocity: "Velocity", pricing: "Pricing", activity: "Activity", costs: "Costs", distributions: "Distributions", models: "Models", skills: "Skills", summary: "Summary", tools: "Tools" };
-const viewIcons = { pricing: "pricing", velocity: "velocity", reliability: "reliability", "limits-cache": "limits", outcomes: "outcomes", workflow: "workflow", insights: "insights" };
-const viewChords = { i: "insights", w: "workflow", o: "outcomes", l: "limits-cache", r: "reliability", v: "velocity", p: "pricing", a: "activity", c: "costs", d: "distributions", k: "skills", m: "models", s: "summary", t: "tools" };
-const providerScopedViews = ["activity", "tools", "skills"];
+const viewOrder = ["summary", "velocity", "costs", "models", "pricing", "tools", "activity"];
+const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", models: "Models", pricing: "Pricing", tools: "Tools", activity: "Activity" };
+const viewChords = { s: "summary", v: "velocity", c: "costs", m: "models", p: "pricing", t: "tools", a: "activity" };
+const providerScopedViews = ["activity", "tools"];
 const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
 const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", all: "All observed time", custom: "Custom range" };
@@ -88,17 +77,14 @@ let snapshot = null;
 let sessionsByRepository = new Map();
 let modelMetric = "value";
 let toolsDetailRepositoryId = null;
-let skillsDetailRepositoryId = null;
-let windowPreset = "all";
+let windowPreset = "30";
 let tableSort = { direction: "descending", key: "value" };
 let shortcutsEnabled = true;
 let navCache = { key: null };
 let navDirty = false;
-const distributionRepositories = new Set();
 // Per-view provider filters are independent of each other and of the daily chart toggles (master semantics).
 const viewProviderFilters = {
   activity: new Set(providerOrder),
-  skills: new Set(providerOrder),
   tools: new Set(providerOrder),
 };
 const hoverListeners = new Set();
@@ -155,7 +141,7 @@ function clear(element) { element.replaceChildren(); }
 
 function emptyState(container, message, title = null) {
   const box = node("div", null, "empty-state");
-  box.append(icon("distributions"));
+  box.append(icon("summary"));
   if (title) box.append(node("strong", title));
   box.append(node("span", message));
   container.append(box);
@@ -384,14 +370,6 @@ function stepView(offset) {
 
 function seriesColor(index) { return `var(--series-${(index % seriesSlots) + 1})`; }
 
-function repositoryColor(id) {
-  const selectedIndex = [...distributionRepositories].indexOf(id);
-  const index = selectedIndex >= 0
-    ? selectedIndex
-    : Math.max(0, snapshot.repositories.findIndex(({ repository }) => repository.id === id));
-  return seriesColor(index);
-}
-
 function renderViewProviderFilters(container, scope) {
   clear(container);
   for (const provider of providerOrder) {
@@ -410,120 +388,9 @@ function renderViewProviderFilters(container, scope) {
   }
 }
 
-function ensureDistributionRepositories() {
-  if (distributionRepositories.size > 0) return;
-  const selected = selectedRepository();
-  if (selected) distributionRepositories.add(selected.repository.id);
-  const counts = snapshot.repositories.map((item) => ({ id: item.repository.id, sessions: repositorySessions(item.repository.id).length })).sort((left, right) => right.sessions - left.sessions);
-  for (const { id, sessions } of counts) {
-    if (sessions > 0 && distributionRepositories.size < 3) distributionRepositories.add(id);
-  }
-}
-
-function renderDistributionRepositoryOptions() {
-  ensureDistributionRepositories(); clear(elements.distributionRepositoryOptions);
-  const sessionCounts = new Map([...sessionsByRepository].map(([id, sessions]) => [id, sessions.length]));
-  const repositories = snapshot.repositories.filter(({ repository }) => sessionCounts.has(repository.id)).sort((left, right) => {
-    const selectedOrder = Number(distributionRepositories.has(right.repository.id)) - Number(distributionRepositories.has(left.repository.id));
-    if (selectedOrder !== 0) return selectedOrder;
-    const activityOrder = (sessionCounts.get(right.repository.id) || 0) - (sessionCounts.get(left.repository.id) || 0);
-    return activityOrder || left.repository.name.localeCompare(right.repository.name);
-  });
-  for (const { repository } of repositories) {
-    const label = node("label", null, "compare-option");
-    label.style.setProperty("--series-color", repositoryColor(repository.id));
-    const input = node("input"); input.type = "checkbox"; input.checked = distributionRepositories.has(repository.id);
-    input.dataset.focusKey = `compare:${repository.id}`;
-    input.disabled = !input.checked && distributionRepositories.size >= seriesSlots;
-    input.addEventListener("change", () => {
-      if (input.checked) distributionRepositories.add(repository.id);
-      else distributionRepositories.delete(repository.id);
-      renderDistributions();
-    });
-    label.append(input, document.createTextNode(`${repository.name} · ${integer.format(sessionCounts.get(repository.id) || 0)}`)); elements.distributionRepositoryOptions.append(label);
-  }
-}
-
 function addSvgText(svg, value, x, y, anchor = "start") {
   const label = svgNode("text", { x, y, class: "axis-label", "text-anchor": anchor });
   label.textContent = value; svg.append(label);
-}
-
-function renderDistributionChart(container, series, accessor, formatter, logarithmic = false, label = "distribution") {
-  clear(container);
-  const valuesBySeries = series.map((item) => ({
-    ...item,
-    values: item.sessions.map(accessor).filter((value) => typeof value === "number" && Number.isFinite(value) && value >= 0),
-  }));
-  const minimum = 5;
-  const captions = node("div", null, "series-coverage");
-  for (const item of valuesBySeries) {
-    const count = `${item.values.length}/${item.sessions.length} eligible sessions`;
-    const label = item.values.length === 0 ? `N/A · ${count}` : item.values.length < minimum ? `${count} · minimum ${minimum} to draw a distribution` : count;
-    const caption = node("span", `${item.name} · ${label}`); caption.title = `${item.name}: ${count}`; captions.append(caption);
-  }
-  container.append(captions);
-  const drawable = valuesBySeries.filter((item) => item.values.length >= minimum);
-  const allValues = drawable.flatMap(({ values }) => values);
-  if (allValues.length === 0) return;
-  const bins = 10, maximum = allValues.reduce((max, value) => Math.max(max, value), 1), width = 680, height = 245;
-  const left = 42, right = 12, top = 14, bottom = 34, plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const position = logarithmic ? (value) => Math.log1p(value) : (value) => value;
-  const valueAtPosition = logarithmic ? (value) => Math.expm1(value) : (value) => value;
-  const maximumPosition = Math.max(1, position(maximum));
-  const distributions = drawable.map((item) => {
-    const counts = Array.from({ length: bins }, () => 0);
-    for (const value of item.values) counts[Math.min(bins - 1, Math.floor((position(value) / maximumPosition) * bins))] += 1;
-    return { ...item, shares: counts.map((count) => item.values.length ? count / item.values.length : 0) };
-  });
-  const yMaximum = Math.max(.01, ...distributions.flatMap(({ shares }) => shares));
-  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
-  for (let index = 0; index < 3; index += 1) {
-    const y = top + (index / 2) * plotHeight;
-    svg.append(svgNode("line", { x1: left, x2: width - right, y1: y, y2: y, class: "distribution-grid" }));
-    addSvgText(svg, `${Math.round(yMaximum * (1 - index / 2) * 100)}%`, left - 8, y + 4, "end");
-  }
-  svg.append(svgNode("line", { x1: left, x2: width - right, y1: top + plotHeight, y2: top + plotHeight, class: "distribution-axis" }));
-  for (const index of [0, Math.floor((bins - 1) / 2), bins - 1]) {
-    const x = left + (index / (bins - 1)) * plotWidth;
-    addSvgText(svg, formatter(valueAtPosition((index / (bins - 1)) * maximumPosition)), x, height - 8, index === 0 ? "start" : index === bins - 1 ? "end" : "middle");
-  }
-  const xs = Array.from({ length: bins }, (_, index) => left + (index / (bins - 1)) * plotWidth);
-  const seriesPoints = distributions.map((item) => ({ item, color: repositoryColor(item.id), points: item.shares.map((share, index) => ({ x: xs[index], y: top + (1 - share / yMaximum) * plotHeight })) }));
-  for (const { color, points } of seriesPoints) {
-    const polyline = svgNode("polyline", { points: points.map(({ x, y }) => `${x},${y}`).join(" "), class: "distribution-line" });
-    polyline.style.setProperty("--series-color", color); svg.append(polyline);
-  }
-  for (const { color, points } of seriesPoints) for (const point of points) {
-    const dot = svgNode("circle", { cx: point.x, cy: point.y, r: 3.5, class: "distribution-dot" });
-    dot.style.setProperty("--series-color", color); svg.append(dot);
-  }
-  container.append(svg);
-  attachCrosshair(container, svg, {
-    xs, plotTop: top, plotBottom: top + plotHeight, plotLeft: left, plotRight: width - right, label: `Normalized repository ${label} distribution`,
-    title: (index) => `${formatter(valueAtPosition((index / bins) * maximumPosition))} – ${formatter(valueAtPosition(((index + 1) / bins) * maximumPosition))}`,
-    rows: (index) => seriesPoints.map(({ item, color }) => ({ label: item.name, color, value: `${(item.shares[index] * 100).toFixed(1)}%` })),
-  });
-}
-
-function renderDistributions() {
-  const restoreFocus = rememberFocus();
-  resetExportMenu();
-  renderDistributionRepositoryOptions(); clear(elements.distributionKey);
-  const series = snapshot.repositories.filter(({ repository }) => distributionRepositories.has(repository.id)).map(({ repository }) => ({
-    id: repository.id,
-    name: repository.name,
-    sessions: sessionsInWindow(repositorySessions(repository.id)),
-  }));
-  for (const item of series) {
-    const key = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", repositoryColor(item.id));
-    key.append(swatch, document.createTextNode(item.name)); elements.distributionKey.append(key);
-  }
-  renderDistributionChart(elements.distributionDuration, series, (s) => metricEligible(s, "duration") ? s.metrics.durationMilliseconds / 60_000 : null, (value) => `${Math.round(value)}m`, true, "duration");
-  renderDistributionChart(elements.distributionCost, series, (session) => metricEligible(session, "apiCost") ? session.cost.totalUsd : null, (value) => money(value), true, "usage value");
-  renderDistributionChart(elements.distributionTools, series, (s) => metricEligible(s, "tools") ? s.metrics.toolCalls : null, (value) => integer.format(value), true, "tool call");
-  renderDistributionChart(elements.distributionCompactions, series, (s) => metricEligible(s, "compactions") ? s.metrics.compactions : null, (value) => integer.format(value), false, "compaction");
-  restoreFocus();
 }
 
 function renderActivity(view) {
@@ -683,27 +550,28 @@ function renderModels(view) {
   if (elements.modelsByProvider.childElementCount === 0) emptyState(elements.modelsByProvider, "No model activity in this view.");
 }
 
-function renderNamedDistribution({ view, field, keyContainer, tableContainer, detailContainer, detailTitle, providerScope, skillMode = false }) {
-  const sessions = sessionsForProviders(view.sessions, providerScope);
-  const names = namedTotals(sessions, field).slice(0, seriesSlots);
+function renderTools(view) {
+  const { toolsKey: keyContainer, toolsByRepository: tableContainer, toolsDetail: detailContainer, toolsDetailTitle: detailTitle } = elements;
+  const sessions = sessionsForProviders(view.sessions, "tools");
+  const names = namedTotals(sessions, "tools").slice(0, seriesSlots);
   clear(tableContainer); clear(keyContainer);
   const header = node("div", null, "distribution-row header-row");
-  header.append(node("span", "Repository"), node("span", "Distribution"), node("span", field === "skills" ? "Observed" : "Calls"), node("span", skillMode ? "Coverage" : "Top")); tableContainer.append(header);
+  header.append(node("span", "Repository"), node("span", "Distribution"), node("span", "Calls"), node("span", "Top")); tableContainer.append(header);
   const rows = view.repositories.map(({ repository }) => {
     const selected = sessions.filter(({ repositoryId }) => repositoryId === repository.id);
-    const repositorySessions = selected.filter((s) => metricEligible(s, field));
-    const totals = new Map(namedTotals(repositorySessions, field).map(({ name, value }) => [name, value]));
+    const repositorySessions = selected.filter((s) => metricEligible(s, "tools"));
+    const totals = new Map(namedTotals(repositorySessions, "tools").map(({ name, value }) => [name, value]));
     return { repository, selected, sessions: repositorySessions, total: [...totals.values()].reduce((sum, value) => sum + value, 0), totals };
   }).filter(({ selected }) => selected.length > 0).sort((left, right) => right.total - left.total);
-  let selectedId = field === "skills" ? skillsDetailRepositoryId : toolsDetailRepositoryId;
+  let selectedId = toolsDetailRepositoryId;
   if (!rows.some(({ repository }) => repository.id === selectedId)) selectedId = rows[0]?.repository.id ?? null;
-  if (field === "skills") skillsDetailRepositoryId = selectedId; else toolsDetailRepositoryId = selectedId;
+  toolsDetailRepositoryId = selectedId;
   for (const item of rows) {
     const row = node("div", null, "distribution-row"); const open = node("button", item.repository.name);
     if (item.repository.id === selectedId) row.setAttribute("aria-current", "true");
-    open.type = "button"; open.dataset.focusKey = `${field}:${item.repository.id}`;
-    open.setAttribute("aria-label", `Show ${field} for ${item.repository.name}`); open.addEventListener("click", () => {
-      if (field === "skills") skillsDetailRepositoryId = item.repository.id; else toolsDetailRepositoryId = item.repository.id;
+    open.type = "button"; open.dataset.focusKey = `tools:${item.repository.id}`;
+    open.setAttribute("aria-label", `Show tools for ${item.repository.name}`); open.addEventListener("click", () => {
+      toolsDetailRepositoryId = item.repository.id;
       renderActiveAnalyticsView(view);
     }); row.append(open);
     const stack = node("div", null, "distribution-stack");
@@ -720,9 +588,9 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
     }
     stack.title = parts.join("\n"); stack.setAttribute("role", "img"); stack.setAttribute("aria-label", parts.join(", "));
     const top = [...item.totals.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "—";
-    row.append(stack, valueWithCoverage(item.total, { eligible: item.sessions.length, selected: item.selected.length }, (v) => integer.format(v), `${field} evidence`), node("span", skillMode ? evidenceLabel(item.sessions) : top)); tableContainer.append(row);
+    row.append(stack, valueWithCoverage(item.total, { eligible: item.sessions.length, selected: item.selected.length }, (v) => integer.format(v), "tools evidence"), node("span", top)); tableContainer.append(row);
   }
-  if (rows.length === 0) { clear(tableContainer); emptyState(tableContainer, skillMode ? "No observed skill invocations in this view." : "No tool activity in this view."); }
+  if (rows.length === 0) { clear(tableContainer); emptyState(tableContainer, "No tool activity in this view."); }
   for (const [index, { name }] of names.entries()) {
     const item = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", seriesColor(index)); item.append(swatch, document.createTextNode(name)); keyContainer.append(item);
   }
@@ -731,28 +599,21 @@ function renderNamedDistribution({ view, field, keyContainer, tableContainer, de
   }
   const selectedRow = rows.find(({ repository }) => repository.id === selectedId);
   detailTitle.textContent = selectedRow?.repository.name || "No repository selected";
-  renderBars(detailContainer, selectedRow ? namedTotals(selectedRow.sessions, field) : [], (value) => integer.format(value), 10);
-  if (selectedRow && !selectedRow.sessions.length) { clear(detailContainer); detailContainer.append(node("p", `${DASH} No ${field} evidence in 0/${selectedRow.selected.length} selected sessions`, "empty-line")); }
+  renderBars(detailContainer, selectedRow ? namedTotals(selectedRow.sessions, "tools") : [], (value) => integer.format(value), 10);
+  if (selectedRow && !selectedRow.sessions.length) { clear(detailContainer); detailContainer.append(node("p", `${DASH} No tools evidence in 0/${selectedRow.selected.length} selected sessions`, "empty-line")); }
 }
 
 function clearInactiveAnalyticsViews(activeName) {
-  if (activeName !== "workflow") clearWorkflow();
   const containers = {
-    outcomes: [document.querySelector("#outcomes-content")],
     activity: [elements.activityProviderFilters, elements.activityHeatmap, elements.activityRepositories],
     costs: [elements.providerCostComponents, elements.repositoryCostComponents],
-    distributions: [elements.distributionRepositoryOptions, elements.distributionKey, elements.distributionDuration, elements.distributionCost, elements.distributionTools, elements.distributionCompactions],
     models: [elements.modelsByProvider],
-    reliability: [document.querySelector('[data-view-panel="reliability"]')],
-    "limits-cache": [$("#limits-cache-view")],
-    skills: [elements.skillsProviderFilters, elements.skillsByRepository, elements.skillsKey, elements.skillsDetail],
     tools: [elements.toolsProviderFilters, elements.toolsByRepository, elements.toolsKey, elements.toolsDetail],
-    workflow: [document.querySelector("#workflow-content")],
   };
   for (const [name, elementsForView] of Object.entries(containers)) {
     if (name === activeName) continue;
     for (const element of elementsForView) {
-      if (name === "limits-cache") clearLimitsCacheView(element); else clear(element);
+      clear(element);
     }
   }
   // The heatmap tooltip lives outside the Activity panel, so it is reset explicitly whenever Activity is not active.
@@ -763,28 +624,14 @@ function renderActiveAnalyticsView(view) {
   const restoreFocus = rememberFocus();
   resetExportMenu();
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
-  if (name === "reliability") renderReliability(document.querySelector('[data-view-panel="reliability"]'), view.sessions);
-  if (name === "workflow") renderWorkflow(view, snapshot);
-  if (name === "distributions") renderDistributions();
   if (name === "activity") renderActivity(view);
   if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, velocityContext());
   if (name === "costs") renderCosts(view);
-  if (name === "limits-cache") renderLimitsCache($("#limits-cache-view"), snapshot, { start: elements.windowStart.value, end: elements.windowEnd.value, repositoryId: selectedRepository()?.repository.id ?? null });
-  if (name === "outcomes") renderOutcomes(document.querySelector("#outcomes-content"), view.sessions);
   if (name === "models") renderModels(view);
   if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.sessions);
-  if (name === "insights") void renderInsights(document.querySelector("#insights-root"), {
-    repositoryId: elements.repositoryFilter.value === "all" ? null : elements.repositoryFilter.value,
-    from: windowPreset === "all" ? "" : elements.windowStart.value, through: windowPreset === "all" ? "" : elements.windowEnd.value,
-    generatedAt: snapshot.generatedAt, repositories: snapshot.repositories, onSelectRepository: selectRepository,
-  });
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
-    renderNamedDistribution({ view, field: "tools", keyContainer: elements.toolsKey, tableContainer: elements.toolsByRepository, detailContainer: elements.toolsDetail, detailTitle: elements.toolsDetailTitle, providerScope: "tools" });
-  }
-  if (name === "skills") {
-    renderViewProviderFilters(elements.skillsProviderFilters, "skills");
-    renderNamedDistribution({ view, field: "skills", keyContainer: elements.skillsKey, tableContainer: elements.skillsByRepository, detailContainer: elements.skillsDetail, detailTitle: elements.skillsDetailTitle, providerScope: "skills", skillMode: true });
+    renderTools(view);
   }
   restoreFocus();
 }
@@ -1035,9 +882,7 @@ function renderSharedView(view) {
   elements.retentionNote.hidden = !retained;
   elements.retentionNote.textContent = `${retained} source-deleted sessions retain facts and prices from their last successful ingest. Historical working status does not establish current activity.`;
   const selected = selectedRepository();
-  const population = currentViewName() === "limits-cache"
-    ? `Request and compaction dates during ${windowCaption()}. Quota remains account-wide across all observed dates.`
-    : currentViewName() === "velocity" ? `Activity observed during ${windowCaption()} (${snapshot.velocity?.timeZone || "UTC"}).`
+  const population = currentViewName() === "velocity" ? `Activity observed during ${windowCaption()} (${snapshot.velocity?.timeZone || "UTC"}).`
     : `Sessions started during ${windowCaption()} (UTC); whole-session totals.`;
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${population}`;
   elements.scopeChip.hidden = !selected;
@@ -1112,7 +957,7 @@ function renderView() {
 // --------------------------------------------------------------------- window controls
 
 function setWindowPreset(preset) {
-  windowPreset = windowPresets.includes(preset) ? preset : "all";
+  windowPreset = windowPresets.includes(preset) ? preset : "30";
   for (const button of windowButtons) button.setAttribute("aria-pressed", String(button.dataset.windowPreset === windowPreset));
   elements.dateRange.hidden = windowPreset !== "custom";
 }
@@ -1223,7 +1068,7 @@ function paletteItems() {
   const selectedId = elements.repositoryFilter.value;
   for (const name of viewOrder) {
     const chord = Object.entries(viewChords).find(([, view]) => view === name)?.[0] || "";
-    items.push({ group: "Views", icon: viewIcons[name] || name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? `g ${chord}` : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
+    items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? `g ${chord}` : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
   }
   if (snapshot) {
     items.push({ group: "Repositories", icon: "repo", label: "All repositories", keywords: "repo clear focus everything", state: selectedId === "all", run: () => selectRepository("all") });
@@ -1398,7 +1243,7 @@ function render(data) {
   for (const control of document.querySelectorAll("[data-unsupported-provider]")) control.hidden = !data.sessions.some((session) => session.provider === "unsupported");
   snapshot = data; sessionsByRepository = groupByRepository(data.sessions);
   elements.generated.textContent = dateTime(data.generatedAt); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
-  populateRepositories(); configureWindow(); renderRateCards(data.rateCard); ensureDistributionRepositories();
+  populateRepositories(); configureWindow(); renderRateCards(data.rateCard);
   delete elements.main.dataset.state;
   renderView();
   applyUrlAfterRender();
@@ -1448,7 +1293,7 @@ const resetExportMenu = installExportMenu(() => {
   const view = currentViewName();
   const { start, end } = selectedWindow();
   const providers = viewProviderFilters[view] ? [...viewProviderFilters[view]] : null;
-  return filterSnapshot(snapshot, { repositoryId: view === "distributions" ? null : selectedRepository()?.repository.id, start, end, providers, repositoryIds: view === "distributions" ? [...distributionRepositories] : null });
+  return filterSnapshot(snapshot, { repositoryId: selectedRepository()?.repository.id, start, end, providers });
 });
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
 const urlTheme = urlParameters.get("theme");
@@ -1458,5 +1303,5 @@ const urlDensity = urlParameters.get("density");
 setDensity(["compact", "comfortable"].includes(urlDensity) ? urlDensity : readPreference("session-analytics-density") || "compact");
 setShortcuts((readPreference("session-analytics-shortcuts") || "on") !== "off");
 const urlWindow = urlParameters.get("window");
-setWindowPreset(windowPresets.includes(urlWindow) ? urlWindow : "all");
+setWindowPreset(windowPresets.includes(urlWindow) ? urlWindow : "30");
 void load(false);

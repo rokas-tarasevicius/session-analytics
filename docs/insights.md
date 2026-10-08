@@ -6,32 +6,27 @@ Insights explain measured signals, with a suggested next step and the limits of 
 session-analytics insights
 session-analytics insights --json
 session-analytics insights --repo-name example --from 2026-09-01 --through 2026-09-30
-session-analytics --insights-config ./insights.json
+session-analytics insights --insights-config ./insights.json
 npm run demo -- insights --json
 ```
 
-The dashboard's Insights tab uses `GET /api/insights?repo-id=KEY&from=YYYY-MM-DD&through=YYYY-MM-DD`. It shares the cached analytics snapshot and recomputes rules after selecting sessions by their UTC start day and repository. Filtering does not rescan transcripts. Refresh snapshot reloads the evidence and insights configuration. Date ranges are inclusive; impossible or reversed dates return a fixed 400 response. Ordinary `report --json` continues to return a machine snapshot; `insights --json` returns a separate, versioned `InsightsReport`.
+Ordinary `report --json` continues to return a machine snapshot; `insights --json` returns a separate, versioned `InsightsReport`.
 
 Date filters parse the timestamp's instant and compare it to UTC midnight boundaries, including the whole `through` day. Offset spellings of the same instant select the same sessions. Invalid or missing starts are excluded when either date bound is present; without a date filter they remain available to other rules. A fixed warning reports their count. Time-pattern rules always exclude them.
 
 ## Reading grouped insights
 
-The machine view shows one ranked card per **rule and scope level**, combining providers and repositories into that card. It initially renders at most **10 cards**; “Show more insights” reveals any additional groups. There are ten current rules. Repeated findings are scope rows inside a card, not more cards.
+Insights group findings by **rule and scope level**, combining providers and repositories. There are ten current rules; repeated findings are scope items inside a group.
 
 - A group shows its total estimated impact, unique affected repository/session counts with selected denominators, rule evidence coverage, quantified-scope coverage, and the lowest confidence of its scopes. Counts are unions of actual contributing sessions, never sums of peer denominators. Compaction/context/gap counts include only sessions with the flagged evidence; time patterns count starts in the flagged bucket. Inventory groups describe repositories/sessions **checked**, not proof that those workflows were harmed.
 - Group totals add disjoint scope estimates **within the same rule and unit**. USD groups rank first, then token exposure, then unquantified signals; descending value within each band and stable ID for ties. Rows use the same order. Groups can overlap: never add their totals into savings. A partial total explicitly counts quantified scopes; no quantified scope means `null`, not zero. Associated usage is not causal cost or recoverable savings.
-- “Explore affected scopes and evidence” opens a ranked table of repositories, hashed session keys, or provider-wide observations for machine rules. It builds only ten rows at first and offers more. Search by repository, session key, provider, model or extension name. A repository button applies the dashboard's repository filter and recomputes peer baselines. Row disclosures keep every original evidence value, denominator, confidence, guardrail and suggested action. Session rows include UTC start/model context and a selectable review dry-run command that never includes `--send-content`.
 - Known partial/active/invalid evidence remains excluded. Peer comparisons additionally require parse-complete, observed inactive evidence; unknown states lower aggregate confidence. Missing evidence is **unavailable**, too little activity **insufficient**. Neither means zero percent or a healthy outcome. Confidence concerns interpretation, never quality or success. API-equivalent value is not an invoice.
-
-Dismiss and seven-day snooze work separately for a **rule** and an individual **scope finding**. Rule decisions hide all that rule's scopes across repository/date filters and refreshed snapshots. Restoring a rule preserves independently hidden scopes. A scope choice hides its row; when all rows are hidden its group is hidden too. “Show dismissed / snoozed” brings hidden groups/rows first for restoration. Summaries and ranking still describe **all evidence**, including hidden rows, with a visible note; row search and browser decisions never change baselines. Repository/date filters do recompute them.
-
-Decisions persist under the existing `session-analytics-insights-v1` localStorage key. Legacy opaque scope IDs remain valid (`insight-` plus 20 hex characters, based on rule/scope/compared names); rule IDs are `insight-rule-` plus a hash of the rule alone. Group display IDs additionally include scope level. Rule choices survive changed targets; changing compared names creates a new scope finding. Only IDs and `dismissed`/expiry values are stored. Blocked storage falls back to page memory. These choices never affect CLI/API evidence or provider settings.
 
 ## CLI and JSON contract
 
 `insights` prints the ranked grouped list and up to three leading scopes per group. `insights --rule session-outlier --all-scopes` prints all rows for that rule with complete evidence and guardrails. Rule selection happens **after** evaluation, preserving peer baselines and denominators. Use the shared `--repo-id` / date options to recompute evidence for a repository/time selection.
 
-`insights --json` and `/api/insights` now return **`schemaVersion: 2`**:
+`insights --json` returns **`schemaVersion: 2`**:
 
 - `groups[]`: ranked rule/scope summaries, `itemIds` in row order, unique `affected` counts, `coverage`, `estimatedImpact`, `impactCoverage`, conservative confidence, guardrails/action and stable group/rule decision IDs.
 - `items[]`: all original per-scope findings, including numeric evidence and denominators, plus the pricing strategy and source/target model transitions where applicable. Join a group's `itemIds` to `items[].id`; each item belongs to exactly one group.
@@ -62,7 +57,7 @@ Session-level insight coverage can describe the eligible **peers**, so the candi
 
 ## Configuration
 
-`--insights-config PATH` wins over `SESSION_ANALYTICS_INSIGHTS_CONFIG`. Paths remain internal. Invalid keys, types, non-finite numbers, invalid names and unknown rules fail with a fixed message. No config means the defaults below and local inventory discovery. Changes apply on the next command or dashboard snapshot refresh.
+`--insights-config PATH` wins over `SESSION_ANALYTICS_INSIGHTS_CONFIG`. Paths remain internal. Invalid keys, types, non-finite numbers, invalid names and unknown rules fail with a fixed message. No config means the defaults below and local inventory discovery. Changes apply on the next insights or review command.
 
 ```json
 {

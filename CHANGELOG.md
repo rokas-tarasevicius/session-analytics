@@ -4,11 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Removed
+
+- Dashboard Distributions, Reliability, Limits & cache, Workflow, Skills, Outcomes and Insights views, their assets and shortcuts, and the dashboard-only `/api/insights` endpoint. Analysis, reports, CLI/MCP features and snapshot data remain available.
+
 ### Changed
 
+- Dashboard navigation now groups Summary and Velocity under Overview; Costs, Models and Pricing under Economics; Tools and Activity under Usage, with Activity last in navigation, view stepping, the palette and shortcut help.
+- Dashboard windows default to the last 30 days of observed history. Explicit `?window=` presets still override the default; the window is not persisted. Under the default, sessions with an unknown start time are excluded (they reappear under **All**), and **Export view** downloads cover only the selected window.
 - Dashboard design refinement: honesty guardrails moved into progressive disclosure. The coverage banner became a top-bar "Coverage" indicator that opens an Evidence & coverage dialog (coverage notes, per-provider evidence table, interpretation footnotes); inline "n/m sessions" denominators became hover badges beside the number; unavailable values render as an em dash with the reason on hover instead of "N/A"; long evidence paragraphs sit behind per-panel "Evidence & limits" disclosures.
-- One shared component set (`src/public/ui.js`: page header, filter bar with labelled fields, KPI card, panel, data table, evidence disclosure, coverage badge, empty state, stat list) now renders Velocity, Reliability, Limits & cache, Outcomes, Workflow, Insights and Pricing with the same spacing, type scale and controls as the Summary.
-- Fleet table repository IDs show the key's hash tail; the footer collapses rate sources into one disclosure; the donut legend hides empty providers; distinct sidebar icons for the seven newer views; `e` opens the coverage dialog.
+- One shared component set (`src/public/ui.js`: filter bar with labelled fields, KPI card, data table, evidence disclosure, coverage badge) now renders Velocity and Pricing with the same spacing, type scale and controls as the Summary.
+- Fleet table repository IDs show the key's hash tail; the footer collapses rate sources into one disclosure; the donut legend hides empty providers; distinct sidebar icons for each view; `e` opens the coverage dialog.
 - Demo: Gemini CLI sessions use a rate-card model so the demo is priced across providers.
 
 ### Fixed
