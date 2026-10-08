@@ -7,6 +7,9 @@ import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { analyzeMachineSessions } from '../../src/analyzer.ts';
+import { openIndexDatabase } from '../../src/store/database.ts';
+import { keyedHash } from '../../src/store/fingerprint.ts';
+import { NO_REPOSITORY_ID } from '../../verify/repos/inventory-roots.ts';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const root = await mkdtemp(join(tmpdir(), 'repos-git-validation-'));
@@ -180,4 +183,107 @@ test('control: standard .git/worktrees layout groups with the main checkout', as
   await f.session(main); await f.session(tree);
   const result = await analyzeMachineSessions(f.options);
   assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
+});
+
+// Directories without a Git root, a recorded remote or Conductor ownership are not
+// repositories. Paths outside the OS temporary directory are synthetic and never
+// created, so they also stand in for deleted directories.
+const outside = `/session-analytics-fixture-${process.pid}-${Date.now()}`;
+const NO_REPOSITORY = 'No repository detected';
+
+test('R-LOCAL-01: home, scratch, download and chat folders share one no-repository group', async t => {
+  const f = await fixture(t);
+  const keys: string[] = [];
+  for (const cwd of [join(outside, 'home'), join(outside, 'home/Downloads/report'), join(outside, 'home/Desktop/scratch'),
+    join(outside, 'home/Documents/Codex/2026-01-01/a-chat-title'), join(outside, 'home/Documents/Codex/2026-01-02/another-chat')]) {
+    keys.push(await f.session(cwd, 'claude')); keys.push(await f.session(cwd, 'codex'));
+  }
+  const result = await analyzeMachineSessions(f.options);
+  assert.equal(result.sessions.length, keys.length);
+  assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
+  assert.ok(result.sessions.every(s => s.repositoryName === NO_REPOSITORY));
+  assert.equal(result.sessions[0]!.repositoryId, NO_REPOSITORY_ID, 'the product and the independent oracle agree on the group ID');
+  assert.deepEqual(result.repositories.filter(r => r.summary.sessions > 0).map(r => r.repository.name), [NO_REPOSITORY]);
+  // Neither the group name nor its ID carries a folder name or path.
+  const serialized = JSON.stringify(result);
+  for (const fragment of ['a-chat-title', 'another-chat', 'Downloads', 'scratch', outside]) assert.equal(serialized.includes(fragment), false, fragment);
+});
+
+test('R-LOCAL-01: deleted checkouts keep their recorded remote; deleted folders without one join the group', async t => {
+  const f = await fixture(t);
+  const remembered = await f.session(join(outside, 'removed-worktree'), 'codex', 'https://one.test/owner/project.git');
+  const forgotten = await f.session(join(outside, 'removed-worktree-claude'), 'claude');
+  const nested = await f.session(join(outside, 'removed-worktree-claude/tests/fixtures/sandbox'), 'claude');
+  const result = await analyzeMachineSessions(f.options);
+  const byKey = new Map(result.sessions.map(s => [s.sessionKey, s]));
+  assert.equal(byKey.get(remembered)?.repositoryName, 'project');
+  assert.equal(byKey.get(forgotten)?.repositoryName, NO_REPOSITORY);
+  assert.equal(byKey.get(nested)?.repositoryId, byKey.get(forgotten)?.repositoryId);
+});
+
+test('R-LOCAL-01: a missing or plain subfolder of a repository stays with that repository', async t => {
+  const f = await fixture(t); const root = join(f.root, 'checkout'); await f.git(root);
+  await mkdir(join(root, 'packages/plain'), { recursive: true });
+  const keys = [await f.session(root), await f.session(join(root, 'packages/plain')), await f.session(join(root, 'packages/removed/src'))];
+  const result = await analyzeMachineSessions(f.options);
+  assert.equal(new Set(keys.map(key => result.sessions.find(s => s.sessionKey === key)?.repositoryId)).size, 1);
+  assert.ok(result.sessions.every(s => s.repositoryName === 'project'));
+});
+
+test('R-LOCAL-01: a deleted Conductor workspace of a registered repository is not bucketed', async t => {
+  const f = await fixture(t); f.register(join(outside, 'conductor/repos/project'));
+  const key = await f.session(join(outside, 'conductor/workspaces/project/removed-city'), 'claude');
+  const result = await analyzeMachineSessions(f.options);
+  const session = result.sessions.find(s => s.sessionKey === key);
+  assert.ok(session?.repositoryId.startsWith('conductor-'));
+  assert.equal(session?.repositoryName, 'project');
+});
+
+test('R-LOCAL-02: both spellings of deleted macOS temporary directories are ephemeral, not repositories', async t => {
+  const f = await fixture(t);
+  for (const cwd of ['/tmp/synthetic-run.AAAA', '/private/tmp/synthetic-run.BBBB/orgs/one/workspaces/two',
+    '/var/folders/zz/synthetic000/T/tmp.CCCC', '/private/var/folders/zz/synthetic000/T/tool-DDDD/workspace']) await f.session(cwd, 'codex');
+  const result = await analyzeMachineSessions(f.options);
+  assert.equal(result.sessions.length, 4);
+  assert.ok(result.sessions.every(s => s.repositoryName === 'Ephemeral automation sessions'));
+});
+
+test('R-LOCAL-02: an existing folder under /tmp is ephemeral through its canonical spelling', async t => {
+  let scratch: string;
+  try { scratch = await mkdtemp('/tmp/session-analytics-tmp-alias-'); } catch { t.skip('/tmp is not writable'); return; }
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const f = await fixture(t);
+  await f.session(scratch, 'claude');
+  const result = await analyzeMachineSessions(f.options);
+  assert.equal(result.sessions[0]?.repositoryName, 'Ephemeral automation sessions');
+});
+
+for (const keptFirst of [true, false]) test(`R-LOCAL-03: retained sessions from retired per-folder groups and the shared group form one group (${keptFirst ? 'shared group first' : 'legacy first'})`, async t => {
+  const f = await fixture(t); const options = { ...f.options, noIndex: false as const };
+  const kept = join(outside, 'kept'), legacyFolders = [join(outside, 'legacy-one'), join(outside, 'legacy-two')];
+  const keys: string[] = [];
+  for (const cwd of keptFirst ? [kept, ...legacyFolders] : [...legacyFolders, kept]) keys.push(await f.session(cwd));
+  const legacyKeys = keptFirst ? keys.slice(1) : keys.slice(0, 2);
+  await analyzeMachineSessions(options);
+  // Rewrite two indexed sessions as an earlier release stored them, with a valid MAC.
+  const connection = openIndexDatabase(options);
+  try {
+    for (const row of connection.database.prepare('SELECT scope,identity_key,payload FROM sessions').all()) {
+      const session = JSON.parse(String(row.payload));
+      const legacy = legacyKeys.indexOf(session.sessionKey) + 1;
+      if (legacy < 1) continue;
+      session.repositoryId = `discovered-${String(legacy).repeat(20)}`; session.repositoryName = `legacy-${legacy} · 000${legacy} (local directory)`;
+      const payload = JSON.stringify(session);
+      connection.database.prepare('UPDATE sessions SET payload=?,payload_mac=? WHERE scope=? AND identity_key=?')
+        .run(payload, keyedHash(connection.secret, payload), row.scope!, row.identity_key!);
+    }
+  } finally { connection.close(); }
+  // With every transcript gone no live session creates the shared group first.
+  await rm(join(f.root, 'claude'), { recursive: true }); await mkdir(join(f.root, 'claude'));
+  const result = await analyzeMachineSessions(options);
+  assert.equal(result.sessions.length, 3);
+  assert.ok(result.sessions.every(s => s.transcript.sourceDeleted && s.repositoryName === NO_REPOSITORY));
+  assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
+  assert.equal(result.repositories.filter(r => r.repository.id === result.sessions[0]!.repositoryId).length, 1);
+  assert.equal(JSON.stringify(result).includes('(local directory)'), false);
 });

@@ -39,3 +39,15 @@ test('scope projection cannot hide malformed stored observations belonging to un
  const untyped=structuredClone(proof);(untyped.census.failures as unknown[]).push(17);
  assert.ok(verifyPhaseInventory(snapshot,untyped,untyped).failures.length,'failure records must be typed before filtering');
 });
+test('the rootless no-repository group passes only with no candidates and no repository scopes',()=>{
+ const withGroup={...snapshot,repositories:[...snapshot.repositories,{repository:{id:'bucket'}}]};
+ const proof=capture();proof.rootCoverage.push({repositoryId:'bucket',candidates:0,status:'rootless'});
+ assert.deepEqual(verifyPhaseInventory(withGroup,proof,proof).failures,[]);
+ const scoped=capture();scoped.rootCoverage.push({repositoryId:'bucket',candidates:0,status:'rootless'});
+ scoped.census.scopes.push({key:'f'.repeat(64),repositoryId:'bucket',provider:'claude',generation:'a'.repeat(64),status:'absent'});
+ assert.ok(verifyInventoryCoverage(withGroup,scoped).length,'a rootless group must not own repository skills');
+ const counted=capture();counted.rootCoverage.push({repositoryId:'bucket',candidates:1,status:'rootless'});
+ assert.ok(verifyInventoryCoverage(withGroup,counted).length,'a rootless group cannot have a candidate root');
+ const missing=capture();missing.rootCoverage.push({repositoryId:'bucket',candidates:0,status:'missing'});
+ assert.ok(verifyInventoryCoverage(withGroup,missing).length);
+});

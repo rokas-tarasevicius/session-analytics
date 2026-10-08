@@ -1,4 +1,4 @@
-import { cursorSessions, type RepositoryRow } from "./analyzer.ts";
+import { cursorSessions, noRepositoryPathsOf, type RepositoryRow } from "./analyzer.ts";
 
 interface CursorWorkerInput {
   databasePath: string;
@@ -21,4 +21,6 @@ const result = await cursorSessions(
 process.stdout.write(JSON.stringify({
   ...result,
   discovered: [...discovered.values()],
+  // Private paths go only to the parent process, for adapters that match project paths.
+  noRepositoryPaths: [...noRepositoryPathsOf(discovered)],
 }));

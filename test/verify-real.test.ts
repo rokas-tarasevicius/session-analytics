@@ -52,10 +52,12 @@ test('changing price ages require a consistent independently bounded catalog clo
 });
 
 test('audit snapshots redact repository names without losing grouping or bucket category', () => {
-  const data = snapshot([{ repositoryId: 'opaque', repositoryName: 'PRIVATE_NAME' }], [{ repository: { id: 'opaque', name: 'PRIVATE_NAME (local directory)' } }]);
+  const data = snapshot([{ repositoryId: 'opaque', repositoryName: 'PRIVATE_NAME' }, { repositoryId: 'bucket', repositoryName: 'No repository detected' }],
+    [{ repository: { id: 'opaque', name: 'PRIVATE_NAME' } }, { repository: { id: 'bucket', name: 'No repository detected' } }]);
   const result = privateAuditSnapshot(data);
   assert.equal(JSON.stringify(result).includes('PRIVATE_NAME'), false);
-  assert.equal(result.repositories[0]!.repository.name.endsWith(' (local directory)'), true);
+  assert.match(result.repositories[0]!.repository.name, /^repository-[0-9a-f]+$/);
+  assert.equal(result.repositories[1]!.repository.name, 'No repository detected');
   assert.equal(result.sessions[0]!.repositoryId, 'opaque');
 });
 

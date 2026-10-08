@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { cursorSessions } from '../../src/analyzer.ts';
+import { analyzeMachineSessions, cursorSessions } from '../../src/analyzer.ts';
+import { NO_REPOSITORY_ID } from '../../verify/repos/inventory-roots.ts';
 import type { RepositoryRow } from '../../src/analyzer.ts';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
@@ -71,4 +72,30 @@ test('R-CURSOR-01: a message-only absolute path without a workspace header leave
   const result = await cursorSessions(file, repos, new Map(), new Map());
   assert.equal(result.sessions.length, 1);
   assert.match(result.sessions[0]!.repositoryName, /unassigned/i);
+});
+
+test('R-CURSOR-04: Cursor, its agent transcripts and Claude in separate non-repository folders share one group row', async t => {
+  const { root } = await fixture(t);
+  // Never created and outside the temporary directory: folders with no repository evidence.
+  const outside = `/session-analytics-cursor-fixture-${process.pid}`;
+  const cursorFolder = join(outside, 'cursor-folder'), claudeFolder = join(outside, 'claude-folder');
+  const file = await composerStore(root, {}, { folder: pathToFileURL(cursorFolder).href });
+  const id = '20000000-0000-4000-8000-000000000001', at = '2026-01-01T00:00:00.000Z';
+  for (const directory of ['claude', 'codex', 'archive']) await mkdir(join(root, directory));
+  await writeFile(join(root, 'claude', `${id}.jsonl`), [
+    { type: 'user', sessionId: id, cwd: claudeFolder, timestamp: at, message: { role: 'user', content: 'synthetic' } },
+    { type: 'assistant', sessionId: id, cwd: claudeFolder, timestamp: at, message: { id: 'message-1', role: 'assistant', model: 'claude-opus-4-6', content: [], usage: { input_tokens: 10, output_tokens: 1 } } },
+  ].map(record => JSON.stringify(record)).join('\n') + '\n');
+  // Cursor names agent-transcript projects after the encoded folder path; only a known path can match it.
+  const project = cursorFolder.replace(/^\//, '').replace(/[^A-Za-z0-9]/g, '-');
+  await mkdir(join(root, 'transcripts', project, 'agent-transcripts'), { recursive: true });
+  await writeFile(join(root, 'transcripts', project, 'agent-transcripts', '30000000-0000-4000-8000-000000000001.jsonl'),
+    JSON.stringify({ role: 'user', message: { content: 'synthetic' } }) + '\n');
+  const result = await analyzeMachineSessions({ noIndex: true, additionalProviders: false, pricingPolicy: 'reviewed-only',
+    dataDir: join(root, 'data'), claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex'), codexArchiveRoot: join(root, 'archive'),
+    cursorDatabasePath: file, databasePath: join(root, 'missing-conductor.db'), cursorTranscriptRoot: join(root, 'transcripts') });
+  assert.equal(result.sessions.length, 3);
+  assert.deepEqual([...new Set(result.sessions.map(s => s.repositoryId))], [NO_REPOSITORY_ID]);
+  assert.equal(result.repositories.filter(r => r.repository.id === NO_REPOSITORY_ID).length, 1);
+  assert.equal(JSON.stringify(result).includes('cursor-folder'), false);
 });

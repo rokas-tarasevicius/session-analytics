@@ -410,9 +410,9 @@ No. Provider stores define the scan. When Conductor's database is present it add
 </details>
 
 <details>
-<summary><strong>What are "(local directory)" and "Ephemeral automation sessions" in the repository list?</strong></summary>
+<summary><strong>What are "No repository detected" and "Ephemeral automation sessions" in the repository list?</strong></summary>
 
-Sessions whose working directory is not inside a Git repository are grouped by that directory, with a short hash suffix to keep same-named directories apart. Sessions that ran in macOS temporary directories are grouped together as ephemeral automation sessions.
+A folder is only listed as a repository when there is evidence for one: a Git root, a Git remote recorded by the provider, or a Conductor repository or workspace. Sessions started anywhere else (your home directory, a download or scratch folder, a deleted checkout whose remote was never recorded) are grouped together under "No repository detected" instead of one entry per folder. Sessions that ran in temporary directories are grouped together as ephemeral automation sessions.
 </details>
 
 <details>

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { canonicalizeRemote, localDirectoryAttribution, resolveRepository } from './git-oracle.ts';
+import { NO_REPOSITORY_GROUP, canonicalizeRemote, localDirectoryAttribution, resolveRepository } from './git-oracle.ts';
 
 function fixture(t: { after(fn: () => void): void }) {
   const root = mkdtempSync(join(tmpdir(), 'repos-oracle-'));
@@ -19,15 +19,19 @@ test('oracle groups existing, deleted and symlinked OS temporary directories wit
   const root = realpathSync(fixture(t)), nested = join(root, 'existing'); mkdirSync(nested);
   const alias = join(root, 'alias'); symlinkSync(nested, alias);
   const ephemeral = '/private/var/folders/session-analytics-ephemeral';
-  for (const cwd of [root, nested, alias, join(root, 'deleted'), '/tmp/synthetic-deleted-session', '/private/var/folders/xx/synthetic/T/deleted']) {
-    assert.deepEqual(localDirectoryAttribution(cwd, resolveRepository(cwd)), { root: ephemeral, route: 'ephemeral' });
+  // Both macOS spellings of a deleted temporary directory (/tmp vs /private/tmp,
+  // /var/folders vs /private/var/folders) are temporary, whatever the current temp root is.
+  for (const cwd of [root, nested, alias, join(root, 'deleted'), '/tmp/synthetic-deleted-session', '/private/tmp/synthetic-deleted-session',
+    '/private/var/folders/xx/synthetic/T/deleted', '/var/folders/xx/synthetic/T/deleted', '/var/folders/xx/synthetic/T']) {
+    assert.deepEqual(localDirectoryAttribution(cwd, resolveRepository(cwd)), { root: ephemeral, route: 'ephemeral' }, cwd);
   }
-  for (const cwd of ['/tmp-neighbor/synthetic', '/opt/synthetic-local', '/var/synthetic-deleted-session', '/var/folders/xx/synthetic/T/deleted', '/private/tmp/synthetic-deleted-session']) {
-    assert.deepEqual(localDirectoryAttribution(cwd, resolveRepository(cwd)), { root: cwd, route: 'local-directory' });
+  // Every other directory without repository evidence shares one bucket instead of becoming its own repository.
+  for (const cwd of ['/tmp-neighbor/synthetic', '/opt/synthetic-local', '/var/synthetic-deleted-session', '/var/folders/xx/synthetic/not-temp', '/private/tmpfoo/synthetic']) {
+    assert.deepEqual(localDirectoryAttribution(cwd, resolveRepository(cwd)), { root: NO_REPOSITORY_GROUP, route: 'no-repository' }, cwd);
   }
   const checkout = join(root, 'checkout'); repo(checkout);
-  assert.equal(localDirectoryAttribution(checkout, resolveRepository(checkout)).route, 'local-directory');
-  assert.equal(localDirectoryAttribution(join(root, 'gone'), resolveRepository(join(root, 'gone'), 'https://example.test/team/project.git')).route, 'local-directory');
+  assert.notEqual(localDirectoryAttribution(checkout, resolveRepository(checkout)).route, 'ephemeral');
+  assert.notEqual(localDirectoryAttribution(join(root, 'gone'), resolveRepository(join(root, 'gone'), 'https://example.test/team/project.git')).route, 'ephemeral');
 });
 
 test('oracle canonicalizes equivalent SSH, SCP, HTTPS and git protocol remotes', () => {

@@ -6,7 +6,7 @@ function classification(r:any):string|null {
  if(r.matches)return null;
  if(['metadata-remote','metadata-unregistered'].includes(r.route))return 'R-GIT-04';
  if(r.route==='git'&&r.physicalRegisteredRoots.length===0)return 'R-GIT-03';
- if(r.route==='local-directory'&&r.cwdIsSymlink)return 'R-GIT-01';
+ if(r.route==='no-repository'&&r.cwdIsSymlink)return 'R-GIT-01';
  if(r.provider==='cursor'&&r.route==='unresolved')return 'R-CURSOR-03';
  return 'UNADJUDICATED';
 }

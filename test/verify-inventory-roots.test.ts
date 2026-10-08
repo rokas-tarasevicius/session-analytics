@@ -4,8 +4,19 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
-import { globalInventoryRoots, inventoryRootCandidates, inventorySkillRoots } from '../verify/repos/inventory-roots.ts';
+import { NO_REPOSITORY_ID, globalInventoryRoots, inventoryRootCandidates, inventorySkillRoots } from '../verify/repos/inventory-roots.ts';
 const id=(namespace:string,value:string)=>namespace+'-'+createHash('sha256').update(value).digest('hex').slice(0,20);
+test('directories without repository evidence share one rootless group; temporary ones share the ephemeral root',()=>{
+ const outside=`/inventory-fixture-${process.pid}`,ephemeral=id('discovered','/private/var/folders/session-analytics-ephemeral');
+ const result=inventoryRootCandidates([],[{cwd:join(outside,'home')},{cwd:join(outside,'home/Downloads/scratch')},{cwd:'/private/tmp/synthetic-run'}],new Set([NO_REPOSITORY_ID,ephemeral]));
+ assert.deepEqual(result.get(NO_REPOSITORY_ID),[]);
+ assert.deepEqual(result.get(ephemeral),['/private/var/folders/session-analytics-ephemeral']);
+ const bridge=inventorySkillRoots(result,new Set([NO_REPOSITORY_ID]),[]);
+ assert.deepEqual(bridge.coverage,[{repositoryId:NO_REPOSITORY_ID,candidates:0,status:'rootless'}]);
+ assert.deepEqual(bridge.failures,[]);assert.deepEqual(bridge.roots,[]);
+ // Without evidence that any session used the group, absence still fails.
+ assert.deepEqual(inventorySkillRoots(new Map(),new Set([NO_REPOSITORY_ID]),[]).failures,[`repository:${NO_REPOSITORY_ID}:missing`]);
+});
 test('independent inventory roots retain authoritative registered and home-directory mappings',async()=>{
  const temporary=await mkdtemp(join(tmpdir(),'inventory-roots-')),root=await realpath(temporary);
  try {await mkdir(join(root,'.git'));await writeFile(join(root,'.git/config'),'');const selected=new Set([id('conductor','conductor:synthetic'),id('discovered',root),id('conductor','conductor:unassigned:conductor')]);const result=inventoryRootCandidates([{id:'synthetic',root_path:join(root,'registered')}],[{cwd:root}],selected);assert.deepEqual(result.get(id('discovered',root)),[root]);assert.deepEqual(result.get(id('conductor','conductor:synthetic')),[join(root,'registered')]);assert.deepEqual(result.get(id('conductor','conductor:unassigned:conductor')),[resolve('unassigned:conductor')]);assert.equal(result.size,3);}finally{await rm(root,{recursive:true,force:true});}

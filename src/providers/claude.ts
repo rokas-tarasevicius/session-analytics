@@ -169,7 +169,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     const state = createMutableSession();
     if (await desktopIdentityMatches(mainPath, row.provider_session_id)) state.agentIdentity.claudeEntrypoint = "desktop";
     const historyStatistics = new HistoryStatisticsCollector();
-    state.workflow = new WorkflowCollector("claude", contentRules, await historyForTranscript(mainPath, workflowSources, row.root_path));
+    state.workflow = new WorkflowCollector("claude", contentRules, await historyForTranscript(mainPath, workflowSources, row.root_path || row.workspace_path));
     const outcomes = new OutcomeCollector(row);
     state.limitsProvider = "claude";
     state.limitsCache.profileKey = limits?.profileKey(mainPath) ?? null;

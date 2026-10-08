@@ -1124,7 +1124,7 @@ async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: Pr
   const evidencePaths = index ? [...new Set((await Promise.all(mainPaths.map(claudeEvidencePaths))).flat())] : [];
   // Messages shared with a resumed copy are accounted across sessions, so only those sessions skip the index.
   if (index && !usageOwners?.sharedBy(evidencePaths)) {
-    const history = await historyForTranscript(path, workflowSources, row.root_path);
+    const history = await historyForTranscript(path, workflowSources, row.root_path || row.workspace_path);
     const dependency = history ? { available: history.available, commands: [...history.commands], registry: [...history.commandNames] } : null;
     return index.session(row, evidencePaths, warnings,
       () => analyzeClaude(row, path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, null, usageOwners, mainPaths),
@@ -1528,17 +1528,51 @@ async function gitRootForPath(rawPath: string): Promise<string | null> {
   }
 }
 
-let cachedTemporaryDirectoryRoot: string | null = null;
-/** The operating system's temporary directory, resolved through symbolic links (e.g. /tmp on Linux). */
-function temporaryDirectoryRoot(): string {
-  if (cachedTemporaryDirectoryRoot === null) {
-    try {
-      cachedTemporaryDirectoryRoot = realpathSync(tmpdir());
-    } catch {
-      cachedTemporaryDirectoryRoot = resolve(tmpdir());
-    }
+let cachedTemporaryDirectoryRoots: string[] | null = null;
+/** macOS exposes /tmp and /var through /private; a deleted directory keeps whichever spelling was recorded. */
+function withoutPrivateAlias(path: string): string {
+  return resolve(path).replace(/^\/private(?=\/(?:tmp|var)(?:\/|$))/, "");
+}
+/** Temporary roots in one spelling: the OS temporary directory (through and without symbolic links) and /tmp. */
+function temporaryDirectoryRoots(): string[] {
+  if (cachedTemporaryDirectoryRoots === null) {
+    let canonical = resolve(tmpdir());
+    try { canonical = realpathSync(tmpdir()); } catch { /* keep the configured spelling */ }
+    cachedTemporaryDirectoryRoots = [...new Set([tmpdir(), canonical, "/tmp"].map(withoutPrivateAlias))];
   }
-  return cachedTemporaryDirectoryRoot;
+  return cachedTemporaryDirectoryRoots;
+}
+function isTemporaryPath(path: string): boolean {
+  const comparable = withoutPrivateAlias(path);
+  // Per-user macOS temporary directories, including ones from other users' sessions or earlier boots.
+  return /^\/var\/folders\/[^/]+\/[^/]+\/T(?:\/|$)/.test(comparable) ||
+    temporaryDirectoryRoots().some((root) => pathInside(comparable, root));
+}
+
+/** One shared group for working directories without any repository evidence. */
+const NO_REPOSITORY_NAME = "No repository detected";
+const NO_REPOSITORY_ID = `discovered-${createHash("sha256").update("no-repository").digest("hex").slice(0, 20)}`;
+/** Earlier releases named every non-Git directory `<basename> · <hash> (local directory)`. */
+const LEGACY_LOCAL_DIRECTORY_SUFFIX = " (local directory)";
+/** Rows without a root directory are keyed by ID in a scan's discovered map. */
+function rootlessKey(repositoryId: string): string { return `id:${repositoryId}`; }
+// Private working directories routed to the shared group, per scan. Adapters that
+// match transcripts by project path still need them; they never reach output.
+const noRepositoryPaths = new WeakMap<Map<string, RepositoryRow>, Set<string>>();
+export function noRepositoryPathsOf(discovered: Map<string, RepositoryRow>): Set<string> {
+  let paths = noRepositoryPaths.get(discovered);
+  if (!paths) { paths = new Set(); noRepositoryPaths.set(discovered, paths); }
+  return paths;
+}
+function noRepositoryGroup(discovered: Map<string, RepositoryRow>, path?: string): RepositoryRow {
+  if (path) noRepositoryPathsOf(discovered).add(path);
+  let repository = discovered.get(rootlessKey(NO_REPOSITORY_ID));
+  if (!repository) {
+    // No root: no directory's skills or Git history belong to this group.
+    repository = { default_branch: "", id: NO_REPOSITORY_ID, name: NO_REPOSITORY_NAME, remote_url: null, root_path: "" };
+    discovered.set(rootlessKey(NO_REPOSITORY_ID), repository);
+  }
+  return repository;
 }
 
 function pathInside(path: string, root: string): boolean {
@@ -1611,28 +1645,20 @@ async function resolveRepositoryForPath(
     const registeredByRemote = repositories.filter(({ remote_url }) => remote_url && normalizeRemote(remote_url) === remoteIdentity);
     if (registeredByRemote.length === 1) return registeredByRemote[0]!;
   }
-  const ephemeralLocalPath =
-    !gitRoot && !remoteIdentity &&
-    ((resolvedCwd.startsWith("/private/var/folders/") && resolvedCwd.includes("/T/")) ||
-      pathInside(resolvedCwd, temporaryDirectoryRoot()) ||
-      pathInside(resolvedCwd, "/tmp"));
-  const groupingRoot = remoteIdentity ? `remote:${remoteIdentity}` : ephemeralLocalPath
-    ? "/private/var/folders/session-analytics-ephemeral"
-    : gitRoot ?? resolvedCwd;
+  // Without a Git root, a recorded remote or Conductor ownership a directory is not a
+  // repository: scratch folders, the home directory and deleted checkouts share one group.
+  const ephemeral = !gitRoot && !remoteIdentity;
+  if (ephemeral && !isTemporaryPath(resolvedCwd)) return noRepositoryGroup(discovered, resolvedCwd);
+  const ephemeralRoot = "/private/var/folders/session-analytics-ephemeral";
+  const groupingRoot = remoteIdentity ? `remote:${remoteIdentity}` : gitRoot ?? ephemeralRoot;
   const existing = discovered.get(groupingRoot);
   if (existing) return existing;
-  const localKey = createHash("sha256").update(groupingRoot).digest("hex").slice(0, 4);
-  const name = ephemeralLocalPath
-    ? "Ephemeral automation sessions"
-    : remoteIdentity ? basename(remoteIdentity) : gitRoot
-      ? basename(gitRoot)
-      : `${basename(groupingRoot) || "Local directory"} · ${localKey} (local directory)`;
   const repository: RepositoryRow = {
     default_branch: "",
     id: `discovered-${createHash("sha256").update(groupingRoot).digest("hex").slice(0, 20)}`,
-    name,
+    name: remoteIdentity ? basename(remoteIdentity) : gitRoot ? basename(gitRoot) : "Ephemeral automation sessions",
     remote_url: repositoryRemote,
-    root_path: ephemeralLocalPath ? groupingRoot : gitRoot ?? resolvedCwd,
+    root_path: ephemeral ? ephemeralRoot : gitRoot ?? resolvedCwd,
   };
   discovered.set(groupingRoot, repository);
   return repository;
@@ -2459,12 +2485,14 @@ async function analyzeSelectedRepositories(
     try {
       const cursorEnvelope = JSON.parse(cursorSerialized) as {
         discovered: RepositoryRow[];
+        noRepositoryPaths?: string[];
         sessions: SessionAnalytics[];
         warning: string | null;
       };
       for (const repository of cursorEnvelope.discovered) {
-        discovered.set(repository.root_path, repository);
+        discovered.set(repository.root_path || rootlessKey(repository.id), repository);
       }
+      for (const path of cursorEnvelope.noRepositoryPaths ?? []) noRepositoryPathsOf(discovered).add(path);
       cursorResult = {
         sessions: cursorEnvelope.sessions,
         warning: cursorEnvelope.warning,
@@ -2482,7 +2510,7 @@ async function analyzeSelectedRepositories(
     const pricing = { rateCard, resolveRate: (model: string, at: string | null) => resolveRate(rateCard, model, at), price: (rate: ModelRate, usage: TokenUsage, input: number) => priceUsage(rate, usage, input).cost };
     const additional = await additionalProviderSessions({
       home: homedir(), options, environment: process.env, pricing, existingSessions: allSessions,
-      knownPaths: [...new Set([...availableRepositories.map((r) => r.root_path), ...workspaceRepositories.keys(), ...discovered.keys(), ...candidates.map((c) => c.cwd)])],
+      knownPaths: [...new Set([...availableRepositories.map((r) => r.root_path), ...workspaceRepositories.keys(), ...discovered.keys(), ...noRepositoryPathsOf(discovered), ...candidates.map((c) => c.cwd)])],
       async repositoryForSession(identity, source) {
         if (identity.cwd) return repositoryForPath(identity.cwd, availableRepositories, workspaceRepositories, discovered);
         const key = createHash("sha256").update(`${source}:${identity.group ?? identity.id}`).digest("hex").slice(0, 20);
@@ -2551,12 +2579,17 @@ async function analyzeSelectedRepositories(
     for (const session of [...retainedSessions, ...allSessions.filter(session => session.transcript.sourceDeleted)]) {
       const currentRepository = [...availableRepositories, ...discovered.values()].find((repository) =>
         repository.id === session.repositoryId || Boolean(repository.root_path && index?.matchesRoot(session.repositoryId, repository.root_path)));
-      if (currentRepository) {
-        session.repositoryId = currentRepository.id;
-        session.repositoryName = currentRepository.name;
+      // Sessions indexed under a retired per-directory group had no repository evidence either.
+      // The shared group has no root to match, so retained members rejoin it by ID.
+      const repository = currentRepository ??
+        (session.repositoryId === NO_REPOSITORY_ID || session.repositoryName.endsWith(LEGACY_LOCAL_DIRECTORY_SUFFIX)
+          ? noRepositoryGroup(discovered) : null);
+      if (repository) {
+        session.repositoryId = repository.id;
+        session.repositoryName = repository.name;
       }
       if (![...availableRepositories, ...discovered.values()].some(({ id }) => id === session.repositoryId)) {
-        discovered.set(`retained:${session.repositoryId}`, {
+        discovered.set(rootlessKey(session.repositoryId), {
           id: session.repositoryId, name: session.repositoryName, root_path: "", remote_url: null, default_branch: "",
         });
       }
