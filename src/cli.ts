@@ -1,5 +1,5 @@
 import { historyReport } from "./report/history.ts";
-import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
+import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, argument } from "./options.ts";
 import { outcomeReport } from "./metrics/outcomes-report.ts";
 import { workflowReport } from "./report/workflow.ts";
@@ -115,7 +115,7 @@ const snapshotFile = argument(process.argv, "--snapshot");
 let analytics;
 try { analytics = process.argv.includes("--share") ? null : await (snapshotFile ? loadMachineSnapshot(snapshotFile) : analyzeMachineSessionsIsolated(analyzeOptions)); }
 catch (error) {
-  process.stderr.write(`${indexErrorMessage(indexErrorCode(error)) ?? "Session analysis could not be completed."}\n`);
+  process.stderr.write(`${indexErrorMessage(indexErrorCode(error)) ?? (error instanceof AnalysisHeapLimitError ? error.message : "Session analysis could not be completed.")}\n`);
   process.exit(1);
 }
 

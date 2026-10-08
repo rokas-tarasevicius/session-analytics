@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, createSecretKey, type KeyObject } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import { open, stat } from "node:fs/promises";
 
@@ -15,8 +15,13 @@ export interface FileFingerprint {
 
 const SAMPLE_BYTES = 4096;
 
+// Importing raw key bytes on every HMAC dominates hashing thousands of short identities.
+const secretKeys = new WeakMap<Uint8Array, KeyObject>();
+
 export function keyedHash(secret: Uint8Array, value: string | Uint8Array): string {
-  return createHmac("sha256", secret).update(value).digest("hex");
+  let key = secretKeys.get(secret);
+  if (!key) { key = createSecretKey(secret); secretKeys.set(secret, key); }
+  return createHmac("sha256", key).update(value).digest("hex");
 }
 
 export async function fingerprint(path: string, secret: Uint8Array): Promise<FileFingerprint> {

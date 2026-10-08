@@ -2,12 +2,14 @@
 export async function* readJsonLines(input: AsyncIterable<string>): AsyncGenerator<string> {
   let pending = "";
   for await (const chunk of input) {
-    pending += chunk;
-    let end: number;
-    while ((end = pending.indexOf("\n")) >= 0) {
-      yield pending.slice(0, end);
-      pending = pending.slice(end + 1);
+    // Scan by offset: re-slicing the remainder after every line is quadratic in lines per chunk.
+    const text = pending + chunk;
+    let start = 0, end: number;
+    while ((end = text.indexOf("\n", start)) >= 0) {
+      yield text.slice(start, end);
+      start = end + 1;
     }
+    pending = text.slice(start);
   }
   if (pending) yield pending;
 }

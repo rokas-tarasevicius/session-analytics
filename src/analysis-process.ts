@@ -4,10 +4,13 @@ import { fileURLToPath } from "node:url";
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
 import { indexErrorMessage } from "./store/errors.ts";
 
+/** Machine-wide history with thousands of indexed sessions peaks well above 256 MB. */
+export const analysisHeapLimitMegabytes = 1024;
+
 export class AnalysisHeapLimitError extends Error {
   readonly stage: "analysis" | "serialization";
   constructor(stage: "analysis" | "serialization") {
-    super("Session analysis exceeded its 256 MB worker heap limit.");
+    super(`Session analysis exceeded its ${analysisHeapLimitMegabytes} MB worker heap limit.`);
     this.stage = stage;
   }
 }
@@ -18,7 +21,7 @@ export async function analyzeMachineSessionsIsolated(
   return await new Promise<MachineAnalytics>((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      ["--max-old-space-size=256", fileURLToPath(new URL("./analysis-worker.ts", import.meta.url))],
+      [`--max-old-space-size=${analysisHeapLimitMegabytes}`, fileURLToPath(new URL("./analysis-worker.ts", import.meta.url))],
       { stdio: ["pipe", "pipe", "pipe"] },
     );
     let output = "";

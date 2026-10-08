@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { analysisHeapLimitMegabytes } from "../analysis-process.ts";
 import type { AnalyzeOptions } from "../types.ts";
 import type { McpSnapshot } from "./types.ts";
 
@@ -7,7 +8,7 @@ import type { McpSnapshot } from "./types.ts";
 export async function loadSnapshot(options: AnalyzeOptions, signal: AbortSignal): Promise<McpSnapshot> {
   signal.throwIfAborted();
   return await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--max-old-space-size=256", fileURLToPath(new URL("./worker.ts", import.meta.url))], {
+    const child = spawn(process.execPath, [`--max-old-space-size=${analysisHeapLimitMegabytes}`, fileURLToPath(new URL("./worker.ts", import.meta.url))], {
       stdio: ["pipe", "pipe", "ignore"], detached: process.platform !== "win32",
     });
     const chunks: Buffer[] = [];

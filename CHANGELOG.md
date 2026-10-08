@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Warm dashboard snapshots no longer reparse every Claude session when resumed copies share message IDs: only the sessions that share a message (8 of 485 on the measured history) skip the index, as all Claude sessions did before. On a ~5,800-session history a warm snapshot went from 115–269 s to about 51 s (CPU 138 s to 52 s).
+- Raise the analysis worker heap cap from 256 MB to 1 GB; large histories exhausted it and the dashboard reported a generic parse failure. Hitting the cap now names the limit in the dashboard and CLI.
+- Faster scans with unchanged output: concurrent fingerprinting, memoized source keys and repository lookups, reused HMAC keys, linear JSONL line splitting and cached calendar-day validation.
 - Verify recovered daily value against its UTC history remainder while independently conserving hourly velocity, including finalized output whose day is known but hour is not.
 - Recognize canonical OS temporary directories in the independent repository oracle and carry recorded source changes through all native verification comparisons.
 - Prove live changes to shared context-curve sampling and recovery calibration from saved public context facts and independently reconstructed SDK pairs, while retaining strict counters and accounting checks.

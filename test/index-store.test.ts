@@ -442,6 +442,37 @@ test("Codex append reuse verifies its full prefix; partial lines, truncation and
   });
 });
 
+test("a resumed Claude copy keeps unrelated Claude sessions cached and is never retained twice", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture);
+    const main = await transcript(fixture, "claude", claudeId);
+    const copy = (id: string) => join(dirname(main), `${id}.jsonl`);
+    const records = (await readFile(main, "utf8")).trim().split("\n");
+    const session = (id: string, hour: string, messages = true) => records.map((line) => JSON.parse(line.replaceAll(claudeId, id).replaceAll("T12:0", `T${hour}:0`)
+      .replaceAll(messages ? "\u0000" : "message-one", "unrelated-message")));
+    const resumedId = "33333333-3333-4333-8333-333333333333", unrelatedId = "44444444-4444-4444-8444-444444444444";
+    const resumed = session(resumedId, "13");
+    await writeFile(copy(resumedId), jsonl(resumed));
+    await writeFile(copy(unrelatedId), jsonl(session(unrelatedId, "14", false)));
+    await analyzeMachineSessions(opts);
+    const cached = await analyzeMachineSessions(opts);
+    assert.deepEqual(stable(cached), stable(await analyzeMachineSessions({ ...opts, noIndex: true })));
+    assert.equal(indexStatus(opts).lastScan?.parsedSessions, 0);
+    const index = new DatabaseSync(indexPath(opts), { readOnly: true });
+    const claudeRows = Number(index.prepare("SELECT count(*) AS n FROM sessions WHERE payload LIKE '%\"provider\":\"claude\"%'").get()?.["n"]);
+    index.close();
+    assert.equal(claudeRows, 1, "only the Claude session that shares no message is indexed");
+    // A richer snapshot in the copy takes ownership of the shared message from the unchanged main file.
+    const richer = resumed.find((row) => row.type === "assistant");
+    richer.message.usage.output_tokens += 50;
+    await appendFile(copy(resumedId), jsonl([richer]));
+    assert.deepEqual(stable(await analyzeMachineSessions(opts)), stable(await analyzeMachineSessions({ ...opts, noIndex: true })));
+    // Provider cleanup deletes the original; its shared message must not be counted by both sessions.
+    await rm(main);
+    assert.deepEqual(stable(await analyzeMachineSessions(opts)), stable(await analyzeMachineSessions({ ...opts, noIndex: true })));
+  });
+});
+
 test("a new Codex broadcast owner invalidates the old owner while unrelated sessions stay cached", async () => {
   await withFixture(async (fixture) => {
     const opts = options(fixture);
