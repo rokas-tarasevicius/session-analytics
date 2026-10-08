@@ -62,9 +62,9 @@ These rules apply to every change, including dashboard and documentation changes
    - listed in the [field manifest](docs/privacy.md#field-manifest) in `docs/privacy.md` with its privacy tier;
    - defined in [`docs/metrics.md`](docs/metrics.md);
    - covered by a test that plants sentinel content in the relevant provider records (see `test/fixtures.ts`) and asserts with `assert.doesNotMatch` that it does not appear in the serialized output.
-3. **Names must be bounded.** Tool names come from structured tool-call records. Skill identifiers must pass `normalizedSkillName`. Do not derive names from prompts, system instructions, or arbitrary text.
+3. **Names must be bounded.** Tool names come from structured tool-call records. Do not derive names from prompts, system instructions, or arbitrary text.
 4. **No paths, IDs, or errors in output.** File paths, working directories, repository roots and remotes, raw session or provider IDs, branch names, titles, and raw exception messages stay inside the analysis process. Use the existing hashed keys and fixed error messages.
-5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add telemetry, CORS headers, or non-loopback binds. Public pricing GETs in `src/pricing/sources.ts` are the documented exception to network isolation; see [pricing](docs/pricing.md). Optional GitHub outcome enrichment sends only already-evidenced PR coordinates when explicitly enabled; see [privacy](docs/privacy.md).
+5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add telemetry, CORS headers, or non-loopback binds. Public pricing GETs in `src/pricing/sources.ts` are the documented exception to network isolation; see [pricing](docs/pricing.md).
 
 5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add background network requests, telemetry, CORS headers, or non-loopback binds. The sole opt-in network surface is the reviewed OTLP export flag; see `docs/interop.md`.
 5. **Read-only sources and local storage.** Open provider SQLite databases with `readOnly: true`, never write to provider directories, and do not add network requests, telemetry, CORS headers, or non-loopback binds. Only `src/store/` may write the private derived index. Extend its explicit disk projection when adding public session fields; test full-scan/index parity and sentinel absence on disk as well as in output. Give fixtures and demo runs their own `dataDir`.
@@ -79,7 +79,7 @@ Provider adapters live in `src/providers/`; the host in `src/analyzer.ts` suppli
 2. **Identity.** Read the provider's own session ID and working directory, and only accept a file whose recorded ID matches its name or key.
 3. **Parser.** Stream records and accumulate counters into an explicit allowlist projection. Decide and document the dedupe key for every counter (message IDs, call IDs, cumulative counters).
 4. **Cost basis.** Use the rate card when the provider records model IDs and token classes; otherwise use a provider-reported value on its own basis, or mark cost unavailable. Never present an imputed token-class price as observed evidence; any documented substitution must carry a bounded assumption and exclude affected tokens from explicit-rate coverage.
-5. **Evidence labels.** Set `executionKind`, `skillEvidence`, and fidelity honestly. Missing data is `unavailable`, not zero.
+5. **Evidence labels.** Set `executionKind` and fidelity honestly. Missing data is `unavailable`, not zero.
 6. **Types and UI.** Extend `SessionProvider` and the dashboard provider registry. Prefer text labels for new providers; a vendor mark requires a license/provenance note in `src/public/brands/NOTICE.md`.
 7. **Fixtures and tests.** Add records in the provider's real shape to `test/fixtures.ts`, including sentinel content, and test counts, dedupe, cost, and the absence of content.
 8. **Docs.** Add a section to [docs/providers.md](docs/providers.md) and a column or row to the README's evidence table.

@@ -15,8 +15,6 @@ import { createSessionAnalyticsFixture } from "./fixtures.ts";
 import { addUnsafeVelocityModels } from "./velocity-fixtures.ts";
 
 import { plantMalformedModels } from "./model-privacy-fixture.ts";
-import { createOutcomeFixture, outcomeSentinels } from "./outcomes-fixtures.ts";
-import { addCommandHistoryFixture, commandSentinels } from "./workflow-fixtures.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -78,7 +76,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "conductor-session-server-"));
   let child: ChildProcess | null = null;
   try {
-    const fixture = await createOutcomeFixture(temporaryDirectory);
+    const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
     const secret = "/private/API-STRUCTURED-SECRET command --token=credential";
     const path = join(fixture.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", "22222222-2222-4222-8222-222222222222.jsonl");
     await appendFile(path, JSON.stringify({ type: "assistant", timestamp: secret, effort: secret, message: { id: "bad-metadata", model: secret, usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: "tool_use", id: "bad-tool", name: secret }] } }) + "\n");
@@ -91,7 +89,6 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     await appendFile(join(fixture.codexRoot, "2026/07/20", "rollout-2026-07-20T10-00-00-11111111-1111-4111-8111-111111111111.jsonl"),
       JSON.stringify({ type: "event_msg", timestamp: "2026-07-20T10:10:00Z", payload: { type: "token_count", info: null,
         rate_limits: { limit_id: "secret-limit-payload", plan_type: "secret-limit-payload", primary: { used_percent: 80, window_minutes: 300, resets_at: 1784548800, payload: "secret-limit-payload" }, credits: { balance: "secret-limit-payload" } } } }) + "\n");
-    await addCommandHistoryFixture(fixture);
     const port = await availablePort();
     const childEnvironment = {
       ...process.env,
@@ -104,6 +101,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       SESSION_ANALYTICS_CODEX_ROOT: fixture.codexRoot,
       SESSION_ANALYTICS_CURSOR_DATABASE: fixture.cursorDatabasePath,
       SESSION_ANALYTICS_CONDUCTOR_DATABASE: fixture.databasePath,
+      // A retired opt-in must not change the output or re-enable content rules.
       SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES: "1",
 
     };
@@ -141,17 +139,10 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal(response.headers.get("cache-control"), "no-store");
     const serialized = await response.text();
     assert.equal(JSON.parse(serialized).summary.analyzedSessions, 5 + unsafeModelSessions);
-    assert.doesNotMatch(serialized, commandSentinels);
-    assert.match(serialized, /\/custom.audit/);
     assert.match(serialized, /"providerReportedSpendUsd":1\.48/);
     assert.match(serialized, /"repositories":3/);
-    assert.match(serialized, /"skills":\{"frontend-design":1\}/);
-    assert.match(serialized, /"skills":\{"review":1\}/);
-    assert.match(serialized, /"skillEvidence":"explicit"/);
-    assert.match(serialized, /"skillEvidence":"inferred"/);
-    assert.match(serialized, /"reliability":\{"version":1,"contentRules":"enabled"/);
+    for (const removed of ["skills", "skillEvidence", "reliability", "limitsCache", "outcomes", "workflow", "insightSignals"]) assert.doesNotMatch(serialized, new RegExp(`"${removed}":`), removed);
     assert.doesNotMatch(serialized, /argHash|fileHash|reliability-hmac/);
-    assert.match(serialized, /"workflow":\{"schemaVersion":1/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath|API-STRUCTURED-SECRET/);
 
@@ -159,11 +150,9 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.doesNotMatch(serialized, /rollout-|transcriptPath/);
     assert.doesNotMatch(serialized, /secret-limit-payload/);
     assert.doesNotMatch(serialized, /SYNTHETIC-MODEL-SENTINEL/);
-    assert.match(serialized, /"usedPercent":80/);
-    assert.equal(JSON.parse(serialized).outcomes.pullRequests.merged, 1);
-    for (const sentinel of outcomeSentinels) assert.ok(!serialized.includes(sentinel));
+    assert.doesNotMatch(serialized, /"usedPercent"/);
 
-    for (const path of ["/api/insights", "/api/review", "/workflow.js", "/workflow-scope.js", "/workflow-worker.js", "/workflow.css", "/views/insights.js", "/views/insights-state.js", "/views/insights.css", "/views/limits-cache.js", "/views/limits-cache.css", "/outcomes.js", "/outcomes-summary.js", "/outcomes.css", "/reliability-data.js", "/reliability-view.js", "/reliability.css"]) {
+    for (const path of ["/api/insights", "/api/review", "/workflow-data.js", "/metrics/outcomes-summary.js", "/workflow.js", "/workflow-scope.js", "/workflow-worker.js", "/workflow.css", "/views/insights.js", "/views/insights-state.js", "/views/insights.css", "/views/limits-cache.js", "/views/limits-cache.css", "/outcomes.js", "/outcomes-summary.js", "/outcomes.css", "/reliability-data.js", "/reliability-view.js", "/reliability.css"]) {
       assert.equal((await fetch(`${origin}${path}`)).status, 404, path);
     }
 
@@ -188,11 +177,6 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       assert.equal((await fetch(`${origin}/${resource}`, { method: "POST" })).status, 405);
     }
 
-    for (const asset of ["workflow-data.js", "metrics/outcomes-summary.js"]) {
-      const response = await fetch(`${origin}/${asset}`);
-      assert.equal(response.status, 200);
-      assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'self'/);
-    }
     assert.match(pageText, /id="activity-tooltip"[\s\S]*role="tooltip"/);
     assert.match(pageText, /<dialog class="palette" id="command-palette"[\s\S]*role="combobox"[\s\S]*role="listbox"/);
     assert.match(pageText, /<dialog class="help" id="help-overlay"/);

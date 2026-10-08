@@ -40,26 +40,17 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 - [x] Persistent content-free SQLite index with incremental ingest (keyed source identity, device/inode, size, nanosecond modification/change times, keyed head/tail fingerprints), session reuse, verified Codex ledger append checkpoints, migrations, WAL, and private permissions.
 - [x] Retain previously indexed source-deleted sessions, reserve shared counter ownership, and provide `index status|path|rebuild|prune` and `--no-index`; fixture/demo parity tests.
 - [x] Atomic ownership-component deferral, UTC-safe pruning with exclusion checkpoints, undated request reservations, key-bound stores, writer corruption recovery, and filtered dashboard retention caveats.
-- [x] Index parity regressions for real-history outcome-reference shapes, atomic full-scan fallback, rotating session/ledger checks, and bounded broadcast-ledger memory; content-free full/cold/warm parity runner.
+- [x] Index parity regressions for atomic full-scan fallback, rotating session/ledger checks, and bounded broadcast-ledger memory; content-free full/cold/warm parity runner.
 - [ ] Incremental Cursor database adapters and resumable session parser checkpoints (the current index refreshes Cursor and reparses changed composite sessions conservatively).
 
 ## M1: Reliability and economics
 
 ### Tool reliability and behavior
 
-Local histories already record tool errors, exit codes, timeouts, durations, MCP call status, hook timing, permission modes, and denials. M1 turns them into content-free measures.
+Local histories already record tool errors, exit codes, timeouts, durations, MCP call status, hook timing, permission modes, and denials. An earlier tool-reliability analysis (outcomes, latency, opt-in loop/churn and verification detectors, MCP server, hook and permission tables) has been removed from analysis and every surface. The items below are not shipped.
 
-- [x] Tool outcomes/error rates by tool, normalized class and MCP server, with low-cardinality error classes and denominator guards. Environment, policy and interruption evidence stays distinguishable; causal blame is not inferred. Reliability report and repository/agent comparisons.
-- [ ] Tool reliability attributed to explicit skills (separate from tool-name attribution).
-- [x] Tool latency (mergeable approximate p50/p95 with timing coverage) and timeouts.
-- [x] **Opt-in P2:** Loop and churn episodes from internal keyed hashes: exact repeats, repeated failing calls, failed-edit cascades, edit thrash, re-read churn, and search loops. Persistent 0600 machine key and stream-wide hashing/reference budgets; no digests in outputs.
-- [x] **Opt-in P2:** Verification share and observed-tail skips (a final edit not followed by a test/build attempt), with incomplete/active evidence and overlapping executions marked unavailable; checks must start after edits complete.
 - [ ] Failing-to-passing test transitions.
-- [x] Steps and time to first possible edit, with main-stream coverage.
-- [x] MCP server table: calls, error rate, latency, connection failure reports and servers seen.
 - [ ] MCP configured-but-unused servers and schema token cost.
-- [x] Hook runs, blocking summaries, and p95 duration with timing coverage.
-- [x] Permission denials, permission-mode observations, and Codex approval-policy/sandbox mix.
 - [ ] Permission prompts per 100 calls and most-approved command classes as allowlist candidates.
 - [ ] Failure-loop cost: tokens and value spent inside flagged windows.
 
@@ -71,54 +62,37 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 - [x] Validate all public velocity model labels; gate inferences on metric evidence, select Codex coverage with charged counters, reject ambiguous start timestamps, and keep agent chart encodings stable across filters.
 - [ ] Distinguish custom agent identities through an opt-in reviewed taxonomy without exposing free-text attribution.
 
-### Limits, cache, and context economics
+### Pricing, cache, and context economics
 
 - [x] Public pricing feeds (models.dev and LiteLLM), immutable request-time snapshots, reviewed exceptions, offline mode, rates CLI, and source provenance with a dashboard Pricing tab.
 - [x] Bound provider model labels and report errors; distinguish imputed cache rates in coverage/provenance; index retained price history and deduplicate unchanged rate tables without deleting observations.
+- [x] Per-session peak context fill from paired per-request input/window evidence.
+
+An earlier limits and cache analysis (quota headroom, cache-break events, context curves, subscription leverage) and the insights price scenarios have been removed. The items below are not shipped.
 
 - [ ] Rate-limit headroom over time from Codex rate-limit snapshots and Claude quota records: time to limit, sessions that hit limits, and usage-limit errors.
 - [ ] Cache-break events with their cause (provider-reported cache-miss reason, idle gap longer than the TTL, model switch, tool-set change) and the cost of re-caching.
-- [ ] Context fill curve, peak fill, compaction before and after sizes, and turns between compactions.
+- [ ] Context fill curve, compaction before and after sizes, and turns between compactions.
 - [ ] Subscription leverage per profile: API-equivalent value against plan price.
-
-- [x] Rate-limit headroom over time from Codex snapshots and Claude quotas: guarded time to limit, sessions with observed limit errors, profile usage caches and Desktop account history.
-- [x] Cache-break provider reasons and separately labeled idle-TTL/model-switch/compaction heuristics; observed re-cache write cost and no-cache input counterfactual.
-- [x] Context fill curves, paired per-request peaks, recorded compaction before/after sizes, and turns between compactions.
-- [x] Subscription leverage per profile against explicitly configured monthly USD prices, with coverage guards.
-- [x] Independent numeric quota freshness, compaction-only date filtering, and a 20,000-point snapshot curve budget with exact aggregates.
 - [ ] Counterfactual pricing: the same tokens at another model's rates.
-
-- [x] Counterfactual pricing: the same tokens at the next mapped tier's rates by default (configurable, explicit-target override), within provider and with explicit eligible-session coverage and no quality claim ([Insights](insights.md)).
 
 ## M2: Outcomes
 
 ### Session to commit to pull request
 
-M2 links agent sessions to the code they produced, retroactively from existing logs, without hooks installed in advance and without uploading content.
+M2 would link agent sessions to the code they produced, retroactively from existing logs, without hooks installed in advance and without uploading content. An earlier outcome analysis (commit/PR links, opt-in Git and GitHub enrichment, line counts and value-per-PR ratios) has been removed from analysis and every surface. The items below are not shipped.
 
-- [x] Evidence-ranked session links from structured commit/PR operations and PR-link records, with weak branch/starting-checkout/workspace context kept separate from produced outcomes. Reports and JSON include confidence and coverage.
-- [x] Opt-in bounded local Git branch/window correlation, agent co-author trailer counts, and authenticated GitHub state/time-to-merge lookup for already evidenced PRs.
-- [x] Guarded API-equivalent value per merged PR, changed lines per dollar, and edits-without-commit value labeled as a linkage heuristic, with deduplicated PRs and explicit pricing denominators.
-- [x] Lines added and removed from Claude patches/cumulative totals, Codex completed FileChange diffs, and Cursor composer totals; missing and partial coverage remain visible.
-- [x] Reconcile snapshot tails and resets, deduplicate cross-file Claude results, retain valid files in mixed Codex batches, and guard/report capped evidence consistently across surfaces.
 - [ ] Hashed file-overlap correlation, reverted changes, line survival at 14 and 30 days, and follow-up fix commits.
 - [ ] Cost per surviving line and independently evidenced abandoned or reverted spend.
 - [ ] Hotspots: files with the most failed edits, churn, and sessions over time. File paths are shown locally only and never leave the parser in shared outputs.
 
 ### Human and agent interaction
 
-- [x] Autonomy run length, human turns per session, turn wall time, and estimated waiting-for-human versus agent-active time, with coverage and explicit idle thresholds.
+An earlier workflow analysis (autonomy runs, waiting and activity estimates, steering, concurrency, archetypes, before/after comparisons, slash commands) and skill usage tracking have been removed from analysis and every surface. The items below are not shipped.
+
 - [ ] Separate permission-wait time from agent activity using stable permission lifecycle evidence.
-- [x] Codex interrupts, opt-in Claude marker counts, mid-turn steering, queue reason classes and plan-mode use.
 - [ ] Plan-rejection evidence and rates (permission approvals are not plan rejections).
-- [x] Concurrency: active sessions over time, daily peaks, effective parallelism and repository-level concurrency.
-- [x] Session archetypes (quick, standard, deep, marathon) and a labeled stale-open-session abandonment heuristic.
-- [x] Model, effort, CLI-version, entrypoint and originator mix with guarded, descriptive before/after comparisons.
 - [ ] Task-matched regression attribution; observed timing changes alone cannot establish a regression.
-- [x] Leading slash-command names and skill usage, including discovered installations without an observed invocation in scope.
-- [x] Workflow report and JSON with UTC active-time/value patterns and activity streaks.
-- [x] Fail closed on unregistered slash-history tokens and incomplete primary lifecycle evidence; isolate optional workflow failures from accounting.
-- [x] Preserve full-snapshot workflow aggregates and skill inventories in reports and JSON.
 
 ## M3: Agent-facing
 
@@ -128,27 +102,22 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 
 - [x] Dependency-free stdio MCP with strict schemas, repository defaults, bounded requests and a snapshot TTL; current and legacy protocol support.
 - [x] `usage_summary`: repository/provider/model/execution-kind totals with price coverage and independent source-health counts, including empty results.
-- [x] `budget_status`: today/this-week dated API value and priced/eligible token coverage, guarded burn rate, and fresh recorded Codex headroom. Current-session attribution and live quotas remain unavailable.
-- [x] `repo_profile`: typical session value/turns/duration, tool/skill mix, cache hits and compactions with sample guards and active/settled/unknown lifecycle coverage.
-- [x] `tool_stats`: call counts and structured outcome flags with coverage; integrated reliability summaries include guarded outcomes, latency and verification.
+- [x] `budget_status`: today/this-week dated API value and priced/eligible token coverage, and guarded burn rate. Current-session attribution and quotas are unavailable.
+- [x] `repo_profile`: typical session value/turns/duration, tool mix, cache hits and compactions with sample guards and active/settled/unknown lifecycle coverage.
+- [x] `tool_stats`: call counts by tool name.
 - [x] `recent_sessions`: hashed keys, providers/models, duration and value.
 - [x] `compare_agents`: all public provider categories in one repository, without quality rankings.
 - [ ] `tool_reliability`: failure history for a tool or command class in this repository.
 - [ ] `repo_hotspots`
 - [ ] `typical_cost`: by session archetype in this repository.
 - [ ] `mcp_health`
-- [x] `unused_extensions`: names-only conventional local inventory versus observed use, with frontmatter/alias identity matching, escaped-string privacy and explicit partial coverage.
 - [x] An agent skill that opens the dashboard or reads the JSON snapshot ([skills/session-analytics](../skills/session-analytics/SKILL.md)).
 - [ ] Optional hooks: pre-tool warnings from historical failure statistics, and a cross-provider budget guard.
 
 ### Opt-in review and coaching
 
-Content-free coaching is local (P0/P1). Content review is **opt-in, off by default (P3)**.
+Content-free coaching would be local (P0/P1); any content review would be **opt-in, off by default (P3)**. The earlier `insights` coaching rules and the opt-in `review` command have been removed. The items below are not shipped.
 
-- [x] Bounded review scaffolding: run content-free detectors first, preview sizes and redaction counts, then optionally review up to three windows through the user's CLI with explicit `--send-content` and an `unknown` fallback. Main Claude/Codex transcripts only; no causal attribution claim.
-- [x] Ten coaching rules with denominators, configurable guards, estimated impact, confidence and suggested actions: repository peer outliers, cache reuse, price scenarios, compaction, delegation, large contexts, no-observed-use skills/MCP servers, idle-gap write associations and neutral start-time patterns. Insights CLI/JSON with per-scope evidence and guardrails.
-- [x] Coaching evidence guards: owned request peaks/size coverage, explicit partial/liveness states, completed-peer eligibility, per-target activity guards, unambiguous MCP attribution and stable eligible review sources.
-- [x] Group coaching by rule/scope level with unique affected counts, ranked scope findings, grouped CLI output and versioned `groups` + `items` JSON.
 - [ ] Coaching extensions requiring richer evidence: request-level context fill above 60%, correction streaks, unverified final edits, repeated-approval context and hotspots. Permission approvals alone carry little signal.
 
 ## M4: Breadth and export
@@ -205,7 +174,7 @@ Every metric added by this roadmap carries interpretation notes in its registry 
 
 - [x] Control Room shell with consistent theme components, palette, shortcuts and URL entry points. The current dashboard has six views: Summary, Velocity, Costs, Pricing, Tools and Activity.
 - [x] One dispatcher, shared options, complete schema/index projection and cross-lane MCP summaries.
-- [x] Cold/warm/full projection parity including pricing, P2 settings and quota replay; one synthetic demo for every view.
+- [x] Cold/warm/full projection parity including pricing; one synthetic demo for every view.
 - [x] Reconciled release documentation and explicit privacy/network boundaries.
 
 - [x] v0.6.1: independent regression coverage for repository identity, Cursor and additional-provider replay, partial pricing coverage, aggregate displays, and legacy snapshot normalization.

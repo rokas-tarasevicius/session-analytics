@@ -840,3 +840,20 @@ test("deleted Cursor databases retain their facts with a source-deleted mark", a
     assert.equal(indexStatus(opts).sourceDeletedSessions, 2);
   });
 });
+
+test("indexed sessions from earlier versions keep history coverage inputs and drop removed analysis fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "index-legacy-projection-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const current = (await analyzeMachineSessions({ ...fixture, noIndex: true, offline: true })).sessions.find((s) => s.provider === "claude" && s.historyProfile)!;
+    const { historyProfile, ...withoutProfile } = current;
+    const legacy = { ...withoutProfile, skills: { review: 1 }, skillEvidence: "explicit", reliability: { version: 1 }, workflow: { schemaVersion: 1 },
+      outcomes: { editsObserved: false }, insightSignals: {}, limitsCache: { profileKey: historyProfile!.profileKey,
+        buckets: historyProfile!.days.map((d) => ({ day: d.day, model: d.model, executionKind: "top-level", observedTokens: d.tokens })) } };
+    const projected = projectSession(legacy as unknown as SessionAnalytics);
+    assert.deepEqual(projected.historyProfile, historyProfile);
+    assert.deepEqual(projected, current);
+    // Non-Claude sessions gain nothing.
+    assert.equal(projectSession({ ...legacy, provider: "codex" } as unknown as SessionAnalytics).historyProfile, undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

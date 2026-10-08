@@ -20,7 +20,7 @@ export async function writeAnalysisSnapshot(snapshot: MachineAnalytics, output: 
         }
         await write("]");
       } else if (value && typeof value === "object") {
-        // Aggregate namespaces (notably workflow timelines) can also contain large arrays.
+        // Aggregate namespaces can also contain large arrays.
         await object(value);
       } else await write(JSON.stringify(value));
     }

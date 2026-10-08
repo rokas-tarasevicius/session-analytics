@@ -106,10 +106,8 @@ export function auditSnapshot(snapshot, { excludedSessionKeys = new Set() } = {}
     const month = (session.firstEventAt ?? session.createdAt ?? 'unknown').slice(0, 7);
     if (!bySessionStartMonth.has(month)) bySessionStartMonth.set(month, zero());
     const monthRow = bySessionStartMonth.get(month);
-    const sizes = session.insightSignals?.requestSizes;
-    const aggregateBaseIsExact = session.metrics.maxInputTokensPerCall <= 272000
-      && sizes?.unknownTokens === 0
-      && sizes?.observedTokens === session.tokens.inputTokens + session.tokens.outputTokens;
+    // Per-request size coverage is no longer published; aggregate pricing is never assumed exact.
+    const aggregateBaseIsExact = false;
     const row = { sessionKey: session.sessionKey, month, ...zero(), models: [], aggregateBaseIsExact };
     row.sessions = 1;
     const modelTokenTotals = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 };

@@ -44,8 +44,6 @@ body:
         - Terminal report or JSON
         - Agent skill or MCP
         - Accounting and pricing
-        - Tool reliability
-        - Outcomes (commits, pull requests)
         - Other
   - type: textarea
     id: alternatives

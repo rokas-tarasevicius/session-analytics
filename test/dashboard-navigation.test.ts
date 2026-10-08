@@ -95,14 +95,6 @@ test("the 30-day default excludes unknown starts and limits view exports to the 
   assert.equal(run("filterSnapshot(snapshot, { ...selectedWindow() }).sessions.length"), 3);
 });
 
-test("observed date bounds still include trailing compaction dates", async () => {
-  const session = sample();
-  session.createdAt = "2026-09-29T10:00:00Z"; session.spendByDay = {};
-  (session as { limitsCache?: unknown }).limitsCache = { buckets: [], compactions: [{ timestamp: "2026-09-30T10:00:00.000Z" }], cacheBreaks: [] };
-  const { run } = await harness([session]);
-  assert.equal(run("observedRange().maximum"), "2026-09-30");
-});
-
 test("scope caption distinguishes Velocity activity dates from session-start views", async () => {
   const { document, run } = await harness([sample()]);
   run("currentViewName = () => 'velocity'; renderSharedView(activeView())");

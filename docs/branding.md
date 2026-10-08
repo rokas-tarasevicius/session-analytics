@@ -92,4 +92,4 @@ These do not follow the brand. Changing them breaks something that already depen
 | Session key and repository ID derivation | `src/analyzer.ts` | Keys must match across snapshots for comparisons. This includes the fixed grouping root used for ephemeral sessions, which is part of that group's repository ID hash. |
 | `SESSION_ANALYTICS_*` environment variables | `src/options.ts` | Existing shell profiles and run scripts set them. If a new prefix is added, keep these as aliases. |
 
-Planned identifiers follow the same rule: MCP tool names will be generic (`budget_status`, `tool_reliability`), telemetry attributes will use the standard `gen_ai.*` namespace, and the JSON output will carry a `schemaVersion`. The data directory will be brand-derived, with a one-time migration when the brand changes.
+Planned identifiers follow the same rule: MCP tool names will be generic (`budget_status`, `tool_stats`), telemetry attributes will use the standard `gen_ai.*` namespace, and the JSON output will carry a `schemaVersion`. The data directory will be brand-derived, with a one-time migration when the brand changes.

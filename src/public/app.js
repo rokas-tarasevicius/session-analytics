@@ -920,10 +920,9 @@ function setWindowPreset(preset) {
 }
 
 function observedRange() {
-  const dates = snapshot.sessions.flatMap(({ createdAt, transcript, evidence, spendByDay, velocity, limitsCache }) => [
+  const dates = snapshot.sessions.flatMap(({ createdAt, transcript, evidence, spendByDay, velocity }) => [
     ...(transcript?.startTimeKnown !== false && evidence?.timing !== "file-mtime" && normalizeTimestamp(createdAt) ? [normalizeTimestamp(createdAt).slice(0, 10)] : []), ...Object.keys(spendByDay),
-    ...(velocity?.buckets ?? []).map(([day]) => day), ...(limitsCache?.buckets ?? []).flatMap(({ day }) => day ? [day] : []),
-    ...(limitsCache?.compactions ?? []).flatMap(({ timestamp }) => timestamp ? [timestamp.slice(0, 10)] : [])]).filter(Boolean).sort();
+    ...(velocity?.buckets ?? []).map(([day]) => day)]).filter(Boolean).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10);
   // UTC session-start dates can run a day ahead of the snapshot's local date; never end a window in the future.
   const today = localDay(snapshot.generatedAt, snapshot.velocity?.timeZone || "UTC");
@@ -995,7 +994,7 @@ function setShortcuts(enabled) {
   writePreference("session-analytics-shortcuts", shortcutsEnabled ? "on" : "off");
 }
 
-/** Provider toggles are scoped: the daily chart on Summary, or the active view's own filter on Activity, Tools, and Skills. */
+/** Provider toggles are scoped: the daily chart on Summary, or the active view's own filter on Activity and Tools. */
 function providerScope() {
   const view = currentViewName();
   if (view === "summary") return "chart";

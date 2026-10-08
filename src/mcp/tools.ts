@@ -15,12 +15,11 @@ const common = { scope, repositoryId, window, provider };
 const repository = { scope: { ...scope, enum: ["repository"] }, repositoryId, window };
 
 const definitions = [
-  { name: "usage_summary", description: "Content-free totals and integrated pricing, velocity, reliability, cache, outcomes, workflow and insight evidence, grouped by repository, provider, model, or agent execution kind. API-equivalent value is not an invoice. Model groups cannot attribute turns or tools.", properties: { ...common, groupBy: { type: "string", enum: ["repository", "provider", "model", "agent"], default: "provider" }, limit, offset } },
-  { name: "budget_status", description: "Today's and this UTC week's dated API-equivalent usage and elapsed-time burn rate, plus fresh recorded quota headroom when evidenced. No invoice, configured budget, or live quota lookup.", properties: { scope, repositoryId, provider } },
-  { name: "repo_profile", description: "Typical value, turns and duration for this repository, tool mix, skills, cache hit rate and compactions. Medians require five eligible sessions. Repository required; duration is not a quality score.", properties: { ...repository, provider } },
-  { name: "tool_stats", description: "Calls by tool and observed structured error flags, with result coverage and minimum sample guards. Missing results are unavailable, never successful calls.", properties: { ...common, limit, offset } },
+  { name: "usage_summary", description: "Content-free totals and integrated pricing and velocity evidence, grouped by repository, provider, model, or agent execution kind. API-equivalent value is not an invoice. Model groups cannot attribute turns or tools.", properties: { ...common, groupBy: { type: "string", enum: ["repository", "provider", "model", "agent"], default: "provider" }, limit, offset } },
+  { name: "budget_status", description: "Today's and this UTC week's dated API-equivalent usage and elapsed-time burn rate. No invoice, configured budget, or quota lookup.", properties: { scope, repositoryId, provider } },
+  { name: "repo_profile", description: "Typical value, turns and duration for this repository, tool mix, cache hit rate and compactions. Medians require five eligible sessions. Repository required; duration is not a quality score.", properties: { ...repository, provider } },
+  { name: "tool_stats", description: "Calls by tool name from structured tool-call records. Counts are activity, not success.", properties: { ...common, limit, offset } },
   { name: "recent_sessions", description: "Recent session hashes, provider, model IDs, duration and usage value. No titles, paths, raw IDs or transcript content. Sorted by most recent evidenced activity.", properties: { ...common, limit, offset } },
-  { name: "unused_extensions", description: "Installed skill and configured MCP server names without observed use in this scope and window. Partial inventory of launch context; no claim that an extension is never used or safe to remove.", properties: { ...common, limit } },
   { name: "compare_agents", description: "All observed provider metrics on one repository with the same window and explicit sample sizes. Task mix is uncontrolled; counts cannot establish quality or a winning agent.", properties: repository },
 ] as const;
 

@@ -3,27 +3,14 @@ import { HistoryStatisticsCollector } from "../metrics/history-statistics.ts";
 import { stat } from "node:fs/promises";
 import { desktopIdentityMatches } from "./claude-desktop.ts";
 import { desktopSupplements } from "./claude-desktop-audit.ts";
-import { cacheGapSignals } from "../insights/cache-gaps.ts";
-import { TranscriptLifecycle } from "../insights/transcript-evidence.ts";
-import { sameVersion } from "../insights/review-source.ts";
-import { canonicalMcpServer } from "../insights/mcp-attribution.ts";
-import { WorkflowCollector } from "../metrics/workflow.ts";
-import { historyForTranscript, type WorkflowSources } from "../metrics/workflow-inventory.ts";
-import { OutcomeCollector } from "../metrics/outcomes.ts";
-import { OutcomeEnricher } from "../metrics/outcomes-enrichment.ts";
+import { TranscriptLifecycle, sameVersion } from "../metrics/transcript-lifecycle.ts";
 import { normalizeTimestamp as normalizedTimestamp } from "../public/timestamps.js";
-import { claudeRequestEvidence, type RequestEvidence } from "../metrics/cache-context.ts";
-import type { LimitsCollector } from "../metrics/limits.ts";
-import { ReliabilityCollector } from "../metrics/reliability.ts";
-import { combineReliability, observeClaude } from "../metrics/reliability-providers.ts";
-import type { ReliabilityContext } from "../metrics/reliability.ts";
-import type { SessionReliability } from "../metrics/reliability-types.ts";
 import { claudeEntrypoint, claudeSubagentType, counterExposed, velocityDimension, zeroVelocity } from "../metrics/velocity.ts";
 import type { AgentIdentity, ClaudeSubagentType, VelocityDimension } from "../types.ts";
 import { resolveRate, type PricingCatalog } from "../pricing/catalog.ts";
 import { priceUsage } from "../pricing/usage.ts";
 import { projectModelId } from "../public/model-id.js";
-import type { MutableSession } from "../analyzer.ts";
+import type { MutableSession, RequestEvidence } from "../analyzer.ts";
 import type { SessionAnalytics, SessionDatabaseRow, TokenUsage } from "../types.ts";
 import type { ProviderAdapter, ProviderEnvironment } from "./adapter.ts";
 import { record as asRecord, text as stringValue, finite, modelName, name as safeName, effortName, safeTime, zeroTokens, sum as sumTokens, type RecordValue as JsonRecord } from "./common.ts";
@@ -31,12 +18,11 @@ import { record as asRecord, text as stringValue, finite, modelName, name as saf
 export interface ClaudeCandidate {
   cwd: string; id: string; path: string; provider: "claude" | "codex"; timestamp: string | null;
 }
-interface ClaudeContext { mainPaths?: string[]; usageOwners?: ReadonlyMap<string, string>; row: SessionDatabaseRow; rateCard: PricingCatalog; warnings: string[]; reliabilityContext: ReliabilityContext; limits?: LimitsCollector; outcomeEnricher: OutcomeEnricher; workflowSources?: WorkflowSources; contentRules: boolean }
+interface ClaudeContext { mainPaths?: string[]; usageOwners?: ReadonlyMap<string, string>; row: SessionDatabaseRow; rateCard: PricingCatalog; warnings: string[]; profileKey?: string | null }
 interface ClaudeRuntime {
   discoverRoots(environment: ProviderEnvironment): Promise<string[]>;
   identify(root: string): Promise<ClaudeCandidate[]>;
   createMutableSession(): MutableSession;
-  updateWorkflow(state: MutableSession, update: (collector: WorkflowCollector) => void): void;
   walkJsonl(path: string): AsyncGenerator<string>;
   visitJsonLines(path: string, visitor: (record: JsonRecord, line: number) => void): Promise<void>;
   trackTimestamp(session: MutableSession, timestamp: string | null): void;
@@ -46,15 +32,13 @@ interface ClaudeRuntime {
 const nonNegativeNumberValue = (value: unknown): number => finite(value) ?? 0;
 const tokenCount = (usage: TokenUsage): number => usage.inputTokens + usage.outputTokens;
 function increment(target: Record<string, number>, key: string, amount = 1): void { target[key] = (target[key] ?? 0) + amount; }
-function normalizedSkillName(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const name = value.trim();
-  return safeName(name);
+function nonnegative(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 /** Existing Claude parser, moved without changing its projection or accounting. */
 export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<ClaudeCandidate, ClaudeContext> {
-  const { createMutableSession, walkJsonl, visitJsonLines, trackTimestamp, addModelUsage, finalizeSession, updateWorkflow } = runtime;
+  const { createMutableSession, walkJsonl, visitJsonLines, trackTimestamp, addModelUsage, finalizeSession } = runtime;
   // Iterations replace top-level usage: fallback reports only the returned
   // attempt; compaction/advisor usage is omitted from the executor totals.
   // Retain normalized numeric counters only, never raw attempt records.
@@ -158,22 +142,14 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     mainPath: string,
     rateCard: PricingCatalog,
     inheritedWarnings: string[],
-    reliabilityContext: ReliabilityContext,
-    limits: LimitsCollector | undefined,
-    outcomeEnricher: OutcomeEnricher,
-    workflowSources?: WorkflowSources,
-    contentRules = false,
     usageOwners?: ReadonlyMap<string, string>,
     mainPaths: string[] = [mainPath],
+    profileKey: string | null = null,
   ): Promise<SessionAnalytics> {
     const state = createMutableSession();
     if (await desktopIdentityMatches(mainPath, row.provider_session_id)) state.agentIdentity.claudeEntrypoint = "desktop";
     const historyStatistics = new HistoryStatisticsCollector();
-    state.workflow = new WorkflowCollector("claude", contentRules, await historyForTranscript(mainPath, workflowSources, row.root_path || row.workspace_path));
-    const outcomes = new OutcomeCollector(row);
-    state.limitsProvider = "claude";
-    state.limitsCache.profileKey = limits?.profileKey(mainPath) ?? null;
-    const sessionLimits = limits?.fork();
+    state.requestProvider = "claude";
     state.effort = null;
     const orphan = mainPath.includes("/subagents/");
     state.executionKind = orphan ? "subagent" : "top-level";
@@ -218,14 +194,11 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     const seenToolCalls = new Set<string>();
     let parseErrors = 0, primaryParseErrors = 0;
     const totals = zeroTokens();
-    const reliabilityStreams: SessionReliability[] = [];
 
     for (const path of paths) {
       const sourceBefore = await stat(path);
       const lifecycle = new TranscriptLifecycle();
-      let streamTurns = 0, streamCompactions = 0;
       const streamBoundaries = new Set<string>();
-      const reliability = new ReliabilityCollector(reliabilityContext);
       const executionKind: SessionAnalytics["executionKind"] =
         primaryPaths.has(path) ? "top-level" : "subagent";
       state.executionKindsSeen.add(executionKind);
@@ -235,16 +208,12 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
         state.mcpEvidence.claude(record, path);
         if (record["__parse_error"] === true) {
           parseErrors += 1;
-          if (path === mainPath) { primaryParseErrors += 1; state.workflow?.gap("malformed"); }
-          reliability.truncated = true;
+          if (path === mainPath) primaryParseErrors += 1;
           return;
         }
-        observeClaude(reliability, record, line, row.workspace_path);
-        outcomes.observeClaude(record, path === mainPath ? "main" : path);
         const timestamp = normalizedTimestamp(record["timestamp"]);
         lifecycle.observe("claude", record);
         trackTimestamp(state, timestamp);
-        if (!orphan && path === mainPath) updateWorkflow(state, (workflow) => workflow.observe(record, line));
         if (record["entrypoint"] !== undefined) identity.claudeEntrypoint = claudeEntrypoint(record["entrypoint"]);
         if (record["attributionAgent"] !== undefined) {
           identity.claudeSubagentType = claudeSubagentType(record["attributionAgent"]);
@@ -255,18 +224,16 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
         const type = stringValue(record["type"]) ?? "";
         const subtype = stringValue(record["subtype"]) ?? "";
         let repeatedBoundary = false;
-        sessionLimits?.observe(mainPath, record, row.conductor_session_id);
         if (subtype === "compact_boundary") {
           const identity = stringValue(record["uuid"]) ?? `${line}`;
           repeatedBoundary = streamBoundaries.has(identity);
           if (!streamBoundaries.has(identity)) {
-            streamBoundaries.add(identity); streamCompactions++;
-            state.limitsCache.addCompaction(path, "boundary", identity, timestamp, executionKind, streamTurns, record["compactMetadata"]);
+            streamBoundaries.add(identity);
+            state.compactionCounter.add(path, "boundary", identity, timestamp);
           }
         } else if (type.includes("compact") || subtype.includes("compact")) {
-          // Preserve older markers in the shared summary, even without sizes.
-          streamCompactions++;
-          state.limitsCache.addCompaction(path, `${type}:${subtype}`, stringValue(record["uuid"]), timestamp, executionKind, streamTurns);
+          // Older markers are counted too, even without a boundary identity.
+          state.compactionCounter.add(path, `${type}:${subtype}`, stringValue(record["uuid"]), timestamp);
         }
         const agentId = stringValue(record["agentId"]);
         if (agentId) state.delegatedAgents.add(agentId);
@@ -304,7 +271,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
             explicitTtl: ttlCounters.some((value) => value !== null) &&
               (usage.cacheWriteInputTokens === 0 || ttlCounters.some((value) => value !== null && value > 0)),
             requestSizeKnown: typeof usageRecord?.["input_tokens"] === "number" && Number.isFinite(usageRecord["input_tokens"]) && usageRecord["input_tokens"] >= 0,
-            evidence: claudeRequestEvidence(record, path, streamCompactions),
+            evidence: { contextWindow: null, requestInputKnown: nonnegative(usageRecord?.["input_tokens"]) !== null },
             dimension,
             cacheRead: counterExposed(usageRecord?.["cache_read_input_tokens"]),
             cacheWrite: counterExposed(usageRecord?.["cache_creation_input_tokens"]),
@@ -361,28 +328,19 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
           if (replaces) {
             assistantUsage.set(messageId, {
               ...snapshot,
-              evidence: { ...snapshot.evidence, reportedReason: snapshot.evidence.reportedReason ?? previous?.evidence.reportedReason ?? null },
               timestamp: previous && tokenCount(previous.usage) > 0 && previous.executionKind === executionKind ? previous.timestamp ?? timestamp : timestamp,
             });
           }
-          if (previous && !previous.evidence.reportedReason && snapshot.evidence.reportedReason) previous.evidence.reportedReason = snapshot.evidence.reportedReason;
           for (const rawBlock of contentBlocks(message)) {
             const block = asRecord(rawBlock);
             if (block?.["type"] !== "tool_use") continue;
             const toolId = stringValue(block["id"]) ?? `${path}:${line}`;
             if (seenToolCalls.has(toolId)) continue;
             seenToolCalls.add(toolId);
-            if (!orphan && path === mainPath) updateWorkflow(state, (workflow) => workflow.tool(timestamp));
             const name = safeName(block["name"]) ?? "unknown_tool";
             increment(state.tools, name);
             increment(state.transportTools, name);
-            const server = canonicalMcpServer(record["attributionMcpServer"]);
-            if (server) increment(state.mcpServers, server);
             state.velocity.tool(timestamp, dimension);
-            if (name === "Skill") {
-              const skill = normalizedSkillName(asRecord(block["input"])?.["skill"]);
-              if (skill) increment(state.skills, skill);
-            }
           }
         }
         if (type === "user" && message) {
@@ -395,11 +353,9 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
           if (humanContent) {
             seenHumanMessages.add(messageId);
             state.userTurns += 1;
-            streamTurns += 1;
           }
         }
       });
-      reliabilityStreams.push(reliability.finish());
       const sourceAfter = await stat(path);
       changed ||= !sameVersion(sourceBefore, sourceAfter);
       activeEvidence ||= lifecycle.liveness() === "active";
@@ -417,10 +373,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     const billedRequests = ownedUsage.flatMap((snapshot) => snapshot.billing?.attempts.map((attempt) => ({
       ...snapshot, ...attempt, dimension: { ...snapshot.dimension, model: attempt.model },
       requestSizeKnown: true, cacheRead: true, cacheWrite: true,
-      stream: attempt.advisor ? `${snapshot.stream}:advisor:${attempt.model}` : snapshot.stream,
-      evidence: { ...snapshot.evidence, requestInputKnown: true, reportedReason: null,
-        stream: attempt.advisor ? `${snapshot.stream}:advisor:${attempt.model}` : snapshot.stream,
-        ttlMinutes: attempt.usage.cacheWrite1hInputTokens > 0 ? 60 : attempt.usage.cacheWrite5mInputTokens > 0 ? 5 : null },
+      evidence: { ...snapshot.evidence, requestInputKnown: true },
     })) ?? [snapshot]);
     for (const { billing, evidence, requestSizeKnown, dimension, cacheRead, cacheWrite, executionKind, model, reasoningExposed, timestamp, usage } of billedRequests.sort((a, b) => (a.timestamp ?? "\uffff").localeCompare(b.timestamp ?? "\uffff"))) {
       if (tokenCount(usage) === 0) continue;
@@ -478,15 +431,12 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     }
     if (primaryParseErrors > 0) state.warnings.push(`${primaryParseErrors} malformed JSONL records were skipped in the primary transcript.`);
     if (parseErrors > primaryParseErrors) state.warnings.push(`${parseErrors - primaryParseErrors} malformed JSONL records were skipped in child transcripts.`);
-    state.outcomes = await outcomes.finish(outcomeEnricher, state.firstEventAt, state.lastEventAt);
     state.completeness = orphan || state.warnings.includes("Some child transcript evidence could not be read.") || parseErrors || changed ? "partial" : "complete";
     state.liveness = activeEvidence ? "active" : unknownLiveness ? "unknown" : "inactive";
     const result = finalizeSession(row, state, totals, paths.length);
     if (incompleteBilling) { result.costComplete = false; result.transcript.completeness = "partial"; }
     result.historyStatistics = historyStatistics.finish();
-    if (result.limitsCache && sessionLimits) result.limitsCache.quotaEvidence = sessionLimits.evidence();
-    result.insightSignals!.cacheGaps = cacheGapSignals(billedRequests, rateCard);
-    result.reliability = combineReliability(reliabilityStreams, row.status === "working");
+    if (profileKey) result.historyProfile = { profileKey, days: [...state.historyDays.values()].sort((a, b) => a.day.localeCompare(b.day) || a.model.localeCompare(b.model)) };
     return result;
   }
 
@@ -494,6 +444,6 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     id: "claude", provider: "claude",
     discoverRoots: runtime.discoverRoots,
     async *identify(root) { yield* await runtime.identify(root); },
-    analyze(candidate, context) { return analyzeClaude(context.row, candidate.path, context.rateCard, context.warnings, context.reliabilityContext, context.limits, context.outcomeEnricher, context.workflowSources, context.contentRules, context.usageOwners, context.mainPaths); },
+    analyze(candidate, context) { return analyzeClaude(context.row, candidate.path, context.rateCard, context.warnings, context.usageOwners, context.mainPaths, context.profileKey ?? null); },
   };
 }

@@ -71,7 +71,7 @@ export function mergeModels(sessions) {
 
 export function namedTotals(sessions, field) {
   const totals = new Map();
-  for (const session of sessions.filter((s) => !["tools", "skills"].includes(field) || metricEligible(s, field))) for (const [name, value] of Object.entries(session[field])) totals.set(name, (totals.get(name) || 0) + value);
+  for (const session of sessions.filter((s) => field !== "tools" || metricEligible(s, field))) for (const [name, value] of Object.entries(session[field])) totals.set(name, (totals.get(name) || 0) + value);
   return [...totals].map(([name, value]) => ({ name, value })).sort((left, right) => right.value - left.value);
 }
 

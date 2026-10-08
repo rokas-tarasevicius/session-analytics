@@ -1,19 +1,6 @@
-import type { SessionReliability } from "./metrics/reliability-types.ts";
-export type { SessionReliability, ToolClass, ToolOutcome, ErrorClass, ReliabilityStats } from "./metrics/reliability-types.ts";
-
 export type SessionProvider = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "unsupported";
-import type { LimitsCacheAnalytics, SessionLimitsCache } from "./metrics/limits-cache-types.ts";
-import type { OutcomeSummary, SessionOutcomes } from "./metrics/outcome-types.ts";
-export type { OutcomeConfidence, OutcomeSource, OutcomeLink, OutcomeOperations, OutcomeEnrichmentStatus, OutcomeRatio, OutcomeSummary, SessionOutcomes } from "./metrics/outcome-types.ts";
 
-import type { SessionWorkflow, WorkflowSummary } from "./metrics/workflow-types.ts";
-export type * from "./metrics/workflow-types.ts";
-
-import type { CacheGapSignals } from "./insights/types.ts";
-import type { SessionHistory, HistoryStatistics, HistoryReconciliation, HistoryCoverage } from "./metrics/history-types.ts";
-export type { Insight, InsightGroup, InsightsReport, InsightThresholds, CacheGapSignals } from "./insights/types.ts";
-export type { ReviewPreview } from "./insights/review-context.ts";
-export type { ReviewAssessment } from "./insights/review-agent.ts";
+import type { SessionHistory, HistoryStatistics, HistoryReconciliation, HistoryCoverage, HistoryProfileEvidence } from "./metrics/history-types.ts";
 
 export type SessionStatus = "idle" | "working" | "completed" | "failed" | "error" | "interrupted" | "cancelled" | "pending" | "unknown";
 import type { McpContext, McpSessionEvidence, McpSourceHealth } from "./mcp/types.ts";
@@ -21,7 +8,6 @@ export type * from "./mcp/types.ts";
 
 export type CostBasis = "api-list-price-equivalent" | "provider-reported" | "unavailable";
 export type ExecutionKind = "mixed" | "subagent" | "top-level" | "unknown";
-export type SkillEvidence = "explicit" | "inferred" | "unavailable";
 export type { IndexStatus, IndexScanStats } from "./store/database.ts";
 
 // Velocity is additive: old snapshots remain readable without these fields.
@@ -275,21 +261,13 @@ export interface TranscriptHealth {
 export interface SessionAnalytics {
   history?: SessionHistory;
   historyStatistics?: HistoryStatistics;
+  historyProfile?: HistoryProfileEvidence;
   /** Present for added evidence sources; absence preserves the legacy provider contract. */
   evidence?: ProviderEvidence;
   conductor?: ConductorResultMetrics;
 
   agentIdentity?: AgentIdentity;
   velocity?: SessionVelocity;
-  reliability?: SessionReliability;
-  limitsCache?: SessionLimitsCache;
-  outcomes?: SessionOutcomes;
-  workflow?: SessionWorkflow;
-  insightSignals?: {
-    cacheGaps?: CacheGapSignals;
-    requestSizes?: { observedTokens: number; unknownTokens: number };
-    mcpServers?: Record<string, number>;
-  };
   mcpEvidence?: McpSessionEvidence;
   cost: CostBreakdown;
   costBasis: CostBasis;
@@ -311,8 +289,6 @@ export interface SessionAnalytics {
   repositoryId: string;
   repositoryName: string;
   sessionKey: string;
-  skillEvidence: SkillEvidence;
-  skills: Record<string, number>;
   spendByDay: Record<string, number>;
   status: SessionStatus;
   tokens: TokenUsage;
@@ -329,9 +305,6 @@ export interface NamedMetric {
 
 export interface RepositoryAnalytics {
   velocity?: VelocityMetadata;
-  limitsCache?: LimitsCacheAnalytics;
-  outcomes?: OutcomeSummary;
-  workflow?: WorkflowSummary;
   schemaVersion: 1;
   generatedAt: string;
   rateCard: {
@@ -374,9 +347,6 @@ export interface RepositoryAnalytics {
 export interface MachineAnalytics {
   historyCoverage?: HistoryCoverage;
   velocity?: VelocityMetadata;
-  limitsCache?: LimitsCacheAnalytics;
-  outcomes?: OutcomeSummary;
-  workflow?: WorkflowSummary;
   schemaVersion: 1;
   mcpSourceHealth?: McpSourceHealth[];
   mcpContext?: McpContext;
@@ -396,7 +366,6 @@ export interface MachineAnalytics {
 }
 
 export interface RepositoryRollup {
-  outcomes?: OutcomeSummary;
   repository: RepositoryAnalytics["repository"];
   spendByDay: NamedMetric[];
   spendByModel: ModelUsage[];
@@ -406,10 +375,6 @@ export interface RepositoryRollup {
 }
 
 export interface SessionDatabaseRow {
-  outcome_archive_commit?: string | null;
-  outcome_pr_present?: number;
-  outcome_workspace_id?: string;
-  outcome_workspace_status?: string | null;
   agent_type: string;
   branch: string | null;
   conductor_session_id: string;
@@ -437,11 +402,6 @@ export interface AnalyzeOptions extends PricingOptions {
   geminiRoot?: string;
   /** Disable discovery of additional stores; explicit store options still apply. */
   additionalProviders?: boolean;
-  reliabilityContentRules?: boolean;
-  outcomesGit?: boolean;
-  outcomesGithub?: boolean;
-  workflowContentRules?: boolean;
-  insightsConfigPath?: string;
   /** Internal launch context, never accepted as an MCP tool argument or returned as a path. */
   mcpCwd?: string;
   noIndex?: boolean;

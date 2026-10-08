@@ -56,11 +56,10 @@ Startup, discovery, listing and pings are immediate and do not scan history. The
 | Tool | Answers | Extra arguments |
 | --- | --- | --- |
 | `usage_summary` | Tokens and value by repository key, provider, model, or agent execution kind | `groupBy`: `repository`, `provider` (default), `model`, `agent`; `limit`, `offset` |
-| `budget_status` | Dated API-equivalent value today/this week, elapsed-time burn rate, fresh recorded headroom | No `window`; always UTC today and Monday-to-date |
-| `repo_profile` | Typical session value, turns and duration; tool mix, skills, cache hits and compactions | Requires one repository; top 20 tools and skills |
-| `tool_stats` | Calls, structured results and errors, with coverage and sample guards | `limit`, `offset` |
+| `budget_status` | Dated API-equivalent value today/this week and elapsed-time burn rate | No `window`; always UTC today and Monday-to-date |
+| `repo_profile` | Typical session value, turns and duration; tool mix, cache hits and compactions | Requires one repository; top 20 tools |
+| `tool_stats` | Calls by tool name (`{ name, calls }`) from structured tool-call records | `limit`, `offset` |
 | `recent_sessions` | Hashed session keys, provider, models, duration and value, newest activity first | `limit`, `offset` |
-| `unused_extensions` | Installed skills and configured servers without observed use | `limit` per list and provider |
 | `compare_agents` | Claude Code, Codex and Cursor on the same repository | Requires one repository; no provider filter |
 
 Shared arguments are optional and strictly validated:
@@ -83,17 +82,17 @@ Snapshots stay in memory for 60 seconds after a successful scan completes. `--mc
 
 ## Interpretation and evidence limits
 
-`usage_summary`, profiles, tool/extension statistics, comparisons and recent sessions select whole sessions by start time; they do not prorate a session across days. `budget_status` instead sums the existing dated API-value ledger, including activity from sessions that started earlier. Its envelope totals explicitly carry `basis: session-start`; `data.today` and `data.week` each expose dated priced/eligible token coverage alongside value and burn rate, including unpriced activity from older sessions.
+`usage_summary`, profiles, tool statistics, comparisons and recent sessions select whole sessions by start time; they do not prorate a session across days. `budget_status` instead sums the existing dated API-value ledger, including activity from sessions that started earlier. Its envelope totals explicitly carry `basis: session-start`; `data.today` and `data.week` each expose dated priced/eligible token coverage alongside value and burn rate, including unpriced activity from older sessions.
 
 API-equivalent values are not invoices or subscription charges. Provider-reported value stays separate. Unknown models remain unpriced with an explicit token denominator. Cursor value cannot be assigned to a day and is excluded from the budget periods. Each period reports the all-history scoped provider-reported value excluded for lack of timing, not a claim about that period's Cursor spend.
 
 Typical-session medians/p90 need five eligible sessions with settled provider lifecycle evidence. Active and unknown sessions, incomplete prices and missing measurements are excluded with counts; `activityStates` shows the lifecycle population. Standalone `idle` metadata is insufficient. Settled describes the last recorded turn, which can resume later; Cursor currently lacks this evidence. Durations include idle time, and task mix remains uncontrolled even in one repository. Model groups cannot attribute turns/tools or Cursor tokens; these fields are `null`. Model session counts can overlap. Agent grouping means `top-level`, `subagent`, `mixed` or `unknown`, never agent nicknames or raw identities.
 
-Error rates require 20 structured results and carry their observed-result denominator. Missing result flags are not successes. Results of a transported code-mode call do not prove the status of its inner tools. Cursor outcomes and textual exit-code parsing are not supported by this lane. Call counts and structured completion counts can differ; unjoinable result coverage is unavailable.
+Tool call counts are activity, not success. They count deduplicated structured tool-call records; code-mode calls count the inner tools they ran. No error rate or result status is reported.
 
-Headroom uses Codex numeric five-hour/seven-day windows only. Samples must be no more than 15 minutes old with a future reset. The most conservative eligible sample is returned across observed sessions/profiles. These are provider-account observations, not a live quota request or repository-specific entitlement. Claude quota statuses alone do not establish a percentage, and missing evidence stays unavailable. Burn rate requires three dated sessions and at least one elapsed UTC hour; it is a historical wall-clock average, not a forecast or budget guard.
+Burn rate requires three dated sessions and at least one elapsed UTC hour; it is a historical wall-clock average, not a forecast or budget guard. `budget_status` does not look up quota, plan limits or headroom.
 
-Extension inventory is deliberately partial. It reads only conventional skill directories (including symlinked `SKILL.md` entries, with at most 16 KiB read to resolve a scalar frontmatter name), Claude JSON server maps, Codex `[mcp_servers.NAME]` tables, and Cursor JSON server maps. It includes fixed project locations plus discovered Claude/Codex profiles; explicit provider roots replace home-profile discovery for that provider. It does not follow config includes, execute commands, connect to servers, inspect credentials, or enumerate plugin/managed registries. Canonical files deduplicate skill aliases; frontmatter names and directory aliases join to invocations. Ambiguous metadata is counted as unresolved and excluded from non-use lists. Configured MCP names containing `__` use the longest matching configured prefix. TOML escaped multiline delimiters stay inside values; malformed string syntax rejects the source. Codex inline-table configuration is not interpreted. Inventory is the launch context's installation, even when the usage query selects another repository. “Without observed use” never means “never used,” disabled, broken, or safe to remove. Cursor skill usage remains unavailable.
+The server reads no skill or MCP-server configuration; it answers only from the analysis snapshot.
 
 See [metric definitions](metrics.md#mcp-query-semantics) and the [field manifest](privacy.md#mcp-fields) for exact formulas and privacy tiers.
 
@@ -111,4 +110,4 @@ node --test test/mcp*.test.ts
 node scripts/demo.ts mcp
 ```
 
-The last command runs a stdio server over synthetic data, with an `acme-web` launch scope, sample extension inventories and recent quota windows. Connect an MCP client to `node /absolute/path/to/scripts/demo.ts mcp`; do not pipe the server's output through the non-silent npm script runner, which prints its own banners. `npm run demo -- mcp` is also available for manual terminal use. No dashboard screenshots change in this feature.
+The last command runs a stdio server over synthetic data, with an `acme-web` launch scope. Connect an MCP client to `node /absolute/path/to/scripts/demo.ts mcp`; do not pipe the server's output through the non-silent npm script runner, which prints its own banners. `npm run demo -- mcp` is also available for manual terminal use. No dashboard screenshots change in this feature.

@@ -13,7 +13,7 @@ export function compareClaude(oracle: Json, snapshot: Json, desktop: Json) {
   const check=(key: string,field: string,actual: unknown,expected: unknown)=>{if(actual===expected)return;if(typeof actual==='number'&&typeof expected==='number'&&/Usd|USD/.test(field)&&Math.abs(actual-expected)<=1e-7)return;differences.push({sessionKey:key,field,actual:actual??null,expected:expected??null});};
   for(const source of oracle.sessions){
     const s=structuredClone(source),ref=references.get(s.sessionKey);if(!ref){differences.push({sessionKey:s.sessionKey,field:'missing-session'});continue;}
-    if(s.historyProfileKeys?.length===1)check(s.sessionKey,'limitsCache.profileKey',ref.limitsCache?.profileKey,s.historyProfileKeys[0]);
+    if(s.historyProfileKeys?.length===1)check(s.sessionKey,'historyProfile.profileKey',ref.historyProfile?.profileKey,s.historyProfileKeys[0]);
     s.costByExecution.unknownUsd??=0;
     if(!Array.isArray(s.eventBuckets))throw new Error('Independent event buckets unavailable');
     const supplementalBuckets=new Map<string,EventBucket>();

@@ -18,6 +18,5 @@ function diagnose(value,sc,path){
 }
 const full=matchesSchema(snapshot,snapshotSchema);diagnose(snapshot,snapshotSchema,'snapshot');
 const badSessionIndexes=new Set(failures.flatMap(f=>{const m=/sessions\[(\d+)\]/.exec(f.path);return m?[Number(m[1])]:[]}));
-const byNamespace={};for(const i of badSessionIndexes)for(const link of snapshot.sessions[i].outcomes?.links||[]){const prefix=['workspace-pr','commit-event','pr-event','pr'].find(prefix=>link.ref.startsWith(prefix+'-'));if(prefix)byNamespace[prefix]=(byNamespace[prefix]||0)+1;}
 const byMonth={};for(const i of badSessionIndexes){const session=snapshot.sessions[i],month=session.createdAt.slice(0,7);const r=byMonth[month]||{sessions:0,tokens:0,usd:0};r.sessions++;r.tokens+=session.tokens.inputTokens+session.tokens.outputTokens;r.usd+=session.cost.totalUsd;byMonth[month]=r;}
-const result={matches:full,failures,affectedSessions:badSessionIndexes.size,byNamespace,byMonth};fs.writeFileSync('.lane/schema-rejection-results.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({matches:full,failures:failures.length,fields:[...new Set(failures.map(f=>f.path.replace(/\[\d+\]/g,'[]')))]},null,2));
+const result={matches:full,failures,affectedSessions:badSessionIndexes.size,byMonth};fs.writeFileSync('.lane/schema-rejection-results.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({matches:full,failures:failures.length,fields:[...new Set(failures.map(f=>f.path.replace(/\[\d+\]/g,'[]')))]},null,2));

@@ -52,8 +52,6 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.equal(codex.cost.totalUsd, 0.0066);
     assert.equal(Number(codex.cost.upperEstimateUsd.toFixed(8)), 0.006975);
     assert.deepEqual(codex.tools, { apply_patch: 1, exec_command: 1 });
-    assert.deepEqual(codex.skills, { "frontend-design": 1 });
-    assert.equal(codex.skillEvidence, "inferred");
     assert.equal(codex.metrics.taskCompletions, 1);
     assert.equal(codex.metrics.compactions, 1);
     assert.equal(codex.metrics.contextUtilizationPeak, 0.5);
@@ -91,8 +89,6 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
       [{ model: "claude-opus-5", priced: true }],
     );
     assert.deepEqual(claude.tools, { Bash: 1, Read: 1, Skill: 1 });
-    assert.deepEqual(claude.skills, { review: 1 });
-    assert.equal(claude.skillEvidence, "explicit");
     assert.equal(claude.metrics.assistantMessages, 2);
     assert.equal(claude.metrics.userTurns, 1);
     assert.equal(claude.metrics.delegatedAgents, 1);
@@ -109,8 +105,6 @@ test("analyzes Codex, Claude, and Cursor sessions without returning transcript c
     assert.equal(cursor.cost.totalUsd, 1.23);
     assert.equal(cursor.costBasis, "provider-reported");
     assert.deepEqual(cursor.tools, { edit_file: 1 });
-    assert.deepEqual(cursor.skills, {});
-    assert.equal(cursor.skillEvidence, "unavailable");
     const metadataOnlyCursor = result.sessions.find(({ models }) => models.some(({ model }) => model === "cursor-archived-model"));
     assert.ok(metadataOnlyCursor);
     assert.equal(metadataOnlyCursor.cost.totalUsd, 0.25);

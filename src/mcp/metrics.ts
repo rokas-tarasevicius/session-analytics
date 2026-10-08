@@ -6,7 +6,7 @@ import type {
 import { integratedMetrics } from "./integrated.ts";
 import { validModelId } from "../public/model-id.js";
 import { metricEligible } from "../public/providers.js";
-import { mcpServerName, safeName, timestamp } from "./names.ts";
+import { safeName, timestamp } from "./names.ts";
 
 const DAY = 86_400_000;
 const PROVIDERS: SessionProvider[] = ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "unsupported"];
@@ -90,9 +90,9 @@ function distribution(values: number[], selectedSessions: number): McpDistributi
   };
 }
 
-function counts(sessions: SessionAnalytics[], kind: "tools" | "skills"): McpNamedCount[] {
+function counts(sessions: SessionAnalytics[]): McpNamedCount[] {
   const map = new Map<string, number>();
-  for (const session of sessions) for (const [raw, calls] of Object.entries(session[kind])) {
+  for (const session of sessions) for (const [raw, calls] of Object.entries(session.tools)) {
     const name = safeName(raw);
     if (name && Number.isFinite(calls) && calls > 0) map.set(name, (map.get(name) ?? 0) + calls);
   }
@@ -112,7 +112,7 @@ export function profile(sessions: SessionAnalytics[]): McpProfile {
   const reported = stable.filter((s) => s.costBasis === "provider-reported");
   const cache = sessions.filter((s) => metricEligible(s, "tokens") && !s.evidence && (s.provider === "claude" || s.provider === "codex"));
   const compactions = sessions.filter((s) => metricEligible(s, "compactions"));
-  const tools = counts(sessions, "tools"), skills = counts(sessions, "skills");
+  const tools = counts(sessions);
   return {
     sessions: sessions.length,
     activityStates: { active: sessions.filter((s) => activity(s) === "active").length,
@@ -123,27 +123,8 @@ export function profile(sessions: SessionAnalytics[]): McpProfile {
     durationMilliseconds: distribution(stable.map(duration).filter((v): v is number => v !== null), sessions.length),
     cacheHitRate: ratio(sum(cache, (s) => s.tokens.cachedInputTokens), sum(cache, (s) => s.tokens.inputTokens), 1000),
     compactionsPerSession: ratio(sum(compactions, (s) => s.metrics.compactions), compactions.length, MIN_SESSIONS),
-    toolMix: tools.slice(0, MAX_MIX), skills: skills.slice(0, MAX_MIX),
-    omittedTools: Math.max(0, tools.length - MAX_MIX), omittedSkills: Math.max(0, skills.length - MAX_MIX),
-    skillEvidence: PROVIDERS.map((provider) => ({ provider, evidence: provider === "claude" ? "explicit" : provider === "codex" ? "inferred" : "unavailable", sessions: sessions.filter((s) => s.provider === provider).length })),
+    toolMix: tools.slice(0, MAX_MIX), omittedTools: Math.max(0, tools.length - MAX_MIX),
   };
-}
-
-function toolStats(sessions: SessionAnalytics[]): McpToolStat[] {
-  const map = new Map(counts(sessions, "tools").map(({ name, calls }) => [name, { name, calls, observedResults: 0, errors: 0 }]));
-  for (const session of sessions) for (const item of session.mcpEvidence?.toolOutcomes ?? []) {
-    const name = safeName(item.tool);
-    if (!name) continue;
-    const row = map.get(name) ?? { name, calls: 0, observedResults: 0, errors: 0 };
-    row.observedResults += number(item.observedResults); row.errors += number(item.errors); map.set(name, row);
-  }
-  return [...map.values()].map((row) => ({
-    ...row,
-    errorRate: ratio(row.errors, row.observedResults, 20),
-    resultCoverage: row.observedResults > row.calls
-      ? { ...ratio(row.observedResults, row.calls), value: null, status: "unavailable" as const }
-      : ratio(row.observedResults, row.calls),
-  })).sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name));
 }
 
 function budgetPeriod(sessions: SessionAnalytics[], since: number, now: number): McpBudgetPeriod {
@@ -177,18 +158,6 @@ function budget(sessions: SessionAnalytics[], now: number): McpBudget {
   return {
     today: budgetPeriod(sessions, windowStart("today", now)!, now),
     week: budgetPeriod(sessions, windowStart("week", now)!, now),
-    rateLimits: PROVIDERS.map((provider) => {
-      const windows = new Map<number, { windowMinutes: number; usedPercent: number; remainingPercent: number; observedAt: string; resetsAt: string }>();
-      for (const session of sessions.filter((s) => s.provider === provider)) for (const sample of session.mcpEvidence?.rateLimits ?? []) {
-        const observedAt = timestamp(sample.observedAt), resetsAt = timestamp(sample.resetsAt);
-        if (!observedAt || !resetsAt || now < Date.parse(observedAt) || now - Date.parse(observedAt) > 15 * 60_000 || Date.parse(resetsAt) <= now) continue;
-        const previous = windows.get(sample.windowMinutes);
-        if (!previous || sample.usedPercent > previous.usedPercent || (sample.usedPercent === previous.usedPercent && observedAt > previous.observedAt)) {
-          windows.set(sample.windowMinutes, { windowMinutes: sample.windowMinutes, usedPercent: sample.usedPercent, remainingPercent: 100 - sample.usedPercent, observedAt, resetsAt });
-        }
-      }
-      return { provider, status: windows.size ? "available" : "unavailable", windows: [...windows.values()].sort((a, b) => a.windowMinutes - b.windowMinutes) };
-    }),
   };
 }
 
@@ -216,7 +185,6 @@ export function buildPayload(
   if (sourceHealth.some((source) => source.status !== "available") || snapshot.analytics.warnings.length || snapshot.analytics.repositories.some((repo) => repo.warnings.length)) {
     notes.push("Some evidence sources are incomplete or have coverage notes; empty results do not establish no usage. Source health describes discovery independently of the selected sessions.");
   }
-  if (sessions.some((s) => s.mcpEvidence?.truncated)) notes.push("Structured outcome evidence was capped; coverage is incomplete.");
   if (sessions.some((s) => s.transcript.warnings.length)) notes.push("Some sessions have parser coverage notes; observed history may be incomplete.");
   let data: McpPayload["data"];
   if (tool === "usage_summary") {
@@ -236,8 +204,7 @@ export function buildPayload(
     data = budget(scoped, now);
     notes.push("Budget periods use dated API value across all scoped sessions, including sessions started earlier. Undated provider-reported value is excluded; no budget or invoice is inferred.",
       "Each period's pricing coverage qualifies both its value and burn rate; common totals instead describe the session-start cohort. Undated tokens are excluded and cannot be assigned to a period.",
-      "Burn rate uses elapsed UTC wall hours, requires at least one hour and three dated sessions, and is not a forecast.",
-      "Headroom is a recorded provider-account observation, not a live or repository-specific quota. The most conservative sample within 15 minutes is used across profiles; expired and stale windows are unavailable.");
+      "Burn rate uses elapsed UTC wall hours, requires at least one hour and three dated sessions, and is not a forecast.");
   } else if (tool === "repo_profile" || tool === "compare_agents") {
     data = tool === "repo_profile" ? profile(sessions) : { agents: PROVIDERS.map((provider) => {
       const selected = sessions.filter((s) => s.provider === provider);
@@ -246,10 +213,10 @@ export function buildPayload(
     notes.push("Typical values require five eligible sessions with settled provider lifecycle evidence. Active and unknown sessions, incomplete prices and missing durations are excluded. Settled describes the recorded turn, not success or a guarantee it cannot resume; duration includes idle time and task mix is uncontrolled.",
       "Cache ratios exclude Cursor and require 1,000 input tokens; compaction rates exclude Cursor and require five sessions. No ranking or causal comparison is implied.");
   } else if (tool === "tool_stats") {
-    const rows = toolStats(sessions);
+    const rows = counts(sessions);
     data = { tools: rows.slice(offset, offset + limit), totalTools: rows.length, nextOffset: offset + limit < rows.length ? offset + limit : null };
-    notes.push("Error rates require 20 structured results. Missing flags are not successes. Result coverage is unavailable when structured completions cannot reconcile with call counters; code-mode outer results do not describe inner tools.");
-  } else if (tool === "recent_sessions") {
+    notes.push("Calls count deduplicated structured tool-call records. Code-mode calls count the inner tools they ran.");
+  } else {
     const rows = [...sessions].filter((s) => /^[a-f0-9]{12}$/.test(s.sessionKey)).sort((a, b) =>
       (Date.parse(timestamp(b.lastEventAt) ?? start(b) ?? "") || 0) - (Date.parse(timestamp(a.lastEventAt) ?? start(a) ?? "") || 0) || a.sessionKey.localeCompare(b.sessionKey));
     data = {
@@ -261,28 +228,9 @@ export function buildPayload(
       }), totalSessions: rows.length, nextOffset: offset + limit < rows.length ? offset + limit : null,
     };
     notes.push("Duration is session wall span, including idle time; compare within the same repository and task kind.");
-  } else {
-    data = { inventoryScope: "launch-context", providers: snapshot.inventory.filter((entry) => !args.provider || entry.provider === args.provider).map((entry) => {
-      const selected = sessions.filter((s) => s.provider === entry.provider);
-      const invoked = new Set(counts(selected, "skills").map((item) => item.name));
-      const used = new Set([...counts(selected, "tools").map((item) => item.name), ...selected.flatMap((s) => (s.mcpEvidence?.toolOutcomes ?? []).map((item) => item.tool))].map((tool) => mcpServerName(tool, entry.mcpServers)).filter((v): v is string => v !== null));
-      const observed = new Set(entry.skillIdentities?.filter((item) => item.aliases.some((alias) => invoked.has(alias))).map((item) => item.name));
-      const skills = entry.skills.filter((name) => safeName(name) && !invoked.has(name) && !observed.has(name));
-      const servers = entry.mcpServers.filter((name) => safeName(name) && !used.has(name));
-      return { provider: entry.provider, inventoryCoverage: "partial", sourcesRead: entry.sourcesRead, unreadableSources: entry.unreadableSources, truncated: entry.truncated,
-        skillEvidence: entry.provider === "claude" ? "explicit" : entry.provider === "codex" ? "inferred" : "unavailable",
-        skillIdentityCoverage: !entry.skillIdentities || (!entry.skillIdentities.length && entry.unresolvedSkills) ? "unavailable"
-          : entry.unresolvedSkills || entry.truncated ? "partial" : "available",
-        unresolvedSkills: entry.unresolvedSkills ?? entry.skills.length,
-        installedSkills: entry.skills.length, configuredMcpServers: entry.mcpServers.length,
-        skillsWithoutObservedUse: entry.provider === "cursor" || !entry.skillIdentities ? [] : skills.slice(0, limit), serversWithoutObservedUse: servers.slice(0, limit),
-        omittedSkills: entry.provider === "cursor" || !entry.skillIdentities ? 0 : Math.max(0, skills.length - limit), omittedServers: Math.max(0, servers.length - limit) };
-    }) };
-    notes.push("Inventory covers conventional local configuration in the launch context, not every plugin or managed source. Names without observed use are not proof of disuse; do not remove extensions automatically.",
-      "Claude skill evidence is explicit, Codex is an inferred lower bound, and Cursor skill usage is unavailable. A selected repository changes usage scope, not the installed inventory.");
   }
   return {
-    metrics: integratedMetrics(snapshot.analytics, sessions, now),
+    metrics: integratedMetrics(snapshot.analytics, sessions),
     schemaVersion: 1, tool,
     snapshot: { generatedAt: timestamp(snapshot.analytics.generatedAt) ?? new Date(now).toISOString(), ageSeconds: Math.max(0, Math.floor((now - Date.parse(snapshot.analytics.generatedAt)) / 1000)) || 0, ttlSeconds },
     scope: { kind: id ? "repository" : "machine", repositoryId: id },
@@ -296,7 +244,7 @@ export function summarize(payload: McpPayload): string {
   const scope = payload.scope.kind === "repository" ? "Repository" : "Machine";
   const total = payload.totals;
   if (payload.tool === "budget_status" && "today" in payload.data) {
-    return `${scope}: $${payload.data.today.apiEquivalentUsd.toFixed(2)} today; $${payload.data.week.apiEquivalentUsd.toFixed(2)} this UTC week, API-equivalent (not an invoice). Headroom is recorded evidence only.`;
+    return `${scope}: $${payload.data.today.apiEquivalentUsd.toFixed(2)} today; $${payload.data.week.apiEquivalentUsd.toFixed(2)} this UTC week, API-equivalent (not an invoice).`;
   }
   return `${scope}, ${payload.window.name}: ${total.sessions} sessions; $${total.value.apiEquivalentUsd.toFixed(2)} API-equivalent (not an invoice), $${total.value.providerReportedUsd.toFixed(2)} provider-reported. Check coverage and sample guards in the JSON.`;
 }

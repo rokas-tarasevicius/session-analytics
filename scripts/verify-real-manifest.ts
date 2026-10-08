@@ -11,7 +11,7 @@ export const oraclePipelines: Record<string, OracleStep[]> = {
   reconcile: [
     ...steps('reconcile', `claude.mjs claude-stats.mjs claude-config.mjs claude-diff.mjs`),
     { file: 'reconcile/codex.mjs', args: ['--raw-only'] },
-    ...steps('reconcile', `codex-segments.mjs codex-accounting.mjs codex-fallbacks.mjs codex-diff.mjs conductor-evidence.mjs conductor.mjs conductor-proof.mjs claude-conductor-crosscheck.mjs conductor-other-providers.mjs codex-conductor.mjs codex-orphans.mjs quota.mjs reference.mjs quota-diff.mjs model-allocation.mjs settled-reference.mjs monthly.mjs history-coverage-current.mjs`),
+    ...steps('reconcile', `codex-segments.mjs codex-accounting.mjs codex-fallbacks.mjs codex-diff.mjs conductor-evidence.mjs conductor.mjs conductor-proof.mjs claude-conductor-crosscheck.mjs conductor-other-providers.mjs codex-conductor.mjs codex-orphans.mjs reference.mjs model-allocation.mjs settled-reference.mjs monthly.mjs history-coverage-current.mjs`),
   ],
   pricing: [
     ...steps('pricing', `snapshot-oracle.mjs claude-raw-oracle.mjs claude-price-oracle.mjs claude-iterations-oracle.mjs claude-billing-boundary-oracle.mjs codex-raw-oracle.ts`),

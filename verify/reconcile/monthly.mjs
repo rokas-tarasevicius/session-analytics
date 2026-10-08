@@ -11,7 +11,6 @@ try {
   const codex = await read('codex-aggregates');
   const conductor = await read('conductor-aggregates');
   const codexReceipts = await read('codex-conductor-coverage');
-  const quota = await read('quota-aggregates');
   const sections = [
     '# Monthly reconciliation',
     `Frozen reference: ${reference.cutoff}. Excludes ${reference.excludedSessions} sessions with independently observed post-cutoff activity. Remaining reference: ${integer(reference.totals.sessions)} sessions, ${integer(reference.totals.inputTokens+reference.totals.outputTokens)} tokens, $${usd(reference.totals.valueUsd)} mixed-basis value. This is the existing reference, before proposed corrections.`,
@@ -35,12 +34,6 @@ try {
     'Each row selects the same session-start cohort. Provider observations give conservative lower bounds; they do not establish an exact corrected cumulative total. The reference combines native sessions and recovered summaries. Differences include repeated epoch accounting, partial receipts, subagent scope, metadata-only models and missing main-loop lower bounds. Do not subtract this table wholesale to calculate a bug impact. Proven defects are quantified separately in BUGS.md.',
     table(['Start cohort','SDK identities / results','Observed token lower bound','Reference tokens in matched identities','Observed cost lower bound USD','Reference USD','Known main-loop tokens omitted'],conductor.monthly.map(r=>[r.month,`${r.sessions} / ${r.resultRecords}`,integer(tokenSum(r.reportedLowerBound)),integer(tokenSum(r.reference)),usd(r.reportedLowerBound.costUsd),usd(r.reference.costUsd),integer(r.omittedTopLevelTokens)])),
     'Per-session receipt sequences, SDK versions, canonical/fallback categories and model maxima are in `conductor-aggregates.json`; their scopes are not interchangeable. Exact request-month or profile attribution is unavailable for recovered cumulative receipts.',
-    '## Quota evidence: coverage only',
-    table(['Source','Provider/account key','Month','Window minutes','Samples','Observed percent range'],[
-      ...quota.desktop.accounts.flatMap(a=>[['fh',300],['sd',10080]].flatMap(([field,minutes])=>a.fields[field].months.map(m=>['Claude Desktop',a.accountKey,m.month,minutes,m.samples,`${m.min}–${m.max}`]))),
-      ...quota.codexbar.flatMap(w=>w.months.map(m=>['CodexBar',`${w.provider}/${w.accountKey}`,m.month,w.windowMinutes,m.samples,`${m.min}–${m.max}`])),
-    ]),
-    'Percent samples are non-additive and overlapping windows cannot be combined. CodexBar account keys cannot be mapped reliably to CLI profiles. No token or dollar remainder can be calculated from these samples. Desktop raw field `xu` is retained as uncalibrated numeric evidence only.',
     '## What cannot be established',
     'July/August missing raw-record cache coverage, undated lifetime cache totals, undated project last-session summaries, unknown SDK reset scopes, missing auxiliary requests and deleted sources prevent a uniquely exact machine lifetime bill. The concrete corrections and their limits are listed in BUGS.md; this table deliberately preserves unavailable denominators.',
   ];

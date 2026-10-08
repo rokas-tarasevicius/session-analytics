@@ -9,12 +9,13 @@ test('native-only identity totals require the exact independently proved receipt
   assert.equal(compareDesktopDedup({...legacy,tokenMismatches:[{...legacy.tokenMismatches[0],tokens:{...tokens,inputTokens:-233}}]},desktop).differences.length,1);
   assert.equal(compareDesktopDedup({tokenMismatches:[]},desktop).differences.length,1);
 });
-test('time proof preserves native request denominator and requires complete receipt-only event value',()=>{
+test('time proof preserves native request value and requires complete receipt-only event value',()=>{
   const day='2026-03-05',native={sessions:[{sessionKey:'hash',spendByDay:{[day]:.212088},tokensByDay:{[day]:{inputTokens:86297,outputTokens:22}}}]};
-  const snapshot={sessions:[{sessionKey:'hash',limitsCache:{buckets:[{day,apiEquivalentUsd:.212088,observedTokens:86319}]}}]};
-  const audit={parityErrors:[{sessionKey:'hash',day,kind:'limits-spend',limitsUsd:.212088,spendUsd:.220615}],discrepancies:[]};
+  const snapshot={sessions:[{sessionKey:'hash',spendByDay:{[day]:.220615}}]};
+  const audit={parityErrors:[],discrepancies:[]};
   assert.deepEqual(compareTimeScopes(audit,native,desktop,snapshot).differences,[]);
-  const broken=structuredClone(snapshot);broken.sessions[0]!.limitsCache.buckets[0]!.observedTokens++;
+  const broken=structuredClone(snapshot);broken.sessions[0]!.spendByDay[day]!+=.001;
   assert.equal(compareTimeScopes(audit,native,desktop,broken).differences.length,1);
-  assert.equal(compareTimeScopes({...audit,parityErrors:[]},native,desktop,snapshot).differences.length,1);
+  assert.equal(compareTimeScopes(audit,native,{intervals:[]},snapshot).differences.length,1);
+  assert.equal(compareTimeScopes({...audit,parityErrors:[{kind:'machine-rollup',day,difference:1}]},native,desktop,snapshot).differences.length,1);
 });

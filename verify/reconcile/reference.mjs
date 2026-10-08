@@ -84,16 +84,10 @@ export function reconcileReference(snapshot, excludedKeys = new Set()) {
   check('model-input-sum', sum(snapshot.spendByModel, (m) => m.inputTokens), snapshot.summary.totalInputTokens, 0);
   check('model-output-sum', sum(snapshot.spendByModel, (m) => m.outputTokens), snapshot.summary.outputTokens, 0);
   check('model-value-sum', sum(snapshot.spendByModel, (m) => m.totalUsd), snapshot.summary.estimatedSpendUsd);
-  const desktop = snapshot.limitsCache.profiles.filter((p) => p.scope === 'desktop-account').map((p) => ({
-    profileKey: p.key,
-    windows: p.windows.map((w) => ({ windowMinutes: w.windowMinutes, observations: w.observations, timelineSamples: w.timeline.length,
-      latestAt: w.latest.timestamp, latestUsedPercent: w.latest.usedPercent, stale: w.stale, headroomPercent: w.headroomPercent,
-      invalidTimelineSamples: w.timeline.filter((t) => t.source !== 'claude-desktop' || typeof t.usedPercent !== 'number').length })),
-  }));
   return { cutoff, totalSessions: snapshot.sessions.length, excludedSessions: snapshot.sessions.length - sessions.length,
     totals, providers: [...providers.values()], byStartMonth: [...starts.values()].sort((a,b)=>`${a.month}:${a.provider}`.localeCompare(`${b.month}:${b.provider}`)),
     byActivityMonth: [...activity.values()].map(({sessionKeys, ...row}) => ({...row, sessions: sessionKeys.size})).sort((a,b)=>`${a.month}:${a.provider}`.localeCompare(`${b.month}:${b.provider}`)),
-    models: [...models.values()], checks, desktop,
+    models: [...models.values()], checks,
   };
 }
 
@@ -101,5 +95,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const snapshot = JSON.parse(await readFile(join(homedir(), 'session-analytics-lanes/reference/snapshot-noindex-51ea561.json'), 'utf8'));
   const result = reconcileReference(snapshot);
   await writeFile('.lane/reference-aggregates.json', `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
-  console.log(JSON.stringify({ cutoff: result.cutoff, totals: result.totals, providers: result.providers, checks: result.checks, desktop: result.desktop }));
+  console.log(JSON.stringify({ cutoff: result.cutoff, totals: result.totals, providers: result.providers, checks: result.checks }));
 } catch { console.error('Reference reconciliation failed; raw error suppressed.'); process.exitCode = 1; }

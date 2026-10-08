@@ -1,4 +1,4 @@
-import { collectHistoryCoverage } from "./metrics/history-coverage.ts";
+import { claudeProfileResolver, collectHistoryCoverage } from "./metrics/history-coverage.ts";
 import { calibrateRecovery, type RecoveryComparison } from "./metrics/recovery-calibration.ts";
 import { createHash } from "node:crypto";
 import { canonicalizeRemote, repositoryRemoteAtRoot } from "./repository-remotes.ts";
@@ -11,35 +11,16 @@ import { readJsonLines } from "./jsonl-lines.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { openSourceDatabase } from "./source-database.ts";
 import { fileURLToPath } from "node:url";
-import { ReliabilityCollector, type ReliabilityContext } from "./metrics/reliability.ts";
-import { combineReliability, observeClaude, observeCodex } from "./metrics/reliability-providers.ts";
-import { loadReliabilitySecret } from "./metrics/reliability-secret.ts";
-import type { SessionReliability } from "./metrics/reliability-types.ts";
 
 import {
   VelocityAccumulator, claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed,
   publicModelId, usageVelocity, velocityDimension, velocityMetadata, zeroVelocity,
 } from "./metrics/velocity.ts";
-import { CacheContextCollector, claudeRequestEvidence, type RequestEvidence } from "./metrics/cache-context.ts";
 import { claudeContextWindow } from "./metrics/context-windows.ts";
-import { LimitsCollector } from "./metrics/limits.ts";
-import type { LimitsCacheAnalytics } from "./metrics/limits-cache-types.ts";
-import { timestamp as normalizedTimestamp } from "./metrics/limits-utils.ts";
+import { CompactionCounter } from "./metrics/compactions.ts";
+import { boundedTimestamp } from "./metrics/bounded-time.ts";
+import { TranscriptLifecycle, sameVersion } from "./metrics/transcript-lifecycle.ts";
 import { publicModel } from "./public-model.ts";
-import { boundContextDetail } from "./metrics/context-detail.ts";
-import { OutcomeCollector } from "./metrics/outcomes.ts";
-import { OutcomeEnricher } from "./metrics/outcomes-enrichment.ts";
-import { summarizeOutcomes } from "./metrics/outcomes-summary.js";
-import { WorkflowCollector } from "./metrics/workflow.ts";
-import { addRepositorySkills, historyForTranscript, loadWorkflowSources } from "./metrics/workflow-inventory.ts";
-import type { WorkflowSources } from "./metrics/workflow-inventory.ts";
-import type { WorkflowInventory } from "./metrics/workflow-types.ts";
-import { summarizeWorkflow } from "./public/workflow-data.js";
-import { cacheGapSignals } from "./insights/cache-gaps.ts";
-import { TranscriptLifecycle } from "./insights/transcript-evidence.ts";
-import { captureReviewSource, sameVersion, verifyReviewSource } from "./insights/review-source.ts";
-import type { ReviewSource } from "./insights/review-source.ts";
-import { canonicalMcpServer } from "./insights/mcp-attribution.ts";
 
 import { aggregateSessions } from "./public/export-data.js";
 import { normalizeTimestamp, timestampMilliseconds } from "./public/timestamps.js";
@@ -140,6 +121,7 @@ interface TokenEvent {
   lastCacheReadExposed: boolean;
   totalReasoningExposed: boolean;
   totalCacheReadExposed: boolean;
+  stream: string;
   evidence: RequestEvidence;
   requestSizeKnown: boolean;
   executionKind: SessionAnalytics["executionKind"];
@@ -178,16 +160,22 @@ interface TranscriptCandidate {
   timestamp: string | null;
 }
 
+/** Per-request context evidence; only native Claude and Codex requests carry it. */
+export interface RequestEvidence {
+  contextWindow: number | null;
+  requestInputKnown: boolean;
+}
+
 export interface MutableSession {
   agentIdentity: AgentIdentity;
   velocity: VelocityAccumulator;
   startDimension: VelocityDimension | null;
-  limitsCache: CacheContextCollector;
-  limitsProvider: "claude" | "codex" | null;
-  outcomes?: SessionAnalytics["outcomes"];
-  workflow?: WorkflowCollector;
-  mcpServers: Record<string, number>;
-  requestSizes: { observedTokens: number; unknownTokens: number };
+  /** Native providers reconcile compaction boundaries and context fill; others keep their own counters. */
+  requestProvider: "claude" | "codex" | null;
+  compactionCounter: CompactionCounter;
+  contextUtilizationPeak: number | null;
+  /** Deduplicated native Claude request tokens per UTC day and model, for history coverage. */
+  historyDays: Map<string, { day: string; model: string; tokens: number }>;
   completeness: "complete" | "partial" | "unknown";
   liveness: "inactive" | "active" | "unknown";
   mcpEvidence: McpEvidenceCollector;
@@ -204,7 +192,6 @@ export interface MutableSession {
   maxInputTokensPerCall: number;
   models: Map<string, ModelUsage>;
   queueOperations: number;
-  skills: Record<string, number>;
   spendByDay: Record<string, number>;
   summaries: number;
   taskCompletions: number;
@@ -213,13 +200,6 @@ export interface MutableSession {
   transportTools: Record<string, number>;
   userTurns: number;
   warnings: string[];
-}
-
-// Optional projections must never suppress core usage or tool accounting.
-function updateWorkflow(state: MutableSession, update: (collector: WorkflowCollector) => void): void {
-  if (!state.workflow) return;
-  try { update(state.workflow); }
-  catch { state.workflow.gap("projection"); }
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -311,7 +291,6 @@ function addModelUsage(
   timestamp = normalizeTimestamp(timestamp);
   model = projectModelId(model);
   if (requestSizeKnown) session.maxInputTokensPerCall = Math.max(session.maxInputTokensPerCall, inputForRequest);
-  session.requestSizes[requestSizeKnown ? "observedTokens" : "unknownTokens"] += tokenCount(usage);
   let aggregate = session.models.get(model);
   if (!aggregate) {
     aggregate = {
@@ -332,12 +311,23 @@ function addModelUsage(
   const pricedRequest = selected ? priceUsage(selected.rate, usage, inputForRequest) : null;
   const accountingDay = isoDay(timestamp);
   session.mcpEvidence.usage(accountingDay ?? "", tokenCount(usage), pricedRequest?.pricedTokens ?? 0);
-  if (requestEvidence && session.limitsProvider) {
-    session.limitsCache.addRequest(model, usage, selected?.rate, pricedRequest?.cost ?? null, timestamp, executionKind, requestEvidence, session.limitsProvider);
+  if (requestEvidence && session.requestProvider) {
+    // Peak fill pairs each request's input with its reported window, or a reviewed Claude capacity.
+    const reportedWindow = requestEvidence.contextWindow !== null && requestEvidence.contextWindow > 0 ? requestEvidence.contextWindow : null;
+    const window = reportedWindow ?? (session.requestProvider === "claude" ? claudeContextWindow(publicModel(model)) : null);
+    if (requestEvidence.requestInputKnown && window) {
+      session.contextUtilizationPeak = Math.max(session.contextUtilizationPeak ?? 0, usage.inputTokens / window);
+    }
+    const day = session.requestProvider === "claude" ? boundedTimestamp(timestamp)?.slice(0, 10) : undefined;
+    if (day) {
+      const historyModel = publicModel(model), key = `${day}:${historyModel}`;
+      const row = session.historyDays.get(key) ?? { day, model: historyModel, tokens: 0 };
+      row.tokens += tokenCount(usage); session.historyDays.set(key, row);
+    }
     if (requestEvidence.requestInputKnown) {
       session.maxInputTokensPerCall = Math.max(session.maxInputTokensPerCall, usage.inputTokens);
       session.maxContextWindow = Math.max(session.maxContextWindow,
-        requestEvidence.contextWindow ?? (session.limitsProvider === "claude" ? claudeContextWindow(model) : null) ?? 0);
+        requestEvidence.contextWindow ?? (session.requestProvider === "claude" ? claudeContextWindow(model) : null) ?? 0);
     }
   }
   if (velocityContext && !selected) session.velocity.add(timestamp, velocityContext.dimension, usageVelocity(usage, 0, 0, velocityContext, calls));
@@ -353,9 +343,6 @@ function addModelUsage(
   aggregate.pricingCoverage!.pricedTokens += pricedTokens;
   aggregate.priced &&= pricedTokens === tokenCount(usage);
   if (velocityContext) session.velocity.add(timestamp, velocityContext.dimension, usageVelocity(usage, cost.totalUsd, pricedTokens, velocityContext, calls));
-  // Claude child transcripts contribute to accounting, but not to their
-  // parent's interaction clock. Codex child threads have their own clock.
-  if (calls) updateWorkflow(session, (workflow) => workflow.value(timestamp, cost.totalUsd, executionKind));
   sumCost(aggregate, cost);
   if (executionKind === "subagent") session.costByExecution.subagentUsd += cost.totalUsd;
   else if (executionKind === "top-level") session.costByExecution.topLevelUsd += cost.totalUsd;
@@ -369,10 +356,10 @@ function createMutableSession(): MutableSession {
     agentIdentity: {},
     velocity: new VelocityAccumulator(),
     startDimension: null,
-    limitsCache: new CacheContextCollector(),
-    limitsProvider: null,
-    mcpServers: Object.create(null) as Record<string, number>,
-    requestSizes: { observedTokens: 0, unknownTokens: 0 },
+    requestProvider: null,
+    compactionCounter: new CompactionCounter(),
+    contextUtilizationPeak: null,
+    historyDays: new Map(),
     completeness: "unknown",
     liveness: "unknown",
     mcpEvidence: new McpEvidenceCollector(),
@@ -389,7 +376,6 @@ function createMutableSession(): MutableSession {
     maxInputTokensPerCall: 0,
     models: new Map<string, ModelUsage>(),
     queueOperations: 0,
-    skills: {},
     spendByDay: {},
     summaries: 0,
     taskCompletions: 0,
@@ -544,23 +530,6 @@ function nestedToolNames(input: unknown): string[] {
   return names;
 }
 
-function normalizedSkillName(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const name = value.trim();
-  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(name) ? name : null;
-}
-
-function inferredSkillNames(input: unknown): string[] {
-  if (typeof input !== "string") return [];
-  const names = new Set<string>();
-  const pattern = /(?:^|[\\/'"`\s])([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/SKILL\.md\b/g;
-  for (const match of input.matchAll(pattern)) {
-    const name = normalizedSkillName(match[1]);
-    if (name) names.add(name);
-  }
-  return [...names];
-}
-
 function codexCounterOwnerPrecedes(
   candidate: CodexCounterOwner,
   current: CodexCounterOwner | undefined,
@@ -649,10 +618,6 @@ async function analyzeCodex(
   inheritedWarnings: string[],
   counterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCounters: Set<string> = new Set<string>(),
-  reliabilityContext: ReliabilityContext = { contentRules: false, secret: null },
-  limits?: LimitsCollector,
-  outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(),
-
   index: IndexScan | null = null,
   attributedCounters: Set<string> | null = null,
   isPrunedCounter: (fingerprint: string) => boolean = () => false,
@@ -661,17 +626,11 @@ async function analyzeCodex(
   if (index) {
     const attributed = new Set<string>();
     return index.session(row, evidencePaths, inheritedWarnings,
-      () => analyzeCodex(row, path, rateCard, inheritedWarnings, counterLedger, claimedCounters, reliabilityContext, limits, outcomeEnricher, null, attributed, (counter) => index.isPrunedCounter(counter), evidencePaths),
+      () => analyzeCodex(row, path, rateCard, inheritedWarnings, counterLedger, claimedCounters, null, attributed, (counter) => index.isPrunedCounter(counter), evidencePaths),
       claimedCounters, counterLedger, attributed, evidencePaths.map(page => [...((counterLedger as CodexCounterLedger | null)?.inheritedCallKeysByPath?.get(page) ?? [])].sort()));
   }
   const state = createMutableSession();
-  const reliability = new ReliabilityCollector(reliabilityContext);
-  let reliabilityCwd = row.workspace_path;
-  state.limitsProvider = "codex";
-  state.limitsCache.profileKey = limits?.profileKey(path) ?? null;
-  const sessionLimits = limits?.fork();
-  const outcomes = new OutcomeCollector(row);
-  state.workflow = new WorkflowCollector("codex");
+  state.requestProvider = "codex";
   const mcpEvidence = state.mcpEvidence;
   state.warnings.push(...inheritedWarnings);
   const tokenEvents: TokenEvent[] = [];
@@ -691,13 +650,12 @@ async function analyzeCodex(
   let currentIdentity: AgentIdentity = {};
   const sourceBefore = await Promise.all(evidencePaths.map((page) => stat(page)));
   const lifecycle = new TranscriptLifecycle();
-  const seenMcp = new Set<string>();
   let parseErrors = 0;
   // Codex has recorded the same lifecycle events in several shapes over time:
   // legacy `event_msg` notifications, `item_completed` items, and top-level
   // `compacted` records. A file can carry more than one shape for the same
   // event. Turns/messages use the largest shape count; compaction boundaries
-  // are reconciled individually by the shared cache/context collector.
+  // are reconciled individually by the compaction counter.
   const legacy = { agentMessages: 0, compactions: 0, userMessages: 0 };
   const compactedRecords = { count: 0 };
   const items = {
@@ -720,8 +678,6 @@ async function analyzeCodex(
     mcpEvidence.codex(record);
     if (record["__parse_error"] === true) {
       parseErrors += 1;
-      reliability.truncated = true;
-      state.workflow?.gap("malformed");
       return;
     }
     // A spawned/forked rollout may replay its parent's session_meta after its
@@ -732,19 +688,12 @@ async function analyzeCodex(
       const expectedThread = ownThread ?? row.provider_session_id;
       if (metadataThreadId && expectedThread && metadataThreadId !== expectedThread) return;
     }
-    if (record["type"] === "session_meta" || record["type"] === "turn_context") {
-      reliabilityCwd = stringValue(asRecord(record["payload"])?.["cwd"]) ?? reliabilityCwd;
-    }
-    observeCodex(reliability, record, line, reliabilityCwd);
     const timestamp = normalizeTimestamp(record["timestamp"]);
-    outcomes.observeCodex(record, line);
     lifecycle.observe("codex", record);
     trackTimestamp(state, timestamp);
-    updateWorkflow(state, (workflow) => workflow.observe(record, line));
     const type = stringValue(record["type"]);
     const payload = asRecord(record["payload"]);
     const payloadType = stringValue(payload?.["type"]);
-    sessionLimits?.observe(path, record, row.conductor_session_id);
 
     if (type === "session_meta") {
       ownThread ??= stringValue(payload?.["id"]);
@@ -790,8 +739,7 @@ async function analyzeCodex(
         lastReasoningExposed: counterExposed(usage["reasoning_output_tokens"]),
         lastCacheReadExposed: counterExposed(usage["cached_input_tokens"]),
         totalReasoningExposed: false, totalCacheReadExposed: false,
-        evidence: { stream: path, contextWindow: null, requestInputKnown: true,
-          compactions: Math.max(legacy.compactions, compactedRecords.count, items.compactions.size), reportedReason: null, ttlMinutes: null },
+        stream: path, evidence: { contextWindow: null, requestInputKnown: true },
         requestSizeKnown: true, executionKind: state.executionKind, fingerprint: null,
         inputForRequest: tokens.inputTokens, last: tokens, model, timestamp, total: zeroTokens(),
       });
@@ -801,7 +749,7 @@ async function analyzeCodex(
       const response = stringValue(payload?.["compaction_response_id"]);
       if (response && ownThread) compactionReceipts.add(`receipt:${createHash("sha256").update(JSON.stringify([ownThread, response])).digest("hex")}`);
       compactedRecords.count += 1;
-      state.limitsCache.addCompaction(path, "compacted", stringValue(record["id"]) ?? stringValue(payload?.["id"]), timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
+      state.compactionCounter.add(path, "compacted", stringValue(record["id"]) ?? stringValue(payload?.["id"]), timestamp);
       return;
     }
     if (type === "event_msg") {
@@ -814,7 +762,7 @@ async function analyzeCodex(
       if (payloadType === "task_complete") state.taskCompletions += 1;
       if (payloadType === "context_compacted") {
         legacy.compactions += 1;
-        state.limitsCache.addCompaction(path, "legacy", stringValue(payload?.["id"]), timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
+        state.compactionCounter.add(path, "legacy", stringValue(payload?.["id"]), timestamp);
       }
       if (payloadType === "item_completed") {
         const item = asRecord(payload?.["item"]);
@@ -824,12 +772,7 @@ async function analyzeCodex(
         if (itemType === "AgentMessage") items.agentMessages.add(itemId);
         if (itemType === "ContextCompaction") {
           items.compactions.add(itemId);
-          state.limitsCache.addCompaction(path, "item", stringValue(item?.["id"]), timestamp, state.executionKind, Math.max(legacy.userMessages, items.userMessages.size));
-        }
-        if (itemType === "McpToolCall" && !seenMcp.has(itemId)) {
-          seenMcp.add(itemId);
-          const server = canonicalMcpServer(item?.["server"]);
-          if (server) increment(state.mcpServers, server);
+          state.compactionCounter.add(path, "item", stringValue(item?.["id"]), timestamp);
         }
       }
       if (payloadType === "token_count") {
@@ -849,9 +792,9 @@ async function analyzeCodex(
             lastCacheReadExposed: counterExposed(last?.["cached_input_tokens"]),
             totalReasoningExposed: counterExposed(total["reasoning_output_tokens"]),
             totalCacheReadExposed: counterExposed(total["cached_input_tokens"]),
-            evidence: { stream: path, contextWindow: nonNegativeNumberValue(info?.["model_context_window"]) || null,
-              requestInputKnown: typeof last?.["input_tokens"] === "number" && Number.isFinite(last["input_tokens"]) && last["input_tokens"] >= 0,
-              compactions: Math.max(legacy.compactions, compactedRecords.count, items.compactions.size), reportedReason: null, ttlMinutes: null },
+            stream: path,
+            evidence: { contextWindow: nonNegativeNumberValue(info?.["model_context_window"]) || null,
+              requestInputKnown: typeof last?.["input_tokens"] === "number" && Number.isFinite(last["input_tokens"]) && last["input_tokens"] >= 0 },
             requestSizeKnown: typeof last?.["input_tokens"] === "number" && Number.isFinite(last["input_tokens"]) && last["input_tokens"] >= 0,
             executionKind: state.executionKind,
             fingerprint: codexCounterFingerprint(total, last),
@@ -876,14 +819,6 @@ async function analyzeCodex(
       const transportName = stringValue(payload?.["name"]) ?? payloadType;
       increment(state.transportTools, transportName);
       const nested = payloadType === "custom_tool_call" ? nestedToolNames(payload?.["input"]) : [];
-      updateWorkflow(state, (workflow) => workflow.tool(timestamp, Math.max(1, nested.length)));
-      const canReadSkill =
-        ["Bash", "Read", "exec_command", "read_file"].includes(transportName) ||
-        nested.some((name) => ["exec_command", "read_file"].includes(name));
-      if (canReadSkill) {
-        const skillInput = payload?.["input"] ?? payload?.["arguments"];
-        for (const name of inferredSkillNames(skillInput)) increment(state.skills, name);
-      }
       state.velocity.tool(timestamp, velocityDimension("codex", currentIdentity, state.executionKind, currentModel, state.effort), Math.max(1, nested.length));
       if (nested.length === 0) {
         increment(state.tools, transportName);
@@ -913,10 +848,10 @@ async function analyzeCodex(
   let previousStream: string | null = null;
   for (const event of tokenEvents) {
     // Cumulative-only baselines must never cross file boundaries.
-    if (previousStream !== event.evidence.stream) {
+    if (previousStream !== event.stream) {
       previous = zeroTokens(); baselined = false;
       previousReasoningExposed = false; previousCacheReadExposed = false;
-      previousStream = event.evidence.stream;
+      previousStream = event.stream;
     }
     const reset = !monotonic(event.total, previous);
     if (reset) counterResets += 1;
@@ -947,7 +882,7 @@ async function analyzeCodex(
     if (event.last && tokenCount(event.last) > 0 && event.fingerprint) {
       if (
         owner?.nativeReceipt || isPrunedCounter(event.fingerprint) ||
-        (owner && (owner.path !== event.evidence.stream || owner.timestamp !== event.timestamp)) ||
+        (owner && (owner.path !== event.stream || owner.timestamp !== event.timestamp)) ||
         claimedCounters.has(event.fingerprint)
       ) {
         if (repeatedInLaterEpoch && !isPrunedCounter(event.fingerprint)) repeatedAfterDecrease++;
@@ -965,7 +900,7 @@ async function analyzeCodex(
       event.evidence.requestInputKnown = false;
       missingLastUsage += 1;
       if (event.fingerprint && tokenCount(attributableDelta) > 0 && (isPrunedCounter(event.fingerprint) ||
-          (owner && (owner.path !== event.evidence.stream || owner.timestamp !== event.timestamp)) || claimedCounters.has(event.fingerprint))) {
+          (owner && (owner.path !== event.stream || owner.timestamp !== event.timestamp)) || claimedCounters.has(event.fingerprint))) {
         sharedSnapshots++; continue;
       }
       if (tokenCount(attributableDelta) > 0 && [...receiptEvents].some(([key, receipt]) =>
@@ -980,7 +915,7 @@ async function analyzeCodex(
           if (!event.timestamp || !counterLedger) return;
           for (const [fingerprint, owner] of counterLedger) {
             if (owner.timestamp > event.timestamp) continue;
-            if (owner.path === event.evidence.stream) { yield fingerprint; continue; }
+            if (owner.path === event.stream) { yield fingerprint; continue; }
             const id = basename(owner.path).match(/([0-9a-f]{8}-[0-9a-f-]{27})(?:_[0-9a-f]{8}-[0-9a-f-]{27})?\.jsonl$/i)?.[1];
             if (id && intervalAncestors.has(id) && threadCreatedAt && (owner.earliestTimestamp ?? owner.timestamp) < threadCreatedAt) yield fingerprint;
           }
@@ -991,7 +926,7 @@ async function analyzeCodex(
       }
       if (event.fingerprint && tokenCount(attributableDelta) > 0) {
         if (isPrunedCounter(event.fingerprint) ||
-          (owner && (owner.path !== event.evidence.stream || owner.timestamp !== event.timestamp)) ||
+          (owner && (owner.path !== event.stream || owner.timestamp !== event.timestamp)) ||
           claimedCounters.has(event.fingerprint)) {
           sharedSnapshots += 1;
           continue;
@@ -1090,15 +1025,11 @@ async function analyzeCodex(
   const sourceAfter = await Promise.all(evidencePaths.map((page) => stat(page)));
   state.completeness = parseErrors || unprovenCrossFileCollisions || repeatedAfterDecrease || sourceBefore.some((before, i) => !sameVersion(before, sourceAfter[i]!)) ? "partial" : "complete";
   state.liveness = lifecycle.liveness();
-  state.outcomes = await outcomes.finish(outcomeEnricher, state.firstEventAt, state.lastEventAt);
-  const result = finalizeSession(row, state, finalTokens, evidencePaths.length);
-  result.reliability = combineReliability([reliability.finish()], row.status === "working");
-  if (result.limitsCache && sessionLimits) result.limitsCache.quotaEvidence = sessionLimits.evidence();
-  return result;
+  return finalizeSession(row, state, finalTokens, evidencePaths.length);
 }
 
 const claudeAdapter = createClaudeAdapter({
-  createMutableSession, walkJsonl, visitJsonLines, trackTimestamp, addModelUsage, finalizeSession, updateWorkflow,
+  createMutableSession, walkJsonl, visitJsonLines, trackTimestamp, addModelUsage, finalizeSession,
   async discoverRoots({ home, environment }) {
     return (await discoverProviderRoots({ home, claudeConfigDirectory: environment["CLAUDE_CONFIG_DIR"], codexHome: environment["CODEX_HOME"] })).claude;
   },
@@ -1116,7 +1047,7 @@ async function claudeEvidencePaths(mainPath: string): Promise<string[]> {
   return paths;
 }
 
-async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: PricingCatalog, warnings: string[], reliabilityContext: ReliabilityContext = { contentRules: false, secret: null }, limits?: LimitsCollector, outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(), workflowSources?: WorkflowSources, contentRules = false, index: IndexScan | null = null, usageOwners?: ClaudeUsageOwners, mainPaths: string[] = [path]): Promise<SessionAnalytics | null> {
+async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: PricingCatalog, warnings: string[], index: IndexScan | null = null, usageOwners?: ClaudeUsageOwners, mainPaths: string[] = [path], profileOf?: (path: string) => string | null): Promise<SessionAnalytics | null> {
   if (index && path.includes("/subagents/") && row.provider_session_id) {
     const retained = index.retainedClaudeParent(row.provider_session_id, path);
     if (retained) return retained;
@@ -1124,13 +1055,10 @@ async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: Pr
   const evidencePaths = index ? [...new Set((await Promise.all(mainPaths.map(claudeEvidencePaths))).flat())] : [];
   // Messages shared with a resumed copy are accounted across sessions, so only those sessions skip the index.
   if (index && !usageOwners?.sharedBy(evidencePaths)) {
-    const history = await historyForTranscript(path, workflowSources, row.root_path || row.workspace_path);
-    const dependency = history ? { available: history.available, commands: [...history.commands], registry: [...history.commandNames] } : null;
     return index.session(row, evidencePaths, warnings,
-      () => analyzeClaude(row, path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, null, usageOwners, mainPaths),
-      undefined, undefined, undefined, dependency);
+      () => analyzeClaude(row, path, rateCard, warnings, null, usageOwners, mainPaths, profileOf));
   }
-  const session = await claudeAdapter.analyze({ path, cwd: row.workspace_path, id: row.provider_session_id ?? "", provider: "claude", timestamp: row.created_at }, { row, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, usageOwners, mainPaths });
+  const session = await claudeAdapter.analyze({ path, cwd: row.workspace_path, id: row.provider_session_id ?? "", provider: "claude", timestamp: row.created_at }, { row, rateCard, warnings, usageOwners, mainPaths, profileKey: profileOf?.(path) ?? null });
   if (!session) throw new Error("Claude evidence could not be analyzed.");
   return session;
 }
@@ -1146,7 +1074,7 @@ function finalizeSession(
   const createdAt = normalizeTimestamp(row.created_at) ?? state.firstEventAt;
   const updatedAt = normalizeTimestamp(row.updated_at) ?? state.lastEventAt ?? createdAt;
   if (!createdAt || !updatedAt) throw new Error("Provider timestamps are unavailable.");
-  for (const names of [state.tools, state.transportTools, state.skills]) {
+  for (const names of [state.tools, state.transportTools]) {
     for (const name of Object.keys(names)) if (publicMetadataName.exec(name)?.[0] !== name) {
       const count = names[name]!; delete names[name];
       increment(names, "unknown_tool", count);
@@ -1170,8 +1098,6 @@ function finalizeSession(
     (sum, value) => sum + value,
     0,
   );
-  const limitsCache = state.limitsProvider ? state.limitsCache.finalize() : undefined;
-  const contextUtilizationPeak = limitsCache?.context.peakFill ?? null;
   const executionKind =
     state.executionKindsSeen.size > 1
       ? "mixed"
@@ -1184,8 +1110,8 @@ function finalizeSession(
   }
   const metrics: SessionMetrics = {
     assistantMessages: state.assistantMessages,
-    compactions: limitsCache?.compactionCount ?? state.compactions,
-    contextUtilizationPeak,
+    compactions: state.requestProvider ? state.compactionCounter.count() : state.compactions,
+    contextUtilizationPeak: state.requestProvider ? state.contextUtilizationPeak : null,
     delegatedAgents: state.delegatedAgents.size,
     durationMilliseconds: sessionDuration,
     eventSpanMilliseconds,
@@ -1200,18 +1126,11 @@ function finalizeSession(
     transportToolCalls,
     userTurns: state.userTurns,
   };
-  let workflow: SessionAnalytics["workflow"];
-  try { workflow = state.workflow?.finish(Date.now(), row.status === "working"); }
-  catch { state.warnings.push("Workflow projection is unavailable; accounting was retained."); }
   return {
     mcpEvidence: state.mcpEvidence.finish(row.status === "working"),
     agentIdentity: state.agentIdentity,
     velocity: state.velocity.finish(row.created_at, state.startDimension ?? velocityDimension(row.agent_type as SessionProvider, state.agentIdentity, state.executionKind, "<unknown>", null)),
-    ...(limitsCache ? { limitsCache } : {}),
-    ...(workflow ? { workflow } : {}),
-    ...(row.agent_type === "claude" || row.agent_type === "codex" ? { insightSignals: { requestSizes: { ...state.requestSizes }, ...(Object.keys(state.mcpServers).length ? { mcpServers: state.mcpServers } : {}) } } : {}),
     cost,
-    ...(state.outcomes ? { outcomes: state.outcomes } : {}),
     costBasis: publicProvider === "unsupported" ? "unavailable" :
       row.agent_type === "cursor"
         ? cost.totalUsd > 0
@@ -1232,13 +1151,6 @@ function finalizeSession(
     repositoryId: row.repository_id,
     repositoryName: row.repository_name,
     sessionKey: createHash("sha256").update(row.conductor_session_id).digest("hex").slice(0, 12),
-    skillEvidence:
-      row.agent_type === "claude"
-        ? "explicit"
-        : row.agent_type === "codex"
-          ? "inferred"
-          : "unavailable",
-    skills: state.skills,
     spendByDay: state.spendByDay,
     status: publicStatus,
     tokens,
@@ -1568,7 +1480,7 @@ function noRepositoryGroup(discovered: Map<string, RepositoryRow>, path?: string
   if (path) noRepositoryPathsOf(discovered).add(path);
   let repository = discovered.get(rootlessKey(NO_REPOSITORY_ID));
   if (!repository) {
-    // No root: no directory's skills or Git history belong to this group.
+    // No root: no directory's Git history belongs to this group.
     repository = { default_branch: "", id: NO_REPOSITORY_ID, name: NO_REPOSITORY_NAME, remote_url: null, root_path: "" };
     discovered.set(rootlessKey(NO_REPOSITORY_ID), repository);
   }
@@ -1700,19 +1612,15 @@ async function analyzeTranscriptCandidate(
   warnings: string[] = ["Discovered directly from the machine-wide provider transcript store."],
   codexCounterLedger: Map<string, CodexCounterOwner> | null = null,
   claimedCodexCounters: Set<string> = new Set<string>(),
-  reliabilityContext: ReliabilityContext = { contentRules: false, secret: null },
-  limits?: LimitsCollector,
-  outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(),
-  workflowSources?: WorkflowSources,
-  contentRules = false,
   index: IndexScan | null = null,
   claudeUsageOwners?: ClaudeUsageOwners,
+  claudeProfileOf?: (path: string) => string | null,
 ): Promise<SessionAnalytics | null> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
   const session = candidate.provider === "codex"
-    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index, null, () => false, candidate.paths)
-    : await analyzeClaude(row, candidate.path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, index, claudeUsageOwners, candidate.paths);
+    ? await analyzeCodex(row, candidate.path, rateCard, warnings, codexCounterLedger, claimedCodexCounters, index, null, () => false, candidate.paths)
+    : await analyzeClaude(row, candidate.path, rateCard, warnings, index, claudeUsageOwners, candidate.paths, claudeProfileOf);
   if (session) session.transcript.startTimeKnown = Boolean(safeTime(candidate.timestamp));
   return session;
 }
@@ -1868,9 +1776,6 @@ function analyzeCursorComposer(
     }
   }
   const reportedCost = addCursorReportedCost(state, data);
-  const outcomes = new OutcomeCollector(row);
-  outcomes.observeCursor(data);
-  state.outcomes = outcomes.project();
   const session = finalizeSession(row, state, tokens, 1);
   session.metrics.modelCalls = modelCalls;
   session.costComplete = session.costBasis !== "unavailable";
@@ -2147,9 +2052,6 @@ function sessionRows(database: DatabaseSync, repositoryIds: string[], includeHid
   // Retained result receipts remain evidence after repository/workspace deletion.
   // Optional workspace columns vary by Conductor version. Older schemas remain supported.
   const workspaceColumns = new Set((database.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>).map(({ name }) => name));
-  const archiveCommit = workspaceColumns.has("archive_commit") ? "w.archive_commit" : "NULL";
-  const prPresent = workspaceColumns.has("pr_title") ? "CASE WHEN length(trim(w.pr_title)) > 0 THEN 1 ELSE 0 END" : "0";
-  const workspaceStatus = workspaceColumns.has("derived_status") ? "w.derived_status" : "NULL";
   const placeholders = repositoryIds.map(() => "?").join(", ") || "NULL";
   const rows = database
     .prepare(`
@@ -2166,10 +2068,6 @@ function sessionRows(database: DatabaseSync, repositoryIds: string[], includeHid
         w.workspace_name,
         w.workspace_path,
         w.branch,
-        w.id AS outcome_workspace_id,
-        ${archiveCommit} AS outcome_archive_commit,
-        ${prPresent} AS outcome_pr_present,
-        ${workspaceStatus} AS outcome_workspace_status,
         r.id AS repository_id,
         r.name AS repository_name,
         r.root_path,
@@ -2262,7 +2160,6 @@ function aggregate(
     velocity: velocityMetadata(),
     generatedAt: new Date().toISOString(),
     schemaVersion: 1,
-    outcomes: summarizeOutcomes(sessions),
     rateCard: publicRateCard(rateCard),
     repository: {
       id: repository.id,
@@ -2273,30 +2170,12 @@ function aggregate(
   };
 }
 
-/** Internal review hook. Paths stay in the review worker and never enter a snapshot. */
-export type EvidenceObserver = ((session: SessionAnalytics, path: string, source: ReviewSource) => void) & { sessionKey?: string };
-
-async function analyzeObservedEvidence(path: string, provider: "claude" | "codex", id: string, cwd: string, analyze: () => Promise<SessionAnalytics | null>, observer?: EvidenceObserver, correlationId = `${provider}:${id}`): Promise<SessionAnalytics | null> {
-  const selected = observer && (!observer.sessionKey || observer.sessionKey === createHash("sha256").update(correlationId).digest("hex").slice(0, 12));
-  const source = selected ? await captureReviewSource(path, provider) : null;
-  if (source && (source.id !== id || source.cwd !== cwd)) throw new Error("Review evidence identity changed.");
-  const session = await analyze();
-  if (source && session) { await verifyReviewSource(path, source); observer!(session, path, source); }
-  return session;
-}
-
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
-  observeEvidence?: EvidenceObserver,
-): Promise<{ historyCoverage?: MachineAnalytics["historyCoverage"]; rateCard: PricingCatalog; repositories: RepositoryAnalytics[]; providerWarnings: string[]; limitsCache: LimitsCacheAnalytics; workflowInventory: WorkflowInventory; mcpContext?: MachineAnalytics["mcpContext"]; mcpSourceHealth: MachineAnalytics["mcpSourceHealth"] }> {
+): Promise<{ historyCoverage?: MachineAnalytics["historyCoverage"]; rateCard: PricingCatalog; repositories: RepositoryAnalytics[]; providerWarnings: string[]; mcpContext?: MachineAnalytics["mcpContext"]; mcpSourceHealth: MachineAnalytics["mcpSourceHealth"] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
   const rateCard = await loadPricingCatalog(options);
-  const reliabilityContext: ReliabilityContext = {
-    contentRules: options.reliabilityContentRules === true,
-    secret: options.reliabilityContentRules === true ? await loadReliabilitySecret(options.dataDir) : null,
-  };
-  const outcomeEnricher = new OutcomeEnricher(options);
   let database: DatabaseSync | null = null;
   let index: IndexScan | null = null;
   try {
@@ -2313,7 +2192,7 @@ async function analyzeSelectedRepositories(
       options.repositoryId || options.repositoryName || options.repositoryRemote || options.repositoryRoot,
     );
     const includeHidden = options.includeHidden ?? true;
-    index = observeEvidence || options.outcomesGit || options.outcomesGithub ? null : await IndexScan.open(options, rateCard, includeHidden);
+    index = await IndexScan.open(options, rateCard, includeHidden);
     const availableRepositories = database
       ? database
           .prepare(
@@ -2388,10 +2267,7 @@ async function analyzeSelectedRepositories(
       ? [options.codexRoot, options.codexArchiveRoot].filter((root): root is string => Boolean(root))
       : discoveredRoots.codex;
     const claudeRoots = options.claudeRoot ? [options.claudeRoot] : await claudeAdapter.discoverRoots({ home: homedir(), options, environment: process.env });
-    const limits = await LimitsCollector.create({ claude: claudeRoots, codex: codexRoots, home: homedir(),
-      dataDirectory: options.dataDir, includeDesktop: !options.claudeRoot });
-    const workflowSources = await loadWorkflowSources(claudeRoots, codexRoots,
-      options.codexRoot || options.codexArchiveRoot ? undefined : join(homedir(), ".agents", "skills"));
+    const claudeProfileOf = await claudeProfileResolver(claudeRoots);
     const [codexIndexes, claudeIndexes] = await Promise.all([
       Promise.all(codexRoots.map((root) => indexProviderTranscripts(root, null, "codex"))),
       Promise.all(claudeRoots.map((root) => indexProviderTranscripts(root, null, "claude"))),
@@ -2435,9 +2311,9 @@ async function analyzeSelectedRepositories(
       const provider = row.agent_type as SessionProvider;
       const selected = registeredSelections.get(row.conductor_session_id)!;
       try {
-        const session = await analyzeObservedEvidence(selected.path!, provider as "claude" | "codex", row.provider_session_id!, row.workspace_path, async () => provider === "codex"
-          ? await analyzeCodex(row, selected.path!, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index, null, () => false, selected.paths)
-          : await analyzeClaude(row, selected.path!, rateCard, selected.warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index, claudeUsageOwners, selected.paths), observeEvidence, row.conductor_session_id);
+        const session = provider === "codex"
+          ? await analyzeCodex(row, selected.path!, rateCard, selected.warnings, codexCounterLedger, claimedCodexCounters, index, null, () => false, selected.paths)
+          : await analyzeClaude(row, selected.path!, rateCard, selected.warnings, index, claudeUsageOwners, selected.paths, claudeProfileOf);
         claimed.add(`${provider}:${row.provider_session_id}`);
         return session;
       } catch (error) {
@@ -2467,17 +2343,16 @@ async function analyzeSelectedRepositories(
       if (matches.length !== 1 || !matches[0] || possibleLegacyOwners.get(`${matches[0].provider}:${matches[0].id}`) !== 1) return null;
       const candidate = matches[0]; claimed.add(`${candidate.provider}:${candidate.id}`);
       try {
-        return await analyzeObservedEvidence(candidate.path, candidate.provider, candidate.id, candidate.cwd, async () => candidate.provider === "codex"
-          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, index, null, () => false, candidate.paths)
-          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index, claudeUsageOwners, candidate.paths), observeEvidence, row.conductor_session_id);
+        return candidate.provider === "codex"
+          ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, index, null, () => false, candidate.paths)
+          : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], index, claudeUsageOwners, candidate.paths, claudeProfileOf);
       } catch (error) { if (error instanceof IndexParityError) throw error; return null; }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
       const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered, candidate.repositoryRemote);
       try {
-        const session = await analyzeObservedEvidence(candidate.path, candidate.provider, candidate.id, candidate.cwd, () => analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, reliabilityContext, limits, outcomeEnricher, workflowSources, options.workflowContentRules, index, claudeUsageOwners), observeEvidence);
-        return session;
+        return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, index, claudeUsageOwners, claudeProfileOf);
       }
       catch (error) { if (error instanceof IndexParityError) throw error; return null; }
     });
@@ -2609,19 +2484,16 @@ async function analyzeSelectedRepositories(
       mcpContext = { repositoryId: current?.id ?? null };
     }
     const selectedIds = new Set(selectedRepositories.map(({ id }) => id));
-    for (const session of retainedPopulation) limits.replay(session.limitsCache?.quotaEvidence ?? []);
     const sessions = explicitRepositoryFilter
       ? retainedPopulation.filter(({ repositoryId }) => selectedIds.has(repositoryId))
       : retainedPopulation;
     const sessionsByRepository = new Map<string, SessionAnalytics[]>();
-    boundContextDetail(sessions);
     for (const session of sessions) {
       const repositorySessions = sessionsByRepository.get(session.repositoryId) ?? [];
       repositorySessions.push(session);
       sessionsByRepository.set(session.repositoryId, repositorySessions);
     }
     const repositoriesForOutput = selectedRepositories;
-    await addRepositorySkills(workflowSources.inventory, selectedRepositories);
     const stableIndex = await index?.commit();
     return {
       ...(!explicitRepositoryFilter ? { historyCoverage: {
@@ -2633,11 +2505,8 @@ async function analyzeSelectedRepositories(
         sourceHealth("codex", codexIndexes.map((item) => item.warning)), sourceHealth("cursor", [cursorResult.warning])],
       rateCard,
       providerWarnings: [...new Set(additional.warnings)],
-      limitsCache: limits.finalize(sessions, new Date().toISOString(), explicitRepositoryFilter),
-      workflowInventory: workflowSources.inventory,
       repositories: repositoriesForOutput.map((repository) => {
         const result = aggregate(repository, sessionsByRepository.get(repository.id) ?? [], rateCard);
-        result.workflow = summarizeWorkflow(result.sessions, workflowSources.inventory, result.generatedAt, [result.repository.id]);
         result.warnings.push(
           ...[codexIndex.warning, claudeIndex.warning, cursorResult.warning, ...additional.warnings].filter(
             (warning): warning is string => Boolean(warning),
@@ -2653,7 +2522,7 @@ async function analyzeSelectedRepositories(
     // Discard every partial claim and close the writer before a fresh, unindexed scan.
     const failedIndex = index; index = null; failedIndex?.close();
     const failedDatabase = database; database = null; failedDatabase?.close();
-    const result = await analyzeSelectedRepositories({ ...options, noIndex: true }, observeEvidence);
+    const result = await analyzeSelectedRepositories({ ...options, noIndex: true });
     result.providerWarnings.push(indexParityWarning);
     for (const repository of result.repositories) repository.warnings.push(indexParityWarning);
     return result;
@@ -2682,12 +2551,10 @@ function aggregateMachine(
   return {
     velocity: combined.velocity,
     generatedAt: combined.generatedAt,
-    outcomes: combined.outcomes,
     schemaVersion: 1,
     rateCard: combined.rateCard,
     repositories: repositories.map(
-      ({ repository, spendByDay, spendByModel, summary, topTools, warnings, outcomes }) => ({
-        outcomes,
+      ({ repository, spendByDay, spendByModel, summary, topTools, warnings }) => ({
         repository,
         spendByDay,
         spendByModel,
@@ -2721,14 +2588,11 @@ function aggregateMachine(
 /** Analyze every locally evidenced repository unless an explicit repository filter is supplied. */
 export async function analyzeMachineSessions(
   options: AnalyzeOptions = {},
-  observeEvidence?: EvidenceObserver,
 ): Promise<MachineAnalytics> {
-  const result = await analyzeSelectedRepositories(options, observeEvidence);
+  const result = await analyzeSelectedRepositories(options);
   const machine = aggregateMachine(result.repositories, result.rateCard);
   machine.warnings = [...new Set([...machine.warnings, ...result.providerWarnings])];
   if (result.historyCoverage) machine.historyCoverage = result.historyCoverage;
-  machine.limitsCache = result.limitsCache;
-  machine.workflow = summarizeWorkflow(machine.sessions, result.workflowInventory, machine.generatedAt, machine.repositories.map((r) => r.repository.id));
   machine.mcpSourceHealth = result.mcpSourceHealth;
   if (result.mcpContext) machine.mcpContext = result.mcpContext;
   return machine;
@@ -2751,5 +2615,5 @@ export async function analyzeRepositorySessions(
   const result = await analyzeSelectedRepositories(options);
   const repository = result.repositories[0];
   if (!repository) throw new Error("No evidenced repository matched the requested filter.");
-  return { ...repository, limitsCache: result.limitsCache };
+  return repository;
 }

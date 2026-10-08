@@ -23,11 +23,7 @@ import { fileURLToPath } from "node:url";
 import { generateProviderDemo } from "./demo-providers.ts";
 
 import { seedDemoPricing } from "./demo-pricing.ts";
-import { claudeReliabilityDemo, codexReliabilityDemo } from "./demo-reliability.ts";
 
-import { demoRateLimits, writeLimitsDemo } from "./demo-limits-cache.ts";
-import { demoClaudeOutcomes, demoCodexFileChange, demoCodexGit } from "./demo-outcomes.ts";
-import { addWorkflowDemo } from "./demo-workflow.ts";
 import { seedHistoryDemo } from "./demo-history.ts";
 import { seedMcpDemo } from "./mcp-demo.ts";
 
@@ -40,7 +36,7 @@ const DAYS = 60;
 // Arguments
 
 const argv = process.argv.slice(2);
-const reportMode = argv[0] === "report" || argv[0] === "insights";
+const reportMode = argv[0] === "report";
 const mcpMode = argv[0] === "mcp";
 const options = reportMode || mcpMode ? argv.slice(1) : argv;
 const has = (flag: string): boolean => options.includes(flag);
@@ -54,10 +50,10 @@ for (let index = 0; index < options.length; index += 1) {
   if (!known.has(flag)) fail(`Unknown demo argument: ${flag}`);
   if (flag === "--port") index += 1;
 }
-if (has("--json") && !reportMode) fail("--json is only valid with report or insights.");
+if (has("--json") && !reportMode) fail("--json is only valid with report.");
 if (has("--help")) {
   process.stdout.write(
-    "Usage: node scripts/demo.ts [report|insights [--json] | mcp] [--no-open] [--port PORT] [--keep]\n" +
+    "Usage: node scripts/demo.ts [report [--json] | mcp] [--no-open] [--port PORT] [--keep]\n" +
       "Generates synthetic sessions in a temporary directory and analyzes only that data.\n",
   );
   process.exit(0);
@@ -348,8 +344,6 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
   const projectDirectory = join(root, claudeProjectDirectory(cwd));
   const entrypoint = weighted([["cli", 40], ["sdk-ts", 50], ["local-agent", 10]] as const);
   const main = claudeTranscript({ entrypoint, cwd, messages, model, repository, sessionId, start, subagent: false });
-  if (messages % 4 === 0) main.records.push(...claudeReliabilityDemo(main.end, cwd, sessionId));
-  main.records.push(...demoClaudeOutcomes(sessionId, repository.name, cwd, iso(main.end)));
   writeJsonl(join(projectDirectory, `${sessionId}.jsonl`), main.records);
   const subagents = main.spawned + (chance(0.18) ? 1 : 0);
   for (let index = 0; index < subagents; index += 1) {
@@ -397,7 +391,7 @@ function writeCodexSession(
     records.push({ timestamp: iso(clock), type, payload });
   };
   const source = parentThreadId ? { subagent: { thread_spawn: { parent_thread_id: parentThreadId, depth: 1 } } } : pick(["cli", "vscode", "exec", "review"]);
-  push("session_meta", { id, cwd, source, originator: source === "exec" ? "codex_exec" : source === "vscode" ? "codex_vscode" : "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock), git: demoCodexGit(id) });
+  push("session_meta", { id, cwd, source, originator: source === "exec" ? "codex_exec" : source === "vscode" ? "codex_vscode" : "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock) });
   push("turn_context", { cwd, model, effort, approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } });
   const total: CodexCounter = { cached_input_tokens: 0, input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 };
   let context = integer(9_000, 18_000);
@@ -417,12 +411,11 @@ function writeCodexSession(
       const reasoning = Math.round(output * between(0.25, 0.65));
       const last = { cached_input_tokens: cached, input_tokens: input, output_tokens: output, reasoning_output_tokens: reasoning, total_tokens: input + output };
       for (const key of Object.keys(total) as Array<keyof CodexCounter>) total[key] += last[key];
-      push("event_msg", { type: "token_count", info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 272_000 }, rate_limits: demoRateLimits(clock) });
+      push("event_msg", { type: "token_count", info: { total_token_usage: { ...total }, last_token_usage: last, model_context_window: 272_000 } });
       const callId = `call_${hex(24)}`;
       const kind = weighted([["exec_command", 52], ["apply_patch", 26], ["update_plan", 8], ["write_stdin", 6], ["skill", 3], ["none", 5]] as const);
       if (kind === "apply_patch") {
         push("response_item", { type: "custom_tool_call", name: "apply_patch", call_id: callId, input: `*** Begin Patch\n*** Update File: ${repository.files[call % repository.files.length]}\n@@\n-synthetic before\n+synthetic after\n*** End Patch`, status: "completed" });
-        push("event_msg", demoCodexFileChange(callId));
       } else if (kind === "skill") {
         const skill = pick(codexSkills);
         push("response_item", { type: "function_call", name: "exec_command", call_id: callId, arguments: JSON.stringify({ cmd: `sed -n '1,200p' .agents/skills/${skill}/SKILL.md` }) });
@@ -453,7 +446,6 @@ function writeCodexSession(
     if (chance(0.08)) push("event_msg", { type: "turn_aborted", turn_id: `turn-${turn}`, reason: turn % 2 ? "interrupted" : "replaced", duration_ms: clock - turnStarted });
     else push("event_msg", { type: "task_complete", turn_id: `turn-${turn}`, duration_ms: clock - turnStarted, last_agent_message: "[synthetic]" });
   }
-  if (!parentThreadId && records.length % 3 === 0) records.push(...codexReliabilityDemo(clock));
   // Older sessions have usually been archived; recent ones stay in the dated tree.
   const archived = now - start > 14 * DAY && chance(0.45);
   const stamp = iso(start).slice(0, 19).replace(/:/g, "-");
@@ -540,10 +532,6 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
   const cursorDatabase = join(root, "cursor", "User", "globalStorage", "state.vscdb");
   const home = join(root, "home");
   for (const directory of [claudeRoot, codexRoot, codexArchiveRoot, home]) mkdirSync(directory, { recursive: true });
-  writeFileSync(join(root, "claude", "settings.json"), JSON.stringify({
-    skills: { "code-review": true, "release-checklist": true },
-    mcpServers: { github: { command: "synthetic-demo-only" }, "archive-search": { command: "synthetic-demo-only" } },
-  }));
 
   const repositories: Repository[] = repositorySpecs.map((spec) => {
     const repository: Repository = { ...spec, directories: [...spec.directories], files: [...spec.files], root: join(root, "repos", spec.name) };
@@ -591,8 +579,6 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
     }
   }
   writeCursorDatabase(cursorDatabase, cursorSessions);
-  writeLimitsDemo({ root, claudeRoot, codexRoot, repository: repositories[0]!.root, now });
-  addWorkflowDemo(claudeRoot, codexRoot, repositories, now);
   process.stderr.write(`Generated ${sessions} synthetic top-level sessions across ${repositories.length} repositories in ${root}\n`);
   return { claudeRoot, codexRoot, codexArchiveRoot, cursorDatabase, home };
 }
@@ -643,10 +629,7 @@ environment["SESSION_ANALYTICS_DATA_DIR"] = join(root, "analytics-data");
 environment["SESSION_ANALYTICS_OFFLINE"] = "1";
 
 const sourceFlags = [
-  "--reliability-content-rules",
-
   "--data-dir", join(root, "analytics-data"),
-  "--workflow-content-rules", // Synthetic marker examples only; real scans default off.
   "--claude-root", sources.claudeRoot,
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,

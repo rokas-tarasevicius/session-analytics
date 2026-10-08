@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { buildPayload, profile } from "../src/mcp/metrics.ts";
-import { readInventory } from "../src/mcp/inventory.ts";
 import type { AnalyzeOptions } from "../src/types.ts";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
@@ -46,7 +45,7 @@ test("budget pricing coverage follows cross-week mixed-price transcript activity
       { type: "turn_context", payload: { model: "gpt-5.6-sol" } }, usage(index * 1000, "2026-10-02T11:02:00Z"), event("task_complete"),
     ]);
     const analytics = await analyzeMachineSessions(f.options);
-    const payload = buildPayload({ analytics, inventory: [] }, "budget_status", {}, NOW, 60);
+    const payload = buildPayload({ analytics }, "budget_status", {}, NOW, 60);
     assert.ok("today" in payload.data);
     for (const period of [payload.data.today, payload.data.week]) {
       assert.equal(period.pricingCoverage?.numerator, 10540);
@@ -124,29 +123,9 @@ test("source health survives a completely empty machine and never forwards warni
     const analytics = await analyzeMachineSessions({ ...f.options, claudeRoot: join(f.root, "SECRET_MISSING"), mcpCwd: undefined });
     assert.equal(analytics.sessions.length, 0); assert.equal(analytics.repositories.length, 0);
     analytics.warnings.push("SECRET_LOCAL_ERROR");
-    const payload = buildPayload({ analytics, inventory: [] }, "usage_summary", { provider: "claude", window: "all" }, NOW, 60);
+    const payload = buildPayload({ analytics }, "usage_summary", { provider: "claude", window: "all" }, NOW, 60);
     assert.deepEqual(payload.sourceHealth, [{ provider: "claude", status: "unavailable", sourcesRead: 0, missingSources: 1, unreadableSources: 0 }]);
     assert.match(payload.notes.join(" "), /sources.*incomplete/);
     assert.doesNotMatch(JSON.stringify(payload), /SECRET_/);
-  } finally { await rm(f.root, { recursive: true, force: true }); }
-});
-
-test("Codex inferred skill reads match a canonical installation through directory aliases", async () => {
-  const f = await fixture();
-  try {
-    const skills = join(f.root, "skills");
-    await mkdir(join(skills, "release-review"), { recursive: true });
-    await writeFile(join(skills, "release-review/SKILL.md"), '---\nname: review\ndescription: SECRET_DESCRIPTION\n---\nSECRET_BODY');
-    await symlink(join(skills, "release-review"), join(skills, "installed-alias"));
-    await rollout(f.options, 1, [{ type: "response_item", timestamp: "2026-10-02T11:51:00Z", payload: {
-      type: "function_call", call_id: "SECRET_CALL_ID", name: "read_file", arguments: '{"path":"/fixture/skills/installed-alias/SKILL.md","other":"SECRET_ARGUMENT"}',
-    } }]);
-    const analytics = await analyzeMachineSessions(f.options), inventory = await readInventory(f.options, {}, f.root);
-    const payload = buildPayload({ analytics, inventory }, "unused_extensions", { provider: "codex", window: "all" }, NOW, 60);
-    assert.ok("providers" in payload.data);
-    assert.equal(analytics.sessions[0]!.skills["installed-alias"], 1);
-    assert.equal(payload.data.providers[0]!.installedSkills, 1);
-    assert.deepEqual(payload.data.providers[0]!.skillsWithoutObservedUse, []);
-    assert.doesNotMatch(JSON.stringify([analytics, inventory, payload]), /SECRET_|\/fixture\//);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });

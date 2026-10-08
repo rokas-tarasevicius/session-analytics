@@ -4,6 +4,12 @@ export interface HistoryUsageDay {
   tokens: number;
   valueUsd: number;
 }
+/** Native Claude request evidence for machine history coverage: the transcript's profile
+ * and its deduplicated request tokens per UTC day and model. */
+export interface HistoryProfileEvidence {
+  profileKey: string;
+  days: Array<{ day: string; model: string; tokens: number }>;
+}
 export interface HistoryStatistics {
   basis: "claude-stream-snapshots-v5";
   days: Array<{ day: string; model: string; tokens: number }>;

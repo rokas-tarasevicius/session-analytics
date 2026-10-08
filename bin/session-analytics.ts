@@ -5,7 +5,7 @@ import { version } from "../src/version.ts";
 
 const [command, ...rawRest] = process.argv.slice(2);
 const rest = rawRest.map((arg) => arg === "-h" ? "--help" : arg);
-const commands = new Set(["dashboard", "report", "rates", "insights", "review", "export", "merge", "index", "mcp"]);
+const commands = new Set(["dashboard", "report", "rates", "export", "merge", "index", "mcp"]);
 const forward = (args: string[]): void => {
   process.argv = [process.argv[0] ?? process.execPath, process.argv[1] ?? "", ...args];
 };
@@ -23,8 +23,6 @@ Usage:
   ${brand.command} [dashboard] [options]  Scan local sessions and open the localhost dashboard
   ${brand.command} report [options]       Print a terminal report (add --json for a snapshot)
   ${brand.command} rates <command>        Update, show, diff, or inspect cached pricing
-  ${brand.command} insights [options]     Explain measured signals (add --json for cards)
-  ${brand.command} review [options]       Preview an opt-in bounded session review
   ${brand.command} export [options]       Write CSV, NDJSON, or OTLP/JSON files
   ${brand.command} merge FILE...          Combine aggregate-only shared snapshots
   ${brand.command} mcp [options]          Serve metrics-only MCP tools over stdio
@@ -40,11 +38,6 @@ Usage:
 } else if (command === "rates") {
   const { runRates } = await import("../src/pricing/cli.ts");
   process.exitCode = await runRates(rest);
-
-} else if (command === "insights" || command === "review") {
-  forward(rest);
-  if (command === "insights") await import("../src/insights/cli.ts");
-  else await import("../src/insights/review-cli.ts");
 
 } else if (command === "export" || command === "merge") {
   const { runInterop, reportInteropFailure } = await import("../src/interop/cli.ts");
