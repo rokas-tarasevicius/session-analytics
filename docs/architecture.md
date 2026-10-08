@@ -113,7 +113,7 @@ A working directory is assigned to the first match in this order:
 5. otherwise, a discovered repository for that Git root, named after its basename;
 6. a recorded Git remote (for example Codex session metadata) identifies a deleted checkout;
 7. temporary directories without a Git root or remote are grouped as `Ephemeral automation sessions`. These are the OS temporary directory, `/tmp` and macOS per-user `/var/folders/*/*/T` directories, under either their `/private` or their short spelling, whether or not they still exist;
-8. every other directory without a Git root, remote or Conductor ownership (the home directory, scratch and download folders, deleted checkouts that recorded no remote) is not a repository. All of them share one group, `No repository detected`, with no root directory.
+8. every other directory without a Git root, remote or Conductor ownership (the home directory, scratch and download folders, deleted checkouts that recorded no remote) is not a repository. All of them share one group, `No repository detected`, with no root directory: no repository skills or Git outcomes are read for it, while each session's project commands still come from its own folder.
 
 Discovered repository IDs are derived from a hash of the grouping root, so they are stable across runs on the same machine and do not contain the path itself.
 

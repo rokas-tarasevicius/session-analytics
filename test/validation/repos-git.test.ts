@@ -7,6 +7,9 @@ import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { analyzeMachineSessions } from '../../src/analyzer.ts';
+import { openIndexDatabase } from '../../src/store/database.ts';
+import { keyedHash } from '../../src/store/fingerprint.ts';
+import { NO_REPOSITORY_ID } from '../../verify/repos/inventory-roots.ts';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const root = await mkdtemp(join(tmpdir(), 'repos-git-validation-'));
@@ -199,6 +202,7 @@ test('R-LOCAL-01: home, scratch, download and chat folders share one no-reposito
   assert.equal(result.sessions.length, keys.length);
   assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
   assert.ok(result.sessions.every(s => s.repositoryName === NO_REPOSITORY));
+  assert.equal(result.sessions[0]!.repositoryId, NO_REPOSITORY_ID, 'the product and the independent oracle agree on the group ID');
   assert.deepEqual(result.repositories.filter(r => r.summary.sessions > 0).map(r => r.repository.name), [NO_REPOSITORY]);
   // Neither the group name nor its ID carries a folder name or path.
   const serialized = JSON.stringify(result);
@@ -252,4 +256,34 @@ test('R-LOCAL-02: an existing folder under /tmp is ephemeral through its canonic
   await f.session(scratch, 'claude');
   const result = await analyzeMachineSessions(f.options);
   assert.equal(result.sessions[0]?.repositoryName, 'Ephemeral automation sessions');
+});
+
+for (const keptFirst of [true, false]) test(`R-LOCAL-03: retained sessions from retired per-folder groups and the shared group form one group (${keptFirst ? 'shared group first' : 'legacy first'})`, async t => {
+  const f = await fixture(t); const options = { ...f.options, noIndex: false as const };
+  const kept = join(outside, 'kept'), legacyFolders = [join(outside, 'legacy-one'), join(outside, 'legacy-two')];
+  const keys: string[] = [];
+  for (const cwd of keptFirst ? [kept, ...legacyFolders] : [...legacyFolders, kept]) keys.push(await f.session(cwd));
+  const legacyKeys = keptFirst ? keys.slice(1) : keys.slice(0, 2);
+  await analyzeMachineSessions(options);
+  // Rewrite two indexed sessions as an earlier release stored them, with a valid MAC.
+  const connection = openIndexDatabase(options);
+  try {
+    for (const row of connection.database.prepare('SELECT scope,identity_key,payload FROM sessions').all()) {
+      const session = JSON.parse(String(row.payload));
+      const legacy = legacyKeys.indexOf(session.sessionKey) + 1;
+      if (legacy < 1) continue;
+      session.repositoryId = `discovered-${String(legacy).repeat(20)}`; session.repositoryName = `legacy-${legacy} · 000${legacy} (local directory)`;
+      const payload = JSON.stringify(session);
+      connection.database.prepare('UPDATE sessions SET payload=?,payload_mac=? WHERE scope=? AND identity_key=?')
+        .run(payload, keyedHash(connection.secret, payload), row.scope!, row.identity_key!);
+    }
+  } finally { connection.close(); }
+  // With every transcript gone no live session creates the shared group first.
+  await rm(join(f.root, 'claude'), { recursive: true }); await mkdir(join(f.root, 'claude'));
+  const result = await analyzeMachineSessions(options);
+  assert.equal(result.sessions.length, 3);
+  assert.ok(result.sessions.every(s => s.transcript.sourceDeleted && s.repositoryName === NO_REPOSITORY));
+  assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
+  assert.equal(result.repositories.filter(r => r.repository.id === result.sessions[0]!.repositoryId).length, 1);
+  assert.equal(JSON.stringify(result).includes('(local directory)'), false);
 });
