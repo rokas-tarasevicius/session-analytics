@@ -156,7 +156,7 @@ Returned by `/api/analytics` and `report --json`.
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `repository.id` | Stable repository key. For a registered repository, `conductor-` plus the first 20 hex characters of SHA-256 of `conductor:<private repository record ID>`. Otherwise `discovered-` plus 20 hex characters of SHA-256 of the grouping identity: `remote:<normalized full remote>` when available, else the canonical Git/common directory or local directory. Unassigned native Cursor composers share a fixed hashed group; adapters hash their source plus private project/group identity, or session identity when no group is available. Raw identity inputs never leave the parser | P1 |
-| `repository.name` | Display name: Conductor's repository name, the final normalized remote component, or the basename of the Git root. Non-Git directories show `<basename> · <4 hex> (local directory)`; macOS temporary directories show `Ephemeral automation sessions`; unassigned groups use a fixed provider label with an optional hash suffix | P1 |
+| `repository.name` | Display name: Conductor's repository name, the final normalized remote component, or the basename of the Git root. Directories without any repository evidence share the fixed label `No repository detected`; temporary directories show `Ephemeral automation sessions`; unassigned groups use a fixed provider label with an optional hash suffix | P1 |
 | `spendByDay[]` | Priced usage by UTC day for this repository | P0 |
 | `spendByModel[]` | Model usage for this repository | P0 |
 | `summary` | Repository totals; see [Summary](#summary) | P0 |

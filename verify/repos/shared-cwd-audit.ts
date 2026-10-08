@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { loadNativeHeads } from './native-heads.ts';
 import { loadConductor } from './conductor-oracle.ts';
-import { canonicalizeRemote, resolveRepository } from './git-oracle.ts';
+import { NO_REPOSITORY_NAME, canonicalizeRemote, resolveRepository } from './git-oracle.ts';
 const hash=(s:string,n=12)=>createHash('sha256').update(s).digest('hex').slice(0,n);
 const home=homedir();const snapshot=JSON.parse(readFileSync(join(home,'session-analytics-lanes/reference/snapshot-noindex-51ea561.json'),'utf8'));
 const prior=JSON.parse(readFileSync('.lane/repos-oracle.json','utf8'));
@@ -40,7 +40,7 @@ for(const r of native.records){
  const g=resolveRepository(r.cwd);if(g.confidence!=='unresolved')continue;
  for(const s of snapshotRows('claude',r.id)){
   if(seen.has(s.sessionKey))continue;seen.add(s.sessionKey);
-  if(!(repositoryLabels.get(s.repositoryId)||'').endsWith('(local directory)'))continue;
+  if(repositoryLabels.get(s.repositoryId)!==NO_REPOSITORY_NAME)continue;
   if(priorByKey.get(s.sessionKey)?.active)continue;
   const remoteSet=new Set(support.map(x=>x.remote));
   if(remoteSet.size!==1){ambiguousTargets.push({sessionKey:s.sessionKey,cwdHash:hash(r.cwd),supportCount:support.length,remoteCount:remoteSet.size,costUsd:s.cost.totalUsd,inputTokens:s.tokens.inputTokens,outputTokens:s.tokens.outputTokens});continue;}

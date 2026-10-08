@@ -20,6 +20,7 @@ import { changedEvidence } from './parity-evidence.ts';
 import { captureSourceGeneration, changedSourceSessions, readSourceGenerations, type SourceGeneration } from './verify-real-source-changes.ts';
 import { captureContextInputs, proveContextCurves, readContextInputs } from './verify-real-context.ts';
 import { calibrationSummary, proveCalibration, sameCalibration } from './verify-real-calibration.ts';
+import { NO_REPOSITORY_NAME } from '../verify/repos/git-oracle.ts';
 import { oraclePipelines, type OracleStep } from './verify-real-manifest.ts';
 import { resetOracleArtifacts, copyPricingEvidence, requireUnchangedProduction, validateOracleExecution, verifyPricingProvenance } from './verify-real-evidence.ts';
 
@@ -40,9 +41,10 @@ export async function productionFingerprint(): Promise<string> {
 
 /** Names are never retained in audit snapshots. Known bucket labels preserve oracle routing. */
 export function privateAuditSnapshot(snapshot: MachineAnalytics): MachineAnalytics {
+  // The two fixed bucket labels carry no private value and drive oracle routing.
   const labels = new Map(snapshot.repositories.map(r => [r.repository.id,
-    r.repository.name === 'Ephemeral automation sessions' ? r.repository.name :
-      `repository-${hash(r.repository.id)}${r.repository.name.endsWith('(local directory)') ? ' (local directory)' : ''}`]));
+    r.repository.name === 'Ephemeral automation sessions' || r.repository.name === NO_REPOSITORY_NAME ? r.repository.name :
+      `repository-${hash(r.repository.id)}`]));
   for (const r of snapshot.repositories) r.repository.name = labels.get(r.repository.id)!;
   for (const s of snapshot.sessions) s.repositoryName = labels.get(s.repositoryId) ?? `repository-${hash(s.repositoryId)}`;
   return snapshot;

@@ -532,12 +532,20 @@ test("moving a rollout into archives does not retain a duplicate", async () => {
 test("retained-only discovered repositories can be selected using a keyed root match", async () => {
   await withFixture(async (fixture, root) => {
     const opts = { ...options(fixture), databasePath: join(root, "absent.db"), cursorDatabasePath: join(root, "absent-cursor.db") };
+    // Without Conductor metadata the fixture's workspace path is not a repository; give it a Git root.
+    const checkout = join(root, "unregistered-checkout");
+    await mkdir(join(checkout, ".git"), { recursive: true }); await writeFile(join(checkout, ".git/config"), "[core]\n bare = false\n");
+    for (const path of await files(fixture.claudeRoot)) {
+      await writeFile(path, (await readFile(path, "utf8")).replaceAll("/fixtures/workspaces/conductor/claude-workspace", checkout));
+    }
     const initial = await analyzeMachineSessions(opts);
     const chosen = initial.sessions.find((session) => session.provider === "claude"); assert.ok(chosen);
     await rm(fixture.claudeRoot, { recursive: true });
-    const retained = await analyzeRepositorySessions({ ...opts, repositoryRoot: "/fixtures/workspaces/conductor/claude-workspace" });
+    const retained = await analyzeRepositorySessions({ ...opts, repositoryRoot: checkout });
     assert.equal(retained.sessions[0]?.sessionKey, chosen.sessionKey);
     assert.equal(retained.sessions[0]?.transcript.sourceDeleted, true);
+    // A folder that is not a repository cannot be selected as one.
+    await assert.rejects(analyzeRepositorySessions({ ...opts, repositoryRoot: "/fixtures/workspaces/conductor/codex-workspace" }), /No evidenced repository/);
   });
 });
 

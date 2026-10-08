@@ -16,7 +16,7 @@ export async function captureInventoryEvidence():Promise<InventoryCapture>{
 export function scopeInventoryEvidence(snapshot:Row,capture:InventoryCapture):InventoryCapture & {outOfScopeFailures:string[]}{
  const id=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(v);
  if(!validInventoryCensus(capture.census,true)||!Array.isArray(capture.rootCoverage)||!Array.isArray(capture.discoveryFailures)||!capture.discoveryFailures.every(f=>typeof f==='string')||!Array.isArray(capture.alternatives)||
-  !capture.rootCoverage.every(r=>r&&id(r.repositoryId)&&Number.isSafeInteger(r.candidates)&&((r.status==='resolved'&&r.candidates===1)||(r.status==='missing'&&r.candidates===0)||(r.status==='ambiguous'&&r.candidates>=2)))||new Set(capture.rootCoverage.map(r=>r.repositoryId)).size!==capture.rootCoverage.length||
+  !capture.rootCoverage.every(r=>r&&id(r.repositoryId)&&Number.isSafeInteger(r.candidates)&&((r.status==='resolved'&&r.candidates===1)||(r.status==='missing'&&r.candidates===0)||(r.status==='rootless'&&r.candidates===0)||(r.status==='ambiguous'&&r.candidates>=2)))||new Set(capture.rootCoverage.map(r=>r.repositoryId)).size!==capture.rootCoverage.length||
   !capture.alternatives.every(a=>a&&id(a.repositoryId)&&Number.isSafeInteger(a.candidates)&&a.candidates>=2&&capture.rootCoverage.filter(r=>r.repositoryId===a.repositoryId&&r.status==='ambiguous'&&r.candidates===a.candidates).length===1)||new Set(capture.alternatives.map(a=>a.repositoryId)).size!==capture.alternatives.length)
   return{...capture,census:{...capture.census,failures:['workflow.inventory.complete-capture-invalid']},outOfScopeFailures:[]};
  const selected=new Set(snapshot.repositories.map((r:Row)=>r.repository.id));
@@ -42,6 +42,8 @@ export function verifyInventoryCoverage(snapshot:Row,capture:InventoryCapture):s
   const id=repository.repository.id,row=coverage.get(id),alternatives=capture.alternatives.filter(r=>r.repositoryId===id),scopes=capture.census.scopes.filter(s=>s.repositoryId===id);
   if(!row||!Number.isSafeInteger(row.candidates)||row.candidates<0){failures.push(`workflow.inventory.repository:${id}:missing`);continue;}
   if(row.status==='resolved'&&row.candidates===1&&scopes.length>=3)continue;
+  // The no-repository group owns no directory; any repository-scoped skill there would be a product error.
+  if(row.status==='rootless'&&row.candidates===0&&scopes.length===0&&!alternatives.length)continue;
   if(row.status==='ambiguous'&&row.candidates>1&&alternatives.length===1&&alternatives[0]!.candidates===row.candidates&&scopes.length>=row.candidates*3&&!capture.census.failures.length)continue;
   failures.push(`workflow.inventory.repository:${id}:unproved`);
  }

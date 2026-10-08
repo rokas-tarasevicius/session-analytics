@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { loadConductor } from './conductor-oracle.ts';
 import { loadNativeHeads } from './native-heads.ts';
 import { loadCursor } from './cursor-oracle.ts';
-import { resolveRepository } from './git-oracle.ts';
+import { NO_REPOSITORY_GROUP, localDirectoryAttribution, resolveRepository } from './git-oracle.ts';
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex').slice(0,20);
 const canonical=(path:string)=>{try{return realpathSync(path);}catch{return resolve(path);}};
 export function inventoryRootCandidates(registered: Array<{id:string;root_path:string}>, records: Array<{cwd?:string|null;initialMetadataRemote?:string|null;metadataRemotes?:string[]}>, selected?:ReadonlySet<string>):Map<string,string[]>{
@@ -25,9 +25,11 @@ export function inventoryRootCandidates(registered: Array<{id:string;root_path:s
     if(seen.has(signature))continue;seen.add(signature);
     const git=resolveRepository(cwd,remote??undefined);
     const physical=git.commonDir?.endsWith('/.git')?dirname(git.commonDir):git.root;
-    const ephemeral=!physical&&!git.remote&&cwd.startsWith('/private/var/folders/')&&cwd.includes('/T/');
-    const grouping=git.remote?`remote:${git.remote}`:ephemeral?'/private/var/folders/session-analytics-ephemeral':physical??cwd;
-    add(`discovered-${hash(grouping)}`,ephemeral?grouping:physical??cwd);
+    if(git.remote||physical){add(`discovered-${hash(git.remote?`remote:${git.remote}`:physical!)}`,physical??cwd);continue;}
+    // Directories without repository evidence share fixed groups. The ephemeral
+    // group keeps its literal sentinel root; the no-repository group owns no directory.
+    const local=localDirectoryAttribution(cwd,git);
+    add(`discovered-${hash(local.root)}`,local.route==='ephemeral'?local.root:null);
   }
   return new Map([...candidates].map(([id,roots])=>[id,[...roots].sort()]));
 }
@@ -37,7 +39,9 @@ export async function loadInventoryRootCandidates(selected?:ReadonlySet<string>,
 }
 
 export interface InventoryRoot { path: string; provider: 'claude'|'codex'; repositoryId: string|null }
-export interface InventoryRootCoverage { repositoryId: string; candidates: number; status: 'resolved'|'missing'|'ambiguous' }
+export interface InventoryRootCoverage { repositoryId: string; candidates: number; status: 'resolved'|'missing'|'ambiguous'|'rootless' }
+/** The shared group for directories without repository evidence owns no directory, so no repository skills. */
+export const NO_REPOSITORY_ID=`discovered-${hash(NO_REPOSITORY_GROUP)}`;
 export interface InventoryRootAlternatives { repositoryId:string; candidates:InventoryRoot[][] }
 const skillDirectories=(path:string,repositoryId:string):InventoryRoot[]=>[['.claude','claude'],['.codex','codex'],['.agents','codex']].map(([directory,provider])=>({path:join(path,directory!,'skills'),provider:provider as 'claude'|'codex',repositoryId}));
 /** roots and alternatives are private. Coverage and fixed failures may be persisted. */
@@ -47,7 +51,7 @@ export function inventorySkillRoots(candidates: ReadonlyMap<string,readonly stri
   const roots=[...globalRoots],alternatives:InventoryRootAlternatives[]=[],coverage:InventoryRootCoverage[]=[],failures:string[]=[];
   for(const repositoryId of [...selected].sort()){
     const choices=candidates.get(repositoryId);
-    const status=!choices?.length?'missing':choices.length===1?'resolved':'ambiguous';
+    const status=!choices?.length?(repositoryId===NO_REPOSITORY_ID&&choices?'rootless':'missing'):choices.length===1?'resolved':'ambiguous';
     coverage.push({repositoryId,candidates:choices?.length??0,status});
     if(status==='missing'||status==='ambiguous'){
       failures.push(`repository:${repositoryId}:${status}`);

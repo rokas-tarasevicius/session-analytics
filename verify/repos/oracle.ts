@@ -8,7 +8,7 @@ import { loadNative } from './native-oracle.ts';
 import { loadNativeHeads } from './native-heads.ts';
 import { loadConductor } from './conductor-oracle.ts';
 import { loadCursor } from './cursor-oracle.ts';
-import { canonicalizeRemote, localDirectoryAttribution, resolveRepository as resolveUncachedRepository } from './git-oracle.ts';
+import { NO_REPOSITORY_NAME, canonicalizeRemote, localDirectoryAttribution, resolveRepository as resolveUncachedRepository } from './git-oracle.ts';
 async function main(): Promise<void> {
 const hashCache=new Map<string,string>();
 const hash=(s:string,n=12)=>{const key=`${n}:${s}`;let value=hashCache.get(key);if(!value){value=createHash('sha256').update(s).digest('hex').slice(0,n);hashCache.set(key,value);}return value;};
@@ -51,7 +51,7 @@ for(const r of records) {
 const rows:any[]=[];
 const missing:any[]=[];
 const repoLabels=new Map(snapshot.repositories.map((r:any)=>[r.repository.id,r.repository.name]));
-const bucket=(id:string)=>{const name=String(repoLabels.get(id)??'');return name==='Ephemeral automation sessions'?'ephemeral':name.endsWith('(local directory)')?'local-directory':'repository';};
+const bucket=(id:string)=>{const name=String(repoLabels.get(id)??'');return name==='Ephemeral automation sessions'?'ephemeral':name===NO_REPOSITORY_NAME?'no-repository':'repository';};
 const workspaces=conductor.workspaces;
 for(const s of snapshot.sessions){
  let rs=sessionCandidates.get(s.sessionKey)??[];

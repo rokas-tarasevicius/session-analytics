@@ -83,17 +83,26 @@ export interface RepositoryEvidence {
   evidence: string[];
 }
 
-/** Last-resort bucket only after Git, remote and registered ownership checks. */
-export function localDirectoryAttribution(cwd: string, git: RepositoryEvidence): { root: string; route: 'ephemeral' | 'local-directory' } {
-  // Existing paths canonicalize; deleted CWDs keep their recorded spelling.
-  // The product's fallback contract recognizes the current OS temp root and
-  // literal /tmp, not every missing descendant of a symlinked ancestor.
+/** Grouping input of the single bucket for directories without repository evidence. */
+export const NO_REPOSITORY_GROUP = 'no-repository';
+export const NO_REPOSITORY_NAME = 'No repository detected';
+export const EPHEMERAL_GROUP = '/private/var/folders/session-analytics-ephemeral';
+
+/** Last-resort bucket only after Git, remote and registered ownership checks.
+ * A directory with none of that evidence is not a repository, so it never gets a
+ * group of its own: temporary directories share the ephemeral group and every
+ * other directory (home, scratch folders, deleted checkouts) shares one bucket. */
+export function localDirectoryAttribution(cwd: string, git: RepositoryEvidence): { root: string; route: 'ephemeral' | 'no-repository' } {
+  // Existing paths canonicalize; deleted CWDs keep their recorded spelling, so
+  // the /private alias of macOS /tmp and /var is folded independently of existence.
   let path = resolve(cwd); try { path = realpathSync(cwd); } catch { /* absent directory */ }
-  const inside = (root: string) => path === root || path.startsWith(root.replace(/\/$/, '') + '/');
+  const fold = (value: string) => resolve(value).replace(/^\/private(?=\/(?:tmp|var)(?:\/|$))/, '');
+  const folded = fold(path);
+  const inside = (root: string) => { const r = fold(root); return folded === r || folded.startsWith(r.replace(/\/$/, '') + '/'); };
   const temporary = !git.root && !git.remote && (
-    path.startsWith('/private/var/folders/') && path.includes('/T/') ||
-    inside(realOrResolved(tmpdir())) || inside('/tmp'));
-  return { root: temporary ? '/private/var/folders/session-analytics-ephemeral' : path, route: temporary ? 'ephemeral' : 'local-directory' };
+    /^\/var\/folders\/[^/]+\/[^/]+\/T(?:\/|$)/.test(folded) ||
+    inside(tmpdir()) || inside(realOrResolved(tmpdir())) || inside('/tmp'));
+  return temporary ? { root: EPHEMERAL_GROUP, route: 'ephemeral' } : { root: NO_REPOSITORY_GROUP, route: 'no-repository' };
 }
 
 /** Resolves nearest Git root, following .git and commondir pointers independently. */
