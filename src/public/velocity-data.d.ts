@@ -24,6 +24,7 @@ export function shiftDay(day: string, amount: number): string;
 export function calendarDays(start: string, end: string): string[];
 export function periodKey(day: string, granularity: string): string;
 export function buildVelocity(sessions: SessionAnalytics[], options: VelocityOptions): VelocityData;
+export function averagePrice(data: VelocityData): { total: number; days: number; activeDays: number; perActiveDay: number | null; perCalendarDay: number | null };
 export function guardedDelta(current: number, previous: number, metric: Metric, previousCalls?: number): number | null;
 export const comparisonEvidenceFloor: number;
 export const ledgerlessSources: Set<string>;

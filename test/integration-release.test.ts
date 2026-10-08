@@ -10,7 +10,7 @@ import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { Element, Option, documentFromHtml } from "./release-dom.ts";
 import { version } from "../src/version.ts";
 
-const views = ["summary", "velocity", "costs", "models", "pricing", "tools", "activity"];
+const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
 
 test("release: every dispatcher command shares help and version without scanning", () => {
@@ -22,7 +22,7 @@ test("release: every dispatcher command shares help and version without scanning
   }
 });
 
-test("release: complete demo API, all seven renderers, static modules and privacy work together", { timeout: 120_000 }, async (t) => {
+test("release: complete demo API, all six renderers, static modules and privacy work together", { timeout: 120_000 }, async (t) => {
   const listener = createServer(); await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
   const address = listener.address(); assert.ok(address && typeof address === "object");
   await new Promise<void>((resolve) => listener.close(() => resolve()));

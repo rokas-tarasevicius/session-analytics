@@ -60,7 +60,7 @@ try{
  await send('Page.navigate',{url:origin+'/?view=summary'});
  for(let i=0;i<240;i++){if(await text('#metric-sessions')!=='—')break;await delay(250)}
  check('snapshotLoaded',await evaluate(`document.querySelector('#sync-context')?.dataset.state`),'live');
- const views=['summary','velocity','costs','models','pricing','tools','activity'];
+ const views=['summary','velocity','costs','pricing','tools','activity'];
  for(const window of windows){
   context={window};await click(`[data-window-preset="${window.replace('d','')}"]`);if(window==='custom'){await change('#window-start','2026-09-01');await change('#window-end','2026-09-30')}
   const range=await evaluate(`({start:document.querySelector('#window-start').value,end:document.querySelector('#window-end').value})`);
@@ -77,11 +77,8 @@ try{
    if(view==='costs'){
     const apiUpper=cohort.filter(s=>s.costBasis==='api-list-price-equivalent').reduce((a,s)=>a+s.cost.upperEstimateUsd,0);
     for(const [id,value]of [['api-total',money(expect.apiEquivalentSpendUsd)],['upper-total',money(apiUpper)],['provider-total',cohort.some(s=>s.costBasis==='provider-reported')?money(expect.providerReportedSpendUsd):'N/A'],['coverage',`${(expect.pricedTokenCoverage*100).toFixed(1)}%`]])check(`costs.${id}`,head(await text('#cost-'+id)),value);
-   }
-   if(view==='models')for(const metric of ['value','calls','input','output']){
-    await click(`[data-model-metric="${metric}"]`);
-    const rows=await evaluate(`Array.from(document.querySelectorAll('.provider-model-group')).flatMap(g=>Array.from(g.querySelectorAll('.model-row')).map(r=>({provider:g.querySelector('h2').textContent,model:r.firstElementChild.textContent,value:r.lastElementChild.textContent})))`);
-    for(const r of rows){const m=expect.models.find(m=>providerLabels[m.provider]===r.provider&&m.model===r.model);if(!m)continue;const value={value:money(m.totalUsd),calls:`${integer(m.calls)} calls`,input:`${compact(m.inputTokens)} tokens`,output:`${compact(m.outputTokens)} tokens`}[metric];if(head(r.value)==='N/A'&&((metric==='value'&&m.totalUsd===0)||(metric==='calls'&&m.calls===0)||(metric!=='value'&&m.inputTokens+m.outputTokens===0)))continue;check(`models.${metric}.${m.provider}.${m.model}`,head(r.value),value)}
+    const rows=await evaluate(`Array.from(document.querySelectorAll('.cost-model-row')).map(r=>({provider:r.querySelector('.cost-model-label').lastElementChild.textContent,model:r.querySelector('.cost-model-label').firstElementChild.textContent,value:r.querySelector('strong').textContent}))`);
+    for(const row of rows){const model=expect.models.find(m=>providerLabels[m.provider]===row.provider&&m.model===row.model);if(model)check(`costs.model.${model.provider}.${model.model}`,head(row.value),model.totalUsd===0&&head(row.value)==='—'?'—':money(model.totalUsd))}
    }
    if(['summary','activity','velocity','tools'].includes(view))for(const provider of providers){
     context={window,view,provider};await providerControls(view,provider);
@@ -94,17 +91,17 @@ try{
     if(view==='velocity'){
      const expected=velocity(snapshot,window,provider);
      for(const [metric,index]of Object.entries({value:0,input:1,uncached:2,cacheRead:3,cacheWrite:4,output:5,reasoning:6,calls:7,tools:8,sessions:9})){
-      await change('.velocity-controls select[aria-label="Metric"]',metric);const v=expected.totals[counters[index]];check(`velocity.${metric}`,await text('.velocity-totals article:first-child strong'),metric==='value'?money(v):number(v));
+      await change('#velocity-view .filter-bar select[aria-label="Metric"]',metric);const v=expected.totals[counters[index]];check(`velocity.${metric}`,await text('[data-velocity-total]'),metric==='value'?money(v):number(v));
      }
-     await change('.velocity-controls select[aria-label="Metric"]','value');
+     await change('#velocity-view .filter-bar select[aria-label="Metric"]','value');
      if(provider==='all')for(const group of ['agent','provider','model','execution','effort']){
-      await change('.velocity-controls select[aria-label="Group by"]',group);
+      await change('#velocity-view .filter-bar select[aria-label="Group by"]',group);
       const rows=await evaluate(`Array.from(document.querySelectorAll('.velocity-legend [data-series]')).map(e=>({id:e.dataset.series,value:e.querySelector('strong').textContent.trim()}))`);
       const expectedGroups=velocityGroups(snapshot,window,provider,group);
       check(`velocity.groups.${group}.count`,rows.length,expectedGroups.length);
       for(const row of rows)check(`velocity.groups.${group}.${row.id}`,row.value,money(expectedGroups.find(([id])=>id===row.id)?.[1]??0));
      }
-     await change('.velocity-controls select[aria-label="Group by"]','agent');
+     await change('#velocity-view .filter-bar select[aria-label="Group by"]','agent');
      const series=await evaluate(`(()=>{const svg=document.querySelector('.velocity-chart svg[role="group"]');if(!svg)return [];const rows=[];svg.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true}));for(let i=0;i<400;i++){const s=document.querySelector('.velocity-inspection strong')?.textContent;if(!s||rows.at(-1)===s)break;rows.push(s);svg.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));}return rows})()`);
      for(const row of series){const [day,value]=row.split(' · ');check(`velocity.daily.${day}`,value,money(expected.days.find(d=>d.day===day)?.valueUsd??0))}
     }

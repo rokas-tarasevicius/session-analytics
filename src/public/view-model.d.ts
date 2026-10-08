@@ -36,6 +36,17 @@ export function namedTotals(sessions: SessionLike[], field: string): NamedMetric
 export function spendDays(sessions: SessionLike[]): NamedMetric[];
 export function coverageWarnings(sessions: SessionLike[]): string[];
 export function costTotals(sessions: SessionLike[]): { cached: number; input: number; output: number; reported: number; total: number; upper: number; write: number };
+export interface ModelCost {
+  provider: string; model: string; value: number; share: number; sessions: number; calls: number; inputTokens: number; outputTokens: number;
+  components: { input: number; cached: number; write: number; output: number };
+  priced: boolean; eligible: number; selected: number;
+  /** Sessions whose call and token counters are evidenced for this model. */
+  evidence: { calls: number; tokens: number };
+}
+export function costByModel(sessions: SessionLike[]): {
+  total: number; models: ModelCost[];
+  providers: Array<{ provider: string; total: number; api: number; reported: number; unattributed: number; coverage: import("./providers.js").MetricCoverage; models: ModelCost[] }>;
+};
 export function groupByRepository(sessions: SessionLike[]): Map<string, SessionLike[]>;
 export function sessionsInRange(sessions: SessionLike[], startDay: string | null, endDay: string | null): SessionLike[];
 export function daysBetween(startDay: string, endDay: string, cap?: number): string[];

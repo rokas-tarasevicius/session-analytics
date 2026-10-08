@@ -2,7 +2,7 @@ import { modelColor, providerColor, providerKey } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
-import { agentLabels, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
+import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
   const result = document.createElement(tag);
@@ -185,6 +185,7 @@ export function renderVelocity(container, sessions, context) {
     const filters = el("div", null, "provider-key"); filters.setAttribute("role", "group"); filters.setAttribute("aria-label", "Providers");
     const selectedProviders = new Set(providerIds);
     const controls = filterBar(group.wrapper, metric.wrapper, granularity.wrapper, mode.wrapper, rollingLabel, filters);
+    const lead = el("div", null, "kpi-grid compact-metrics velocity-lead");
     const totals = el("div", null, "kpi-grid compact-metrics velocity-totals");
     const comparisons = evidence([], { title: "How the comparisons are built" });
     const main = panelShell("Observed", "Usage over time");
@@ -193,7 +194,7 @@ export function renderVelocity(container, sessions, context) {
     main.article.append(chart, coverage);
     const projection = panelShell("End-of-month scenario", "Projection");
     const movers = panelShell("Largest increases", "Top movers");
-    container.append(controls, totals, comparisons, main.article, projection.article, movers.article);
+    container.append(lead, controls, main.article, totals, comparisons, projection.article, movers.article);
     controller = { sessions, context, update: null };
     const update = () => {
       const current = controller.context;
@@ -204,11 +205,18 @@ export function renderVelocity(container, sessions, context) {
       rolling.disabled = options.granularity !== "day" || options.mode === "cumulative";
       rollingLabel.title = rolling.disabled ? "A daily average is shown on non-cumulative daily charts." : "Seven calendar days, including inactive dates.";
       const data = buildVelocity(scoped, options);
+      const valueData = options.metric === "value" && options.granularity === "day" ? data : buildVelocity(scoped, { ...options, metric: "value", granularity: "day", mode: "lines" });
+      const price = averagePrice(valueData);
+      lead.replaceChildren(
+        kpi({ label: "Average price", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: `per active day · ${price.activeDays} of ${price.days} days active · ${formatMetric(price.perCalendarDay, "value")} per calendar day`, accent: true }),
+        kpi({ label: "Usage value", value: formatMetric(price.total, "value"), note: `${price.days} calendar days · API-equivalent${valueData.evidence.complete ? "" : " · partially observed"}${selectedProviders.size < providerIds.length ? ` · ${selectedProviders.size} of ${providerIds.length} providers` : ""}` }),
+      );
       const today = localDay(current.generatedAt, current.timeZone);
       const comparisonData = buildVelocity(scoped, { ...options, ...comparisonSpan(current.end, today), granularity: "day", mode: "lines" });
       const indicators = velocityIndicators(comparisonData, today);
       main.heading.textContent = `${metricDefinitions[options.metric].label} by ${group.select.selectedOptions[0].textContent.toLowerCase()}`;
-      subtitle.textContent = `${current.start} → ${current.end} · ${current.timeZone}`;
+      const plottedTotal = el("span", formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric)); plottedTotal.setAttribute("data-velocity-total", "");
+      subtitle.replaceChildren(el("span", "Total "), plottedTotal, el("span", ` · ${current.start} → ${current.end} · ${current.timeZone}`));
       renderVelocityChart(chart, data, { rolling: rolling.checked && !rolling.disabled });
       coverage.replaceChildren(el("summary", "Evidence & limits"), (() => { const body = el("div", null, "evidence-body"); for (const text of [
         options.granularity === "hour" ? "Totals for each local clock hour; repeated DST hours combine." : options.granularity === "week" || options.granularity === "month" ? "Boundary periods include only selected dates." : "Inactive calendar dates are included.",
@@ -221,7 +229,6 @@ export function renderVelocity(container, sessions, context) {
       const comparisonNote = (item, period) => `Observed ${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} and ${item.previous.coveredDays}/${item.previous.days} calendar days covered. ${evidenceLabels[options.metric] ? `Evidence current: ${evidenceText(item.current.evidence, options.metric)}; prior: ${evidenceText(item.previous.evidence, options.metric)}. ` : ""}${item.status === "unavailable" ? `Not comparable: ${item.reason}.` : `${period === "week" ? `Same weekdays; ${cutoff}.` : `Same day numbers, clipped to the shorter month; ${cutoff}.`}${item.rolledBack ? " Rolled back to the period that just finished because today has not completed." : ""}${item.partial ? ` Metric evidence is incomplete on at least one side (${Math.round(comparisonEvidenceFloor * 100)}% or more is required); the change uses observed ${options.metric === "value" ? "priced value" : "counters"} only.` : ""}`}`;
       const shortNote = (item) => `${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${span(item.current)} vs ${span(item.previous)}${item.partial ? ` · partially ${options.metric === "value" ? "priced" : "observed"}` : ""}`;
       totals.replaceChildren(
-        kpi({ label: "Selected period", value: formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric), note: `${data.daily.length} calendar days · ${metricDefinitions[options.metric].unit}${data.evidence.complete ? "" : " · partially observed"}${selectedProviders.size < providerIds.length ? ` · ${selectedProviders.size} of ${providerIds.length} providers` : ""}`, accent: true }),
         kpi({ label: weekLabel, value: comparisonValue(indicators.week), reason: indicators.week.reason, note: shortNote(indicators.week) }),
         kpi({ label: monthLabel, value: comparisonValue(indicators.month), reason: indicators.month.reason, note: shortNote(indicators.month) }),
         kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number.format(indicators.burn.ratio)}×`, reason: "Needs a 14-day baseline with complete evidence", note: `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered` }),

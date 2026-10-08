@@ -57,18 +57,21 @@ const descend = (node: Element): Element[] => [node, ...node.children.flatMap(de
 
 test("review: mixed reported/API cost stacks represent the displayed total", async () => {
   const h = await harness(), container = new Element(); h.context["container"] = container;
-  h.run('renderCostRows(container, [{ name: "Mixed", cost: { total: 10, reported: 90, input: 10, cached: 0, write: 0, output: 0 } }])');
+  h.run('renderCostRows(container, [{ provider: "claude", total: 100, unattributed: 90, models: [{ model: "claude-opus-5", value: 10 }], coverage: { eligible: 2, selected: 2 } }])');
   const bars = descend(container).filter((n) => n.tag === "i" && n.style["width"]);
   assert.equal(bars.reduce((n, b) => n + parseFloat(String(b.style["width"])), 0), 100);
-  assert.equal(bars.find((b) => b.dataset["component"] === "reported")!.style["width"], "90%");
+  assert.equal(bars.find((b) => b.attributes["data-series"] === "claude:unattributed")!.style["width"], "90%");
 });
 
-test("review: models display N/A requests for run summaries and coverage for mixed evidence", async () => {
-  const h = await harness(); const summary = sample(evidence()); summary.tokens = tokens(100, 0, 0, 20); summary.models = [reportedModel("claude-opus-5", summary.tokens, 1)]; summary.costBasis = "provider-reported";
-  h.context["sessions"] = [summary]; h.run('modelMetric="calls"; renderModels({sessions})');
-  assert.match(h.elements.get("#models-by-provider")!.textContent, /—/); assert.doesNotMatch(h.elements.get("#models-by-provider")!.textContent, /0 calls|N\/A/);
-  const native = sample(undefined); native.models = [{ ...summary.models[0]!, calls: 2 }]; native.tokens = summary.tokens; native.costBasis = "api-list-price-equivalent";
-  h.context["sessions"] = [summary, native]; h.run('renderModels({sessions})'); assert.match(h.elements.get("#models-by-provider")!.textContent, /2 calls.*1\/2/);
+test("review: Costs models retain eligible calls and price coverage for mixed evidence", async () => {
+  const h = await harness(); const summary = sample(evidence()); summary.tokens = tokens(100, 0, 0, 20); summary.models = [reportedModel("claude-opus-5", summary.tokens, 1)]; summary.costBasis = "provider-reported"; summary.cost.totalUsd = 1;
+  const invalid = sample(evidence(), true); invalid.models = summary.models;
+  h.context["sessions"] = [summary, invalid]; h.run('renderModelCosts(elements.costModels, costByModel(sessions))');
+  assert.match(h.elements.get("#cost-models")!.textContent, /\$1.00.*1\/2/);
+  assert.doesNotMatch(h.elements.get("#cost-models")!.textContent, /\b0 calls/, "run summaries have no request evidence, so no call count is implied");
+  const native = sample(undefined); native.models = [{ ...summary.models[0]!, calls: 2 }]; native.tokens = summary.tokens; native.costBasis = "api-list-price-equivalent"; native.costComplete = true;
+  h.context["sessions"] = [summary, native]; h.run('renderModelCosts(elements.costModels, costByModel(sessions))');
+  assert.match(h.elements.get("#cost-models")!.textContent, /2 sessions · 2 calls/);
 });
 
 test("review: invalid and unavailable sessions never imply observed tools or complete repository coverage", async () => {
