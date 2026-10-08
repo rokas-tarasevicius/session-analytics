@@ -1,6 +1,6 @@
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
-import { agentLabels, buildVelocity, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
+import { agentLabels, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
   const result = document.createElement(tag);
@@ -22,12 +22,21 @@ export function formatMetric(value, metric, short = false) {
   return (short ? compact : number).format(value);
 }
 const deltaLabel = (value) => value === null ? "N/A" : `${value > 0 ? "+" : ""}${number.format(value * 100)}%`;
-const comparisonValue = (item) => item.status === "change" ? Math.abs(item.delta) < 0.0005 ? "▬ 0%" : `${item.delta > 0 ? "▲" : "▼"} ${number.format(Math.abs(item.delta) * 100)}%` : item.status === "new" ? "New" : item.status === "idle" ? "No activity" : null;
+/** KPI text for a comparison status; null renders as an em dash with the comparison's reason. */
+export const comparisonValue = (item) => item.status === "change" ? Math.abs(item.delta) < 0.0005 ? "▬ 0%" : `${item.delta > 0 ? "▲" : "▼"} ${number.format(Math.abs(item.delta) * 100)}%` : item.status === "new" ? "New" : item.status === "idle" ? "No activity" : null;
 const periodDate = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" });
-function span({ start, end }) {
+export function span({ start, end }) {
   const first = periodDate.format(new Date(`${start}T12:00:00Z`));
   if (start === end) return first;
   return `${first}–${start.slice(0, 7) === end.slice(0, 7) ? Number(end.slice(-2)) : periodDate.format(new Date(`${end}T12:00:00Z`))}`;
+}
+/** Card labels: the period that just finished (Monday, the 1st), a past window's end, or to date. */
+export function comparisonLabels(indicators, today) {
+  const through = indicators.end < today ? ` through ${span({ start: indicators.completeThrough, end: indicators.completeThrough })}` : "";
+  return {
+    week: indicators.week.rolledBack ? "Last week vs week before" : through ? `Week${through} vs prior` : "This week vs last",
+    month: indicators.month.rolledBack ? "Last month vs month before" : through ? `Month${through} vs prior` : "Month to date vs prior",
+  };
 }
 const evidenceLabels = { value: "priced tokens", reasoning: "output with reasoning detail", uncached: "input with cache-read detail", cacheRead: "input with cache-read detail", cacheWrite: "input with cache-write detail" };
 function evidenceText(evidence, metric) {
@@ -152,7 +161,7 @@ function coverageText(data) {
   if (data.metric === "cacheWrite") detail = ratio(values[13], data.coverage.cacheWriteInput, "Cache-write coverage, Claude input; Codex/Cursor unavailable");
   const included = formatMetric(values[metricDefinitions[data.metric].index], data.metric);
   const undated = formatMetric(data.undated[metricDefinitions[data.metric].index], data.metric);
-  return `${included} dated · ${number.format(data.contributingSessions)} sessions with dated evidence. ${detail ? `${detail}. ` : ""}${undated} undated across this repository/provider scope, excluded from date filters and charts.${data.unledgered.sessions > 0 ? ` ${data.unledgered.sessions} session${data.unledgered.sessions === 1 ? "" : "s"} from sources without activity dates (${formatMetric(data.unledgered.value, "value")} whole-session value) excluded.` : ""}${data.missingSessions ? ` ${data.missingSessions} session${data.missingSessions === 1 ? "" : "s"} need a refresh to collect activity buckets.` : ""}`;
+  return `${included} dated · ${number.format(data.contributingSessions)} sessions with dated evidence. ${detail ? `${detail}. ` : ""}${undated} undated across this repository/provider scope, excluded from date filters and charts.${data.unledgered.sessions > 0 ? ` Across all time, ${data.unledgered.sessions} session${data.unledgered.sessions === 1 ? "" : "s"} from sources without activity dates (${formatMetric(data.unledgered.value, "value")} whole-session value) are excluded.` : ""}${data.missingSessions ? ` ${data.missingSessions} session${data.missingSessions === 1 ? "" : "s"} need a refresh to collect activity buckets.` : ""}`;
 }
 const controllers = new WeakMap();
 function panelShell(kicker, title) {
@@ -204,12 +213,12 @@ export function renderVelocity(container, sessions, context) {
         coverageText(data),
         "Value is not an invoice; activity is not an outcome.",
       ].filter(Boolean)) body.append(el("p", text)); return body; })());
-      const weekLabel = indicators.week.rolledBack ? "Last week vs week before" : "This week vs last";
-      const monthLabel = indicators.month.rolledBack ? "Last month vs month before" : "Month to date vs prior";
-      const comparisonNote = (item, period) => `Observed ${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} and ${item.previous.coveredDays}/${item.previous.days} calendar days covered. ${evidenceLabels[options.metric] ? `Evidence current: ${evidenceText(item.current.evidence, options.metric)}; prior: ${evidenceText(item.previous.evidence, options.metric)}. ` : ""}${item.status === "unavailable" ? `Not comparable: ${item.reason}.` : `${period === "week" ? "Same weekdays; today excluded." : "Same day numbers, clipped to the shorter month; today excluded."}${item.rolledBack ? " Rolled back to the period that just finished because today has not completed." : ""}${item.partial ? ` Metric evidence is incomplete on at least one side (90% or more is required); the change uses observed ${options.metric === "value" ? "priced value" : "counters"} only.` : ""}`}`;
+      const { week: weekLabel, month: monthLabel } = comparisonLabels(indicators, today);
+      const cutoff = indicators.end < today ? `through the window end, ${indicators.completeThrough}` : "today excluded";
+      const comparisonNote = (item, period) => `Observed ${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${item.current.coveredDays}/${item.current.days} and ${item.previous.coveredDays}/${item.previous.days} calendar days covered. ${evidenceLabels[options.metric] ? `Evidence current: ${evidenceText(item.current.evidence, options.metric)}; prior: ${evidenceText(item.previous.evidence, options.metric)}. ` : ""}${item.status === "unavailable" ? `Not comparable: ${item.reason}.` : `${period === "week" ? `Same weekdays; ${cutoff}.` : `Same day numbers, clipped to the shorter month; ${cutoff}.`}${item.rolledBack ? " Rolled back to the period that just finished because today has not completed." : ""}${item.partial ? ` Metric evidence is incomplete on at least one side (${Math.round(comparisonEvidenceFloor * 100)}% or more is required); the change uses observed ${options.metric === "value" ? "priced value" : "counters"} only.` : ""}`}`;
       const shortNote = (item) => `${formatMetric(item.current.value, options.metric)} vs ${formatMetric(item.previous.value, options.metric)} · ${span(item.current)} vs ${span(item.previous)}${item.partial ? ` · partially ${options.metric === "value" ? "priced" : "observed"}` : ""}`;
       totals.replaceChildren(
-        kpi({ label: "Selected period", value: formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric), note: `${data.daily.length} calendar days · ${metricDefinitions[options.metric].unit}${data.evidence.complete ? "" : " · partially observed"}`, accent: true }),
+        kpi({ label: "Selected period", value: formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric), note: `${data.daily.length} calendar days · ${metricDefinitions[options.metric].unit}${data.evidence.complete ? "" : " · partially observed"}${selectedProviders.size < providerIds.length ? ` · ${selectedProviders.size} of ${providerIds.length} providers` : ""}`, accent: true }),
         kpi({ label: weekLabel, value: comparisonValue(indicators.week), reason: indicators.week.reason, note: shortNote(indicators.week) }),
         kpi({ label: monthLabel, value: comparisonValue(indicators.month), reason: indicators.month.reason, note: shortNote(indicators.month) }),
         kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number.format(indicators.burn.ratio)}×`, reason: "Needs a 14-day baseline with complete evidence", note: `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered` }),

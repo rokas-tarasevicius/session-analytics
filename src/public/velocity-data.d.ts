@@ -26,6 +26,8 @@ export function periodKey(day: string, granularity: string): string;
 export function buildVelocity(sessions: SessionAnalytics[], options: VelocityOptions): VelocityData;
 export function guardedDelta(current: number, previous: number, metric: Metric, previousCalls?: number): number | null;
 export const comparisonEvidenceFloor: number;
+export const ledgerlessSources: Set<string>;
+export function periodFromVelocity(data: VelocityData): Period;
 export function comparisonSpan(end: string, today: string | null): { start: string; end: string };
 export function comparePeriods(current: Period, previous: Period, metric: Metric, options?: { missingSessions?: number }): Comparison;
 export function quantile(values: number[], fraction: number): number | null;

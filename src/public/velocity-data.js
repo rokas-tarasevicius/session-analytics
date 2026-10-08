@@ -100,6 +100,10 @@ function groupIdentity(session, dimension, group) {
   return [dimension.agent, agentLabels[dimension.agent] || "Unknown agent"];
 }
 
+/** Evidence sources whose parsers never write an hourly activity ledger. Their sessions are
+ * disclosed (all time) rather than treated as a stale snapshot that needs a refresh. */
+export const ledgerlessSources = new Set(["conductor-result", "cursor-sdk", "cursor-transcript", "copilot-events", "opencode-db", "gemini-chat"]);
+
 /** Sum occupied hourly cells; never use session creation as the activity date. */
 export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7 } = {}) {
   const index = metricDefinitions[metric].index;
@@ -112,12 +116,10 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   const evidence = blankEvidence();
   const coverage = { priceTokens: 0, cacheReadInput: 0, cacheWriteInput: 0, reasoningOutput: 0 };
   let earliest = null, missingSessions = 0, contributingSessions = 0;
-  // Secondary sources (OpenCode, Gemini, Copilot, Cursor SDK/transcripts, Conductor
-  // results) never produce an hourly ledger: they are disclosed, not a stale snapshot.
   const unledgered = { sessions: 0, value: 0 };
   for (const session of sessions) {
     if (!session.velocity) {
-      if (session.evidence?.source) { unledgered.sessions += 1; unledgered.value += session.cost?.totalUsd || 0; } else missingSessions += 1;
+      if (ledgerlessSources.has(session.evidence?.source)) { unledgered.sessions += 1; unledgered.value += session.cost?.totalUsd || 0; } else missingSessions += 1;
       continue;
     }
     let contributes = false;
@@ -201,9 +203,8 @@ export function comparePeriods(current, previous, metric, { missingSessions = 0 
   const result = { current, previous, delta: null, status: "unavailable", reason: null, partial: false };
   const definition = metricDefinitions[metric];
   if (missingSessions) return { ...result, reason: "Refresh: some sessions have no activity ledger" };
-  if (!current.days) return { ...result, reason: "No completed days in this period yet" };
-  if (!previous.covered) return { ...result, reason: previous.coveredDays ? "Prior period is only partly observed" : "No observed history for the prior period" };
-  if (!current.covered) return { ...result, reason: "Current period is only partly observed" };
+  // The prior period always precedes the current one, so it is the side that can predate history.
+  if (!previous.covered || !current.covered) return { ...result, reason: previous.coveredDays ? "Prior period is only partly observed" : "No observed history for the prior period" };
   if (current.evidence.unsupported || previous.evidence.unsupported) return { ...result, reason: "Metric not recorded by some providers" };
   const weak = [["current", current.evidence], ["prior", previous.evidence]].find(([, evidence]) => evidenceShare(evidence) < comparisonEvidenceFloor);
   if (weak) {
@@ -215,6 +216,13 @@ export function comparePeriods(current, previous, metric, { missingSessions = 0 
   const delta = guardedDelta(current.value, previous.value, metric, previous.calls);
   if (delta === null) return { ...result, partial, reason: definition.index < 7 ? `Prior period below the minimum baseline (${definition.minimum} ${definition.unit}, 3 model calls)` : `Prior period below the minimum baseline (${definition.minimum} ${definition.unit})` };
   return { ...result, partial, delta, status: "change" };
+}
+
+/** A whole buildVelocity window as one comparison period, covered only inside observed history. */
+export function periodFromVelocity(data) {
+  const index = metricDefinitions[data.metric].index;
+  const coveredDays = data.daily.filter(({ day }) => data.earliest !== null && day >= data.earliest).length;
+  return { start: data.start, end: data.end, days: data.daily.length, coveredDays, covered: data.daily.length > 0 && coveredDays === data.daily.length, value: data.totals[index], calls: data.totals[7], evidence: { ...data.evidence } };
 }
 
 /**
@@ -276,7 +284,7 @@ export function velocityIndicators(data, today) {
   const remaining = calendarDays(shiftDay(completeThrough, 1), monthEnd).length;
   const active = history.filter((v) => v > 0).length;
   let projection = null;
-  if (supported(elapsed) && supported(observedPeriod) && supported(sample) && history.length >= 7 && active >= 3 && guardedDelta(sum(history), sum(history), data.metric, sample.calls) !== null) {
+  if (remaining > 0 && supported(elapsed) && supported(observedPeriod) && supported(sample) && history.length >= 7 && active >= 3 && guardedDelta(sum(history), sum(history), data.metric, sample.calls) !== null) {
     const project = (fraction) => {
       const rate = quantile(history, fraction);
       // A busy partial day must not consume the allowance for future full days.

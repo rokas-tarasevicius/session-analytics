@@ -412,9 +412,14 @@ The Velocity tab and Summary share the same deduplicated activity ledger. **Usag
 dashboard definition:** dated API-equivalent value by activity date in the declared timezone. The
 Summary "Priced usage value" KPI, its sparkline and delta, the sidebar repository values, the
 "Usage value by repository" bars, Summary's daily chart and Velocity's "Selected period" all sum this
-ledger over the same selected dates, so they agree for the same window, repository focus and providers.
+ledger over the same selected dates, so they agree for the same window, repository focus and providers
+(Velocity's provider chips state "N of M providers" when some are off; Summary always uses all).
 Undated value (including Cursor's provider-reported value) and sessions from sources without a ledger
-are disclosed beside the KPI, never added to a dated window. Session-start cohort views (session,
+are disclosed beside the KPI as **all-time** amounts for the scope, never added to a dated window;
+stale sessions that need a refresh are counted there too and mark the KPI partial. The Summary delta
+uses the same guarded comparison as Velocity's cards (observed prior window, at least 90% pricing
+evidence, minimum baseline). The window's latest selectable date is capped at the snapshot's local
+date, so a UTC session start "tomorrow" cannot add an empty future day. Session-start cohort views (session,
 token, tool and compaction KPIs, the fleet table, model mix, Costs and the CLI report) keep whole-session
 values of sessions started in the window (UTC); their value can differ for that reason alone.
 `MachineAnalytics.velocity` (also present on the single-repository result) declares
@@ -438,10 +443,11 @@ the velocity view asks for a refresh instead of reconstructing activity from ses
   Global session-start filtering normalizes offset-free database timestamps as UTC.
   Missing starts and file-mtime fallbacks are excluded from bounded start-date scopes
   and counted as unknown starts; all-time totals retain them.
-- Sessions from secondary sources (OpenCode, Gemini CLI, Copilot CLI, Cursor SDK runs and
-  transcripts, Conductor results; any session with `evidence.source` set) have no hourly ledger.
+- Sessions from secondary sources whose parsers write no hourly ledger (`evidence.source` of
+  `opencode-db`, `gemini-chat`, `copilot-events`, `cursor-sdk`, `cursor-transcript` or
+  `conductor-result`) have no activity dates. Conductor-message recovery does write a ledger.
   They are counted, with their whole-session value, as **sources without activity dates** and are
-  excluded from dated totals. Only a canonical session without `velocity` (a snapshot written before
+  excluded from dated totals. Only a other session without `velocity` (a snapshot written before
   the ledger existed) counts as missing and asks for a refresh.
 - Claude prices the final streamed usage once at the first positive-usage snapshot's
   timestamp in the owning execution kind. A usage-free parent placeholder cannot assign a
@@ -551,7 +557,11 @@ its month: the first N completed dates versus the first N dates of the previous 
 prior month is shorter, **both** sides are clipped to its length. On a Monday, or on the 1st,
 the last completed date belongs to the period that just finished, so the cards compare that
 whole week/month with the one before and are relabeled “Last week vs week before” / “Last month
-vs month before”. The calendar indicators (week, month, burn and projection) read the ledger from
+vs month before”. A rolled-back month keeps the clipping rule (on April 1, March 1–28 versus
+February 1–28) so both sides cover the same number of days. A historical window's end date is
+complete and is included; its cards read “Week through <date> vs prior” / “Month through <date>
+vs prior”, so a past window ending on a Monday or the 1st compares one day with the same day a
+week or month earlier. No projection is shown for a month with no remaining days. The calendar indicators (week, month, burn and projection) read the ledger from
 two whole months before the anchor month, independent of the selected window's start, so a
 “Last 7 days” window still compares this week with last week. Their periods must still lie inside
 observed history: dates before the first observed activity are not zero. Notes show both periods'

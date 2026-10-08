@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildVelocity, calendarDays, comparePeriods, comparisonSpan, localDay, velocityIndicators } from "../src/public/velocity-data.js";
+import { buildVelocity, calendarDays, comparePeriods, comparisonSpan, localDay, periodFromVelocity, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
 import type { Period } from "../src/public/velocity-data.js";
 import type { SessionAnalytics, VelocityValues } from "../src/types.ts";
 
@@ -125,4 +125,65 @@ test("calendar comparisons on count metrics use the same periods", () => {
   const { week } = indicators([session], "2026-10-08", "2026-10-08", "calls");
   assert.equal(week.current.value, 12); assert.equal(week.previous.value, 12, "Each bucket records four calls");
   assert.equal(week.delta, 0);
+});
+
+test("a prior period that starts before observed history is reported as partly observed", () => {
+  const { week } = indicators([ledger(every("2026-09-29", "2026-10-08", () => 10))], "2026-10-08");
+  assert.equal(week.status, "unavailable"); assert.equal(week.reason, "Prior period is only partly observed");
+  assert.equal(week.previous.coveredDays, 2, "Sep 28 predates the first observed date");
+  const { month } = indicators([ledger(every("2026-09-03", "2026-10-08", () => 10))], "2026-10-08");
+  assert.equal(month.reason, "Prior period is only partly observed"); assert.equal(month.previous.coveredDays, 5);
+  const none = indicators([ledger(every("2026-10-01", "2026-10-08", () => 10))], "2026-10-08").week;
+  assert.equal(none.reason, "No observed history for the prior period");
+});
+
+test("a past window keeps its end date, compares through it and has no month-end projection", () => {
+  const session = ledger(every("2026-07-01", "2026-10-08", () => 10));
+  const monday = indicators([session], "2026-10-08", "2026-10-05");
+  assert.equal(monday.completeThrough, "2026-10-05");
+  assert.equal(monday.week.rolledBack, false);
+  assert.deepEqual([monday.week.current.start, monday.week.current.end, monday.week.previous.start, monday.week.previous.end], ["2026-10-05", "2026-10-05", "2026-09-28", "2026-09-28"]);
+  assert.equal(monday.week.delta, 0);
+  const monthEnd = indicators([session], "2026-10-08", "2026-09-30");
+  assert.equal(monthEnd.month.current.days, 30); assert.equal(monthEnd.month.previous.end, "2026-08-30");
+  assert.equal(monthEnd.projection, null, "A finished month has nothing left to project");
+});
+
+test("sessions without an activity ledger do not disable rolling averages or top movers", () => {
+  const dated = ledger(every("2026-08-01", "2026-09-15", () => 10));
+  const gemini = { provider: "gemini", repositoryId: "repo", createdAt: "2026-09-10T10:00:00Z", cost: { totalUsd: 2 }, evidence: { source: "gemini-chat" } } as unknown as SessionAnalytics;
+  const data = buildVelocity([dated, gemini], { start: "2026-09-01", end: "2026-09-14" });
+  assert.equal(data.rolling.at(-1), 10);
+  assert.equal(topMovers([dated, gemini], { start: "2026-09-01", end: "2026-09-14" }, "2026-09-15").available, true);
+  const stale = { provider: "claude", repositoryId: "repo", createdAt: "2026-09-10T10:00:00Z", cost: { totalUsd: 2 }, evidence: { source: "conductor-messages" } } as unknown as SessionAnalytics;
+  const blocked = buildVelocity([dated, stale], { start: "2026-09-01", end: "2026-09-14" });
+  assert.equal(blocked.missingSessions, 1, "Conductor message recovery writes a ledger, so its absence means a stale snapshot");
+  assert.equal(blocked.rolling.at(-1), null);
+});
+
+test("a whole window becomes one comparison period, covered only inside observed history", () => {
+  const session = ledger(every("2026-09-05", "2026-09-14", () => 10));
+  const current = periodFromVelocity(buildVelocity([session], { start: "2026-09-08", end: "2026-09-14" }));
+  const prior = periodFromVelocity(buildVelocity([session], { start: "2026-09-01", end: "2026-09-07" }));
+  assert.deepEqual([current.days, current.coveredDays, current.covered, current.value, current.calls], [7, 7, true, 70, 28]);
+  assert.deepEqual([prior.coveredDays, prior.covered, prior.value], [3, false, 30]);
+  assert.equal(comparePeriods(current, prior, "value").reason, "Prior period is only partly observed");
+});
+
+test("card text covers every comparison status and labels rolled-back and past periods", async () => {
+  const { comparisonLabels, comparisonValue, span } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+  assert.equal(comparisonValue({ status: "change", delta: 1.13 }), "▲ 113%");
+  assert.equal(comparisonValue({ status: "change", delta: -0.125 }), "▼ 12.5%");
+  assert.equal(comparisonValue({ status: "change", delta: 0.0001 }), "▬ 0%");
+  assert.equal(comparisonValue({ status: "new", delta: null }), "New");
+  assert.equal(comparisonValue({ status: "idle", delta: null }), "No activity");
+  assert.equal(comparisonValue({ status: "unavailable", delta: null }), null);
+  assert.equal(span({ start: "2026-10-05", end: "2026-10-07" }), "Oct 5–7");
+  assert.equal(span({ start: "2026-09-28", end: "2026-10-04" }), "Sep 28–Oct 4");
+  assert.equal(span({ start: "2026-10-05", end: "2026-10-05" }), "Oct 5");
+  const session = ledger(every("2026-07-01", "2026-10-08", () => 10));
+  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-08"), "2026-10-08"), { week: "This week vs last", month: "Month to date vs prior" });
+  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-05"), "2026-10-05"), { week: "Last week vs week before", month: "Month to date vs prior" });
+  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-01"), "2026-10-01"), { week: "This week vs last", month: "Last month vs month before" });
+  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-08", "2026-10-05"), "2026-10-08"), { week: "Week through Oct 5 vs prior", month: "Month through Oct 5 vs prior" });
 });

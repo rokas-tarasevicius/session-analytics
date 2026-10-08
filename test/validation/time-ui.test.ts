@@ -50,7 +50,7 @@ test('time-ui: priced-value KPI and sparkline follow activity dates like Velocit
   const labels: Record<string,string>={};
   const render = productionFunction('renderSummary', {
     ...ui, ...velocityData, elements, snapshot: {}, $:lookup, windowDays:()=>['2026-09-01'], windowPreset:'all',
-    velocityContext:()=>({start:'2026-09-01',end:'2026-09-01',timeZone:'Europe/London'}),repositorySessions:()=>[],
+    velocityContext:()=>({start:'2026-09-01',end:'2026-09-01',timeZone:'Europe/London'}),repositorySessions:()=>[],spendDelta:()=>null,
     node:(tag:string,text?:string)=>{const e=new Element(tag);e.textContent=text??'';return e;},clear:(e:Element)=>e.replaceChildren(),
     renderHistoryCoverage(){},renderMetricValue(){},coveredValue:()=>'',money:(v:number)=>`$${v.toFixed(2)}`,percent:String,integer:new Intl.NumberFormat('en'),compact:new Intl.NumberFormat('en'),
     dailyCountSeries,dailySpendSeries,renderDelta(){},renderSparkline:(e:Element,values:number[],_days:string[],options:{label:string})=>{const key=Object.entries(elementMap).find(([,v])=>v===e)![0];series[key]=values;labels[key]=options.label;},
