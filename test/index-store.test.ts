@@ -442,6 +442,28 @@ test("Codex append reuse verifies its full prefix; partial lines, truncation and
   });
 });
 
+test("a resumed Claude copy stays cached until the owner of a message it shares changes", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture);
+    const main = await transcript(fixture, "claude", claudeId);
+    const copyId = "33333333-3333-4333-8333-333333333333";
+    const copy = join(dirname(main), `${copyId}.jsonl`);
+    const resumed = (await readFile(main, "utf8")).trim().split("\n").map((line) => JSON.parse(line.replaceAll(claudeId, copyId).replaceAll("T12:0", "T13:0")));
+    await writeFile(copy, jsonl(resumed));
+    await analyzeMachineSessions(opts);
+    const cached = await analyzeMachineSessions(opts);
+    assert.deepEqual(stable(cached), stable(await analyzeMachineSessions({ ...opts, noIndex: true })));
+    assert.equal(indexStatus(opts).lastScan?.parsedSessions, 0);
+    // A richer snapshot in the copy takes ownership of the shared message from the unchanged main file.
+    const richer = resumed.find((row) => row.type === "assistant");
+    richer.message.usage.output_tokens += 50;
+    await appendFile(copy, jsonl([richer]));
+    const moved = await analyzeMachineSessions(opts);
+    assert.deepEqual(stable(moved), stable(await analyzeMachineSessions({ ...opts, noIndex: true })));
+    assert.equal(indexStatus(opts).lastScan?.parsedSessions, 2);
+  });
+});
+
 test("a new Codex broadcast owner invalidates the old owner while unrelated sessions stay cached", async () => {
   await withFixture(async (fixture) => {
     const opts = options(fixture);

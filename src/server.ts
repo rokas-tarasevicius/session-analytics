@@ -4,7 +4,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
+import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, setting, argument } from "./options.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import type { MachineAnalytics, SharedSnapshot } from "./types.ts";
@@ -100,6 +100,7 @@ async function sendFile(response: ServerResponse, path: string): Promise<void> {
 function safeError(error: unknown): string {
   const indexError = indexErrorMessage(indexErrorCode(error));
   if (indexError) return indexError;
+  if (error instanceof AnalysisHeapLimitError) return error.message;
   const message = error instanceof Error ? error.message : "";
   if (message.includes("insights")) return "Insights are unavailable. Check the configured thresholds, inventory and filters.";
   if (message.includes("Snapshot")) return "The snapshot file is invalid, unsupported, or unavailable.";

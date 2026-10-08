@@ -41,6 +41,16 @@ export function lastActivityAt(session: Pick<SessionAnalytics, "lastEventAt" | "
   return ""; // Unknown activity time is never treated as proof that a session is old.
 }
 
+async function concurrently<T, R>(values: T[], limit: number, operation: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < values.length) { const position = next++; results[position] = await operation(values[position]!); }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
+  return results;
+}
+
 /** One writer transaction per scan. Failed scans roll back facts, fingerprints, and deletion marks together. */
 export class IndexScan {
   private connection: IndexConnection;
@@ -58,6 +68,8 @@ export class IndexScan {
   private unobservedClaims = new Map<string, string>();
   private retiredCounters: Set<string>;
   private ledgerPaths = new Set<string>();
+  private sourceKeys = new Map<string, string>();
+  private prefetched = new Map<string, FileFingerprint>();
   private retainedOrphanCount = 0;
   private dependencies = new Map<string, string>();
   private ambiguousCounters = false;
@@ -140,17 +152,33 @@ export class IndexScan {
   }
 
   hash(value: string): string { return keyedHash(this.connection.secret, value); }
-  sourceKey(path: string): string { return this.hash(`source:${resolve(path)}`); }
+  sourceKey(path: string): string {
+    let key = this.sourceKeys.get(path);
+    if (key === undefined) { key = this.hash(`source:${resolve(path)}`); this.sourceKeys.set(path, key); }
+    return key;
+  }
   identity(provider: string, id: string): string { return this.hash(`identity:${provider}:${id}`); }
-  isPrunedCounter(fingerprint: string): boolean { return this.retiredCounters.has(this.hash(fingerprint)); }
+  isPrunedCounter(fingerprint: string): boolean { return this.retiredCounters.size > 0 && this.retiredCounters.has(this.hash(fingerprint)); }
+
+  /** Fingerprint upcoming sources concurrently. Commit still re-checks every value it saves. */
+  async prefetch(paths: string[]): Promise<void> {
+    const pending = [...new Set(paths)].filter((path) => !this.fingerprints.has(this.sourceKey(path)));
+    await concurrently(pending, 16, async (path) => {
+      // A failed prefetch is retried, and reported, by the session that needs the file.
+      try { this.prefetched.set(this.sourceKey(path), await fingerprint(path, this.connection.secret)); } catch { /* retried */ }
+    });
+  }
 
   private async file(path: string): Promise<FileFingerprint> {
     const key = this.sourceKey(path);
     const existing = this.fingerprints.get(key);
     if (existing) return existing.value;
-    let value: FileFingerprint;
-    try { value = await fingerprint(path, this.connection.secret); }
-    catch { throw new IndexParityError(); }
+    let value = this.prefetched.get(key);
+    this.prefetched.delete(key);
+    if (!value) {
+      try { value = await fingerprint(path, this.connection.secret); }
+      catch { throw new IndexParityError(); }
+    }
     this.fingerprints.set(key, { path, value }); this.stats.fingerprintedFiles += 1;
     return value;
   }
@@ -433,9 +461,10 @@ export class IndexScan {
       }
     }
     const unstable = new Set<string>();
-    for (const [key, { path, value }] of this.fingerprints) {
-      if (!(await stillMatches(path, value))) unstable.add(key);
-    }
+    this.prefetched.clear();
+    const sources = [...this.fingerprints];
+    const stable = await concurrently(sources, 16, ([, { path, value }]) => stillMatches(path, value));
+    sources.forEach(([key], position) => { if (!stable[position]) unstable.add(key); });
     const unstableComponents = new Set([...unstable].map((source) => this.component(source)));
     const deferredSources = new Set([...this.fingerprints.keys()].filter((source) => unstableComponents.has(this.component(source))));
     // One active agent must not prevent thousands of stable sessions from ever reaching the index.

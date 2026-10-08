@@ -71,7 +71,7 @@ import type {
 
 import { desktopMetadataPath } from "./providers/claude-desktop.ts";
 import { createClaudeAdapter } from "./providers/claude.ts";
-import { buildClaudeUsageOwners } from "./providers/claude-ownership.ts";
+import { buildClaudeUsageOwners, type ClaudeUsageOwners } from "./providers/claude-ownership.ts";
 import { additionalProviderSessions } from "./providers/index.ts";
 import { modelName, name as safeName, effortName, safeTime, statusName } from "./providers/common.ts";
 import { conductorFallback, conductorLegacyProviderIds } from "./providers/conductor.ts";
@@ -1115,16 +1115,18 @@ async function claudeEvidencePaths(mainPath: string): Promise<string[]> {
   return paths;
 }
 
-async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: PricingCatalog, warnings: string[], reliabilityContext: ReliabilityContext = { contentRules: false, secret: null }, limits?: LimitsCollector, outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(), workflowSources?: WorkflowSources, contentRules = false, index: IndexScan | null = null, usageOwners?: ReadonlyMap<string, string>, mainPaths: string[] = [path]): Promise<SessionAnalytics | null> {
+async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: PricingCatalog, warnings: string[], reliabilityContext: ReliabilityContext = { contentRules: false, secret: null }, limits?: LimitsCollector, outcomeEnricher: OutcomeEnricher = new OutcomeEnricher(), workflowSources?: WorkflowSources, contentRules = false, index: IndexScan | null = null, usageOwners?: ClaudeUsageOwners, mainPaths: string[] = [path]): Promise<SessionAnalytics | null> {
   if (index && path.includes("/subagents/") && row.provider_session_id) {
     const retained = index.retainedClaudeParent(row.provider_session_id, path);
     if (retained) return retained;
   }
-  // A changed cross-session owner invalidates session-local index accounting.
-  if (index && !usageOwners?.size) {
+  if (index) {
     const history = await historyForTranscript(path, workflowSources, row.root_path);
-    const dependency = history ? { available: history.available, commands: [...history.commands], registry: [...history.commandNames] } : null;
-    return index.session(row, [...new Set((await Promise.all(mainPaths.map(claudeEvidencePaths))).flat())], warnings,
+    const evidencePaths = [...new Set((await Promise.all(mainPaths.map(claudeEvidencePaths))).flat())];
+    // A changed owner of any duplicated message this session observes invalidates its indexed accounting.
+    const dependency = { history: history ? { available: history.available, commands: [...history.commands], registry: [...history.commandNames] } : null,
+      usageOwners: usageOwners?.dependencies(evidencePaths) ?? [] };
+    return index.session(row, evidencePaths, warnings,
       () => analyzeClaude(row, path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, null, usageOwners, mainPaths),
       undefined, undefined, undefined, dependency);
   }
@@ -1544,12 +1546,34 @@ function pathInside(path: string, root: string): boolean {
   return resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}/`);
 }
 
-async function repositoryForPath(
+// One scan owns one discovered map. Thousands of sessions share a few hundred working
+// directories, and each lookup walks the filesystem and every workspace root.
+const repositoryLookups = new WeakMap<Map<string, RepositoryRow>, Map<string, Promise<RepositoryRow>>>();
+
+function repositoryForPath(
   cwd: string,
   repositories: RepositoryRow[],
   workspaceRepositories: Map<string, RepositoryRow>,
   discovered: Map<string, RepositoryRow>,
   metadataRemote: string | null = null,
+): Promise<RepositoryRow> {
+  let lookups = repositoryLookups.get(discovered);
+  if (!lookups) { lookups = new Map(); repositoryLookups.set(discovered, lookups); }
+  const key = JSON.stringify([cwd, metadataRemote]);
+  let lookup = lookups.get(key);
+  if (!lookup) {
+    lookup = resolveRepositoryForPath(cwd, repositories, workspaceRepositories, discovered, metadataRemote);
+    lookups.set(key, lookup);
+  }
+  return lookup;
+}
+
+async function resolveRepositoryForPath(
+  cwd: string,
+  repositories: RepositoryRow[],
+  workspaceRepositories: Map<string, RepositoryRow>,
+  discovered: Map<string, RepositoryRow>,
+  metadataRemote: string | null,
 ): Promise<RepositoryRow> {
   const resolvedCwd = await realpath(cwd).catch(() => resolve(cwd));
   const workspaceMatch = workspaceRepositories.get(resolvedCwd);
@@ -1558,8 +1582,15 @@ async function repositoryForPath(
   const gitRoot = metadataRemote && !(await stat(resolvedCwd).catch(() => null)) ? null : await gitRootForPath(resolvedCwd);
   const repositoryRemote = (gitRoot ? await repositoryRemoteAtRoot(gitRoot) : null) ?? metadataRemote;
   const remoteIdentity = repositoryRemote ? normalizeRemote(repositoryRemote) : null;
-  const workspaceAncestor = [...workspaceRepositories.entries()]
-    .filter(([root]) => pathInside(resolvedCwd, root))
+  // Workspace keys are normalized absolute paths, so walking the cwd's own ancestors
+  // deepest-first finds the same longest containing root without scanning every workspace.
+  const workspaceAncestors: Array<[string, RepositoryRow]> = [];
+  for (let root = resolvedCwd; ; root = dirname(root)) {
+    const repository = workspaceRepositories.get(root);
+    if (repository && (root !== parse(root).root || root === resolvedCwd)) workspaceAncestors.push([root, repository]);
+    if (dirname(root) === root) break;
+  }
+  const workspaceAncestor = workspaceAncestors
     .filter(([root, repository]) => {
       // Explicit workspace ownership survives deletion. A nested independent
       // Git boundary must retain its own identity, including linked worktrees.
@@ -1567,8 +1598,7 @@ async function repositoryForPath(
       if (!gitRoot) return !metadataRemote || sameRemote;
       return resolve(gitRoot) === resolve(root) ||
         resolve(gitRoot) === resolve(repository.root_path) || sameRemote;
-    })
-    .sort(([left], [right]) => right.length - left.length)[0];
+    })[0];
   if (workspaceAncestor) return workspaceAncestor[1];
   const direct = repositories
     .filter(({ root_path }) => root_path && pathInside(resolvedCwd, root_path))
@@ -1656,7 +1686,7 @@ async function analyzeTranscriptCandidate(
   workflowSources?: WorkflowSources,
   contentRules = false,
   index: IndexScan | null = null,
-  claudeUsageOwners?: ReadonlyMap<string, string>,
+  claudeUsageOwners?: ClaudeUsageOwners,
 ): Promise<SessionAnalytics | null> {
   const timestamp = candidate.timestamp ?? new Date((await stat(candidate.path)).mtimeMs).toISOString();
   const row = syntheticSessionRow(candidate.provider, candidate.id, candidate.cwd, timestamp, repository);
@@ -2396,6 +2426,7 @@ async function analyzeSelectedRepositories(
       }
       registeredRows.push(row);
     }
+    await index?.prefetch([...codexIndex.paths.values(), ...claudeIndex.paths.values()].flat());
     const analyzedRows = await mapConcurrent(registeredRows, 1, async (row) => {
       if (row.agent_type !== "codex" && row.agent_type !== "claude") {
         return ["cursor", "copilot", "opencode", "gemini"].includes(row.agent_type) ? null : unavailableSession(row, "unsupported", ["Unsupported Conductor agent type."]);
