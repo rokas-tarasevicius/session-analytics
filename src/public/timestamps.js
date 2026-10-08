@@ -2,13 +2,14 @@
 // Offset-free provider/database timestamps mean UTC, independent of local TZ/DST.
 /** Few distinct days recur across millions of event timestamps. @type {Map<string, boolean>} */
 const calendarDays = new Map();
+const maxCachedDays = 100_000;
 /** @param {string} date */
 function validCalendarDay(date) {
   let valid = calendarDays.get(date);
   if (valid === undefined) {
     const day = Date.parse(`${date}T00:00:00Z`);
     valid = Number.isFinite(day) && new Date(day).toISOString().slice(0, 10) === date;
-    if (calendarDays.size >= 100_000) calendarDays.clear();
+    if (calendarDays.size >= maxCachedDays) calendarDays.clear();
     calendarDays.set(date, valid);
   }
   return valid;

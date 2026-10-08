@@ -72,6 +72,7 @@ import type {
 import { desktopMetadataPath } from "./providers/claude-desktop.ts";
 import { createClaudeAdapter } from "./providers/claude.ts";
 import { buildClaudeUsageOwners, type ClaudeUsageOwners } from "./providers/claude-ownership.ts";
+import { mapConcurrent } from "./concurrency.ts";
 import { additionalProviderSessions } from "./providers/index.ts";
 import { modelName, name as safeName, effortName, safeTime, statusName } from "./providers/common.ts";
 import { conductorFallback, conductorLegacyProviderIds } from "./providers/conductor.ts";
@@ -1120,12 +1121,11 @@ async function analyzeClaude(row: SessionDatabaseRow, path: string, rateCard: Pr
     const retained = index.retainedClaudeParent(row.provider_session_id, path);
     if (retained) return retained;
   }
-  if (index) {
+  const evidencePaths = index ? [...new Set((await Promise.all(mainPaths.map(claudeEvidencePaths))).flat())] : [];
+  // Messages shared with a resumed copy are accounted across sessions, so only those sessions skip the index.
+  if (index && !usageOwners?.sharedBy(evidencePaths)) {
     const history = await historyForTranscript(path, workflowSources, row.root_path);
-    const evidencePaths = [...new Set((await Promise.all(mainPaths.map(claudeEvidencePaths))).flat())];
-    // A changed owner of any duplicated message this session observes invalidates its indexed accounting.
-    const dependency = { history: history ? { available: history.available, commands: [...history.commands], registry: [...history.commandNames] } : null,
-      usageOwners: usageOwners?.dependencies(evidencePaths) ?? [] };
+    const dependency = history ? { available: history.available, commands: [...history.commands], registry: [...history.commandNames] } : null;
     return index.session(row, evidencePaths, warnings,
       () => analyzeClaude(row, path, rateCard, warnings, reliabilityContext, limits, outcomeEnricher, workflowSources, contentRules, null, usageOwners, mainPaths),
       undefined, undefined, undefined, dependency);
@@ -1582,24 +1582,18 @@ async function resolveRepositoryForPath(
   const gitRoot = metadataRemote && !(await stat(resolvedCwd).catch(() => null)) ? null : await gitRootForPath(resolvedCwd);
   const repositoryRemote = (gitRoot ? await repositoryRemoteAtRoot(gitRoot) : null) ?? metadataRemote;
   const remoteIdentity = repositoryRemote ? normalizeRemote(repositoryRemote) : null;
-  // Workspace keys are normalized absolute paths, so walking the cwd's own ancestors
-  // deepest-first finds the same longest containing root without scanning every workspace.
-  const workspaceAncestors: Array<[string, RepositoryRow]> = [];
+  // Workspace keys are normalized absolute paths: the deepest owning ancestor is the longest containing root.
   for (let root = resolvedCwd; ; root = dirname(root)) {
     const repository = workspaceRepositories.get(root);
-    if (repository && (root !== parse(root).root || root === resolvedCwd)) workspaceAncestors.push([root, repository]);
-    if (dirname(root) === root) break;
-  }
-  const workspaceAncestor = workspaceAncestors
-    .filter(([root, repository]) => {
+    if (repository && (root !== parse(root).root || root === resolvedCwd)) {
       // Explicit workspace ownership survives deletion. A nested independent
       // Git boundary must retain its own identity, including linked worktrees.
       const sameRemote = Boolean(remoteIdentity && repository.remote_url && normalizeRemote(repository.remote_url) === remoteIdentity);
-      if (!gitRoot) return !metadataRemote || sameRemote;
-      return resolve(gitRoot) === resolve(root) ||
-        resolve(gitRoot) === resolve(repository.root_path) || sameRemote;
-    })[0];
-  if (workspaceAncestor) return workspaceAncestor[1];
+      if (!gitRoot ? !metadataRemote || sameRemote
+        : resolve(gitRoot) === resolve(root) || resolve(gitRoot) === resolve(repository.root_path) || sameRemote) return repository;
+    }
+    if (dirname(root) === root) break;
+  }
   const direct = repositories
     .filter(({ root_path }) => root_path && pathInside(resolvedCwd, root_path))
     .sort((left, right) => resolve(right.root_path).length - resolve(left.root_path).length)[0];
@@ -2121,25 +2115,6 @@ async function cursorSessionsSerialized(
       workspaceRepositories: [...workspaceRepositories],
     }));
   });
-}
-
-async function mapConcurrent<T, R>(
-  values: T[],
-  concurrency: number,
-  operation: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(values.length);
-  let cursor = 0;
-  async function worker(): Promise<void> {
-    while (cursor < values.length) {
-      const index = cursor;
-      cursor += 1;
-      const value = values[index];
-      if (value !== undefined) results[index] = await operation(value);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
-  return results;
 }
 
 function sessionRows(database: DatabaseSync, repositoryIds: string[], includeHidden: boolean) {

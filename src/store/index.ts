@@ -8,6 +8,7 @@ import type { AnalyzeOptions, RateCard, SessionAnalytics, SessionDatabaseRow } f
 import { openIndexDatabase, type IndexConnection, type IndexScanStats } from "./database.ts";
 import { fingerprint, keyedHash, stillMatches, type FileFingerprint } from "./fingerprint.ts";
 import { readCodexLedger, type CodexLedgerEvidence } from "./codex-ledger.ts";
+import { mapConcurrent } from "../concurrency.ts";
 import { projectSession, sessionForIndex } from "./projection.ts";
 import { assertIndexParity, IndexParityError, rotatingSample } from "./parity.ts";
 
@@ -41,15 +42,7 @@ export function lastActivityAt(session: Pick<SessionAnalytics, "lastEventAt" | "
   return ""; // Unknown activity time is never treated as proof that a session is old.
 }
 
-async function concurrently<T, R>(values: T[], limit: number, operation: (value: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(values.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < values.length) { const position = next++; results[position] = await operation(values[position]!); }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
-  return results;
-}
+const FINGERPRINT_CONCURRENCY = 16;
 
 /** One writer transaction per scan. Failed scans roll back facts, fingerprints, and deletion marks together. */
 export class IndexScan {
@@ -163,7 +156,7 @@ export class IndexScan {
   /** Fingerprint upcoming sources concurrently. Commit still re-checks every value it saves. */
   async prefetch(paths: string[]): Promise<void> {
     const pending = [...new Set(paths)].filter((path) => !this.fingerprints.has(this.sourceKey(path)));
-    await concurrently(pending, 16, async (path) => {
+    await mapConcurrent(pending, FINGERPRINT_CONCURRENCY, async (path) => {
       // A failed prefetch is retried, and reported, by the session that needs the file.
       try { this.prefetched.set(this.sourceKey(path), await fingerprint(path, this.connection.secret)); } catch { /* retried */ }
     });
@@ -175,7 +168,8 @@ export class IndexScan {
     if (existing) return existing.value;
     let value = this.prefetched.get(key);
     this.prefetched.delete(key);
-    if (!value) {
+    // A source that changed or vanished since the prefetch is fingerprinted at use, as before.
+    if (!value || !(await stillMatches(path, value))) {
       try { value = await fingerprint(path, this.connection.secret); }
       catch { throw new IndexParityError(); }
     }
@@ -463,7 +457,7 @@ export class IndexScan {
     const unstable = new Set<string>();
     this.prefetched.clear();
     const sources = [...this.fingerprints];
-    const stable = await concurrently(sources, 16, ([, { path, value }]) => stillMatches(path, value));
+    const stable = await mapConcurrent(sources, FINGERPRINT_CONCURRENCY, ([, { path, value }]) => stillMatches(path, value));
     sources.forEach(([key], position) => { if (!stable[position]) unstable.add(key); });
     const unstableComponents = new Set([...unstable].map((source) => this.component(source)));
     const deferredSources = new Set([...this.fingerprints.keys()].filter((source) => unstableComponents.has(this.component(source))));

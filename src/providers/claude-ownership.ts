@@ -5,14 +5,21 @@ interface Owner { path: string; firstPath: string; firstFile: string; files?: Se
 
 /** Duplicated message IDs mapped to their owning main path. */
 export class ClaudeUsageOwners extends Map<string, string> {
-  readonly idsByFile = new Map<string, string[]>();
+  private readonly sharedFiles = new Set<string>();
+  private readonly visitedFiles = new Set<string>();
 
-  /** A session's accounting reads only the duplicated IDs its own files observe, so
-   * these pairs are exactly the cross-session state its indexed facts depend on. */
-  dependencies(paths: Iterable<string>): Array<[string, string]> {
-    const ids = new Set<string>();
-    for (const path of paths) for (const id of this.idsByFile.get(path) ?? []) ids.add(id);
-    return [...ids].sort().map((id) => [id, this.get(id)!]);
+  visited(file: string): void { this.visitedFiles.add(file); }
+
+  own(id: string, owner: string, files: Iterable<string>): void {
+    this.set(id, owner);
+    for (const file of files) this.sharedFiles.add(file);
+  }
+
+  /** Whether any of these files observes a message another session also records, or could: a file
+   * this pass did not read completely is unknown whenever any message is shared. */
+  sharedBy(paths: Iterable<string>): boolean {
+    for (const path of paths) if (this.sharedFiles.has(path) || (this.size > 0 && !this.visitedFiles.has(path))) return true;
+    return false;
   }
 }
 
@@ -26,6 +33,7 @@ export async function buildClaudeUsageOwners(
   visit: (path: string, visitor: (record: RecordValue, line: number) => void) => Promise<void>,
 ): Promise<ClaudeUsageOwners> {
   const observed = new Map<string, Owner>();
+  const owners = new ClaudeUsageOwners();
   for (const candidate of [...candidates].sort((a, b) => (a.timestamp ?? "\uffff").localeCompare(b.timestamp ?? "\uffff") || a.path.localeCompare(b.path))) {
     let paths: string[];
     try { paths = [...new Set((await Promise.all((candidate.paths ?? [candidate.path]).map(pathsFor))).flat())]; } catch { continue; }
@@ -46,6 +54,7 @@ export async function buildClaudeUsageOwners(
           const ttl = (finite(ttlRecord?.["ephemeral_5m_input_tokens"]) ?? 0) + (finite(ttlRecord?.["ephemeral_1h_input_tokens"]) ?? 0);
           const writes = Math.max(finite(usage["cache_creation_input_tokens"]) ?? 0, ttl);
           const previous = observed.get(id);
+          // Most messages appear once; only a repeated ID pays for a file set.
           if (previous) (previous.files ??= new Set([previous.firstFile])).add(path);
           const duplicate = !!previous && (previous.duplicate || previous.firstPath !== candidate.path);
           const sameCounters = previous && input === previous.input && cached === previous.cached && writes === previous.writes;
@@ -56,17 +65,10 @@ export async function buildClaudeUsageOwners(
               ...(previous?.files ? { files: previous.files } : {}), output, total, reasoning, ttl, input, cached, writes, duplicate });
           } else if (duplicate) previous.duplicate = true;
         });
+        owners.visited(path);
       } catch { /* The regular per-session parser retains read/parse diagnostics. */ }
     }
   }
-  const owners = new ClaudeUsageOwners();
-  for (const [id, owner] of observed) {
-    if (!owner.duplicate) continue;
-    owners.set(id, owner.path);
-    for (const file of owner.files ?? [owner.firstFile]) {
-      const ids = owners.idsByFile.get(file) ?? [];
-      ids.push(id); owners.idsByFile.set(file, ids);
-    }
-  }
+  for (const [id, owner] of observed) if (owner.duplicate) owners.own(id, owner.path, owner.files ?? [owner.firstFile]);
   return owners;
 }
