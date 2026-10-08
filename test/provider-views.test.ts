@@ -31,7 +31,8 @@ async function harness() {
   const evidenceHelpers = await import(new URL("../src/public/evidence.js", import.meta.url).href);
   const exportHelpers = await import(new URL("../src/public/export-data.js", import.meta.url).href);
   const ui = await import(new URL("../src/public/ui.js", import.meta.url).href);
-  const context = createContext({ renderHistoryCoverage() {}, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, document, Intl, Set, Map, console, HTMLElement: Element,
+  const velocityData = await import(new URL("../src/public/velocity-data.js", import.meta.url).href);
+  const context = createContext({ renderHistoryCoverage() {}, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   source = source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
@@ -81,13 +82,17 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
   const invalid = sample(undefined, true); invalid.tokens = tokens(999, 0, 0, 999); invalid.metrics.toolCalls = 999; invalid.tools = { Read: 999 };
   for (const sessions of [[activity], [summary], [invalid], [summary, activity]]) {
     h.context["sessions"] = sessions;
-    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
+    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,scopeSessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
     // Values stay bare; the eligible/selected share moves to the coverage badge beside the value.
     assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? "100" : "—");
     const selected = `${sessions.length} selected ${sessions.length === 1 ? "session" : "sessions"}`;
     assert.equal(h.elements.get("#metric-input-coverage")!.textContent.trim(), sessions.includes(summary) ? sessions.length === 2 ? "1/2" : "" : `No token evidence in ${selected}`);
-    assert.equal(h.elements.get("#metric-spend")!.textContent, sessions.includes(summary) ? "$1.00" : "—");
-    assert.equal(h.elements.get("#metric-spend-coverage")!.textContent.trim(), sessions.includes(summary) ? sessions.length === 2 ? "1/2" : "" : `No priced or reported value in ${selected}`);
+    // The headline is the activity-dated ledger shared with Velocity. A provider-reported summary has no
+    // activity dates, so the headline is unavailable and its whole-session value is disclosed, not hidden.
+    assert.equal(h.elements.get("#metric-spend")!.textContent, "—");
+    assert.equal(h.elements.get("#metric-spend-coverage")!.textContent.trim(), "");
+    const note = h.elements.get("#metric-spend-note")!.textContent;
+    if (sessions.includes(summary)) assert.match(note, /\$1\.00 in \d sessions? without activity dates/);
     assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? "0" : "—");
     assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2" : "" : `No tool evidence in ${selected}`);
     assert.equal(h.elements.get("#metric-compactions")!.textContent, "—");

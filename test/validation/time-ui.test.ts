@@ -7,6 +7,7 @@ import { normalizeTimestamp } from '../../src/public/timestamps.js';
 import { dailyCountSeries, dailySpendSeries, heatLevel } from '../../src/public/view-model.js';
 // Loaded dynamically like the other harnesses: ui.js is browser JavaScript without type declarations.
 const ui: Record<string, unknown> = await import(new URL('../../src/public/ui.js', import.meta.url).href);
+const velocityData = await import(new URL('../../src/public/velocity-data.js', import.meta.url).href);
 
 // Execute the production functions unchanged with deterministic DOM collaborators.
 function productionFunction(name: string, context: Record<string, unknown>) {
@@ -35,24 +36,31 @@ test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch
   assert.match(evidence.textContent,/1\/4 sessions/);
 });
 
-test('time-ui: priced-value sparkline discloses its session-start cohort scope', () => {
-  const old = {createdAt:'2026-08-31T12:00:00Z',spendByDay:{'2026-09-01':7}};
-  const recent = {createdAt:'2026-09-01T12:00:00Z',spendByDay:{'2026-09-01':3},tokens:{inputTokens:1,outputTokens:1},metrics:{toolCalls:1,compactions:0}};
+test('time-ui: priced-value KPI and sparkline follow activity dates like Velocity, including earlier starts', () => {
+  // A session started before the window still contributes the value it used inside the window; the KPI,
+  // its sparkline and Velocity's "Selected period" all read the same activity ledger.
+  const bucket = (day: string, value: number) => [day, 12, 0, [value, 100, 100, 0, 0, 20, 0, 1, 0, 0, 120, 0, 100, 0]];
+  const velocity = (cells: unknown[]) => ({ dimensions: [{ agent: 'claude-cli', model: 'm', executionKind: 'top-level', effort: 'unknown' }], buckets: cells, undated: [] });
+  const old = {provider:'claude',repositoryId:'r',createdAt:'2026-08-31T12:00:00Z',spendByDay:{'2026-09-01':7},velocity:velocity([bucket('2026-08-31',1),bucket('2026-09-01',7)])};
+  const recent = {provider:'claude',repositoryId:'r',createdAt:'2026-09-01T12:00:00Z',spendByDay:{'2026-09-01':3},tokens:{inputTokens:1,outputTokens:1},metrics:{toolCalls:1,compactions:0},velocity:velocity([bucket('2026-09-01',3)])};
   const elementMap: Record<string,Element>={};
   const lookup=(key:string)=>elementMap[key]??=new Element();
   const elements = new Proxy({}, {get:(_target,key)=>lookup(String(key))});
   const series: Record<string,number[]>={};
   const labels: Record<string,string>={};
   const render = productionFunction('renderSummary', {
-    ...ui, elements, snapshot: {}, $:lookup, windowDays:()=>['2026-09-01'], windowPreset:'all',
-    renderHistoryCoverage(){},renderMetricValue(){},coveredValue:()=>'',money:String,percent:String,integer:new Intl.NumberFormat('en'),compact:new Intl.NumberFormat('en'),
+    ...ui, ...velocityData, elements, snapshot: {}, $:lookup, windowDays:()=>['2026-09-01'], windowPreset:'all',
+    velocityContext:()=>({start:'2026-09-01',end:'2026-09-01',timeZone:'Europe/London'}),repositorySessions:()=>[],spendDelta:()=>null,
+    node:(tag:string,text?:string)=>{const e=new Element(tag);e.textContent=text??'';return e;},clear:(e:Element)=>e.replaceChildren(),
+    renderHistoryCoverage(){},renderMetricValue(){},coveredValue:()=>'',money:(v:number)=>`$${v.toFixed(2)}`,percent:String,integer:new Intl.NumberFormat('en'),compact:new Intl.NumberFormat('en'),
     dailyCountSeries,dailySpendSeries,renderDelta(){},renderSparkline:(e:Element,values:number[],_days:string[],options:{label:string})=>{const key=Object.entries(elementMap).find(([,v])=>v===e)![0];series[key]=values;labels[key]=options.label;},
     renderLine(){},dailyProviderSpend(){},renderDonut(){},renderBars(){},renderRepositoryTable(){},renderWarnings(){},renderProviderEvidence(){},selectRepository(){},
   });
-  render({summary:{coverage:{cost:{},apiCost:{},reportedCost:{},tokens:{},tools:{eligible:1},compactions:{}}},sessions:[recent],dailySessions:[old,recent],repositories:[],spendByModel:[],topTools:[],warnings:[]});
-  assert.deepEqual(Array.from(series['#metric-spend-spark']!),[3]);
-  assert.equal(dailySpendSeries([old,recent],['2026-09-01'])[0],10);
-  assert.match(labels['#metric-spend-spark']!,/sessions started.*selected window/i);
+  render({summary:{coverage:{cost:{},apiCost:{},reportedCost:{},tokens:{},tools:{eligible:1},compactions:{}}},sessions:[recent],scopeSessions:[old,recent],dailySessions:[old,recent],repositories:[],spendByModel:[],topTools:[],warnings:[]});
+  assert.deepEqual(Array.from(series['#metric-spend-spark']!),[10]);
+  assert.equal(lookup('spend').textContent,'$10.00');
+  assert.equal(velocityData.buildVelocity([old,recent],{start:'2026-09-01',end:'2026-09-01'}).totals[0],10,'Velocity reports the same total');
+  assert.match(labels['#metric-spend-spark']!,/activity date \(Europe\/London\)/i);
 });
 
 test('time-ui: session-start sparklines exclude unknown starts and file modification dates', () => {

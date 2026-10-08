@@ -100,6 +100,10 @@ function groupIdentity(session, dimension, group) {
   return [dimension.agent, agentLabels[dimension.agent] || "Unknown agent"];
 }
 
+/** Evidence sources whose parsers never write an hourly activity ledger. Their sessions are
+ * disclosed (all time) rather than treated as a stale snapshot that needs a refresh. */
+export const ledgerlessSources = new Set(["conductor-result", "cursor-sdk", "cursor-transcript", "copilot-events", "opencode-db", "gemini-chat"]);
+
 /** Sum occupied hourly cells; never use session creation as the activity date. */
 export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7 } = {}) {
   const index = metricDefinitions[metric].index;
@@ -112,8 +116,12 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   const evidence = blankEvidence();
   const coverage = { priceTokens: 0, cacheReadInput: 0, cacheWriteInput: 0, reasoningOutput: 0 };
   let earliest = null, missingSessions = 0, contributingSessions = 0;
+  const unledgered = { sessions: 0, value: 0 };
   for (const session of sessions) {
-    if (!session.velocity) { missingSessions += 1; continue; }
+    if (!session.velocity) {
+      if (ledgerlessSources.has(session.evidence?.source)) { unledgered.sessions += 1; unledgered.value += session.cost?.totalUsd || 0; } else missingSessions += 1;
+      continue;
+    }
     let contributes = false;
     for (const [, values] of session.velocity.undated) add(undated, values);
     for (const [day, hour, dimensionId, values] of session.velocity.buckets) {
@@ -154,7 +162,7 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   const daily = [...dailyMap.values()];
   const rolling = daily.map((_, i) => i < 6 || daily[i - 6].day < earliest || missingSessions || !daily.slice(i - 6, i + 1).every((item) => item.evidence.complete) ? null : sum(daily.slice(i - 6, i + 1).map((item) => item.total)) / 7);
   if (mode === "cumulative" && granularity !== "hour") series = series.map((item) => { let running = 0; return { ...item, values: item.values.map((value) => running += value) }; });
-  return { start, end, group, metric, granularity, mode, keys, series, allSeries, daily, rolling, totals, undated, coverage, evidence, earliest, missingSessions, contributingSessions };
+  return { start, end, group, metric, granularity, mode, keys, series, allSeries, daily, rolling, totals, undated, coverage, evidence, earliest, missingSessions, unledgered, contributingSessions };
 }
 
 /** Percentages need enough observed activity as well as a nonzero denominator. */
@@ -170,6 +178,78 @@ export function quantile(values, fraction) {
   return sorted[lower] * (1 - weight) + sorted[Math.ceil(position)] * weight;
 }
 
+/** Minimum share of eligible tokens with known metric evidence on each side of a period comparison. */
+export const comparisonEvidenceFloor = 0.9;
+const evidenceShare = (evidence) => evidence.eligible > 0 ? evidence.known / evidence.eligible : 1;
+
+/**
+ * The ledger dates the calendar indicators need. They are anchored on the selected end date but
+ * look back through observed history, not just the selected window: a "last 7 days" window must
+ * still compare this week with last week. Two whole months before the anchor month cover the
+ * month-over-month fallback on the 1st, both prior weeks and the 14-day burn baseline.
+ */
+export function comparisonSpan(end, today) {
+  const anchor = today && today < end ? today : end;
+  const start = new Date(`${anchor.slice(0, 7)}-01T12:00:00Z`); start.setUTCMonth(start.getUTCMonth() - 2);
+  return { start: start.toISOString().slice(0, 10), end };
+}
+
+/**
+ * Classifies one like-for-like period comparison. `status` is `change` (a guarded percentage),
+ * `new` (observed zero before, activity now), `idle` (observed zero on both sides) or
+ * `unavailable` with a specific `reason`. A delta is never Infinity, NaN or an invented 0%.
+ */
+export function comparePeriods(current, previous, metric, { missingSessions = 0 } = {}) {
+  const result = { current, previous, delta: null, status: "unavailable", reason: null, partial: false };
+  const definition = metricDefinitions[metric];
+  if (missingSessions) return { ...result, reason: "Refresh: some sessions have no activity ledger" };
+  // The prior period always precedes the current one, so it is the side that can predate history.
+  if (!previous.covered || !current.covered) return { ...result, reason: previous.coveredDays ? "Prior period is only partly observed" : "No observed history for the prior period" };
+  if (current.evidence.unsupported || previous.evidence.unsupported) return { ...result, reason: "Metric not recorded by some providers" };
+  const weak = [["current", current.evidence], ["prior", previous.evidence]].find(([, evidence]) => evidenceShare(evidence) < comparisonEvidenceFloor);
+  if (weak) {
+    const share = Math.floor(100 * evidenceShare(weak[1]));
+    return { ...result, reason: `${share}% ${metric === "value" ? "of tokens priced" : "metric evidence"} in the ${weak[0]} period; ${Math.round(comparisonEvidenceFloor * 100)}% needed` };
+  }
+  const partial = !current.evidence.complete || !previous.evidence.complete;
+  if (previous.value === 0) return { ...result, partial, status: current.value === 0 ? "idle" : "new" };
+  const delta = guardedDelta(current.value, previous.value, metric, previous.calls);
+  if (delta === null) return { ...result, partial, reason: definition.index < 7 ? `Prior period below the minimum baseline (${definition.minimum} ${definition.unit}, 3 model calls)` : `Prior period below the minimum baseline (${definition.minimum} ${definition.unit})` };
+  return { ...result, partial, delta, status: "change" };
+}
+
+/** A whole buildVelocity window as one comparison period, covered only inside observed history. */
+export function periodFromVelocity(data) {
+  const index = metricDefinitions[data.metric].index;
+  const coveredDays = data.daily.filter(({ day }) => data.earliest !== null && day >= data.earliest).length;
+  return { start: data.start, end: data.end, days: data.daily.length, coveredDays, covered: data.daily.length > 0 && coveredDays === data.daily.length, value: data.totals[index], calls: data.totals[7], evidence: { ...data.evidence } };
+}
+
+/**
+ * Week and month comparisons over completed dates (today is partial and excluded).
+ * The current period is the week/month containing the last completed date, so on a Monday or
+ * on the 1st it is the period that just finished (`rolledBack`), compared with the one before.
+ * Week: Monday through the last completed date vs the same weekdays one week earlier.
+ * Month: the first N completed dates vs the first N dates of the prior month, both clipped to
+ * the shorter month.
+ */
+function periodComparisons(range, end, completeThrough, metric, options = {}) {
+  const weekStart = periodKey(completeThrough, "week");
+  const week = {
+    ...comparePeriods(range(weekStart, completeThrough), range(shiftDay(weekStart, -7), shiftDay(completeThrough, -7)), metric, options),
+    rolledBack: weekStart !== periodKey(end, "week"),
+  };
+  const monthStart = `${completeThrough.slice(0, 7)}-01`;
+  const previousMonthEnd = shiftDay(monthStart, -1);
+  const previousMonthStart = `${previousMonthEnd.slice(0, 7)}-01`;
+  const pairedDays = Math.min(calendarDays(monthStart, completeThrough).length, Number(previousMonthEnd.slice(-2)));
+  const month = {
+    ...comparePeriods(range(monthStart, shiftDay(monthStart, pairedDays - 1)), range(previousMonthStart, shiftDay(previousMonthStart, pairedDays - 1)), metric, options),
+    rolledBack: monthStart !== `${end.slice(0, 7)}-01`,
+  };
+  return { week, month };
+}
+
 export function velocityIndicators(data, today) {
   const end = data.end < today ? data.end : today;
   const completeThrough = end === today ? shiftDay(today, -1) : end;
@@ -182,15 +262,8 @@ export function velocityIndicators(data, today) {
     return { start, end: finish, days: dates.length, coveredDays: dates.filter((day) => day >= observedStart && days.has(day)).length, covered, value: sum(rows.map((row) => row?.total || 0)), calls: sum(rows.map((row) => row?.values[7] || 0)), evidence: rows.reduce((total, row) => row ? addEvidence(total, row.evidence) : total, blankEvidence()) };
   };
   const supported = (period) => period.covered && period.evidence.complete && !data.missingSessions;
-  const compare = (current, previous) => ({ current, previous, delta: supported(current) && supported(previous) ? guardedDelta(current.value, previous.value, data.metric, previous.calls) : null });
-  const weekStart = periodKey(end, "week");
-  const week = compare(range(weekStart, completeThrough), range(shiftDay(weekStart, -7), shiftDay(completeThrough, -7)));
+  const { week, month } = periodComparisons(range, end, completeThrough, data.metric, { missingSessions: data.missingSessions });
   const monthStart = `${end.slice(0, 7)}-01`;
-  const previousMonthEnd = shiftDay(monthStart, -1);
-  const previousMonthStart = `${previousMonthEnd.slice(0, 7)}-01`;
-  const completeMonthDays = calendarDays(monthStart, completeThrough).length;
-  const pairedDays = Math.min(completeMonthDays, Number(previousMonthEnd.slice(-2)));
-  const month = compare(range(monthStart, shiftDay(monthStart, pairedDays - 1)), range(previousMonthStart, shiftDay(previousMonthStart, pairedDays - 1)));
   const trailing = range(shiftDay(end, -14), shiftDay(end, -1));
   const baseline = calendarDays(trailing.start, trailing.end).map((day) => days.get(day)?.total || 0);
   const median = supported(trailing) ? quantile(baseline, 0.5) : null;
@@ -211,7 +284,7 @@ export function velocityIndicators(data, today) {
   const remaining = calendarDays(shiftDay(completeThrough, 1), monthEnd).length;
   const active = history.filter((v) => v > 0).length;
   let projection = null;
-  if (supported(elapsed) && supported(observedPeriod) && supported(sample) && history.length >= 7 && active >= 3 && guardedDelta(sum(history), sum(history), data.metric, sample.calls) !== null) {
+  if (remaining > 0 && supported(elapsed) && supported(observedPeriod) && supported(sample) && history.length >= 7 && active >= 3 && guardedDelta(sum(history), sum(history), data.metric, sample.calls) !== null) {
     const project = (fraction) => {
       const rate = quantile(history, fraction);
       // A busy partial day must not consume the allowance for future full days.

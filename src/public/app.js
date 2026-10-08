@@ -1,6 +1,6 @@
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
-  clampWindow, costTotals, coverageWarnings, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample,
+  clampWindow, costTotals, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
   groupByRepository, heatLevel, matchesQuery, mergeModels, namedTotals, percent, previousPeriod, providerLabels,
   providerOrder, repositoryKey, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, spendDays, summarize, tickScale,
   windowStartFor,
@@ -9,7 +9,7 @@ import { providerColors, providerMark, renderProviderEvidence, dailySpendByProvi
 
 import { renderPricingPanel } from "./pricing.js";
 import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
-import { localDay, sessionStartWindow } from "./velocity-data.js";
+import { buildVelocity, comparePeriods, localDay, periodFromVelocity, sessionStartWindow } from "./velocity-data.js";
 import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
 import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
@@ -170,7 +170,7 @@ function sessionsInWindow(sessions) {
   return selectSessions(sessions, selectedWindow());
 }
 
-function windowDays() { return daysBetween(elements.windowStart.value, elements.windowEnd.value); }
+function windowDays() { return daysBetween(elements.windowStart.value || elements.windowStart.min, elements.windowEnd.value || elements.windowEnd.max); }
 function historicalSnapshot({ transcript }) {
   return transcript.sourceDeleted || transcript.warnings.includes("Source availability could not be checked; showing the last indexed facts.");
 }
@@ -830,16 +830,17 @@ function populateRepositories() {
 function renderRepositoryNav() {
   if (!wideLayout.matches) { navDirty = true; return; }
   navDirty = false;
-  const start = elements.windowStart.value, end = elements.windowEnd.value;
+  const start = elements.windowStart.value || elements.windowStart.min, end = elements.windowEnd.value || elements.windowEnd.max;
   const key = `${snapshot.generatedAt}|${start}|${end}`;
   if (navCache.key !== key) {
     const days = daysBetween(start, end);
-    const windowSessions = sessionsInWindow(snapshot.sessions);
+    const activity = buildVelocity(snapshot.sessions, { start, end, group: "repository", metric: "value" });
+    const byRepository = new Map(activity.allSeries.map((series) => [series.id, series]));
     const rows = snapshot.repositories.map((item) => {
-      const sessions = sessionsInWindow(repositorySessions(item.repository.id));
-      return { id: item.repository.id, name: item.repository.name, series: dailySpendSeries(sessions, days), value: summarize(sessions).estimatedSpendUsd };
+      const series = byRepository.get(item.repository.id);
+      return { id: item.repository.id, name: item.repository.name, series: series?.values ?? days.map(() => 0), value: series?.total ?? 0 };
     }).sort((left, right) => right.value - left.value || left.name.localeCompare(right.name));
-    navCache = { days, key, rows, total: summarize(windowSessions).estimatedSpendUsd };
+    navCache = { days, key, rows, total: activity.totals[0] };
     const scrollTop = elements.repositoryList.scrollTop;
     navHoverListeners.clear();
     clear(elements.repositoryList);
@@ -883,6 +884,7 @@ function renderSharedView(view) {
   elements.retentionNote.textContent = `${retained} source-deleted sessions retain facts and prices from their last successful ingest. Historical working status does not establish current activity.`;
   const selected = selectedRepository();
   const population = currentViewName() === "velocity" ? `Activity observed during ${windowCaption()} (${snapshot.velocity?.timeZone || "UTC"}).`
+    : currentViewName() === "summary" ? `Usage value by activity date (${snapshot.velocity?.timeZone || "UTC"}); other totals for sessions started during ${windowCaption()} (UTC).`
     : `Sessions started during ${windowCaption()} (UTC); whole-session totals.`;
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${population}`;
   elements.scopeChip.hidden = !selected;
@@ -898,15 +900,36 @@ function renderDelta(element, delta) {
   element.setAttribute("aria-label", delta.label);
 }
 
+/** The usage-value delta follows the same guarded period comparison as Velocity. */
+function spendDelta(comparison, length) {
+  if (!comparison || (comparison.status !== "change" && comparison.status !== "new")) return null;
+  const delta = deltaDescription(comparison.current.value, comparison.status === "new" ? 0 : comparison.previous.value, length);
+  return delta && comparison.partial ? { ...delta, text: `${delta.text} · partial`, label: `${delta.label}, partially priced` } : delta;
+}
+
 function renderSummary(view) {
   renderHistoryCoverage($("#history-coverage"), snapshot.historyCoverage, snapshot.sessions);
   const summary = view.summary;
   const days = windowDays();
+  const context = velocityContext();
+  // One ledger pass grouped by repository serves the KPI, its sparkline and the repository bars.
+  const activity = buildVelocity(view.scopeSessions, { start: context.start, end: context.end, group: "repository", metric: "value" });
   // Deltas compare against the equal-length period immediately before the window, only when that period is fully observed.
-  const previous = windowPreset === "all" ? null : previousPeriod({ end: elements.windowEnd.value, min: elements.windowStart.min, start: elements.windowStart.value });
+  const previous = windowPreset === "all" ? null : previousPeriod({ end: context.end, min: elements.windowStart.min, start: context.start });
   const previousSummary = previous ? summarize(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay)) : null;
-  renderMetricValue(elements.spend, summary.estimatedSpendUsd, summary.coverage.cost, money, "priced or reported value", elements.spendCoverage);
-  elements.spendNote.textContent = `${summary.coverage.apiCost.eligible ? money(summary.apiEquivalentSpendUsd) : DASH} API-equivalent · ${summary.coverage.reportedCost.eligible ? money(summary.providerReportedSpendUsd) : DASH} provider-reported · not an invoice`;
+  const previousActivity = previous ? buildVelocity(view.scopeSessions, { start: previous.startDay, end: previous.endDay, metric: "value" }) : null;
+  const spendComparison = previousActivity ? comparePeriods(periodFromVelocity(activity), periodFromVelocity(previousActivity), "value", { missingSessions: activity.missingSessions }) : null;
+  const unavailable = !view.scopeSessions.some((session) => session.velocity);
+  setValue(elements.spend, activity.totals[0], unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { reason: "No session in this selection has activity dates" });
+  clear(elements.spendCoverage);
+  const pricedShare = activity.evidence.eligible > 0 ? activity.evidence.known / activity.evidence.eligible : 1;
+  if (!unavailable && (pricedShare < 1 || activity.missingSessions)) {
+    const badge = node("small", activity.missingSessions ? "partial" : `${Math.floor(100 * pricedShare)}% priced`, "coverage");
+    badge.title = activity.missingSessions ? `${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh to collect activity dates` : "Share of dated Claude/Codex tokens with an API price";
+    badge.setAttribute("aria-label", badge.title); elements.spendCoverage.append(badge);
+  }
+  const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates`] : [])];
+  elements.spendNote.textContent = `By activity date (${context.timeZone}) · excludes, across all time, ${excluded.join(" and ")}${activity.missingSessions ? ` · ${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh` : ""} · not an invoice`;
   if (summary.retainedSessions) elements.spendNote.textContent += " · retained history uses last-ingest prices";
   elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
@@ -915,7 +938,7 @@ function renderSummary(view) {
   elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached · repeated context included` : "Cache share unavailable · repeated context included";
   renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer.format(summary.workingSnapshots);
   const metrics = [
-    ["spend", "Dated API-equivalent value only (UTC); sessions started in the selected window, undated and out-of-window value excluded", money, summary.estimatedSpendUsd, previousSummary?.estimatedSpendUsd, dailySpendSeries(view.sessions, days)],
+    ["spend", `Dated API-equivalent value by activity date (${context.timeZone}); undated value excluded`, money, activity.totals[0], previousActivity?.totals[0], activity.daily.map(({ total }) => total)],
     ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
     ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.inputTokens)],
     ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.outputTokens)],
@@ -923,11 +946,12 @@ function renderSummary(view) {
     ["compactions", "Compactions per session-start day", integer.format, summary.compactions, previousSummary?.compactions, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.compactions)],
   ];
   for (const [name, label, format, current, before, series] of metrics) {
-    renderDelta($(`#metric-${name}-delta`), previousSummary ? deltaDescription(current, before, previous.length) : null);
+    renderDelta($(`#metric-${name}-delta`), name === "spend" ? spendDelta(spendComparison, previous?.length) : previousSummary ? deltaDescription(current, before, previous.length) : null);
     renderSparkline($(`#metric-${name}-spark`), series, days, { format, label });
   }
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
-  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd, coverage: item.summary.coverage.cost, what: "priced or reported value" })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
+  const repositoryValue = new Map(activity.allSeries.map(({ id, total }) => [id, total]));
+  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: repositoryValue.get(item.repository.id) ?? 0 })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
   renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
   renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd, eligible, selected }) => ({ name: model, value: totalUsd, provider, coverage: { eligible: eligible.value, selected }, what: "priced value" })), money, 8);
   renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
@@ -968,7 +992,10 @@ function observedRange() {
     ...(velocity?.buckets ?? []).map(([day]) => day), ...(limitsCache?.buckets ?? []).flatMap(({ day }) => day ? [day] : []),
     ...(limitsCache?.compactions ?? []).flatMap(({ timestamp }) => timestamp ? [timestamp.slice(0, 10)] : [])]).filter(Boolean).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10);
-  return { maximum: dates.at(-1) || minimum, minimum };
+  // UTC session-start dates can run a day ahead of the snapshot's local date; never end a window in the future.
+  const today = localDay(snapshot.generatedAt, snapshot.velocity?.timeZone || "UTC");
+  const maximum = dates.at(-1) || minimum;
+  return { maximum: today && maximum > today && minimum <= today ? today : maximum, minimum };
 }
 
 function configureWindow() {
