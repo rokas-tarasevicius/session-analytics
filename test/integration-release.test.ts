@@ -55,7 +55,7 @@ test("release: complete demo API, all seven renderers, static modules and privac
     const server = await readFile(new URL("../src/server.ts", import.meta.url), "utf8");
     const staticBlock = server.slice(server.indexOf("const staticFiles ="), server.indexOf("let analyticsPromise"));
     const assets = [...staticBlock.matchAll(/\["(\/[^"\n]*)",\s*join\(/g)].map((m) => m[1]!);
-    for (const asset of ["/workflow-data.js", "/metrics/outcomes-summary.js", "/export-data.js"]) assert.ok(assets.includes(asset), asset);
+    for (const asset of ["/workflow-data.js", "/metrics/outcomes-summary.js", "/export-data.js", "/chart-colors.js", "/chart-legend.js", "/chart-scale.js"]) assert.ok(assets.includes(asset), asset);
     for (const asset of assets) { const r = await realFetch(base + asset); assert.equal(r.status, 200, asset); assert.ok((await r.arrayBuffer()).byteLength, asset); }
     const html = await (await realFetch(base)).text();
     const document = documentFromHtml(html), storage = { getItem: () => null, setItem() {} };

@@ -1,0 +1,8 @@
+export type ProviderKey = "codex" | "claude" | "cursor" | "copilot" | "opencode" | "gemini" | "unknown";
+export const brandPalette: { light: Record<string, string>; dark: Record<string, string> };
+export function providerKey(provider?: string | null): ProviderKey;
+export function providerColor(provider?: string | null): string;
+export function modelProvider(model?: string | null, fallbackProvider?: string | null): ProviderKey;
+export function modelTier(model?: string | null): 0 | 1 | 2 | 3;
+export function modelColor(provider?: string | null, model?: string | null): string;
+export function componentColor(component: string, baseColor: string): string;

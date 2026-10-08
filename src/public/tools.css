@@ -1,4 +1,4 @@
-/* Tools view: one neutral fill, proportional bars, and a tool-first reading order. */
+/* Tools view: one neutral chart fill (provider splits take brand colours), proportional bars, and a tool-first reading order. */
 #tools-view { min-width: 0; }
 #tools-view .tools-metrics > .kpi:last-child > strong { font-size: 18px; overflow-wrap: anywhere; }
 #tools-view .tools-ranking th, #tools-view .tools-ranking td { vertical-align: middle; }
@@ -9,7 +9,7 @@
 #tools-view .tools-select:hover, #tools-view .tools-select[aria-pressed="true"] { color: var(--text); }
 #tools-view .tools-select[aria-pressed="true"] { border-left-color: var(--text-2); }
 #tools-view .tools-calls { display: grid; gap: 6px; min-width: 110px; font-variant-numeric: tabular-nums; }
-#tools-view .tools-bar > i { background: var(--neutral-mark); }
+#tools-view .tools-bar > i { background: var(--series-color, var(--chart-neutral)); }
 #tools-view .tools-toggle { margin-top: 12px; }
 #tools-view .panel h3 { overflow-wrap: anywhere; }
 #tools-view h4 { margin: 0 0 14px; font-size: 12px; font-weight: 600; }
@@ -19,7 +19,7 @@
 #tools-view .tools-trend-scroll { overflow-x: auto; }
 #tools-view .tools-columns { display: grid; align-items: stretch; gap: 1px; height: 140px; border-bottom: 1px solid var(--line-strong); }
 #tools-view .tools-column { display: flex; align-items: flex-end; justify-content: center; height: 100%; }
-#tools-view .tools-column > i { display: block; width: 100%; max-width: 32px; background: var(--neutral-mark); }
+#tools-view .tools-column > i { display: block; width: 100%; max-width: 32px; background: var(--chart-neutral); }
 #tools-view .tools-trend-axis { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--muted); font: 10px var(--font-mono); }
 #tools-view .tools-splits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 #tools-view .tools-breakdown .bar-label > span { white-space: normal; overflow-wrap: anywhere; }

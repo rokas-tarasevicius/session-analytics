@@ -16,7 +16,7 @@
 
 The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
 
-Palette, shared with the dashboard's light and dark themes. The exact logo hexes are used for UI accents (active states, focus rings, status dots); chart series use lightness-tiered steps of the same hues so adjacent series stay distinguishable under color-vision deficiency (validated with the data-viz palette checks). Dashboard type is Geist (text) and Geist Mono (figures), both bundled under the OFL:
+Palette, shared with the dashboard's light and dark themes. The exact logo hexes are used for UI accents (active states, focus rings, status dots); provider charts use the brand palette below; other categorical charts retain the product hues. Dashboard type is Geist (text) and Geist Mono (figures), both bundled under the OFL:
 
 | Role | Color |
 | --- | --- |
@@ -28,11 +28,36 @@ Palette, shared with the dashboard's light and dark themes. The exact logo hexes
 | Connector | `#62665c` |
 | Heatmap ramp (light) | `#eef2ef` to `#005742` (sage, light to dark) |
 | Heatmap ramp (dark) | `#1a1c18` to `#7eddc0` (sage, dark to light) |
-| Chart series (light) | coral `#c15f4b`, sage `#006855`, ochre `#daa75d`, deep coral `#7b2717`, connector `#62665c`, pale sage `#65af9c` |
-| Chart series (dark) | coral `#cf6b57`, sage `#68bea8`, ochre `#e1ad63`, deep sage `#2c7866`, pale coral `#edab9d`, connector `#62665c` |
-| Providers | Claude = coral, Codex = sage, Cursor = ochre (series steps above) |
 | Dark surfaces | page `#0e0f0d`, card `#151613`, raised `#1b1d19` / `#22241f`, border `#262823` |
 | Light surfaces | page `#f4f4f1`, card `#ffffff`, raised `#f6f6f3` / `#ecece8`, border `#e4e4df` |
+
+### Provider and chart colours
+
+Provider/model identity comes from `src/public/chart-colors.js` and matching `--provider-*` CSS tokens. A regression test checks both theme palettes against the CSS.
+
+| Provider | Light | Dark |
+| --- | --- | --- |
+| OpenAI / Codex / GPT | `#5c5c59` | `#9a9a96` |
+| Anthropic / Claude | `#c96442` | `#d8683f` |
+| Cursor | `#008aa0` | `#13a0b3` |
+| GitHub Copilot | `#8250df` | `#9672ea` |
+| OpenCode | `#a8820d` | `#b98a14` |
+| Google Gemini | `#3a7be0` | `#4f8ae8` |
+| Unknown / unsupported | `#c4c4bd` | `#4a4c46` |
+| Neutral single series (repositories, tools, delegation) | `#006855` | `#68bea8` |
+
+OpenAI greys deliberately depart from the chroma floor to preserve brand identity; series are always labelled. Cursor's monochrome mark uses cyan-teal in charts to distinguish it from OpenAI.
+
+Model shades belong to the family, never its rank or value: flagship tier 0, standard tier 1, named/Codex variants tier 2 (unknown named families use a stable tier 1/2 hash), light tier 3. Opus, Sonnet and Haiku always use tiers 0, 1 and 3. Light tiers use Oklab mixes of base 72% + black, base, base 72% + white, base 50% + white. Dark tiers use base 70% + white, base, base 72% + black, base 52% + black. Claude and GPT have explicit shades:
+
+| Family | Theme | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
+| --- | --- | --- | --- | --- | --- |
+| Claude | Light | `#9a4127` | `#c96442` | `#df8a66` | `#ecb49a` |
+| Claude | Dark | `#f2a887` | `#d8683f` | `#ae4f2f` | `#87402a` |
+| GPT / Codex | Light | `#262624` | `#5c5c59` | `#8a8a86` | `#b5b5b0` |
+| GPT / Codex | Dark | `#e6e6e1` | `#9a9a96` | `#73736f` | `#555551` |
+
+The `--series-1..6` categorical slots (coral `#c15f4b`, sage `#006855`, ochre `#daa75d`, deep coral `#7b2717`, connector `#62665c`, pale sage `#65af9c` in light; `#cf6b57`, `#68bea8`, `#e1ad63`, `#2c7866`, `#edab9d`, `#62665c` in dark) remain only for Velocity's non-provider groups (repository, execution kind, effort), and `--heat-*` remains the sage ramp for the activity heatmap. The provider hues pass the data-viz validator's adjacent-pair checks in provider order (worst adjacent CVD ΔE 10.7 light, 9.9 dark); with all six on screen at once, Gemini blue and Copilot purple are close under deuteranopia, so provider charts always carry a labelled legend. Cost components use shades of the provider hue (or neutral sage for repositories), with stripes for provider-reported value. Legends use readable neutral text and support pointer and keyboard highlighting. Cost, model and tool bars share the maximum across their panel, with no minimum fill width.
 
 ### Regenerating images
 

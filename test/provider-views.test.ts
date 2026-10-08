@@ -19,6 +19,7 @@ class Element {
   removeAttribute(key: string) { delete this.attributes[key]; }
   setAttribute(key: string, value: string) { this.attributes[key] = value; }
   addEventListener(name: string, listener: () => void) { this.listeners[name] = listener; }
+  removeEventListener() {}
   querySelectorAll() { return []; }
   querySelector() { return new Element(); }
   classList = { add() {}, remove() {}, toggle() {} };
@@ -35,7 +36,8 @@ async function harness() {
   const velocityData = await import(new URL("../src/public/velocity-data.js", import.meta.url).href);
   const tools = await import(new URL("../src/public/tools.js", import.meta.url).href);
   const toolsData = await import(new URL("../src/public/tools-data.js", import.meta.url).href);
-  const context = createContext({ renderHistoryCoverage() {}, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, ...tools, ...toolsData, document, Intl, Set, Map, console, HTMLElement: Element,
+  const charts = Object.assign({}, ...await Promise.all(["chart-colors", "chart-scale", "chart-legend"].map((name) => import(new URL(`../src/public/${name}.js`, import.meta.url).href))));
+  const context = createContext({ renderHistoryCoverage() {}, ...charts, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, ...tools, ...toolsData, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   source = source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;

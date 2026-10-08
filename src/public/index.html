@@ -172,7 +172,7 @@
               </article>
               <article class="panel span-6">
                 <header><div><p class="kicker">Consumption</p><h2>Request input processed by repository</h2></div></header>
-                <div class="bar-list sage chart-slot" id="repository-tokens"></div>
+                <div class="bar-list chart-slot" id="repository-tokens"></div>
               </article>
               <article class="panel span-4">
                 <header><div><p class="kicker">Models</p><h2>Usage-value mix</h2></div></header>
@@ -180,11 +180,11 @@
               </article>
               <article class="panel span-4">
                 <header><div><p class="kicker">Execution</p><h2>Tool families</h2></div></header>
-                <div class="bar-list ochre chart-slot" id="tool-calls"></div>
+                <div class="bar-list chart-slot" id="tool-calls"></div>
               </article>
               <article class="panel span-4">
                 <header><div><p class="kicker">Delegation</p><h2>Explicit sub-agent value · lower bound</h2></div></header>
-                <div class="bar-list ochre chart-slot" id="repository-subagent-spend"></div>
+                <div class="bar-list chart-slot" id="repository-subagent-spend"></div>
               </article>
             </section>
 
@@ -206,7 +206,7 @@
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
             <header class="view-header"><div><p class="kicker">Session starts</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <article class="panel activity-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
-            <article class="panel activity-repositories"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list sage chart-slot" id="activity-repositories"></div></article>
+            <article class="panel activity-repositories"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
@@ -224,7 +224,7 @@
           </section>
 
           <section class="analytics-view" data-view-panel="models" hidden aria-labelledby="models-title">
-            <header class="view-header"><div><p class="kicker">Providers</p><h2 id="models-title">Models</h2><p>Bars use a separate scale inside each provider.</p></div><div class="segmented" id="model-metric-switch" role="group" aria-label="Model metric"><button type="button" data-model-metric="value" aria-pressed="true">Usage value</button><button type="button" data-model-metric="calls" aria-pressed="false">Model calls</button><button type="button" data-model-metric="input" aria-pressed="false">Input</button><button type="button" data-model-metric="output" aria-pressed="false">Output</button></div></header>
+            <header class="view-header"><div><p class="kicker">Providers</p><h2 id="models-title">Models</h2><p>Bars share one scale across all providers.</p></div><div class="segmented" id="model-metric-switch" role="group" aria-label="Model metric"><button type="button" data-model-metric="value" aria-pressed="true">Usage value</button><button type="button" data-model-metric="calls" aria-pressed="false">Model calls</button><button type="button" data-model-metric="input" aria-pressed="false">Input</button><button type="button" data-model-metric="output" aria-pressed="false">Output</button></div></header>
             <div class="chart-slot" id="models-by-provider"></div>
           </section>
 
