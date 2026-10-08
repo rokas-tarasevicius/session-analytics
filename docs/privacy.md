@@ -136,6 +136,7 @@ Returned by `/api/analytics` and `report --json`.
 | `rateCard.models[].model` | Model ID with a currently resolved rate | P0 |
 | `rateCard.models[].source` | Public URL of the selected rate source | P0 |
 | `rateCard.models[].provenance` | Current rate evidence; see Pricing provenance below | P0 |
+| `rateCard.models[].rate` | Current public price per 1M tokens: provider key and numeric rate fields only (input, cached input, cache read, cache writes, cache-write multiplier and observability, output, long-context modifiers and context tiers) | P0 |
 | `rateCard.pricing` | Cache freshness/configuration; see Pricing status below | P0 |
 | `repositories[]` | One rollup per repository; see [Repository rollup](#repository-rollup-repositoryrollup) | P0/P1 |
 | `sessions[]` | Every analyzed session; see [Session](#session-sessionanalytics) | P0/P1 |

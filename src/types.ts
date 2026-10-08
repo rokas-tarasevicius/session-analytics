@@ -87,6 +87,21 @@ export interface ModelRate {
   source: string;
 }
 
+/** Numeric-only projection of the currently resolved public rate; built field by field. */
+export interface PublicModelRate {
+  provider: SessionProvider;
+  inputPerMillion: number;
+  cachedInputPerMillion?: number;
+  cacheReadPerMillion?: number;
+  cacheWrite5mPerMillion?: number;
+  cacheWrite1hPerMillion?: number;
+  cacheWriteMultiplier?: number;
+  cacheWriteObservable?: boolean;
+  outputPerMillion: number;
+  longContext?: LongContextRate;
+  contextTiers?: Array<Omit<ContextPriceTier, "assumptions">>;
+}
+
 /** Absolute USD/million prices above a per-request input boundary. */
 export interface ContextPriceTier {
   aboveInputTokens: number;
@@ -322,7 +337,7 @@ export interface RepositoryAnalytics {
   rateCard: {
     currency: "USD";
     effectiveDate: string;
-    models: Array<{ model: string; source: string; provenance?: RateProvenance }>;
+    models: Array<{ model: string; source: string; provenance?: RateProvenance; rate?: PublicModelRate }>;
     pricing?: PricingStatus;
   };
   repository: {

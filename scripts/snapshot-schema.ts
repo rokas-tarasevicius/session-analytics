@@ -2,7 +2,7 @@ import { metricSchemas, model as publicModelSchema } from "./metric-schema.ts";
 /** Development-only schema generator. Exhaustive mapped types catch field drift in tsc. */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { CostBasis, CostBreakdown, ExecutionKind, MachineAnalytics, ModelUsage, NamedMetric, RepositoryAnalytics, RepositoryRollup, SessionAnalytics, SessionMetrics, SessionProvider, SharedCounters, SharedRepository, SharedSnapshot, SkillEvidence, TokenUsage, TranscriptHealth } from "../src/types.ts";
+import type { CostBasis, CostBreakdown, ExecutionKind, LongContextRate, MachineAnalytics, PublicModelRate, ModelUsage, NamedMetric, RepositoryAnalytics, RepositoryRollup, SessionAnalytics, SessionMetrics, SessionProvider, SharedCounters, SharedRepository, SharedSnapshot, SkillEvidence, TokenUsage, TranscriptHealth } from "../src/types.ts";
 import { fixedWarnings, warningPatterns, repositoryKeyPattern, modelPattern, metadataPattern, sessionStatuses } from "../src/public/evidence.js";
 
 type Schema = Record<string, unknown>;
@@ -51,7 +51,16 @@ export function snapshotSchemas(): Record<string, Schema> {
     NamedMetric: object<NamedMetric>({ name: text, value: number }),
     Summary: object<RepositoryAnalytics["summary"]>(summaryFields),
     Repository: object<RepositoryAnalytics["repository"]>({ id: repositoryKey, name: { type: "string", minLength: 1, maxLength: 256, pattern: "^[^/\\\\\\u0000-\\u001f\\u007f]+$" } }),
-    RateCard: object<RepositoryAnalytics["rateCard"]>({ currency: { const: "USD" }, effectiveDate: text, pricing: ref("PricingStatus"), models: array(object<{model: string; source: string; provenance?: unknown}>({ model, source: { type: "string", pattern: "^https?://" }, provenance: ref("RateProvenance") }, ["provenance"])) }, ["pricing"]),
+    PublicModelRate: object<PublicModelRate>({
+      provider: enumeration<SessionProvider>({ claude: true, codex: true, cursor: true, copilot: true, opencode: true, gemini: true, unsupported: true }),
+      inputPerMillion: number, cachedInputPerMillion: number, cacheReadPerMillion: number, cacheWrite5mPerMillion: number,
+      cacheWrite1hPerMillion: number, cacheWriteMultiplier: number, cacheWriteObservable: boolean, outputPerMillion: number,
+      longContext: object<LongContextRate>({ inputMultiplier: number, outputMultiplier: number, thresholdInputTokens: integer }),
+      contextTiers: array(object<NonNullable<PublicModelRate["contextTiers"]>[number]>({ aboveInputTokens: integer, inputPerMillion: number,
+        outputPerMillion: number, cacheReadPerMillion: number, cacheWrite5mPerMillion: number, cacheWrite1hPerMillion: number },
+        ["cacheReadPerMillion", "cacheWrite5mPerMillion", "cacheWrite1hPerMillion"])),
+    }, ["cachedInputPerMillion", "cacheReadPerMillion", "cacheWrite5mPerMillion", "cacheWrite1hPerMillion", "cacheWriteMultiplier", "cacheWriteObservable", "longContext", "contextTiers"]),
+    RateCard: object<RepositoryAnalytics["rateCard"]>({ currency: { const: "USD" }, effectiveDate: text, pricing: ref("PricingStatus"), models: array(object<{model: string; source: string; provenance?: unknown; rate?: unknown}>({ model, source: { type: "string", pattern: "^https?://" }, provenance: ref("RateProvenance"), rate: ref("PublicModelRate") }, ["provenance", "rate"])) }, ["pricing"]),
     SessionMetrics: object<SessionMetrics>({
       assistantMessages: integer, compactions: integer, contextUtilizationPeak: nullable(number), delegatedAgents: integer,
       durationMilliseconds: number, eventSpanMilliseconds: number, maxContextWindow: integer, maxInputTokensPerCall: integer,

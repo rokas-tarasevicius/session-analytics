@@ -33,6 +33,7 @@ function environment(fixture: SessionAnalyticsFixture, directory: string): NodeJ
 class Element {
   textContent = "";
   children: Element[] = [];
+  dataset: Record<string, string> = {};
   append(...nodes: Element[]) { this.children.push(...nodes); }
   replaceChildren(...nodes: Element[]) { this.children = nodes; }
   setAttribute() {}
@@ -41,12 +42,17 @@ class Element {
 async function rendered(snapshot: MachineAnalytics): Promise<string> {
   const globals = globalThis as typeof globalThis & { document?: unknown };
   const previous = globals.document;
-  globals.document = { createElement: () => new Element() };
+  globals.document = { createElement: () => new Element(), createElementNS: () => new Element() };
   try {
-    const { renderPricingPanel } = await import(new URL("../src/public/pricing.js", import.meta.url).href);
+    const { renderPricingPanel, renderModelDetails } = await import(new URL("../src/public/pricing.js", import.meta.url).href);
+    const { pricingModelCards } = await import(new URL("../src/public/pricing-data.js", import.meta.url).href);
     const panel = new Element();
     renderPricingPanel(panel, snapshot.rateCard, snapshot.sessions);
-    return panel.text();
+    // Card details (rates applied, assumptions) live in the dialog; render every used card's details too.
+    const details = pricingModelCards(snapshot.rateCard, snapshot.sessions).used.map((card: unknown) => {
+      const dialog = new Element(); renderModelDetails(dialog, card, snapshot.rateCard); return dialog.text();
+    });
+    return [panel.text(), ...details].join(" ");
   } finally { if (previous === undefined) delete globals.document; else globals.document = previous; }
 }
 
