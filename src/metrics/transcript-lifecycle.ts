@@ -3,6 +3,10 @@ import type { TranscriptHealth } from "../types.ts";
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : {};
 
+/** File identity and content version; a version change during a read marks the session partial. */
+export interface FileVersion { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }
+export const sameVersion = (a: FileVersion, b: FileVersion): boolean => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+
 /** Liveness is a bounded observation, never an inference from total starts minus completions. */
 export class TranscriptLifecycle {
   private state: "open" | "closed" | "unknown" = "unknown";

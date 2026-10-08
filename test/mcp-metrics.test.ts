@@ -36,7 +36,7 @@ function snapshot(sessions: SessionAnalytics[]): McpSnapshot {
   analytics.generatedAt = new Date(NOW - 5000).toISOString();
   analytics.sessions = sessions;
   analytics.mcpContext = { repositoryId: baseline.repositories.find((r) => r.summary.sessions > 0)!.repository.id };
-  return { analytics, inventory: [] };
+  return { analytics };
 }
 
 test("UTC calendar windows include today and Monday, across month/year boundaries", () => {
@@ -93,30 +93,17 @@ test("budget dates requests across session boundaries and never spreads Cursor v
   assert.equal(response.window.basis, "activity-day"); assert.equal(response.snapshot.ageSeconds, 5);
 });
 
-test("recorded headroom uses fresh non-expired windows and conservative cross-profile evidence", () => {
-  const rate = (usedPercent: number, ageMinutes: number, resetMinutes: number) => ({ windowMinutes: 300, usedPercent,
-    observedAt: new Date(NOW - ageMinutes * 60_000).toISOString(), resetsAt: new Date(NOW + resetMinutes * 60_000).toISOString() });
-  const sessions = [rate(20, 2, 100), rate(70, 3, 90), rate(99, 16, 90), rate(100, 1, -1), rate(99, -1, 100)].map((window) => session({ provider: "codex", mcpEvidence: { toolOutcomes: [], truncated: false, rateLimits: [window] } }));
-  const response = buildPayload(snapshot(sessions), "budget_status", {}, NOW, 60);
-  assert.ok("rateLimits" in response.data);
-  const codex = response.data.rateLimits.find((item) => item.provider === "codex")!;
-  assert.equal(codex.status, "available"); assert.equal(codex.windows[0]!.remainingPercent, 30);
-  assert.equal(response.data.rateLimits.find((item) => item.provider === "claude")!.status, "unavailable");
-  const expired = buildPayload(snapshot(sessions), "budget_status", {}, NOW + 20 * 60_000, 60);
-  assert.ok("rateLimits" in expired.data); assert.equal(expired.data.rateLimits[1]!.status, "unavailable");
-});
-
-test("tool outcome rates expose measured denominators and guard small or unmatched samples", () => {
-  const value = session({ tools: { Bash: 30, Read: 5, unknown: 0 }, mcpEvidence: { rateLimits: [], truncated: false,
-    toolOutcomes: [{ tool: "Bash", observedResults: 20, errors: 4 }, { tool: "Read", observedResults: 2, errors: 1 }, { tool: "mcp__fixture__lookup", observedResults: 2, errors: 1 }] } });
+test("tool stats count calls by name and never emit result or error fields", () => {
+  const value = session({ tools: { Bash: 30, Read: 5, unknown: 0 } });
   const response = buildPayload(snapshot([value]), "tool_stats", {}, NOW, 60);
   assert.ok("tools" in response.data);
-  assert.equal(response.data.tools[0]!.errorRate.value, 0.2);
-  assert.equal(response.data.tools[0]!.resultCoverage.value, 2 / 3);
-  assert.equal(response.data.tools[1]!.errorRate.value, null);
-  const unmatched = response.data.tools.find((row) => row.name === "mcp__fixture__lookup")!;
-  assert.equal(unmatched.calls, 0); assert.equal(unmatched.observedResults, 2);
-  assert.equal(unmatched.resultCoverage.status, "unavailable");
+  assert.deepEqual(response.data.tools, [{ name: "Bash", calls: 30 }, { name: "Read", calls: 5 }]);
+});
+
+test("budget status reports dated value without quota headroom", () => {
+  const response = buildPayload(snapshot([session()]), "budget_status", {}, NOW, 60);
+  assert.ok("today" in response.data);
+  assert.deepEqual(Object.keys(response.data).sort(), ["today", "week"]);
 });
 
 test("model totals reconcile value, preserve provider bases and omit unattributable measures", () => {
@@ -156,21 +143,17 @@ test("recent pagination is stable and output projection never spreads unexpected
   assert.doesNotMatch(JSON.stringify([first, second, comparison]), /SECRET_/);
 });
 
-test("structured evidence deduplicates results, ignores text, validates quotas and orders snapshots", () => {
+test("structured evidence keeps lifecycle and pricing counters, never tool results, quotas or text", () => {
   const collector = new McpEvidenceCollector();
-  const call = { type: "assistant", message: { content: [{ type: "tool_use", id: "SECRET_CALL", name: "Bash", input: { command: "SECRET_COMMAND" } }] } };
-  collector.claude(call); collector.claude(call);
-  for (const error of [true, true, false]) collector.claude({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "SECRET_CALL", is_error: error, content: "SECRET_RESULT" }] } });
-  collector.claude({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "unmatched", is_error: true }] } });
-  collector.codex({ type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "SECRET_CODEX_CALL", arguments: "SECRET_ARGUMENTS" } });
-  collector.codex({ type: "response_item", payload: { type: "function_call_output", call_id: "SECRET_CODEX_CALL", output: "Process exited with code 1 SECRET_OUTPUT" } });
-  collector.codex({ type: "event_msg", payload: { type: "item_completed", item: { type: "McpToolCall", id: "SECRET_MCP_ID", server: "fixture", tool: "lookup", status: "completed", result: { isError: true, content: "SECRET_MCP_CONTENT" }, error: "SECRET_ERROR" } } });
-  for (const [time, used] of [["2026-10-02T11:59:00Z", 25], ["2026-10-02T11:50:00Z", 99], ["2026-10-02T11:59:30Z", -1], ["SECRET_TIMESTAMP", 80]] as const) {
-    collector.codex({ type: "event_msg", timestamp: time, payload: { type: "token_count", rate_limits: { limit_id: "SECRET_LIMIT_ID", plan_type: "SECRET_PLAN", primary: { used_percent: used, window_minutes: 300, resets_at: (NOW + 60_000) / 1000 } } } });
-  }
+  const call = { type: "assistant", timestamp: "2026-10-02T11:00:00Z", message: { stop_reason: "end_turn", content: [{ type: "tool_use", id: "SECRET_CALL", name: "Bash", input: { command: "SECRET_COMMAND" } }] } };
+  collector.claude(call);
+  collector.claude({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "SECRET_CALL", is_error: true, content: "SECRET_RESULT" }] } });
+  collector.codex({ type: "event_msg", timestamp: "2026-10-02T11:59:00Z", payload: { type: "token_count", rate_limits: { limit_id: "SECRET_LIMIT_ID", primary: { used_percent: 25, window_minutes: 300, resets_at: (NOW + 60_000) / 1000 } } } });
+  collector.usage("2026-10-02", 100, 60); collector.usage("SECRET_DAY", 7, true);
   const result = collector.finish();
-  assert.deepEqual(result.toolOutcomes, [{ tool: "Bash", observedResults: 1, errors: 1 }, { tool: "mcp__fixture__lookup", observedResults: 1, errors: 1 }]);
-  assert.equal(result.rateLimits.length, 1); assert.equal(result.rateLimits[0]!.usedPercent, 25);
+  assert.deepEqual(Object.keys(result).sort(), ["activityState", "pricingByDay", "undatedTokens"]);
+  assert.deepEqual(result.pricingByDay, [{ day: "2026-10-02", eligibleTokens: 100, pricedTokens: 60 }]);
+  assert.equal(result.undatedTokens, 7);
   assert.doesNotMatch(JSON.stringify(result), /SECRET_|Process exited/);
 });
 
@@ -198,11 +181,8 @@ test("integration: MCP exposes the shared metric families and partial pricing co
   const result = buildPayload(snapshot([s]), "usage_summary", { window: "all" }, NOW, 60);
   assert.equal(result.totals.value.pricingCoverage.value, 0.5);
   assert.ok(result.metrics);
-  for (const namespace of ["pricing", "velocity", "reliability", "limitsCache", "outcomes", "workflow", "insightSignals"]) assert.ok(namespace in result.metrics);
-  assert.equal(result.metrics.outcomes.sessions, 1);
-  assert.equal(result.metrics.workflow.coverage.sessions, 1);
-  assert.equal(result.metrics.reliability.coveredSessions, 1);
-  assert.equal(result.metrics.limitsCache.quotaScope, "global-profile-observations");
+  assert.deepEqual(Object.keys(result.metrics).sort(), ["basis", "pricing", "velocity"]);
+  assert.equal(result.metrics.velocity.coveredSessions, 1);
   const activity = session({ provider: "copilot", evidence: { source: "copilot-events", fidelity: "activity-only", tokens: "unavailable", tools: "observed", turns: "observed", timing: "provider", usageUnit: "unavailable" } });
   const unavailable = buildPayload(snapshot([activity]), "usage_summary", { window: "all", provider: "copilot" }, NOW, 60);
   assert.equal(unavailable.totals.sessions, 1);

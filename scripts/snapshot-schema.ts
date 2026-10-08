@@ -2,7 +2,7 @@ import { metricSchemas, model as publicModelSchema } from "./metric-schema.ts";
 /** Development-only schema generator. Exhaustive mapped types catch field drift in tsc. */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { CostBasis, CostBreakdown, ExecutionKind, LongContextRate, MachineAnalytics, PublicModelRate, ModelUsage, NamedMetric, RepositoryAnalytics, RepositoryRollup, SessionAnalytics, SessionMetrics, SessionProvider, SharedCounters, SharedRepository, SharedSnapshot, SkillEvidence, TokenUsage, TranscriptHealth } from "../src/types.ts";
+import type { CostBasis, CostBreakdown, ExecutionKind, LongContextRate, MachineAnalytics, PublicModelRate, ModelUsage, NamedMetric, RepositoryAnalytics, RepositoryRollup, SessionAnalytics, SessionMetrics, SessionProvider, SharedCounters, SharedRepository, SharedSnapshot, TokenUsage, TranscriptHealth } from "../src/types.ts";
 import { fixedWarnings, warningPatterns, repositoryKeyPattern, modelPattern, metadataPattern, sessionStatuses } from "../src/public/evidence.js";
 
 type Schema = Record<string, unknown>;
@@ -69,28 +69,28 @@ export function snapshotSchemas(): Record<string, Schema> {
     }),
     TranscriptHealth: object<TranscriptHealth>({ sourceDeleted: boolean, startTimeKnown: boolean, completeness: { anyOf: ["complete", "partial", "unknown"].map((value) => ({ const: value })) }, liveness: { anyOf: ["inactive", "active", "unknown"].map((value) => ({ const: value })) }, files: integer, snapshotWhileWorking: boolean, status: enumeration<TranscriptHealth["status"]>({ invalid: true, missing: true, ok: true, unsupported: true }), warnings: array(warning) }, ["sourceDeleted", "startTimeKnown", "completeness", "liveness"]),
     SessionAnalytics: object<SessionAnalytics>({
-      history: ref("SessionHistory"), historyStatistics: ref("HistoryStatistics"), mcpEvidence: ref("McpSessionEvidence"),
-      evidence: ref("ProviderEvidence"), conductor: ref("ConductorResultMetrics"), agentIdentity: ref("AgentIdentity"), velocity: ref("SessionVelocity"), reliability: ref("SessionReliability"), limitsCache: ref("SessionLimitsCache"), outcomes: ref("SessionOutcomes"), workflow: ref("SessionWorkflow"), insightSignals: ref("InsightSignals"),
+      history: ref("SessionHistory"), historyStatistics: ref("HistoryStatistics"), historyProfile: ref("HistoryProfileEvidence"), mcpEvidence: ref("McpSessionEvidence"),
+      evidence: ref("ProviderEvidence"), conductor: ref("ConductorResultMetrics"), agentIdentity: ref("AgentIdentity"), velocity: ref("SessionVelocity"),
       cost: ref("CostBreakdown"), costBasis: enumeration<CostBasis>({ "api-list-price-equivalent": true, "provider-reported": true, unavailable: true }),
       costByExecution: object<SessionAnalytics["costByExecution"]>({ subagentUsd: number, topLevelUsd: number, unknownUsd: number }),
       costComplete: boolean, createdAt: text, effort: nullable(metadata), executionKind: enumeration<ExecutionKind>({ mixed: true, subagent: true, "top-level": true, unknown: true }),
       firstEventAt: nullable(text), lastEventAt: nullable(text), metrics: ref("SessionMetrics"), models: array(ref("ModelUsage")),
       pricedTokenCoverage: nullable(number), provider: enumeration<SessionProvider>({ claude: true, codex: true, cursor: true, copilot: true, opencode: true, gemini: true, unsupported: true }), repositoryId: repositoryKey,
-      repositoryName: text, sessionKey: { type: "string", pattern: "^[a-f0-9]{12}$" }, skillEvidence: enumeration<SkillEvidence>({ explicit: true, inferred: true, unavailable: true }),
-      skills: { ...record(integer), propertyNames: metadata }, spendByDay: record(number), status: { anyOf: sessionStatuses.map((value) => ({ const: value })) }, tokens: ref("TokenUsage"), tools: { ...record(integer), propertyNames: metadata },
+      repositoryName: text, sessionKey: { type: "string", pattern: "^[a-f0-9]{12}$" },
+      spendByDay: record(number), status: { anyOf: sessionStatuses.map((value) => ({ const: value })) }, tokens: ref("TokenUsage"), tools: { ...record(integer), propertyNames: metadata },
       transcript: ref("TranscriptHealth"), transportTools: { ...record(integer), propertyNames: metadata }, updatedAt: text,
-    }, ["history", "historyStatistics", "mcpEvidence", "evidence", "conductor", "agentIdentity", "velocity", "reliability", "limitsCache", "outcomes", "workflow", "insightSignals"]),
-    RepositoryRollup: object<RepositoryRollup>({ outcomes: ref("OutcomeSummary"), repository: ref("Repository"), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }, ["outcomes"]),
-    RepositoryAnalytics: object<RepositoryAnalytics>({ velocity: ref("VelocityMetadata"), limitsCache: ref("LimitsCacheAnalytics"), outcomes: ref("OutcomeSummary"), workflow: ref("WorkflowSummary"), schemaVersion: { const: 1 }, generatedAt: text, rateCard: ref("RateCard"), repository: ref("Repository"), sessions: array(ref("SessionAnalytics")), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }, ["velocity", "limitsCache", "outcomes", "workflow"]),
+    }, ["history", "historyStatistics", "historyProfile", "mcpEvidence", "evidence", "conductor", "agentIdentity", "velocity"]),
+    RepositoryRollup: object<RepositoryRollup>({ repository: ref("Repository"), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }),
+    RepositoryAnalytics: object<RepositoryAnalytics>({ velocity: ref("VelocityMetadata"), schemaVersion: { const: 1 }, generatedAt: text, rateCard: ref("RateCard"), repository: ref("Repository"), sessions: array(ref("SessionAnalytics")), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }, ["velocity"]),
     MachineAnalytics: object<MachineAnalytics>({
       historyCoverage: ref("HistoryCoverage"),
       mcpSourceHealth: array(ref("McpSourceHealth")), mcpContext: ref("McpContext"),
-      velocity: ref("VelocityMetadata"), limitsCache: ref("LimitsCacheAnalytics"), outcomes: ref("OutcomeSummary"), workflow: ref("WorkflowSummary"),
+      velocity: ref("VelocityMetadata"),
       schemaVersion: { const: 1 }, generatedAt: text, rateCard: ref("RateCard"), repositories: array(ref("RepositoryRollup")),
       sessions: array(ref("SessionAnalytics")), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")),
       summary: object<MachineAnalytics["summary"]>({ ...summaryFields, repositories: integer, repositoriesWithSessions: integer, workingSnapshots: integer }),
       topTools: array(ref("NamedMetric")), warnings: array(warning),
-    }, ["historyCoverage", "velocity", "limitsCache", "outcomes", "workflow", "mcpSourceHealth", "mcpContext"]),
+    }, ["historyCoverage", "velocity", "mcpSourceHealth", "mcpContext"]),
   };
   const sharedDefinitions = {
     SharedCounters: object<SharedCounters>(sharedFields),

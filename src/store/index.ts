@@ -136,11 +136,12 @@ export class IndexScan {
           : [homedir(), process.env["CODEX_HOME"] ?? "", "codex-discovery"],
         options.databasePath ? resolve(options.databasePath) : "default-conductor",
         options.cursorDatabasePath ? resolve(options.cursorDatabasePath) : "default-cursor", includeHidden,
-        options.additionalProviders !== false, options.reliabilityContentRules === true, options.workflowContentRules === true,
+        // Two retired content-rule flags stay as constants so existing scopes, and their retained history, keep their keys.
+        options.additionalProviders !== false, false, false,
         [options.cursorSdkRoot, options.cursorTranscriptRoot, options.copilotRoot, options.opencodeDatabasePath, options.geminiRoot]
           .map((root) => root ? resolve(root) : "default"),
       ]);
-      return new IndexScan(connection, scope, hash(["parser-v061-native-accounting", source, ledgerSource, storeSource, projectionSource, parserSources, pricing, options.reliabilityContentRules === true, options.workflowContentRules === true]));
+      return new IndexScan(connection, scope, hash(["parser-v061-native-accounting", source, ledgerSource, storeSource, projectionSource, parserSources, pricing]));
     } catch (error) { connection.close(); throw error; }
   }
 
@@ -299,9 +300,7 @@ export class IndexScan {
       const previous = this.sessions.get(identity);
       // A missing-timestamp token record has no ledger owner; preserve the full-scan claimed-counter order.
       const previousSession = previous ? JSON.parse(previousPayload(previous)) as SessionAnalytics : null;
-      // Open workflows age into abandonment flags even when the source file is unchanged.
-      const canReuse = previousSession?.workflow?.abandonment !== "ongoing" &&
-        !(previousSession?.transcript.liveness === "active" && !previousSession.transcript.snapshotWhileWorking) &&
+      const canReuse = !(previousSession?.transcript.liveness === "active" && !previousSession.transcript.snapshotWhileWorking) &&
         (row.agent_type !== "codex" || Boolean(this.dependencies.get(mainPath)) && !this.ambiguousCounters);
       // Exclusion depends on verified activity time, not on which undated request won.
       // Previously removed ownership is already reserved independently of cache reuse.

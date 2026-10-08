@@ -21,8 +21,6 @@ test("integration: a registered child cwd cannot replace the genuine Claude prim
     assert.ok(session);
     assert.ok(session.transcript.warnings.some(warning => warning.includes("primary transcript")));
     assert.ok(!session.transcript.warnings.some(warning => warning.includes("Primary transcript is unavailable")));
-    assert.equal(session.workflow!.coverage.malformedRecords, 1);
-    assert.equal(session.workflow!.coverage.timing, "partial");
     assert.doesNotMatch(JSON.stringify(result), /SYNTHETIC_PRIVATE_PRIMARY|synthetic-primary-response/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

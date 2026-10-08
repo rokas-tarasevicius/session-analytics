@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { analyzeMachineSessions } from '../../src/analyzer.ts';
 import { openIndexDatabase } from '../../src/store/database.ts';
 import { keyedHash } from '../../src/store/fingerprint.ts';
-import { NO_REPOSITORY_ID } from '../../verify/repos/inventory-roots.ts';
+import { NO_REPOSITORY_ID } from '../../verify/repos/git-oracle.ts';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const root = await mkdtemp(join(tmpdir(), 'repos-git-validation-'));

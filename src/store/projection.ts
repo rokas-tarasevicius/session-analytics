@@ -34,7 +34,23 @@ function project(value: unknown, schema: Schema): unknown {
   return value;
 }
 
+/** Index payloads written before 0.7 carried history-coverage inputs inside the removed
+ * `limitsCache` projection. Carry the Claude profile and dated request tokens forward so
+ * retained, source-deleted sessions keep their history attribution; everything else is dropped. */
+function migrateLegacySession(value: SessionAnalytics): SessionAnalytics {
+  const legacy = (value as { limitsCache?: { profileKey?: unknown; buckets?: unknown } }).limitsCache;
+  if (value.provider !== "claude" || value.historyProfile || !legacy || typeof legacy.profileKey !== "string" || !Array.isArray(legacy.buckets)) return value;
+  const days = new Map<string, { day: string; model: string; tokens: number }>();
+  for (const bucket of legacy.buckets as Array<{ day?: unknown; model?: unknown; observedTokens?: unknown }>) {
+    if (typeof bucket?.day !== "string" || typeof bucket.model !== "string" || typeof bucket.observedTokens !== "number") continue;
+    const key = `${bucket.day}:${bucket.model}`, row = days.get(key) ?? { day: bucket.day, model: bucket.model, tokens: 0 };
+    row.tokens += bucket.observedTokens; days.set(key, row);
+  }
+  return { ...value, historyProfile: { profileKey: legacy.profileKey, days: [...days.values()].sort((a, b) => a.day.localeCompare(b.day) || a.model.localeCompare(b.model)) } };
+}
+
 export function projectSession(value: SessionAnalytics): SessionAnalytics {
+  value = migrateLegacySession(value);
   const schema = snapshotSchema.$defs?.["SessionAnalytics"] ?? fail();
   const result = project(value, schema);
   if (!matchesSchema(result, { ...schema, $defs: snapshotSchema.$defs })) fail();

@@ -33,9 +33,9 @@ test('time-range: file modification dates cannot widen observed activity history
  assert.equal(bounds.maximum,'2026-09-01','File timestamps are not activity evidence');
 });
 
-test('time-range: unknown starts retain independently dated velocity and compaction evidence',()=>{
+test('time-range: unknown starts retain independently dated velocity evidence',()=>{
  const bounds=observedRange([
-  {createdAt:'2000-01-01T00:00:00Z',transcript:{startTimeKnown:false},spendByDay:{},velocity:{buckets:[['2026-08-31',1,0,[]]]},limitsCache:{compactions:[{timestamp:'2026-09-02T12:00:00Z'}]}},
+  {createdAt:'2000-01-01T00:00:00Z',transcript:{startTimeKnown:false},spendByDay:{'2026-09-02':1},velocity:{buckets:[['2026-08-31',1,0,[]]]}},
  ]);
  assert.equal(bounds.minimum,'2026-08-31');
  assert.equal(bounds.maximum,'2026-09-02');

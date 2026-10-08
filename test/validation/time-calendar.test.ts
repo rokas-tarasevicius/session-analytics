@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { localClock } from '../../src/metrics/velocity.ts';
-import { timestamp } from '../../src/metrics/limits-utils.ts';
+import { boundedTimestamp as timestamp } from '../../src/metrics/bounded-time.ts';
 import { localDay } from '../../src/public/velocity-data.js';
 import { calendarDay, inUtcWindow } from '../../verify/time/calendar-oracle.ts';
 
@@ -15,7 +15,7 @@ test('time-calendar: malformed calendar days never become dated velocity or limi
 test('time-calendar: offset-free limits timestamps normalize as UTC before entering absolute velocity clocks', () => {
   const script = `
     import { localClock } from './src/metrics/velocity.ts';
-    import { timestamp } from './src/metrics/limits-utils.ts';
+    import { boundedTimestamp as timestamp } from './src/metrics/bounded-time.ts';
     console.log(JSON.stringify({ limits: timestamp('2026-09-01T00:30:00'), velocity: localClock(timestamp('2026-09-01T00:30:00')) }));
   `;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env: { ...process.env, TZ: 'Europe/London' } });

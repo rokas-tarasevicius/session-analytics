@@ -86,6 +86,7 @@ export interface RepositoryEvidence {
 /** Grouping input of the single bucket for directories without repository evidence. */
 export const NO_REPOSITORY_GROUP = 'no-repository';
 export const NO_REPOSITORY_NAME = 'No repository detected';
+export const NO_REPOSITORY_ID = `discovered-${createHash('sha256').update(NO_REPOSITORY_GROUP).digest('hex').slice(0, 20)}`;
 export const EPHEMERAL_GROUP = '/private/var/folders/session-analytics-ephemeral';
 
 /** Last-resort bucket only after Git, remote and registered ownership checks.

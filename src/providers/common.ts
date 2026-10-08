@@ -122,7 +122,7 @@ export function emptySession(identity: ProviderSession, provider: SessionProvide
     firstEventAt: null, lastEventAt: null,
     metrics: { assistantMessages: 0, compactions: 0, contextUtilizationPeak: null, delegatedAgents: 0, durationMilliseconds: 0, eventSpanMilliseconds: 0, maxContextWindow: 0, maxInputTokensPerCall: 0, modelCalls: 0, queueOperations: 0, summaries: 0, taskCompletions: 0, taskStarts: 0, toolCalls: 0, transportToolCalls: 0, userTurns: 0 },
     models: [], pricedTokenCoverage: null, provider, repositoryId: context.repository.id, repositoryName: context.repository.name,
-    sessionKey: hash(`${provider}:${identity.id}`), skillEvidence: "unavailable", skills: {}, spendByDay: {}, status: "unknown",
+    sessionKey: hash(`${provider}:${identity.id}`), spendByDay: {}, status: "unknown",
     tokens: zeroTokens(), tools: {}, transportTools: {}, transcript: { files: 1, snapshotWhileWorking: false, status: "ok", warnings: [] }, evidence,
   };
 }

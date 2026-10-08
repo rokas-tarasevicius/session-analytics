@@ -68,49 +68,6 @@ function table(rows: unknown, key: 'name' | 'model', dollarValue: boolean): Row[
     return result;
   }).sort((a, b) => String(a[key]).localeCompare(String(b[key])));
 }
-/** Counts, artifact unions and ratio operands from the public outcome contract. */
-function outcomeSummary(sessions: Row[]): Row {
-  const observed = sessions.filter(s => s.outcomes), api = observed.filter(s => s.costBasis === 'api-list-price-equivalent');
-  const links = (s: Row, kind: string) => array(s.outcomes.links).filter(l => l.role === 'outcome' && l.kind === kind);
-  const commit = (s: Row) => finite(s.outcomes.operations.commits) > 0 || links(s, 'commit').length > 0;
-  const priced = (s: Row) => s.costComplete === true && s.pricedTokenCoverage === 1;
-  const measured = (s: Row) => s.outcomes.linesAdded !== null && s.outcomes.linesRemoved !== null;
-  const artifacts = observed.flatMap(s => links(s, 'pull-request')).filter(l => l.identity === 'artifact');
-  const allRefs = new Set(artifacts.map(l => l.ref)), mergedRefs = new Set(artifacts.filter(l => l.state === 'merged').map(l => l.ref));
-  const lineCandidates = api.filter(measured), lineEligible = lineCandidates.filter(s => priced(s) && finite(s.cost.totalUsd) > 0 && s.outcomes.lineCoverage === 'complete');
-  const unlinked = api.filter(s => s.outcomes.editsObserved && !commit(s));
-  const mergeRows = api.map(s => {
-    const refs = [...new Set(links(s, 'pull-request').filter(l => l.identity === 'artifact').map(l => l.ref))];
-    return { s, refs, merged: refs.filter(ref => mergedRefs.has(ref)), complete: s.outcomes.prAssociationsComplete ?? !s.outcomes.truncated };
-  }).filter(r => r.merged.length || !r.complete);
-  const mergeEligible = mergeRows.filter(r => r.complete && priced(r.s));
-  const ratio = (numerator: number, denominator: number, eligible: number, candidates: number, minimum: number, minSessions = 1, incomplete = false, missing = 0) => {
-    const status = missing ? 'incomplete-evidence' : !denominator || !candidates ? 'unavailable' : incomplete ? 'incomplete-pricing' : denominator < minimum || eligible < minSessions ? 'insufficient-activity' : 'available';
-    return { numerator, denominator, value: status === 'available' ? numerator / denominator : null, eligibleSessions: eligible,
-      candidateSessions: candidates, minimumDenominator: minimum, minimumSessions: minSessions, incompleteEvidenceSessions: missing, status };
-  };
-  const commits = observed.filter(commit).length;
-  return {
-    sessions: sessions.length, observedSessions: observed.length, editSessions: observed.filter(s => s.outcomes.editsObserved).length,
-    commitSessions: commits, prSessions: observed.filter(s => links(s, 'pull-request').length).length,
-    mergedPrSessions: observed.filter(s => links(s, 'pull-request').some(l => l.state === 'merged' || mergedRefs.has(l.ref))).length,
-    contextOnlySessions: observed.filter(s => !commit(s) && !links(s, 'pull-request').length && array(s.outcomes.links).length > 0 && s.outcomes.links.every((l: Row) => l.role === 'context')).length,
-    lineMeasuredSessions: observed.filter(measured).length,
-    coverage: { lines: Object.fromEntries(['complete', 'partial', 'unavailable'].map(state => [state, observed.filter(s => s.outcomes.lineCoverage === state).length])),
-      truncatedSessions: observed.filter(s => s.outcomes.truncated).length,
-      enrichment: Object.fromEntries(['git', 'github'].map(kind => [kind, Object.fromEntries(['off', 'not-applicable', 'matched', 'no-match', 'unavailable', 'limited'].map(status => [status, observed.filter(s => s.outcomes.enrichment[kind] === status).length]))])) },
-    linesAdded: sum(observed.filter(measured), s => s.outcomes.linesAdded), linesRemoved: sum(observed.filter(measured), s => s.outcomes.linesRemoved),
-    apiSessions: api.length, apiPricedSessions: api.filter(priced).length, apiEquivalentValueUsd: sum(api, s => s.cost.totalUsd),
-    unlinkedApiEquivalentUsd: sum(unlinked, s => s.cost.totalUsd), unlinkedEditSessions: unlinked.length,
-    pullRequests: { linked: allRefs.size, created: new Set(artifacts.filter(l => l.created).map(l => l.ref)).size, merged: mergedRefs.size,
-      unidentifiedCreatedOperations: observed.flatMap(s => links(s, 'pull-request')).filter(l => l.identity === 'observation' && l.created).length,
-      unidentifiedMergedOperations: observed.flatMap(s => links(s, 'pull-request')).filter(l => l.identity === 'observation' && l.state === 'merged').length },
-    operations: Object.fromEntries(['commits', 'pushes', 'prsCreated', 'prsEdited', 'prsMerged', 'prsClosed'].map(field => [field, sum(observed, s => s.outcomes.operations[field])])),
-    commitSessionRate: ratio(commits, observed.length, observed.length, sessions.length, 5),
-    linesPerApiDollar: ratio(sum(lineEligible, s => finite(s.outcomes.linesAdded) + finite(s.outcomes.linesRemoved)), sum(lineEligible, s => s.cost.totalUsd), lineEligible.length, lineCandidates.length, 1, 5),
-    apiEquivalentPerMergedPr: ratio(sum(mergeEligible, r => finite(r.s.cost.totalUsd) * r.merged.length / r.refs.length), new Set(mergeRows.flatMap(r => r.merged)).size, mergeEligible.length, mergeRows.length, 3, 1, mergeRows.some(r => !priced(r.s)), mergeRows.filter(r => !r.complete).length),
-  };
-}
 function historySessionValues(rows: Row[], knownProfiles: Set<string>) {
   const months = new Map<string, Row>();
   const month = (key: string) => { let value = months.get(key); if (!value) { value = { sessionEvidenceUsd: 0, sessionsWithDatedValue: 0, recoveredMessageUsd: 0 }; months.set(key, value); } return value; };
@@ -123,7 +80,7 @@ function historySessionValues(rows: Row[], knownProfiles: Set<string>) {
     }
     for (const key of datedMonths) month(key).sessionsWithDatedValue++;
     undatedSessionValueUsd += Math.max(0, finite(s.cost.totalUsd) - dated);
-    if (s.provider === 'claude' && s.history && !knownProfiles.has(s.limitsCache?.profileKey)) {
+    if (s.provider === 'claude' && s.history && !knownProfiles.has(s.historyProfile?.profileKey)) {
       for (const bucket of array(s.history.days)) { unassignedProfileTokens += finite(bucket.tokens); month(bucket.day.slice(0, 7)).recoveredMessageUsd += finite(bucket.valueUsd); }
       unassignedProfileTokens += finite(s.history.undatedTokens);
     }
@@ -162,11 +119,6 @@ export function proveLiveAggregates(before: Row, after: Row, excluded: ReadonlyS
         if (!ordered(a[field]) || !ordered(b[field])) { failures.push(`${scope}.${field}.order`); continue; }
         if (!same(normalize(a[field]), normalize(b[field]))) accepted.push({ scope, field });
         a[field] = stable; b[field] = stable;
-      }
-      if (a.outcomes !== undefined || b.outcomes !== undefined) {
-        const oldOutcomes = outcomeSummary(oldRows), newOutcomes = outcomeSummary(newRows), stable = outcomeSummary(stableOld);
-        if (!same(a.outcomes, oldOutcomes) || !same(b.outcomes, newOutcomes) || !same(stable, outcomeSummary(stableNew))) failures.push(`${scope}.outcomes`);
-        else { if (!same(a.outcomes, b.outcomes)) accepted.push({ scope, field: 'outcomes' }); a.outcomes = stable; b.outcomes = stable; }
       }
     } catch { failures.push(`${scope}.unavailable`); }
   };

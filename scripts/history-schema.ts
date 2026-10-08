@@ -7,6 +7,7 @@ export function historySchemas(): Record<string, Schema> {
   return {
     HistoryUsageDay: obj<H.HistoryUsageDay>({ day, model: ref("HistoryModelId"), tokens: i, valueUsd: n }),
     HistoryStatistics: obj<H.HistoryStatistics>({ basis: en("claude-stream-snapshots-v5"), days: arr(obj<H.HistoryStatistics["days"][number]>({ day, model: ref("HistoryModelId"), tokens: i })) }),
+    HistoryProfileEvidence: obj<H.HistoryProfileEvidence>({ profileKey: { type: "string", pattern: "^profile-[a-f0-9]{20}$" }, days: arr(obj<H.HistoryProfileEvidence["days"][number]>({ day, model: ref("HistoryModelId"), tokens: i })) }),
     HistoryModelId: { type: "string", maxLength: 160, pattern: "^(<unknown>|(?:@cf/)?[A-Za-z][A-Za-z0-9._-]*(?:/[A-Za-z][A-Za-z0-9._-]*){0,2})$" },
     SessionHistory: obj<H.SessionHistory>({ days: arr(ref("HistoryUsageDay")), undatedTokens: i, undatedValueUsd: n }),
     HistoryReconciliation: obj<H.HistoryReconciliation>({ messageValueUsd: n, reportedUsd: nil(n), differenceUsd: nil(signed), relativeDifference: nil(signed), status: en("agrees", "differs", "partial", "unavailable"), receiptScope: en("complete", "partial", "unavailable"), messages: i, messagesWithoutUsage: i, messagesWithoutIdentity: i, outputTokensRecovered: i, receiptFloorApplied: { type: "boolean" } }, ["outputTokensRecovered", "receiptFloorApplied"]),

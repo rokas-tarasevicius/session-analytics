@@ -11,14 +11,10 @@ import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from '../src/a
 import { indexStatus } from '../src/store/database.ts';
 import { indexParityWarning } from '../src/public/evidence.js';
 import type { AnalyzeOptions, MachineAnalytics } from '../src/types.ts';
-import { captureInventoryEvidence, scopeInventoryEvidence, verifyPhaseInventory, type InventoryCapture } from './verify-real-inventory-evidence.ts';
 import { proveDeferralWarning } from './verify-real-warnings.ts';
-import { proveLiveLimits } from './verify-real-live-limits.ts';
-import { proveLiveWorkflow } from './verify-real-live-workflow.ts';
 import { proveLiveAggregates } from './verify-real-live.ts';
 import { changedEvidence } from './parity-evidence.ts';
 import { captureSourceGeneration, changedSourceSessions, readSourceGenerations, type SourceGeneration } from './verify-real-source-changes.ts';
-import { captureContextInputs, proveContextCurves, readContextInputs } from './verify-real-context.ts';
 import { calibrationSummary, proveCalibration, sameCalibration } from './verify-real-calibration.ts';
 import { NO_REPOSITORY_NAME } from '../verify/repos/git-oracle.ts';
 import { oraclePipelines, type OracleStep } from './verify-real-manifest.ts';
@@ -64,11 +60,10 @@ export function strictFields(a: unknown, b: unknown, path = '', differences: Set
   } else differences.add(path);
   return [...differences].sort();
 }
-export function compareStableSnapshots(a: MachineAnalytics, b: MachineAnalytics, excluded: Set<string>, provedCurves: ReadonlySet<string> = new Set()) {
+export function compareStableSnapshots(a: MachineAnalytics, b: MachineAnalytics, excluded: Set<string>) {
   const aa = new Map(a.sessions.map(s => [s.sessionKey, s])), bb = new Map(b.sessions.map(s => [s.sessionKey, s]));
   return [...new Set([...aa.keys(), ...bb.keys()])].sort().filter(key => !excluded.has(key)).flatMap(sessionKey => {
-    const fields = strictFields(aa.get(sessionKey), bb.get(sessionKey)).filter(field =>
-      !provedCurves.has(sessionKey) || !/^limitsCache\.context\.(?:curve(?:\.|$)|curveSampled$)/.test(field));
+    const fields = strictFields(aa.get(sessionKey), bb.get(sessionKey));
     if (a.sessions.filter(s => s.sessionKey === sessionKey).length !== 1 || b.sessions.filter(s => s.sessionKey === sessionKey).length !== 1) fields.push('sessionKey.multiplicity');
     return fields.length ? [{ sessionKey, fields }] : [];
   });
@@ -244,64 +239,49 @@ async function main(): Promise<void> {
       const existing=await json(join(directory,'execution.json'));existingExecution=existing['areas'];
       if(!Array.isArray(existingExecution)||!Array.isArray(existing['phases'])||existing['phases'].length!==3)throw new Error('Complete scan evidence unavailable.');
       snapshot=await json(join(directory,'full.json')) as MachineAnalytics;
-      const fullInventory=[await json(join(directory,'inventory-full-before.json')),await json(join(directory,'inventory-full-after.json'))] as unknown as [InventoryCapture,InventoryCapture];
       for(const phase of ['full','cold','warm']){
         const previous=existing['phases'].find((p:Json)=>p['phase']===phase);
         if(!previous||!Array.isArray(previous['changedEvidenceSessions'])||!Array.isArray(previous['pricingAgeFailures']))throw new Error('Scan evidence unavailable.');
         const current=await json(join(directory,`${phase}.json`)) as MachineAnalytics;
-        const contextCurveProof = proveContextCurves(snapshot, current, new Set(previous['changedEvidenceSessions']), await readContextInputs(directory, phase));
-        const phaseInventory=[await json(join(directory,`inventory-${phase}-before.json`)),await json(join(directory,`inventory-${phase}-after.json`))] as unknown as [InventoryCapture,InventoryCapture];
-        const inventoryVerification=verifyPhaseInventory(current,...phaseInventory);
         const aggregateVerification=await verifyPhaseAggregates(directory,phase,join(directory,`${phase}.json`),current.generatedAt);
         const liveProof=proveLiveAggregates(snapshot,current,new Set(previous['changedEvidenceSessions']));
-        const workflowProof=proveLiveWorkflow(liveProof.left,liveProof.right,new Set(previous['changedEvidenceSessions']),{before:[scopeInventoryEvidence(snapshot,fullInventory[0]).census,scopeInventoryEvidence(snapshot,fullInventory[1]).census],after:[scopeInventoryEvidence(current,phaseInventory[0]).census,scopeInventoryEvidence(current,phaseInventory[1]).census]});
-        const limitsProof=proveLiveLimits(workflowProof.left,workflowProof.right,new Set(previous['changedEvidenceSessions']));
-        const warningProof=proveDeferralWarning(limitsProof.right,previous['index'],new Set(previous['changedEvidenceSessions']));
-        const calibrationProof = await normalizeLiveCalibration(directory, phase, snapshot, current, limitsProof.left, warningProof.snapshot, new Set(previous['changedEvidenceSessions']));
+        const warningProof=proveDeferralWarning(liveProof.right,previous['index'],new Set(previous['changedEvidenceSessions']));
+        const calibrationProof = await normalizeLiveCalibration(directory, phase, snapshot, current, liveProof.left, warningProof.snapshot, new Set(previous['changedEvidenceSessions']));
         const pricingProvenanceFailures=await verifyPricingProvenance(current,join(directory,'pricing-evidence'));
-        const result={...previous,contextCurveProof,aggregateVerification,pricingProvenanceFailures,inventoryVerification,differences:phase==='full'?[]:compareStableSnapshots(snapshot,current,new Set(previous['changedEvidenceSessions']),new Set(contextCurveProof.map(r=>r.sessionKey))),aggregateDifferences:phase==='full'?[]:compareSnapshotAggregates(limitsProof.left as MachineAnalytics,warningProof.snapshot as MachineAnalytics),limitsAggregateProof:limitsProof.accepted,limitsAggregateFailures:limitsProof.failures,workflowAggregateProof:workflowProof.accepted,workflowAggregateFailures:workflowProof.failures,warningProof:warningProof.accepted,warningFailures:warningProof.failures,liveAggregateProof:liveProof.accepted,liveAggregateFailures:liveProof.failures};
+        const result={...previous,aggregateVerification,pricingProvenanceFailures,differences:phase==='full'?[]:compareStableSnapshots(snapshot,current,new Set(previous['changedEvidenceSessions'])),aggregateDifferences:phase==='full'?[]:compareSnapshotAggregates(liveProof.left as MachineAnalytics,warningProof.snapshot as MachineAnalytics),warningProof:warningProof.accepted,warningFailures:warningProof.failures,liveAggregateProof:liveProof.accepted,liveAggregateFailures:liveProof.failures};
         Object.assign(result, { calibrationProof }); phases.push(result);output(result);
       }
     }
     else if (value('--snapshot')) snapshot = await json(snapshotPath) as MachineAnalytics;
     else {
       const options: AnalyzeOptions = { dataDir, offline: true, includeHidden: true };
-      let full: MachineAnalytics | undefined; let initialGenerations: Map<string, string>[] = []; let fullInventory:[InventoryCapture,InventoryCapture] | undefined;
+      let full: MachineAnalytics | undefined; let initialGenerations: Map<string, string>[] = [];
       for (const phase of ['full', 'cold', 'warm'] as const) {
         process.stderr.write(`Real verification: ${phase} analyzer scan.\n`);
         const sourceBefore = await captureSourceGeneration(directory, `${phase}-before`, options);
         sourceGenerations.push(sourceBefore);
         const before = new Map(sourceBefore.sessions);
-        const inventoryBefore=await captureInventoryEvidence();
-        await writeFile(join(directory,`inventory-${phase}-before.json`),JSON.stringify(inventoryBefore),{mode:0o600});
         const startedAt = Date.now(), start = performance.now();
         const current = privateAuditSnapshot(await analyzeMachineSessionsIsolated({ ...options, noIndex: phase === 'full' }));
         const pricingAgeFailures = verifyPricingAges(current, startedAt, Date.now());
-        const inventoryAfter=await captureInventoryEvidence();
-        await writeFile(join(directory,`inventory-${phase}-after.json`),JSON.stringify(inventoryAfter),{mode:0o600});
-        const inventoryVerification=verifyPhaseInventory(current,inventoryBefore,inventoryAfter);
         const sourceAfter = await captureSourceGeneration(directory, `${phase}-after`, options);
         sourceGenerations.push(sourceAfter);
         const after = new Map(sourceAfter.sessions);
-        if (!full) { full = current; initialGenerations = [before, after]; fullInventory=[inventoryBefore,inventoryAfter]; }
+        if (!full) { full = current; initialGenerations = [before, after]; }
         const changed = changedEvidence(...initialGenerations, before, after);
-        const contextInputs = phase === 'full' ? undefined : await captureContextInputs(directory, phase, dataDir!);
-        const contextCurveProof = proveContextCurves(full, current, changed, contextInputs);
         // Changed evidence is accepted only for those explicit hashed sessions, never a broad tolerance.
-        const differences = phase === 'full' ? [] : compareStableSnapshots(full, current, changed, new Set(contextCurveProof.map(r=>r.sessionKey)));
+        const differences = phase === 'full' ? [] : compareStableSnapshots(full, current, changed);
         const index = phase === 'full' ? null : indexStatus(options).lastScan;
         const fellBack = current.warnings.includes(indexParityWarning);
         await writeFile(join(directory, `${phase}.json`), JSON.stringify(current), { mode: 0o600 });
         const liveProof = proveLiveAggregates(full, current, changed);
-        const workflowProof=proveLiveWorkflow(liveProof.left,liveProof.right,changed,{before:[scopeInventoryEvidence(full,fullInventory![0]).census,scopeInventoryEvidence(full,fullInventory![1]).census],after:[scopeInventoryEvidence(current,inventoryBefore).census,scopeInventoryEvidence(current,inventoryAfter).census]});
-        const limitsProof=proveLiveLimits(workflowProof.left,workflowProof.right,changed);
-        const warningProof=proveDeferralWarning(limitsProof.right,index,changed);
+        const warningProof=proveDeferralWarning(liveProof.right,index,changed);
         const aggregateVerification = await verifyPhaseAggregates(directory, phase, join(directory, `${phase}.json`), current.generatedAt);
-        const calibrationProof = await normalizeLiveCalibration(directory, phase, full, current, limitsProof.left, warningProof.snapshot, changed);
-        const aggregateDifferences = phase === 'full' ? [] : compareSnapshotAggregates(limitsProof.left as MachineAnalytics, warningProof.snapshot as MachineAnalytics);
+        const calibrationProof = await normalizeLiveCalibration(directory, phase, full, current, liveProof.left, warningProof.snapshot, changed);
+        const aggregateDifferences = phase === 'full' ? [] : compareSnapshotAggregates(liveProof.left as MachineAnalytics, warningProof.snapshot as MachineAnalytics);
         const pricingProvenanceFailures=await verifyPricingProvenance(current,join(directory,'pricing-evidence'));
-        const result = { phase, inventoryVerification, milliseconds: Math.round(performance.now() - start), sessions: current.sessions.length, changedEvidenceSessions: [...changed].sort(), differences, aggregateDifferences, limitsAggregateProof:limitsProof.accepted,limitsAggregateFailures:limitsProof.failures, workflowAggregateProof:workflowProof.accepted,workflowAggregateFailures:workflowProof.failures, warningProof:warningProof.accepted, warningFailures:warningProof.failures, liveAggregateProof: liveProof.accepted, liveAggregateFailures: liveProof.failures, aggregateVerification, pricingAgeFailures, pricingProvenanceFailures, index, fellBack, pricing: current.rateCard.pricing };
-        Object.assign(result, { contextCurveProof, calibrationProof }); phases.push(result); output(result);
+        const result = { phase, milliseconds: Math.round(performance.now() - start), sessions: current.sessions.length, changedEvidenceSessions: [...changed].sort(), differences, aggregateDifferences, warningProof:warningProof.accepted, warningFailures:warningProof.failures, liveAggregateProof: liveProof.accepted, liveAggregateFailures: liveProof.failures, aggregateVerification, pricingAgeFailures, pricingProvenanceFailures, index, fellBack, pricing: current.rateCard.pricing };
+        Object.assign(result, { calibrationProof }); phases.push(result); output(result);
       }
       snapshot = full!;
     }
@@ -343,7 +323,7 @@ async function main(): Promise<void> {
     requireUnchangedProduction(sourceFingerprint, await productionFingerprint());
     await writeFile(join(directory, 'results.json'), JSON.stringify({ generatedAt: snapshot.generatedAt, liveEvidence, phases, execution: results, comparisons }, null, 2));
     for (const result of comparisons) output(result);
-    const failed = results.some(r => r['failedCommands'] > 0) || comparisons.some(r => r.unresolved > 0) || phases.some(p => p['differences'].length || p['aggregateDifferences'].length || p['inventoryVerification'].failures.length || p['limitsAggregateFailures'].length || p['workflowAggregateFailures'].length || p['warningFailures'].length || p['liveAggregateFailures'].length || p['aggregateVerification'].failed || p['pricingAgeFailures'].length || p['pricingProvenanceFailures'].length || p['fellBack'] || p['phase'] !== 'full' && !p['index']);
+    const failed = results.some(r => r['failedCommands'] > 0) || comparisons.some(r => r.unresolved > 0) || phases.some(p => p['differences'].length || p['aggregateDifferences'].length || p['warningFailures'].length || p['liveAggregateFailures'].length || p['aggregateVerification'].failed || p['pricingAgeFailures'].length || p['pricingProvenanceFailures'].length || p['fellBack'] || p['phase'] !== 'full' && !p['index']);
     if (failed) process.exitCode = 1;
   } finally {
     if (previousDataDir === undefined) delete process.env['SESSION_ANALYTICS_DATA_DIR']; else process.env['SESSION_ANALYTICS_DATA_DIR'] = previousDataDir;

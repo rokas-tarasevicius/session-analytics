@@ -1,17 +1,4 @@
-import type { ExecutionKind, MachineAnalytics, SessionProvider, SkillEvidence } from "../types.ts";
-
-export interface McpToolOutcome {
-  tool: string;
-  observedResults: number;
-  errors: number;
-}
-
-export interface McpRateWindow {
-  windowMinutes: number;
-  usedPercent: number;
-  observedAt: string;
-  resetsAt: string;
-}
+import type { ExecutionKind, MachineAnalytics, SessionProvider } from "../types.ts";
 
 export type McpActivityState = "active" | "settled" | "unknown";
 export interface McpPricingDay { day: string; eligibleTokens: number; pricedTokens: number }
@@ -23,40 +10,25 @@ export interface McpSourceHealth {
   unreadableSources: number;
 }
 
-/** Only structured result flags and numeric quota windows; never result text. */
+/** Lifecycle state and the daily pricing ledger; never transcript text. */
 export interface McpSessionEvidence {
   activityState?: McpActivityState;
   pricingByDay?: McpPricingDay[];
   undatedTokens?: number;
-  toolOutcomes: McpToolOutcome[];
-  rateLimits: McpRateWindow[];
-  truncated: boolean;
 }
 
 export interface McpContext {
   repositoryId: string | null;
 }
 
-export interface McpInventoryProvider {
-  provider: SessionProvider;
-  skills: string[];
-  skillIdentities?: Array<{ name: string; aliases: string[] }>;
-  unresolvedSkills?: number;
-  mcpServers: string[];
-  sourcesRead: number;
-  unreadableSources: number;
-  truncated: boolean;
-}
-
 export interface McpSnapshot {
   analytics: MachineAnalytics;
-  inventory: McpInventoryProvider[];
 }
 
 export type McpWindow = "today" | "week" | "7d" | "30d" | "90d" | "all";
 export type McpGroup = "repository" | "provider" | "model" | "agent";
 export type McpToolName = "usage_summary" | "budget_status" | "repo_profile" | "tool_stats" |
-  "recent_sessions" | "unused_extensions" | "compare_agents";
+  "recent_sessions" | "compare_agents";
 
 export interface McpArguments {
   scope?: "repository" | "machine";
@@ -118,19 +90,12 @@ export interface McpProfile {
   cacheHitRate: McpRatio;
   compactionsPerSession: McpRatio;
   toolMix: McpNamedCount[];
-  skills: McpNamedCount[];
   omittedTools: number;
-  omittedSkills: number;
-  skillEvidence: Array<{ provider: SessionProvider; evidence: SkillEvidence; sessions: number }>;
 }
 
 export interface McpToolStat {
   name: string;
   calls: number;
-  observedResults: number;
-  errors: number;
-  errorRate: McpRatio;
-  resultCoverage: McpRatio;
 }
 
 export interface McpRecentSession {
@@ -164,28 +129,6 @@ export interface McpBudgetPeriod {
 export interface McpBudget {
   today: McpBudgetPeriod;
   week: McpBudgetPeriod;
-  rateLimits: Array<{
-    provider: SessionProvider;
-    status: "available" | "unavailable";
-    windows: Array<McpRateWindow & { remainingPercent: number }>;
-  }>;
-}
-
-export interface McpUnusedProvider {
-  provider: SessionProvider;
-  inventoryCoverage: "partial";
-  sourcesRead: number;
-  unreadableSources: number;
-  truncated: boolean;
-  skillEvidence: SkillEvidence;
-  skillIdentityCoverage: "available" | "partial" | "unavailable";
-  unresolvedSkills: number;
-  installedSkills: number;
-  configuredMcpServers: number;
-  skillsWithoutObservedUse: string[];
-  serversWithoutObservedUse: string[];
-  omittedSkills: number;
-  omittedServers: number;
 }
 
 /** All tool payloads have the same provenance envelope; each data variant is allowlisted. */
@@ -212,9 +155,6 @@ export interface McpPayload {
     sessions: McpRecentSession[];
     totalSessions: number;
     nextOffset: number | null;
-  } | {
-    inventoryScope: "launch-context";
-    providers: McpUnusedProvider[];
   } | {
     agents: Array<{ provider: SessionProvider; totals: McpTotals; profile: McpProfile }>;
   };

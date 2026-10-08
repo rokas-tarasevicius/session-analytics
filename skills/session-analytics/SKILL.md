@@ -1,6 +1,6 @@
 ---
 name: session-analytics
-description: Open a privacy-safe localhost dashboard, or print a terminal or JSON report, of machine-wide Claude Code, Codex, and Cursor session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, cost, tools, skills, models, compactions, pricing coverage, or API-equivalent usage across repositories.
+description: Open a privacy-safe localhost dashboard, or print a terminal or JSON report, of machine-wide Claude Code, Codex, and Cursor session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, cost, tools, models, compactions, pricing coverage, or API-equivalent usage across repositories.
 ---
 
 # Session analytics
@@ -27,9 +27,9 @@ Use repository or evidence-path flags only when the user explicitly narrows the 
 
 ### Direct metrics through MCP
 
-When the user asks a metric question and the `session-analytics` MCP server is connected, use its tools directly: `usage_summary`, `budget_status`, `repo_profile`, `tool_stats`, `recent_sessions`, `unused_extensions`, and `compare_agents`. Continue to use the dashboard launch above when the user asks to open or show the dashboard. Installation is documented in `docs/mcp.md`; the server command is `session-analytics mcp`.
+When the user asks a metric question and the `session-analytics` MCP server is connected, use its tools directly: `usage_summary`, `budget_status`, `repo_profile`, `tool_stats`, `recent_sessions`, and `compare_agents`. Continue to use the dashboard launch above when the user asks to open or show the dashboard. Installation is documented in `docs/mcp.md`; the server command is `session-analytics mcp`.
 
-MCP defaults to the server's launch repository when known. Use `scope: "machine"` only for a machine-wide question; discover repository keys through `usage_summary` and pass `repositoryId` when narrowing. Tools never accept filesystem paths. Ordinary windows select sessions by start time in UTC; budget periods use dated API value. Report snapshot age, price coverage and observed denominators, and preserve `null` for unavailable or insufficient samples. API-equivalent value is not an invoice. Headroom is a recent recorded observation, not a live entitlement. Names without observed use do not justify uninstalling extensions. Do not open transcripts to fill evidence gaps.
+MCP defaults to the server's launch repository when known. Use `scope: "machine"` only for a machine-wide question; discover repository keys through `usage_summary` and pass `repositoryId` when narrowing. Tools never accept filesystem paths. Ordinary windows select sessions by start time in UTC; budget periods use dated API value. Report snapshot age, price coverage and observed denominators, and preserve `null` for unavailable or insufficient samples. API-equivalent value is not an invoice. Tool call counts are activity, not success; no tool reports quota headroom or error rates. Do not open transcripts to fill evidence gaps.
 
 The command reads standard local stores automatically:
 
@@ -61,8 +61,6 @@ Read the project's `docs/metrics.md` before changing a metric or rate, adding a 
 - Usage value: API list-price equivalents, cache-write upper estimates, Cursor provider-reported local value, and top-level versus subagent allocation. These are not invoices or subscription charges.
 - Execution shape: turns, model responses and calls, task markers, tool calls by name, compactions, summaries, queue operations, delegated agents, duration, and working or terminal state.
 - Comparisons: repository totals, provider and model mix, daily priced-usage velocity, selectable time windows, ranked sessions, cache ratio, tool distribution, and repository drill-down.
-
-Skill usage is explicit for Claude `Skill` tool events, an inferred lower bound for Codex calls that read a canonical `SKILL.md`, and unavailable for Cursor. Only normalized skill identifiers and counts enter the public projection; tool arguments and paths remain excluded.
 
 Processed input is request-context consumption, not unique authored text. Tools and task markers describe activity; they do not prove quality, success, causation, or value delivered.
 

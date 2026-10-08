@@ -49,8 +49,33 @@ function modelsEqual(actual: ModelUsage[], expected: ModelUsage[]): boolean {
   });
 }
 
-export function validateSnapshot(value: unknown): MachineAnalytics {
+/** Fields that snapshots written before 0.7 could carry. They are dropped on load, never validated or returned. */
+const legacyMachineFields = ["limitsCache", "outcomes", "workflow"];
+const legacyRepositoryFields = ["outcomes"];
+const legacySessionFields = ["reliability", "limitsCache", "outcomes", "workflow", "insightSignals", "skills", "skillEvidence"];
+const legacyMcpEvidenceFields = ["toolOutcomes", "rateLimits", "truncated"];
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const without = (value: Record<string, unknown>, keys: string[]): Record<string, unknown> =>
+  keys.some((key) => Object.hasOwn(value, key)) ? Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key))) : value;
+
+/** Accept older full snapshots by ignoring removed analysis fields; every remaining field is still validated. */
+export function withoutLegacyFields(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const machine = without(value, legacyMachineFields);
+  return {
+    ...machine,
+    ...(Array.isArray(machine["repositories"]) ? { repositories: machine["repositories"].map((repository) => isRecord(repository) ? without(repository, legacyRepositoryFields) : repository) } : {}),
+    ...(Array.isArray(machine["sessions"]) ? { sessions: machine["sessions"].map((session) => {
+      if (!isRecord(session)) return session;
+      const result = without(session, legacySessionFields);
+      return isRecord(result["mcpEvidence"]) ? { ...result, mcpEvidence: without(result["mcpEvidence"], legacyMcpEvidenceFields) } : result;
+    }) } : {}),
+  };
+}
+
+export function validateSnapshot(input: unknown): MachineAnalytics {
   const fail = (): never => { throw new InteropError("Snapshot is invalid, inconsistent, or unsupported."); };
+  const value = withoutLegacyFields(input);
   if (!matchesSchema(value, snapshotSchema)) fail();
   const snapshot = value as MachineAnalytics;
   const date = (value: string) => Number.isFinite(timestampMilliseconds(value));

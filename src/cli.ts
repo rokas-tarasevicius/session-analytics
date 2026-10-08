@@ -1,8 +1,6 @@
 import { historyReport } from "./report/history.ts";
 import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, argument } from "./options.ts";
-import { outcomeReport } from "./metrics/outcomes-report.ts";
-import { workflowReport } from "./report/workflow.ts";
 import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
 import { loadMachineSnapshot } from "./interop/snapshot.ts";
 import { InteropError } from "./interop/error.ts";
@@ -10,11 +8,8 @@ import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
 
-import { limitsCacheReport } from "./metrics/limits-report.ts";
-
 const valueFlags = new Set([...analysisValueFlags, ...shareValueFlags]);
 const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--share", "--version", "--no-additional-providers", "--offline"]);
-import { reliabilityReport } from "./metrics/reliability-report.ts";
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
@@ -64,17 +59,7 @@ Options:
   --gemini-root PATH     Override Gemini's tmp directory
   --no-additional-providers Disable new-source discovery (explicit paths still apply)
   --rate-card PATH       Override the reviewed rate card
-${pricingHelp}
-  --reliability-content-rules Enable local content rules for errors, shell classes and behavior (P2)
-  --no-reliability-content-rules Disable those rules, including when enabled by environment
-
-  --outcomes-git         Opt in to bounded local Git outcome correlation
-  --outcomes-github      Opt in to GitHub PR state queries through authenticated gh
-  --no-outcomes-git      Disable Git enrichment (overrides environment)
-  --no-outcomes-github   Disable GitHub enrichment (overrides environment)
-  --workflow-content-rules Enable local Claude interruption marker counts (P2)
-  --no-workflow-content-rules Disable those rules, including an environment opt-in
-  --no-index             Full scan without reading or writing the index
+${pricingHelp}  --no-index             Full scan without reading or writing the index
   --version              Print the version
   --help                 Show this help
 `);
@@ -169,9 +154,6 @@ if (analytics && process.argv.includes("--json")) {
       `compactions: ${metricValue(analytics.sessions.filter((s) => metricEligible(s, "compactions")).reduce((n, s) => n + s.metrics.compactions, 0), "compactions")}\n`,
   );
   process.stdout.write(historyReport(analytics));
-  process.stdout.write(limitsCacheReport(analytics));
-  process.stdout.write(outcomeReport(analytics.sessions));
-  if (analytics.workflow) process.stdout.write(workflowReport(analytics.workflow, analytics.repositories));
   process.stdout.write("\nTop sessions by priced usage value\n");
   for (const session of analytics.sessions.filter((s) => metricEligible(s, "cost"))
     .sort((left, right) => right.cost.totalUsd - left.cost.totalUsd)
@@ -182,7 +164,6 @@ if (analytics && process.argv.includes("--json")) {
         `${model.padEnd(20).slice(0, 20)}  Session ${session.sessionKey}\n`,
     );
   }
-  process.stdout.write(reliabilityReport(analytics.sessions));
   if (analytics.warnings.length > 0) {
     process.stdout.write("\nWarnings\n");
     for (const warning of analytics.warnings) process.stdout.write(`- ${warning}\n`);

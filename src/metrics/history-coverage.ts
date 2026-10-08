@@ -1,12 +1,32 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import type { SessionAnalytics, TokenUsage } from "../types.ts";
 import type { HistoryCoverage, HistoryModelCoverage, HistoryMonth, HistoryProfile } from "./history-types.ts";
-import { key } from "./limits-utils.ts";
+import { createHash } from "node:crypto";
 import { projectModelId } from "../public/model-id.js";
 import { record, zeroTokens, type RecordValue } from "../providers/common.ts";
 import { resolveRate, type PricingCatalog } from "../pricing/catalog.ts";
 import { priceUsage } from "../pricing/usage.ts";
+
+const key = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 20);
+const profileDirectory = (root: string): string => basename(root) === "projects" ? dirname(root) : root;
+const profileKeyFor = (canonical: string): string => `profile-${key(`claude:directory:${canonical}`)}`;
+
+/** Maps a native Claude transcript to the profile whose statistics describe it; the longest root wins. */
+export async function claudeProfileResolver(roots: string[]): Promise<(path: string) => string | null> {
+  const profiles: Array<{ root: string; profileKey: string }> = [];
+  for (const root of roots) {
+    const directory = profileDirectory(root);
+    let canonical = resolve(directory);
+    try { canonical = await realpath(directory); } catch { /* Missing evidence is normal. */ }
+    profiles.push({ root: resolve(root), profileKey: profileKeyFor(canonical) });
+  }
+  profiles.sort((a, b) => b.root.length - a.root.length);
+  return (path) => {
+    const full = resolve(path);
+    return profiles.find(({ root }) => full === root || full.startsWith(`${root}${sep}`))?.profileKey ?? null;
+  };
+}
 
 const integer = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 function day(value: unknown): string | null {
@@ -18,10 +38,10 @@ interface Cell { profile: HistoryProfile; day: string; model: string; provider: 
 interface Statistics { profile: HistoryProfile; cells: Cell[] }
 
 async function statistics(root: string, ordinal: number): Promise<Statistics> {
-  const directory = basename(root) === "projects" ? dirname(root) : root;
+  const directory = profileDirectory(root);
   let canonical = resolve(directory);
   try { canonical = await realpath(directory); } catch { /* Missing profile is normal. */ }
-  const profile: HistoryProfile = { profileKey: `profile-${key(`claude:directory:${canonical}`)}`, ordinal,
+  const profile: HistoryProfile = { profileKey: profileKeyFor(canonical), ordinal,
     status: "missing", dailyTokensVersion: null, statisticsThrough: null, firstStatisticsDay: null, firstTranscriptDay: null, lifetimeTokens: 0, sessionsWithoutStatisticsCounters: 0, months: [] };
   const cells: Cell[] = [];
   let data: RecordValue | null;
@@ -121,18 +141,18 @@ export async function collectHistoryCoverage(roots: string[], sessions: SessionA
     for (const at of datedMonths) month(at).sessionsWithDatedValue++;
     result.undatedSessionValueUsd += Math.max(0, session.cost.totalUsd - datedValue);
     if (session.provider !== "claude") continue;
-    const profileKey = session.limitsCache?.profileKey, profile = profileKey ? profiles.get(profileKey) : null;
+    const profileKey = session.historyProfile?.profileKey, profile = profileKey ? profiles.get(profileKey) : null;
     if (profile) {
       const first = day(session.firstEventAt?.slice(0, 10));
       if (!session.transcript.sourceDeleted && first && (!profile.firstTranscriptDay || first < profile.firstTranscriptDay)) profile.firstTranscriptDay = first;
-      for (const bucket of session.limitsCache?.buckets ?? []) if (bucket.day && day(bucket.day)) {
+      for (const bucket of session.historyProfile?.days ?? []) if (day(bucket.day)) {
         const id = `${profileKey}:${bucket.day}:${bucket.model}`;
-        evidence.set(id, (evidence.get(id) ?? 0) + bucket.observedTokens);
+        evidence.set(id, (evidence.get(id) ?? 0) + bucket.tokens);
       }
       // Older source-deleted index facts cannot reconstruct stream redundancy;
       // their deduplicated counters provide only a conservative subtraction.
-      if (!session.historyStatistics && session.limitsCache?.buckets.length) profile.sessionsWithoutStatisticsCounters++;
-      const statistics = session.historyStatistics?.days ?? (session.limitsCache?.buckets ?? []).flatMap((b) => b.day ? [{ day: b.day, model: b.model, tokens: b.observedTokens }] : []);
+      if (!session.historyStatistics && session.historyProfile?.days.length) profile.sessionsWithoutStatisticsCounters++;
+      const statistics = session.historyStatistics?.days ?? session.historyProfile?.days ?? [];
       for (const bucket of statistics) {
         const id = `${profileKey}:${bucket.day}:${bucket.model}`;
         statisticsEvidence.set(id, (statisticsEvidence.get(id) ?? 0) + bucket.tokens);

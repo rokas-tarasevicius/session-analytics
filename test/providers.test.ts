@@ -53,6 +53,8 @@ test("Claude adapter migration preserves legacy fields as the session projection
     const data = await analyzeMachineSessions(legacyOptions(f));
     const actual = data.sessions.map((s) => ({ ...s, repositoryId: s.repositoryName })).sort((a, b) => a.sessionKey.localeCompare(b.sessionKey));
     const expected = JSON.parse(await readFile(new URL("./provider-fixtures/legacy-sessions.json", import.meta.url), "utf8"));
+    // Skills analysis was removed; the fixture predates that and still records the fields.
+    for (const session of expected) { delete session.skills; delete session.skillEvidence; }
     // Limits/cache replaces the legacy ratio-of-maxima with per-request context evidence.
     for (const session of expected) if (session.provider === "claude") {
       session.tokens.nonReasoningOutputTokens = 0;

@@ -1,19 +1,19 @@
 # Privacy contract
 
-The local real-machine verification harness also writes audit-only evidence: hashed session keys, metadata signatures and capture timestamps (P1); exclusion counts, public context counters/curve points and independently reconstructed calibration values (P0, with hashed identities and event timestamps treated as P1). Source generations, pre-budget context inputs and calibration pairs stay in `.lane/`; they contain no source paths, raw session IDs or transcript content and add no public snapshot fields. Provider histories are read-only throughout verification.
+The local real-machine verification harness also writes audit-only evidence: hashed session keys, metadata signatures and capture timestamps (P1); exclusion counts and independently reconstructed calibration values (P0, with hashed identities and event timestamps treated as P1). Source generations and calibration pairs stay in `.lane/`; they contain no source paths, raw session IDs or transcript content and add no public snapshot fields. Provider histories are read-only throughout verification.
 
 `session-analytics` reads coding-agent transcripts that already exist on your machine. Those transcripts contain everything you and your agents have written: prompts, responses, reasoning, commands, file paths, diffs, and tool output. This document defines exactly what the tool may return from them, how that boundary is enforced, and what it does not protect against.
 
-The content-free contract covers dashboard/API, reports, pricing commands, insights, MCP, exports/sharing, the agent skill and the persisted index. `index path` deliberately prints only the index location for local management. The separate P3 review exception requires an explicit per-run `--send-content`; analytics never invoke it.
+The content-free contract covers dashboard/API, reports, pricing commands, MCP, exports/sharing, the agent skill and the persisted index. `index path` deliberately prints only the index location for local management.
 
 ## The contract
 
 **Returned:** allowlisted counters and metadata only.
 
 - Token/cost/event counters, durations, timestamps, bounded model IDs and enumerated effort/status labels.
-- Bounded tool, skill and MCP-server names; registry-verified slash-command names, never arguments or unknown command text.
-- Repository display names and stable repository keys; 12-hex provider-qualified session hashes, hashed outcome references, pseudonymous profile keys and explicit plan labels.
-- Numeric CLI versions, fixed entrypoint/originator enums, configured monthly plan amounts and allowlisted quota/plan states.
+- Bounded tool names, never arguments or command text.
+- Repository display names and stable repository keys; 12-hex provider-qualified session hashes and pseudonymous profile keys.
+- Fixed entrypoint/originator enums.
 - Fixed warning text with approved counts/model identifiers; public price sources, dates, payload hashes, rates and provenance enums.
 
 **Never returned:**
@@ -30,14 +30,14 @@ The content-free contract covers dashboard/API, reports, pricing commands, insig
 
 - **Explicit projections.** Native parsers and provider adapters build public objects from declared fields. Raw records and internal correlation types never cross the worker boundary. Snapshot schemas reject unknown nested fields; the index recursively selects that same schema before writing and after reading.
 - **One model policy.** `src/public/model-id.js` (also re-exported by `src/public-model.ts`) bounds IDs to 160 characters and up to three validated namespace components. Filesystem roots, paths with traversal, URLs, whitespace, file suffixes, credential patterns and recognizable raw identifiers are rejected as `<unknown>`. Eligible counters remain visible. A syntactically valid name is still identifying metadata, not proof of safe provenance.
-- **Bounded names and enums.** Tools/skills/MCP names use the public grammar; Codex code-mode tool names are extracted as identifiers only. Status/error/warning fields use enums or fixed templates, never raw local errors.
+- **Bounded names and enums.** Tool names use the public grammar; Codex code-mode tool names are extracted as identifiers only. Status/error/warning fields use enums or fixed templates, never raw local errors.
 - **Sentinel coverage.** Synthetic tests plant content, credentials, paths, IDs and commands in provider records. Analyzer, API, schemas, cache replay, reports, exports, MCP and rendering tests reject those strings at their output boundaries.
-- **Fixed failures.** Worker stderr is discarded. The only index errors crossing the worker are allowlisted codes/messages; all other analysis failures are generic. Raw fetch errors and agent CLI output are not returned.
-- **Read-only provider access.** Transcripts are streamed and provider SQLite stores opened read-only. The separate private data directory contains derived index facts, public price history, preferences/configuration and opt-in secrets; provider directories are untouched.
-- **Explicit network boundaries.** Analysis reads cached prices; dashboard startup can refresh fixed public price feeds without local metadata, credentials or redirects. `--offline` disables pricing requests. `--outcomes-github` permits authenticated PR-coordinate lookups; `export --otlp-endpoint` permits selected content-free export delivery; `review --send-content` permits bounded P3 prose for that run. These options are independent. There is no telemetry. The loopback dashboard uses same-origin CSP, bundled fonts and marks.
-- **MCP boundary.** Tools accept no paths, commands, URLs, SQL or client roots. Trusted source paths are launch settings. Only projected metrics and names-only inventory enter responses; configured MCP commands are never executed and servers are never contacted.
+- **Fixed failures.** Worker stderr is discarded. The only index errors crossing the worker are allowlisted codes/messages; all other analysis failures are generic. Raw fetch errors are not returned.
+- **Read-only provider access.** Transcripts are streamed and provider SQLite stores opened read-only. The separate private data directory contains derived index facts, public price history, preferences/configuration and private keys; provider directories are untouched.
+- **Explicit network boundaries.** Analysis reads cached prices; dashboard startup can refresh fixed public price feeds without local metadata, credentials or redirects. `--offline` disables pricing requests. `export --otlp-endpoint` permits selected content-free export delivery; it is independent of the pricing setting. There is no telemetry. The loopback dashboard uses same-origin CSP, bundled fonts and marks.
+- **MCP boundary.** Tools accept no paths, commands, URLs, SQL or client roots. Trusted source paths are launch settings. Only projected metrics enter responses; the MCP worker reads no skill or MCP-server configuration, never executes configured commands and never contacts servers.
 
-Raw transcript content is not persisted or logged. Bounded parsing collectors may hold current request/receipt evidence in memory until reconciliation. Reliability correlation retains only internal HMACs/counters; output/result text never enters the public projection. Outcome enrichment keeps private branch/PR coordinates only for bounded local correlation and explicitly enabled lookups. Public pricing caches contain normalized rates, not raw feed bodies or local inventories.
+Raw transcript content is not persisted or logged. Bounded parsing collectors may hold current request/receipt evidence in memory until reconciliation. Public pricing caches contain normalized rates, not raw feed bodies or local inventories.
 
 ## Local index
 
@@ -49,7 +49,7 @@ The following is the complete disk field manifest. Index source keys and integri
 
 | Stored data | Contents | Tier |
 | --- | --- | --- |
-| `sessions.payload` | The complete schema-allowlisted `SessionAnalytics` projection below, including metric namespaces and pricing provenance; no raw provider rows | P0/P1/P2 when enabled |
+| `sessions.payload` | The complete schema-allowlisted `SessionAnalytics` projection below, including metric namespaces and pricing provenance; no raw provider rows | P0/P1 |
 | `scope`, `identity_key`, `source_keys`, `root_key`, `remote_key`, `signature` | Keyed hashes of source configuration, provider-qualified identity, paths, roots/remotes, and parser/rate/metadata dependencies | P1 |
 | `payload_mac`, `ledger_mac` | Keyed payload integrity digests | P1 |
 | `source_deleted`, `last_event_at`, `retention_verified` | Deletion state, normalized last activity, and whether a current parser verified the retention date; unverifiable legacy dates cannot justify pruning | P0 |
@@ -75,7 +75,7 @@ The following is the complete disk field manifest. Index source keys and integri
 | SQLite metadata / `writer.sqlite` | Schema version, transaction metadata, and local writer coordination; no transcript data | P0 |
 | `writer-ticket-*` / `.next` | Transient process ID, random nonce, and numeric mutex order; no provider data, paths, or session IDs; removed on release or dead-process recovery | P0 |
 
-The index retains previously observed history after provider deletion. `index prune --before YYYY-MM-DD` removes old verified session facts, clears reusable evidence, vacuums the active database, and keeps a retention floor, minimal keyed exclusion checkpoints, and keyed anti-rebilling reservations. Subsequent scans may rebuild ledger evidence from surviving provider files; unchanged exclusion checkpoints skip session parsing without restoring session facts. The cutoff is exclusive UTC midnight; provider files are untouched. Unverified legacy dates are kept until the source can be reparsed. Rebuild discards retained history and resets the floor. Corruption recovery places unreadable main or writer databases in private `.rebuild-*` quarantine files, which are excluded from analysis, status, and prune; remove those separately when no longer needed. Retention is of derived facts, never a raw transcript archive. P2 settings partition indexed history, so disabling rules cannot replay earlier rule-derived facts. Deleted-source facts from a different P2 setting are unavailable in that scope. No P3 content is indexed.
+The index retains previously observed history after provider deletion. `index prune --before YYYY-MM-DD` removes old verified session facts, clears reusable evidence, vacuums the active database, and keeps a retention floor, minimal keyed exclusion checkpoints, and keyed anti-rebilling reservations. Subsequent scans may rebuild ledger evidence from surviving provider files; unchanged exclusion checkpoints skip session parsing without restoring session facts. The cutoff is exclusive UTC midnight; provider files are untouched. Unverified legacy dates are kept until the source can be reparsed. Rebuild discards retained history and resets the floor. Corruption recovery places unreadable main or writer databases in private `.rebuild-*` quarantine files, which are excluded from analysis, status, and prune; remove those separately when no longer needed. Retention is of derived facts, never a raw transcript archive. Index payloads written by earlier versions may still contain removed analysis namespaces; they are dropped when read and never returned, except that a Claude session's stored profile key and per-day model tokens are carried forward as `historyProfile`.
 
 ### Parity audit diagnostics
 
@@ -99,19 +99,9 @@ No new processing tier or network access is introduced. A consistency fallback u
 | Tier | Contents | Status |
 | --- | --- | --- |
 | **P0** | Counters, costs, dates, durations, bounded model/tool names and enumerated labels | Returned by default |
-| **P1** | Pseudonymous session/repository/profile/outcome keys, display names, MCP/command/skill inventory names and timezone | Returned with explicit field coverage; private path/argument digests and keys are never public |
-| **P2** | Fixed rule IDs/classes and counts derived from local content | Reliability and Workflow rules, plus optional Git trailer classification; opt-in, off by default |
-| **P3** | Bounded redacted human/assistant prose sent through the user's agent CLI | Explicit `review --send-content` per run; never stored in the index or returned through analytics APIs |
-
-`--reliability-content-rules` / `SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES=1` enables local reliability rules. `--no-reliability-content-rules` overrides the opt-in. Structured outcomes, durations and permission/hook enums remain P0/P1. When rules need correlation, a private 32-byte `reliability-hmac.key` (0600) is created atomically under `--data-dir` / `SESSION_ANALYTICS_DATA_DIR`; symlinks, malformed keys and unsafe ownership/modes are refused. Neither keys nor argument/path digests enter snapshots. Default scans do not create that key.
-
-`--workflow-content-rules` / `SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES=1` enables two exact Claude interruption-marker rules; `--no-workflow-content-rules` overrides it. Only marker counts and labeled timing coverage leave the parser, never matched text. Disabling P2 selects an independent index scope. `--outcomes-git` permits bounded local Git enrichment including co-author classification; `--outcomes-github` separately permits network queries.
-
-### P3 review exception
-
-`review --session KEY --via claude|codex` defaults to a metadata-only dry-run: rule IDs, sizes and redaction counts, no displayed prose and no CLI invocation. Only an explicit `--send-content` flag permits that run to send a bounded prompt through the selected CLI on `PATH`. There is no environment-variable equivalent, persistent opt-in, review HTTP endpoint or dashboard send control. Authentication, retention and billing belong to the user's agent provider.
-
-The capped review worker resolves the hashed key through validated analyzer evidence, chooses up to three windows, and omits reasoning and tool argument/result blocks. It redacts common credential, URL, email, path, ID and code forms and known local identifiers; **remaining prose is P3 and may still be identifying or sensitive**. Regex redaction does not guarantee anonymization. It is capped to 12 excerpts × 1,000 characters and a 60 KB prompt. Paths and raw source IDs never cross the worker output boundary. Only allowlisted assessment enums are returned; arbitrary agent stdout/stderr is discarded. Default analytics remain content-free. [Full behavior and limitations](insights.md#opt-in-review-p3).
+| **P1** | Pseudonymous session/repository/profile keys, display names and timezone | Returned with explicit field coverage; private keys are never public |
+| **P2** | Fixed rule IDs/classes and counts derived from local content | No current feature; any such rule must be opt-in and off by default |
+| **P3** | Bounded redacted human/assistant prose sent off the machine | No current feature; would require an explicit per-run opt-in and could never be stored in the index or returned through analytics APIs |
 
 ## Field manifest
 
@@ -145,9 +135,6 @@ Returned by `/api/analytics` and `report --json`.
 | `summary` | Machine totals; see [Summary](#summary) | P0 |
 | `topTools[]` | `{ name, value }`, effective tool calls by tool name, descending | P0 |
 | `warnings[]` | Fixed-text coverage notes (unpriced models, missing or unmatched transcripts, unreadable roots) | P0 |
-| `limitsCache` | Optional quota/profile and subscription namespace, also present on the single-repository result; see [Limits and cache](#limits-and-cache) | P0/P1 |
-| `outcomes` | Optional outcome summary; fields defined below | P0 |
-| `workflow` | Optional workflow aggregate; also present on the single-repository analysis result. See the workflow manifest below | P0/P1/P2 |
 | `mcpContext.repositoryId` | Optional launch-context repository key, or null outside a repository; requested internally by the MCP worker, never a path | P1 |
 | `mcpSourceHealth[].provider`, `.status` | Provider and available/incomplete/unavailable discovery enum, independent of sessions | P0 |
 | `mcpSourceHealth[].sourcesRead`, `.missingSources`, `.unreadableSources` | Discovery source counts; no paths or error text | P0 |
@@ -163,7 +150,6 @@ Returned by `/api/analytics` and `report --json`.
 | `summary` | Repository totals; see [Summary](#summary) | P0 |
 | `topTools[]` | Effective tool calls by name for this repository | P0 |
 | `warnings[]` | Fixed-text coverage notes for this repository | P0 |
-| `outcomes` | Optional outcome summary; also present on single-repository results | P0 |
 
 ### Summary
 
@@ -217,8 +203,7 @@ Repository summaries and the machine summary share these fields.
 | `status` | Fixed label: `idle`, `working`, `completed`, `failed`, `error`, `interrupted`, `cancelled`, `pending`, or `unknown`; unrecognized source text becomes `unknown` | P0 |
 | `createdAt` | Session start as UTC ISO with milliseconds; offset-free source/database timestamps mean UTC | P0 |
 | `updatedAt` | Conductor's or Cursor's last-updated time when available; otherwise the session start time | P0 |
-| `workflow` | Optional primary-transcript workflow projection; absent for unsupported/failed parses. See below | P0/P1/P2 |
-| `mcpEvidence` | Optional structured outcome/quota counters from the streaming parser; see [MCP fields](#mcp-fields) | P0 |
+| `mcpEvidence` | Optional lifecycle state and daily pricing-coverage operands from the streaming parser; see [MCP fields](#mcp-fields) | P0 |
 | `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
 | `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
 | `effort` | Validated reasoning-effort enum (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, `auto`, `unknown`), or `null` | P0 |
@@ -238,20 +223,15 @@ Repository summaries and the machine summary share these fields.
 | `spendByDay` | `{ "YYYY-MM-DD": USD }` for this session, by UTC day of each priced request | P0 |
 | `tools` | `{ toolName: count }`, effective tool calls (code-mode calls expanded to the inner tool) | P0 |
 | `transportTools` | `{ toolName: count }`, tool calls as the provider transported them, before expansion | P0 |
-| `skills` | `{ skillId: count }`, skill invocations | P0 |
-| `skillEvidence` | `explicit` (native Claude), `inferred` (native Codex lower bound), or `unavailable` | P0 |
 | `metrics` | Execution counters; see [Session metrics](#session-metrics-sessionmetrics) | P0 |
-| `reliability` | Optional versioned reliability projection; absent for unsupported evidence; see below | P0/P1/P2 |
-| `limitsCache` | Optional request cache/context namespace for Claude and Codex; see [Limits and cache](#limits-and-cache). Absent for unsupported evidence | P0/P1 |
-| `outcomes` | Optional session outcome evidence; fields defined below | P0/P1/P2 |
-| `insightSignals.cacheGaps` | Optional Claude-only counters; see [Cache-gap signals](#cache-gap-signals) | P0 |
-| `insightSignals.requestSizes.observedTokens`, `.unknownTokens` | Accounted input-plus-output tokens with known/unknown request input size, after ownership and deduplication | P0 |
-| `insightSignals.mcpServers` | Optional map of bounded server name to structured observations: deduplicated Codex MCP items or Claude tool calls carrying explicit server attribution; no arguments/results | P1 names, P0 counts |
+| `historyProfile` | Optional, native Claude sessions only: input to machine-wide history coverage; absent when the transcript's Claude profile is unknown | P0/P1 |
+| `historyProfile.profileKey` | Pseudonymous `profile-<20 hex>` key of the Claude profile holding the transcript, the same key as `historyCoverage.profiles[].profileKey`; derived from the canonical profile directory, which is never returned | P1 |
+| `historyProfile.days[].day`, `.model`, `.tokens` | UTC request date (`YYYY-MM-DD`), bounded model ID, and deduplicated request input plus output tokens for that day and model; undated requests are omitted | P0 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
 | `transcript.snapshotWhileWorking` | `true` for Conductor's explicit `working` status; false does not establish inactivity | P0 |
 | `transcript.completeness` | Optional `complete`, `partial`, `unknown`: parse/file-version completeness of observed evidence, not lifetime retention | P0 |
-| `transcript.liveness` | Optional `active`, `inactive`, `unknown`: observed lifecycle/Conductor state; see [evidence rules](insights.md#rules-and-formulas) | P0 |
+| `transcript.liveness` | Optional `active`, `inactive`, `unknown`: observed lifecycle/Conductor state; see [transcript evidence](metrics.md#request-size-and-transcript-evidence) | P0 |
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
 | `evidence` | Optional source fidelity and availability; absent on the original native-provider projections | P0 |
 | `evidence.accounting` | Optional `complete` or `partial` for retained accounting; no promise of complete historical retention | P0 |
@@ -281,7 +261,7 @@ Repository summaries and the machine summary share these fields.
 | `conductor.errorResults` | Count of results with `is_error === true`; not a task-failure verdict | P0 |
 | `conductor.terminalReasons` | Counts keyed only by `success`, `error_during_execution`, `error_max_turns`, `error_max_budget_usd`, `error_max_structured_output_retries`, `completed`, `cancelled`, `interrupted`, or `unknown`; all other values map to `unknown` | P0 |
 
-Structured metadata is validated before aggregation and warning construction. Model IDs use a separate bounded grammar that preserves namespaces (including `org/model` and `@cf/vendor/model`) and exact rate keys, while rejecting filesystem, URL, whitespace/control, and credential shapes. Tool/skill identifiers exclude prototype keys. Rejected model/tool values become fixed unknown labels; timestamps must parse as bounded ISO date-time forms. Private correlation IDs and ownership fingerprints remain inside the worker.
+Structured metadata is validated before aggregation and warning construction. Model IDs use a separate bounded grammar that preserves namespaces (including `org/model` and `@cf/vendor/model`) and exact rate keys, while rejecting filesystem, URL, whitespace/control, and credential shapes. Tool identifiers exclude prototype keys. Rejected model/tool values become fixed unknown labels; timestamps must parse as bounded ISO date-time forms. Private correlation IDs and ownership fingerprints remain inside the worker.
 | `transcript.snapshotWhileWorking` | `true` when the session was marked working at its last source observation; a retained observation does not establish current activity | P0 |
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
 | `transcript.sourceDeleted` | Optional `true`: these are last-ingested facts whose source was removed; absent for current evidence and `--no-index` output. Prices/parser results are frozen at last ingest | P0 |
@@ -307,48 +287,6 @@ Structured metadata is validated before aggregation and warning construction. Mo
 | `maxContextWindow` | Largest observed Codex window or reviewed Claude model capacity | P0 |
 | `maxInputTokensPerCall` | Largest input of a single request | P0 |
 | `contextUtilizationPeak` | Maximum paired request-input/window ratio over eligible deduplicated requests, or `null`; Claude's reviewed capacities are estimates | P0 |
-
-### Reliability (`SessionReliability`)
-
-Public types live in [`src/metrics/reliability-types.ts`](../src/metrics/reliability-types.ts), referenced and re-exported by `src/types.ts`. All fields below are under `sessions[].reliability`. MCP server/tool names are bounded to 128 identifier characters; invalid names become `unknown`. No raw provider object is copied into this namespace.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `version` | Reliability schema version, currently `1` | P0 |
-| `contentRules` | `enabled` or `disabled` | P0 |
-| `hashing` | `enabled`, `disabled`, or `unavailable`; never key material | P0 |
-| `tools[].name` | Bounded structured tool name; MCP names are server-qualified (names exceeding 128 characters use a prefix plus a digest of the structured name only) | P0 / P1 for MCP server identity |
-| `tools[].toolClass` | Fixed cross-provider class; shell command inference requires P2 | P0 / P2 when inferred |
-| `tools[].calls`, `mcp[].calls` | Observed calls in this group | P0 |
-| `tools[].outcomes`, `mcp[].outcomes` | Fixed `success`, `error`, `denied`, `interrupted`, `timeout`, `unknown` counters | P0 / P2 when derived from receipt text |
-| `tools[].errors`, `mcp[].errors` | Fixed error-class IDs and counts (full enum in metrics.md); no error text | P0 / P2 when derived from text |
-| `tools[].latency.samples`, `mcp[].latency.samples`, `hooks.latency.samples` | Observed durations contributing to the histogram | P0 / P2 for parsed receipt timing |
-| `tools[].latency.buckets`, `mcp[].latency.buckets`, `hooks.latency.buckets` | Sparse numeric `[upperBoundMs, count]` pairs; no timestamps or call IDs | P0 / P2 for parsed receipt timing |
-| `tools[].latency.p50Ms`, `tools[].latency.p95Ms`, `mcp[].latency.p50Ms`, `mcp[].latency.p95Ms`, `hooks.latency.p50Ms`, `hooks.latency.p95Ms` | Approximate merged quantiles, or null without samples | P0 / P2 for parsed receipt timing |
-| `mcp[].server` | Bounded server name from structured tool/attachment evidence | P1 |
-| `mcp[].connectionFailures` | Reported failed connections, separate from call errors | P0 |
-| `coverage.argumentCalls`, `coverage.fileCalls` | Counts of calls with usable argument/file HMACs; never the HMACs themselves | P2 |
-| `coverage.unmatchedResults` | Receipts without a matching call; suppresses sequence claims for the whole composite session | P0 |
-| `coverage.truncated` | Parsing, retained-state or stream-wide hashing safeguards made the evidence partial | P0 |
-| `flags` | Null when disabled/unavailable; otherwise the counters below | P2 |
-| `flags.exact_repeat`, `flags.repeated_failure`, `flags.failed_edit_cascade`, `flags.edit_thrash`, `flags.reread_churn`, `flags.search_loop` | Local detector episode counts; no matching arguments, paths, digests, IDs or excerpts | P2 |
-| `verification.checks`, `verification.passed`, `verification.failed` | Recognized test/build calls and outcomes | P0 / P2 for command classification |
-| `verification.editCalls` | Successful or unresolved edit/write calls | P0 |
-| `verification.share` | Guarded check / (check + edit) ratio, or null | P2 |
-| `verification.skip` | Observed-tail skip; false requires a completed check started after edits completed; null for overlap or insufficient evidence | P2 |
-| `verification.stepsToFirstEdit`, `verification.msToFirstEdit` | Main-stream calls and milliseconds before the first possible edit, or null | P0 |
-| `hooks.runs`, `hooks.blocks` | Hook runs and summaries blocking continuation | P0 |
-| `permissions.denials` | Denied tool calls | P0 / P2 if inferred from failed text |
-| `permissions.modes` | Counts of `default`, `auto`, `bypassPermissions`, `plan`, `acceptEdits`, `dontAsk`, `unknown` observations | P0 |
-| `permissions.approvalPolicies` | Counts of `untrusted`, `on-failure`, `on-request`, `never`, `unknown` observations | P0 |
-| `permissions.sandboxes` | Counts of `read-only`, `workspace-write`, `danger-full-access`, `external-sandbox`, `unknown` observations | P0 |
-| `apiErrors` | Structured `api_rate_limit`, `api_server_error`, `unknown` counts | P0 |
-
-The report derives class/repository/agent comparisons, coverage denominators, episode totals and guarded rates from these fields. The public JSON contains no per-call events and no additional reliability root rollup. Tests in `test/reliability.test.ts` and `test/server.test.ts` cover sentinels through the parser, child worker, API and report, including error text, diffs, command arguments, hooks and MCP results.
-
-| `maxContextWindow` | Largest context window the provider reported | P0 |
-| `maxInputTokensPerCall` | Largest owned, deduplicated request with known input size; a lower bound when request-size coverage is partial | P0 |
-| `contextUtilizationPeak` | `maxInputTokensPerCall / maxContextWindow`, or `null` when no window is reported | P0 |
 
 ### Token usage (`TokenUsage`)
 
@@ -494,338 +432,6 @@ Week/month/hour series, rolling means, changes, movers and projection bands are 
 in the browser from these cells and are not additional exported fields. Definitions,
 minimum-activity guards and unknown-data rules are in [metrics.md](metrics.md#velocity-snapshot-version-1).
 
-
-### Limits and cache
-
-Types are explicitly defined in [`src/metrics/limits-cache-types.ts`](../src/metrics/limits-cache-types.ts); formulas and guards are in [limits-cache.md](limits-cache.md). All provider records are projected field by field. Source/config paths, account/organization IDs, request IDs, unknown plan/limit names, diagnostic text, compaction summaries, raw credits metadata and raw config objects never leave the parser. No P2/P3 processing is added.
-
-#### Snapshot `limitsCache`
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `profiles[]` | Observed provider profiles or separate Desktop accounts | P0/P1 |
-| `profiles[].key` | `profile-` plus 20 SHA-256 hex characters of provider-qualified canonical profile identity or Desktop organization; unkeyed, stable and pseudonymous, not anonymous against known-input recomputation | P1 |
-| `profiles[].provider` | `claude` or `codex` | P0 |
-| `profiles[].ordinal` | One-based discovery ordinal within provider | P0 |
-| `profiles[].label` | Ordinal label, or explicitly configured bounded public display label; never inferred from directory names | P1 |
-| `profiles[].scope` | `profile` or `desktop-account`; profiles are not assumed to have distinct subscriptions | P0 |
-| `profiles[].planType`, `planObservedAt` | Allowlisted Codex plan enum (`free`, `go`, `plus`, `pro`, `team`, `business`, `enterprise`, `edu`, `unknown`) and observation time; nullable, never mapped to a guessed price | P0 |
-| `profiles[].credits` | Nullable allowlisted credit observation | P0 |
-| `profiles[].credits.observedAt` | Observation timestamp | P0 |
-| `profiles[].credits.hasCredits`, `unlimited` | Nullable booleans | P0 |
-| `profiles[].credits.balance` | Nullable finite numeric balance in provider units, not a USD conversion | P0 |
-| `profiles[].windows[]` | Separate rate-limit windows; never added across accounts/profiles | P0/P1 |
-| `profiles[].windows[].key` | Hashed limit identifier plus window kind/duration, or fixed Claude window enum | P1 |
-| `profiles[].windows[].label`, `windowMinutes` | Fixed display label and nullable observed window duration | P0 |
-| `profiles[].windows[].observations`, `duplicatesDiscarded` | Retained observation count and encountered same-source timestamp collisions | P0 |
-| `profiles[].windows[].historyLimited`, `timelineSampled` | Explicit retention/sampling indicators | P0 |
-| `profiles[].windows[].timeline[]`, `latest` | Bounded timeline and most recent sample, as defined below | P0 |
-| `profiles[].windows[].latestNumeric` | Latest numeric sample using the same sample manifest below, or null; independently dated from latest status evidence | P0 |
-| `profiles[].windows[].headroomExpiresAt` | Numeric observation's ISO freshness/reset deadline, or null without numeric evidence | P0 |
-| `profiles[].windows[].stale` | Numeric sample (or latest status if no numeric sample exists) expired, future-dated, or past reset | P0 |
-| `profiles[].windows[].headroomPercent`, `timeToLimitMinutes` | Nullable headroom and guarded projection from latest compatible numeric observation | P0 |
-| `profiles[].windows[].observedMinutes`, `above90Minutes`, `shareAbove90` | Measured exposure denominator, ≥90% duration and nullable guarded share | P0 |
-| `profiles[].limitHits[].timestamp`, `kind` | Bounded event details; ISO time and `http-429`, `usage-limit-exceeded`, or `quota-rejected` | P0 |
-| `profiles[].limitHitCount`, `sessionsWithLimitErrors` | Exact observed event count and sessions with explicit request-limit errors; no raw session IDs | P0 |
-| `subscriptions[].profileKey`, `month` | Profile pseudonym and UTC `YYYY-MM` | P1/P0 |
-| `subscriptions[].apiEquivalentUsd`, `monthlyPriceUsd`, `leverage` | Observed dated API value, nullable user-configured full monthly USD price and nullable guarded ratio | P0 |
-| `subscriptions[].pricedTokens`, `observedTokens`, `pricingCoverage` | Input-plus-output pricing denominator/numerator and nullable coverage | P0 |
-| `subscriptions[].activeDays`, `partialMonth`, `scope` | Observed active days, current-month flag and `all-repositories`/`selected-repository` scope | P0 |
-| `warnings[]` | Fixed optional-source/configuration warnings, without paths or raw errors | P0 |
-| `policy.freshnessMinutes`, `maximumObservationGapMinutes`, `minimumObservedMinutes`, `minimumRequests`, `minimumInputTokens` | Published freshness, exposure and activity guards | P0 |
-| `policy.contextTableReviewedAt` | Review date for Claude fallback model capacities | P0 |
-
-Every `timeline[]` / `latest` / non-null `latestNumeric` sample contains only:
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `timestamp`, `resetsAt` | Normalized ISO observation time and nullable reset | P0 |
-| `usedPercent` | Nullable finite utilization in [0, 100] | P0 |
-| `status` | Nullable `allowed`, `allowed_warning`, or `rejected` | P0 |
-| `source` | `codex-transcript`, `claude-quota`, `claude-cache`, or `claude-desktop` | P0 |
-| `usingOverage` | Nullable recorded boolean | P0 |
-
-#### Session `limitsCache`
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `profileKey` | Nullable profile pseudonym joining snapshot profiles | P1 |
-| `cache` | Totals below, plus guarded `hitRatio` and nullable input `pricingCoverage` | P0 |
-| `context` | Context totals below, plus the curve and guarded threshold shares | P0 |
-| `buckets[].day`, `model`, `executionKind` | Nullable UTC request day, model ID, and execution enum; repository/profile come from the containing session | P0 |
-| `buckets[].observedTokens`, `pricedTokens`, `apiEquivalentUsd` | Input-plus-output totals and ordinary priced request value, for monthly comparisons | P0 |
-| `buckets[].cache`, `context` | Exact additive totals below (peak uses maximum) | P0 |
-| `cacheBreaks[].timestamp`, `model`, `executionKind` | Nullable time and allowlisted request dimensions | P0 |
-| `cacheBreaks[].reportedReason` | Nullable `previous_message_not_found`, `messages_changed`, `tools_changed`, `system_changed`, `model_changed` | P0 |
-| `cacheBreaks[].heuristics[]` | `idle-ttl`, `model-switch`, `compaction` flags | P0 |
-| `cacheBreaks[].writeTokens`, `writeUsd` | Observed write tokens and nullable priced write value on that request | P0 |
-| `cacheBreaksSampled` | Event details sampled; aggregate counts remain exact | P0 |
-| `compactions[].timestamp`, `executionKind`, `trigger` | Nullable time, execution enum, and `auto`/`manual`/`unknown` | P0 |
-| `compactions[].preTokens`, `postTokens`, `turnsSincePrevious` | Nullable numeric pre/post sizes and observed human-turn interval within that stream | P0 |
-| `compactionCount`, `compactionsSampled` | Total supported boundaries and explicit detail-sampling flag | P0 |
-| `compactionCountExact` | False when missing timestamps or ambiguous cross-format matches prevent an exact observed-boundary count | P0 |
-
-Cache totals in `cache` and `buckets[].cache`:
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `requests`, `inputTokens`, `cacheReadTokens`, `cacheWriteTokens` | Deduplicated request/input class counts | P0 |
-| `pricedRequests`, `pricedInputTokens` | Requests/input eligible for no-cache comparison with a known rate and known request input | P0 |
-| `actualInputUsd`, `noCacheInputUsd`, `netSavingsUsd` | Observed input value, counterfactual value and difference; difference may be negative | P0 |
-| `cacheWriteUsd`, `recacheWriteUsd` | Observed write value, and its subset on requests with break flags | P0 |
-| `breakRequests`, `pricedBreakRequests`, `reportedBreaks`, `heuristicBreaks` | Unique flagged requests, their priced denominator, and potentially overlapping reported/heuristic counts | P0 |
-| `unknownTtlWriteRequests` | Write requests lacking explicit TTL breakdown | P0 |
-
-Context totals in `context` and `buckets[].context`:
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `requests`, `eligibleRequests` | Deduplicated requests and requests with paired input/window evidence | P0 |
-| `reportedWindowRequests`, `reviewedWindowRequests` | Recorded Codex versus reviewed Claude-capacity coverage | P0 |
-| `above40`, `above60`, `above80`, `peakFill` | Strict threshold counts and nullable maximum paired fill ratio | P0 |
-| `context.shareAbove40`, `shareAbove60`, `shareAbove80` | Session-only nullable shares, with minimum activity guard | P0 |
-| `context.curveSampled` | Curve reduced by the 240-point session cap and/or 20,000-point snapshot cap; aggregate counts/peaks remain exact | P0 |
-| `context.curve[].request`, `timestamp`, `executionKind`, `inputTokens`, `windowTokens`, `fill` | Request ordinal (not raw ID), nullable time, execution enum, input/window counts and paired ratio | P0 |
-
-Sentinel tests in `test/limits-cache.test.ts` place content in diagnostics, quotas, unknown limit/plan IDs, credits metadata, Desktop organization IDs, compaction summaries and configuration. `test/model-privacy-fixture.ts` also plants paths, URLs, control characters, error text and oversized strings directly in Claude/Codex model metadata and Cursor cost keys. Tests cover serialized analytics, terminal output, the actual isolated-worker HTTP API, including cache-break/model dimensions.
-
-### Session outcomes (`SessionOutcomes`)
-
-All fields below are inside `session.outcomes`. Names and semantics are declared in `src/metrics/outcome-types.ts`, re-exported by `src/types.ts`. [Metric definitions](metrics.md#outcomes) specify denominators, confidence, and limits.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `editsObserved` | Successful edit evidence or positive line totals observed | P0 |
-| `editOperations` | Deduplicated Claude edit results / completed Codex FileChange events | P0 |
-| `linesAdded`, `linesRemoved` | Observed counts, or null when unavailable | P0 |
-| `lineCoverage` | complete, partial, unavailable; complete refers only to retained observations | P0 |
-| `lineSource` | claude-cost-state, claude-structured-patch, codex-file-change, cursor-composer, mixed, unavailable | P0 |
-| `operations.commits`, `operations.pushes` | Deduplicated successful structured Git operation counts | P0 |
-| `operations.prsCreated`, `operations.prsEdited`, `operations.prsMerged`, `operations.prsClosed` | Structured PR operation counts, not unique artifacts | P0 |
-| `links[].ref` | Fixed prefix (`branch`, `commit`, `pr`, `commit-event`, `pr-event`, `workspace-pr`) plus 24 hex characters of SHA-256 over a qualified artifact/observation identity; legacy `pull-request` hashes remain readable | P1 |
-| `links[].kind` | branch, commit, pull-request | P0 |
-| `links[].role` | outcome or context | P0 |
-| `links[].identity` | artifact or observation (no reliable artifact identity) | P0 |
-| `links[].confidence` | strong, medium, weak | P0 |
-| `links[].sources[]` | claude-git-operation, claude-pr-link, claude-branch, codex-session-git, conductor-workspace, local-git, github | P0 |
-| `links[].created` | Explicit PR creation observed | P0 |
-| `links[].state` | unknown, open, closed, merged; context state never proves an outcome | P0 |
-| `links[].timeToMergeMilliseconds` | GitHub PR creation-to-merge duration, or null | P0 |
-| `agentCoauthoredCommits` | Matched commits with an agent-name co-author trailer; 0 unless local Git enrichment is enabled | P2 (opt-in) |
-| `agentCoauthorTrailers` | Recognized agent co-author trailers on matched commits, deduplicated by commit across branch queries | P2 (opt-in) |
-| `enrichment.git`, `enrichment.github` | off, not-applicable, matched, no-match, unavailable, limited | P0 |
-| `truncated` | Collector reached an evidence cap; counts may be lower bounds | P0 |
-| `prAssociationsComplete` | False when a PR association or further result inspection was lost to a collector cap; guards PR allocation | P0 |
-
-Outcome refs are stable, unkeyed pseudonyms, not anonymity guarantees. Commit and branch identities are qualified by repository key; PR identities use canonical repository/number; anonymous observations use provider-qualified session/tool IDs; workspace context uses workspace ID. No new path/argument hashes are exposed. An observer already holding candidate identities can recompute these hashes. Raw SHAs, branches, PR numbers, slugs, URLs, titles, and workspaces remain private even with enrichment. There is deliberately no raw-PR display mode.
-
-Line-marker counting inspects only structured diff syntax and emits P0 counts; no semantic code/text rules run by default. Optional Git co-author classification is P2. Enabling GitHub sends only existing authentication and validated PR coordinates to github.com, never a transcript or file path. Both enrichments are explicitly off by default and have negative CLI overrides.
-
-### Outcome summary (`OutcomeSummary`)
-
-The root and repository `outcomes` share this schema. All fields are P0; totals with missing/partial coverage are not claims about all work.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `sessions`, `observedSessions` | Selected and inspected sessions | P0 |
-| `editSessions`, `commitSessions`, `prSessions`, `mergedPrSessions` | Independent session evidence stages | P0 |
-| `contextOnlySessions` | Sessions whose links are all weak context | P0 |
-| `lineMeasuredSessions`, `linesAdded`, `linesRemoved` | Measured-session coverage and summed observed line counters | P0 |
-| `coverage.lines.complete`, `coverage.lines.partial`, `coverage.lines.unavailable` | Mutually exclusive coverage counts among inspected sessions | P0 |
-| `coverage.truncatedSessions` | Inspected sessions reaching evidence limits | P0 |
-| `coverage.enrichment.git`, `coverage.enrichment.github` | Fixed counters keyed by off, not-applicable, matched, no-match, unavailable, limited; each sums to inspected sessions | P0 |
-| `apiSessions`, `apiPricedSessions`, `apiEquivalentValueUsd` | API-basis session coverage and known-rate value | P0 |
-| `unlinkedEditSessions`, `unlinkedApiEquivalentUsd` | API sessions/value with edits and no produced commit evidence; heuristic | P0 |
-| `pullRequests.linked`, `pullRequests.created`, `pullRequests.merged` | Distinct identified PR counts | P0 |
-| `pullRequests.unidentifiedCreatedOperations`, `pullRequests.unidentifiedMergedOperations` | Anonymous PR observations excluded from distinct totals | P0 |
-| `operations.commits`, `operations.pushes`, `operations.prsCreated`, `operations.prsEdited`, `operations.prsMerged`, `operations.prsClosed` | Sum of session operation counts | P0 |
-| `commitSessionRate` | Guarded commit-evidence session share | P0 |
-| `apiEquivalentPerMergedPr` | Guarded allocated API session value per identified merged PR | P0 |
-| `linesPerApiDollar` | Guarded changed lines per API-equivalent dollar | P0 |
-
-Each of the three ratios has the following fields:
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `value` | Numeric ratio only when available; otherwise null | P0 |
-| `numerator`, `denominator` | Observed operands, including when a guard withholds the ratio | P0 |
-| `minimumDenominator`, `minimumSessions` | Activity thresholds applied to that ratio | P0 |
-| `eligibleSessions`, `candidateSessions` | Coverage counts for the ratio's measurement cohort | P0 |
-| `incompleteEvidenceSessions` | API sessions with incomplete PR associations for the PR ratio; zero for other ratios | P0 |
-| `status` | available, unavailable, insufficient-activity, incomplete-pricing, incomplete-evidence | P0 |
-
-### Workflow field manifest
-
-Types are declared in [`src/metrics/workflow-types.ts`](../src/metrics/workflow-types.ts) and re-exported from `src/types.ts`. All output objects are projections of counters, bounded labels and normalized timestamps. Raw IDs used for matching/deduplication, history `display` text, custom originator strings, queue reasons, skill bodies and directory paths stay internal. Fixtures in `test/workflow.test.ts` and `test/workflow-integration.test.ts` plant sentinels in all these sources and assert their absence through session/repository/machine JSON, the worker boundary and terminal report. The API uses the same worker projection, with additional coverage in `test/server.test.ts`.
-
-Paths below are relative to `session.workflow`, except where specified. Unavailable histogram values and denominators are null, not zero.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `schemaVersion` | Workflow contract version, `1` | P0 |
-| `scope` | `primary-transcript` | P0 |
-| `ending` | `terminal`, `interrupted`, `inferred`, `open`, `unavailable` | P0 |
-| `coverage.timing` | `observed`, `partial`, `unavailable` timing coverage | P0 |
-| `coverage.humanTurns` | `observed`, `partial` when primary records/projection signals were lost, or `not-applicable` for a child thread | P0 |
-| `coverage.timestampedEvents`, `coverage.untimedEvents`, `coverage.droppedEvents` | Normalized signal and cap counters | P0 |
-| `coverage.malformedRecords`, `coverage.projectionErrors` | Primary JSON/record-shape gaps and isolated optional-observer failures; no raw errors | P0 |
-| `coverage.contentRules` | Whether the P2 marker rule was enabled for this session | P0 |
-| `humanTurns` | Observed primary human inputs, null for sub-agent threads | P0 |
-| `toolCalls` | Selected primary-transcript tool-call count, including untimed calls | P0 |
-| `toolRuns`, `turnWallTime` | Histogram objects: `bins[].value`, `bins[].count`, `samples`, `p50`, `p95`, `max`; counts for runs, milliseconds for turns | P0 |
-| `recordedTurnDurations`, `inferredTurnDurations` | Histogram sample counts by timing evidence | P0 |
-| `time.activeMilliseconds`, `time.waitingForHumanMilliseconds`, `time.unclassifiedMilliseconds`, `time.observedSpanMilliseconds` | Estimated activity/wait/idle partition and observed wall span | P0 |
-| `time.idleThresholdMilliseconds`, `time.waitingCapMilliseconds` | Fixed 300,000 / 1,800,000 ms thresholds | P0 |
-| `time.activeSpans[].start`, `time.activeSpans[].end` | Coalesced, half-open ISO activity intervals; no event IDs | P0 |
-| `interruptions.interrupted`, `interruptions.replaced`, `interruptions.other` | Deduplicated structured Codex abort counts | P0 |
-| `interruptions.subagentInterrupted` | Distinct interrupted sub-agent activity items | P0 |
-| `interruptions.claudeMarkers` | Fixed rule `claude-interrupt-marker` count; null when off | P2 |
-| `steering.midTurnHumanTurns`, `steering.planEntries`, `steering.planItems` | Steering and distinct planning evidence counters | P0 |
-| `steering.queueOperations.enqueue`, `.dequeue`, `.remove`, `.other` | Fixed operation enum counters | P0 |
-| `steering.queueReasons.prompt`, `.interrupt`, `.completion`, `.cancellation`, `.other`, `.unspecified` | Fixed reason-class counters, never original reason text | P0 |
-| `archetype` | `quick`, `standard`, `deep`, `marathon`, or null; heuristic | P0 |
-| `abandonment` | `flagged`, `not-flagged`, `insufficient-evidence`, `ongoing`; heuristic | P0 |
-| `mix[].at` | ISO metadata observation timestamp | P0 |
-| `mix[].model` | Bounded structured model identifier or null | P0 |
-| `mix[].effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, or null | P0 |
-| `mix[].cliVersion` | Numeric three-component version; optional numeric alpha/beta/rc/dev suffix; null otherwise | P0 |
-| `mix[].entrypoint` | `cli`, `sdk-ts`, `local-agent`, `vscode`, `exec`, `subagent`, `review`, `unknown` | P0 |
-| `mix[].originator` | `codex_cli_rs`, `codex_vscode`, `codex_exec`, `codex_sdk`, `app-server`, `unknown` | P0 |
-| `commands[].name` | Leading identifier independently verified against built-in or scoped command/skill registries; unknown spellings never leave the parser | P1 |
-| `commands[].at` | Normalized timestamp of a recognized command in matched Claude history | P0 |
-| `unrecognizedCommands` | Matched slash-prefixed history entries without registry evidence; count only, never the spelling | P0 |
-| `commandHistoryAvailable` | Whether the matching profile history was readable | P0 |
-| `valueByHour[].hour`, `valueByHour[].usd` | UTC-hour timestamp and API-equivalent value of timestamped priced primary requests | P0 |
-| `pricedRequests`, `timestampedPricedRequests` | Value heatmap denominator/numerator | P0 |
-
-The following paths are relative to `MachineAnalytics.workflow` or `RepositoryAnalytics.workflow`. Public `RepositoryRollup` does not duplicate this large aggregate; per-repository concurrency is inside `workflow.repositories`.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `schemaVersion` | Workflow contract version, `1` | P0 |
-| `coverage.sessions`, `.supportedSessions`, `.timedSessions`, `.humanSessions`, `.contentRuleSessions`, `.partialSessions` | Selected, supported, timed, primary-human, P2-enabled and partial session counts | P0 |
-| `autonomy.humanTurns`, `.turnsPerSession` | Primary human inputs and guarded mean (null below five sessions) | P0 |
-| `autonomy.toolRuns`, `.turnWallTime` | Pooled histograms with the same six histogram fields as above | P0 |
-| `autonomy.recordedTurnDurations`, `.inferredTurnDurations` | Pooled timing evidence counts | P0 |
-| `time.activeMilliseconds`, `.waitingForHumanMilliseconds`, `.unclassifiedMilliseconds` | Sums of session partitions, not a cross-session wall union | P0 |
-| `interruptions.interrupted`, `.replaced`, `.other`, `.subagentInterrupted`, `.claudeMarkers` | Summed counters above, preserving null for disabled marker rules | P0/P2 |
-| `interruptions.eligibleHumanTurns`, `.eligibleSessions`, `.perHumanTurn` | Covered denominator, session count and guarded event frequency; may include enabled P2 counts | P0/P2 |
-| `steering.midTurnHumanTurns`, `.planEntries`, `.planItems`, `.queueOperations`, `.queueReasons` | Summed counters with exactly the same nested keys as session steering | P0 |
-| `concurrency.peak`, `.eligibleSessions` | Peak activity overlap and sessions with positive activity spans | P0 |
-| `concurrency.activeSessionMilliseconds`, `.wallClockActiveMilliseconds`, `.effectiveParallelism` | Summed session activity, wall union and guarded ratio | P0 |
-| `concurrency.timeline[].start`, `.end`, `.sessions` | ISO interval boundaries and concurrently active session count | P0 |
-| `concurrency.daily[].day`, `.peak`, `.activeSessionMilliseconds`, `.wallClockActiveMilliseconds` | UTC date, daily peak, activity sum and wall union | P0 |
-| `repositories[].repositoryId` | Existing pseudonymous repository key | P1 |
-| `repositories[].sessions`, `.peak`, `.effectiveParallelism`, `.activeSessionMilliseconds`, `.wallClockActiveMilliseconds` | Per-repository supported count and concurrency measures | P0 |
-| `archetypes.quick`, `.standard`, `.deep`, `.marathon`, `.unavailable` | Counts by heuristic bucket | P0 |
-| `abandonment.flagged`, `.eligible`, `.ongoing`, `.insufficientEvidence` | Heuristic numerator and coverage counts | P0 |
-| `patterns.timezone`, `.asOfDay` | `UTC` and the snapshot's reference date | P0 |
-| `patterns.cells[].weekday`, `.hour`, `.activeMilliseconds`, `.apiEquivalentUsd` | Sunday=0 weekday, 0–23 UTC hour, summed activity and priced request value; 168 cells | P0 |
-| `patterns.activeDays`, `.longestStreakDays`, `.currentStreakDays` | Active-day and UTC streak counts | P0 |
-| `patterns.pricedRequests`, `.timestampedPricedRequests` | Summed heatmap coverage counters | P0 |
-| `mix[].day`, `.provider`, `.dimension`, `.name`, `.sessions` | UTC date, provider, model/effort/cliVersion/entrypoint/originator dimension, bounded name and distinct session-day count | P0 |
-| `comparisons[].repositoryId` | Existing pseudonymous repository key | P1 |
-| `comparisons[].provider`, `.dimension`, `.archetype`, `.effort`, `.entrypoint`, `.heldConstant` | Comparable context: provider, `cliVersion`/`model`, bucket, effort, entrypoint and the fixed other identifier | P0 |
-| `comparisons[].durationEvidence` | `provider-duration`, `event-derived`, `mixed` timing class held constant | P0 |
-| `comparisons[].before`, `.after`, `.changedAt` | Bounded before/after identifiers and first new-era ISO timestamp | P0 |
-| `comparisons[].beforeSessions`, `.afterSessions`, `.status` | Cohort sizes and `eligible`, `small-cohort`, `overlapping-eras` guard label | P0 |
-| `comparisons[].beforeTurnP50`, `.afterTurnP50`, `.beforeRunP50`, `.afterRunP50`, `.turnTimeChange` | Pooled turn/run medians and guarded fractional timing change; nullable | P0 |
-| `commands[].name` | Registry-verified command identifier | P1 |
-| `commands[].count`, `commandHistorySessions`, `unrecognizedCommands` | Recognized command counts, readable-history session denominator and unrecognized slash-entry count | P0 |
-| `installedSkills[].name` | Bounded discovered skill identifier | P1 |
-| `installedSkills[].provider`, `.observedInvocations` | Claude/Codex provider and observed scoped invocation count | P0 |
-| `installedSkills[].repositoryId` | Existing repository key for project installations; null for provider profile/shared inventory | P1 |
-| `inventory.directoriesRead`, `.directoriesUnavailable`, `.historyFilesRead`, `.historyFilesUnavailable`, `.malformedHistoryRecords` | Inventory coverage counters; no directory names, history filenames or errors | P0 |
-
-Derived timing/turn/heuristic fields can incorporate P2 interruption control events **only when enabled**, as indicated by coverage. All such values remain counters, enums and timestamps. No P3 content is introduced.
-
-Malformed primary evidence makes timing partial and ending unavailable. Tool-run, inferred-turn, activity, waiting and abandonment estimates are suppressed; independent provider durations retain their evidence count. Enum fields accept strings only, and optional observer failures cannot discard accounting.
-
-### Cache-gap signals
-
-`session.insightSignals.cacheGaps` is absent for unsupported providers. Every value is a number, never transcript content.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `observableCalls` | Deduplicated Claude requests with explicit TTL fields and valid timestamps | P0 |
-| `timedTransitions` | Adjacent same-model requests in the same file with valid times and current explicit TTL | P0 |
-| `fiveMinuteExpiries` | 5m write events after a >5m gap; candidate association, not proven expiry | P0 |
-| `oneHourExpiries` | 1h write events after a >1h gap; may overlap 5m events | P0 |
-| `rewriteTokens` | TTL-specific cache-write tokens after qualifying gaps | P0 |
-| `pricedRewriteTokens` | Subset of those tokens with a reviewed price | P0 |
-| `estimatedPremiumUsd` | Estimated write-versus-read difference on priced tokens; not actual savings | P0 |
-
-### Insights report (`InsightsReport`)
-
-Returned by `insights --json`; public types are re-exported from `src/types.ts` and defined under `src/insights/`. Configuration file paths and settings contents are never returned.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `schemaVersion` | Version 2 of this separate report contract (`groups` plus `items`; v1 `cards` migrated to `items`) | P0 |
-| `generatedAt` | Source snapshot time | P0 |
-| `rateCardEffectiveDate` | Rate card date used for comparisons | P0 |
-| `thresholds` | Explicit numeric configuration: `minRepoSessions`, `minModelCalls`, `minInputTokens`, `outlierMultiplier`, `minOutlierUsd`, `minDifferenceUsd`, `cacheReadShare`, `cacheWriteShare`, `compactionsPer100Calls`, `minCompactions`, `subagentShare`, `subagentDelta`, `longContextInputTokens`, `longContextShare`, `extensionMinSessions`, `extensionMinToolCalls`, `idleGapMinEvents`, `timeMinSessions`, `timeBucketShare`, `utcOffsetMinutes` | P0 |
-| `groups[]`, `items[]` | Ranked rule/scope summaries and complete per-scope findings; no transcript records | P0/P1 |
-| `groups[].id` | `insight-group-` plus 20 hex SHA-256 characters from rule/scope kind; stable display key | P1 |
-| `groups[].ruleDecisionId` | `insight-rule-` plus 20 hex SHA-256 characters from rule alone; browser decision key across all scopes/filters | P1 |
-| `groups[].rule`, `groups[].scopeKind` | Fixed rule ID and `machine`, `repo` or `session` | P0 |
-| `groups[].title` | Fixed grouped rule title, including next-tier/configured-target scenario label | P0 |
-| `groups[].itemIds[]` | References to existing opaque per-scope insight IDs, ranked within the group | P1 |
-| `groups[].affected.repositories`, `.sessions` | Distinct actual contributor counts; inventory rules count sessions/repositories checked | P0 |
-| `groups[].coverage.eligibleSessions`, `.totalSessions`, `.totalRepositories` | Unique rule-eligible session count and selected session/repository denominators | P0 |
-| `groups[].estimatedImpact.value`, `.unit`, `.basis`, `.label` | Sum of disjoint quantified scope values within one rule/unit, or null; same enums as item impact and fixed total/partial-total label | P0 |
-| `groups[].impactCoverage.quantifiedItems`, `.totalItems` | Quantified-scope count and all affected-scope denominator | P0 |
-| `groups[].confidence` | Lowest per-scope confidence: `low`, `medium`, `high` | P0 |
-| `groups[].guardrails[]`, `.suggestedAction` | Distinct fixed item interpretation notes and fixed rule action | P0 |
-| `items[].id` | `insight-` plus 20 hex SHA-256 characters from rule, scope and names; stable browser decision key, not a secret-keyed hash | P1 |
-| `items[].rule` | One of the ten fixed rule IDs in [insights.md](insights.md#rules-and-formulas) | P0 |
-| `items[].title` | Fixed rule title | P0 |
-| `items[].scope.kind` | `machine`, `repo`, `session` | P0 |
-| `items[].scope.repositoryId`, `items[].scope.sessionKey` | Existing pseudonymous key or null | P1 |
-| `items[].scope.provider` | Existing provider enum or null | P0 |
-| `items[].session.startedAt`, `items[].session.models[]` | Present on session items: normalized UTC start (null if invalid/missing) and bounded model IDs; no title or path | P0 |
-| `items[].evidence[].label` | Fixed description of a numeric measurement | P0 |
-| `items[].evidence[].value` | Numeric scalar or ratio numerator | P0 |
-| `items[].evidence[].unit` | `USD`, `tokens`, `count`, `ratio`, `multiple`, `hour` | P0 |
-| `items[].evidence[].denominator` | Numeric denominator, or null for a scalar | P0 |
-| `items[].evidence[].denominatorLabel` | Fixed denominator meaning, or null | P0 |
-| `items[].estimatedImpact.value` | Numeric estimate or null when unquantified | P0 |
-| `items[].estimatedImpact.unit` | `USD` or `tokens`; never summed across units | P0 |
-| `items[].estimatedImpact.basis` | `scenario-difference`, `associated-usage`, `unavailable` | P0 |
-| `items[].estimatedImpact.label` | Fixed description of estimate and limits | P0 |
-| `items[].confidence` | `low`, `medium`, `high`; interpretive confidence | P0 |
-| `items[].guardrail`, `items[].suggestedAction` | Fixed explanatory text, no transcript or config text | P0 |
-| `items[].names[]` | Compared model ID or bounded configured skill/MCP server name; no settings values | P0 for models/skills, P1 for MCP servers |
-| `items[].pricing.strategy` | Optional `next-tier-down` or `configured-target`, on price scenario items | P0 |
-| `items[].pricing.transitions[].sourceModel`, `.targetModel` | Bounded model IDs describing each one-step within-provider scenario move; never arbitrary configuration values | P0 |
-| `items[].coverage.eligibleSessions`, `items[].coverage.totalSessions` | Eligible/selected session counts, peers for peer comparisons | P0 |
-| `coverage[].rule`, `coverage[].eligibleSessions`, `coverage[].totalSessions`, `coverage[].findings`, `coverage[].groups` | Rule ID, evidence coverage, scope-item count and grouped-card count | P0 |
-| `coverage[].status` | `disabled`, `unavailable`, `insufficient`, `no-findings`, `findings` | P0 |
-| `evidenceCoverage[].reason` | `partial-transcript`, `active-session`, `unknown-liveness`, `unknown-completeness`, `unknown-request-size` | P0 |
-| `evidenceCoverage[].sessions`, `.totalSessions` | Reason count and selected-session denominator; overlapping counts | P0 |
-| `warnings[]` | Fixed messages with counts about evidence, invalid/missing starts, partial inventory and interpretation; never raw provider warnings | P0 |
-
-### Review metadata (`ReviewPreview`) and assessment
-
-`review --json` returns `{ preview, result }`. The internal prompt is P3 and is never a field of this JSON. `result` is null for a dry-run or missing context. No excerpts or raw agent responses are displayed even after a send.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `preview.privacyTier` | Literal `P3`, identifies the optional workflow | P0 |
-| `preview.mode` | `dry-run` or `sent` | P0 |
-| `preview.sessionKey` | Selected hashed session key | P1 |
-| `preview.via` | `claude` or `codex` | P0 |
-| `preview.flaggedRules[]` | Fixed rule IDs relevant to this session/repository/provider | P0 |
-| `preview.spans`, `preview.excerpts` | Selected bounded window/prose counts | P0 |
-| `preview.contentBytes`, `preview.promptBytes` | UTF-8 JSON excerpt/full prompt sizes | P0 |
-| `preview.redactions.credentials`, `.identifiers`, `.paths`, `.urls`, `.emails`, `.codeBlocks` | Counts of redaction replacements in selected excerpts | P0 |
-| `preview.omittedBlocks` | Unsupported/non-prose blocks excluded while scanning the selected file | P0 |
-| `preview.truncated` | Oversized records, excerpt/window limits or truncated prose encountered | P0 |
-| `preview.note` | Fixed dry-run/send description and privacy limit | P0 |
-| `result.assessment` | `unknown`, `expected`, `worth-review` | P0 |
-| `result.confidence` | `low`, `medium`, `high` | P0 |
-| `result.suggestion` | `none`, `compare-similar-task`, `check-context`, `check-cache`, `check-delegation` | P0 |
-
 ### Health endpoint
 
 `GET /api/health` returns `{ service: "session-analytics", snapshot: "ready" | "building" | "not-started", status: "ok" }`. All fields are P0.
@@ -848,21 +454,13 @@ These fields also appear in the existing JSON/API session projection when suppor
 | `pricingByDay[].day` | Valid UTC accounting date shared with the spend ledger | P0 |
 | `pricingByDay[].eligibleTokens`, `.pricedTokens` | Deduplicated API token operands, including unpriced requests | P0 |
 | `undatedTokens` | API tokens with no valid accounting date | P0 |
-| `toolOutcomes[].tool` | Bounded tool name from structured invocation/completion evidence | P0 |
-| `toolOutcomes[].observedResults` | Distinct matched structured outcomes | P0 |
-| `toolOutcomes[].errors` | Outcomes with an explicit error flag/failure status | P0 |
-| `rateLimits[].windowMinutes` | Provider quota window, 300 or 10080 minutes | P0 |
-| `rateLimits[].usedPercent` | Recorded numeric utilization, 0–100 | P0 |
-| `rateLimits[].observedAt` | ISO observation timestamp | P0 |
-| `rateLimits[].resetsAt` | ISO provider reset timestamp | P0 |
-| `truncated` | Collector hit its bounded local ID capacity | P0 |
 
 #### Common tool envelope (`McpPayload`)
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `schemaVersion` | MCP payload schema, currently 1 | P0 |
-| `tool` | One of seven published tool names | P0 |
+| `tool` | One of six published tool names | P0 |
 | `snapshot.generatedAt` | ISO snapshot generation time | P0 |
 | `snapshot.ageSeconds` | Nonnegative age at query time | P0 |
 | `snapshot.ttlSeconds` | Configured in-memory cache TTL | P0 |
@@ -908,12 +506,11 @@ These fields also appear in the existing JSON/API session projection when suppor
 | `activityStates.active`, `.settled`, `.unknown` | Selected session counts by observed lifecycle; only settled sessions enter distributions | P0 |
 | `apiEquivalentUsd`, `providerReportedUsd`, `userTurns`, `durationMilliseconds` | Distribution objects on the named bases | P0 |
 | `cacheHitRate`, `compactionsPerSession` | Ratios with supported-provider denominators | P0 |
-| `toolMix[].name`, `skills[].name` | Bounded metadata names | P0 |
-| `toolMix[].calls`, `skills[].calls`, `omittedTools`, `omittedSkills` | Observed counts and names beyond the list cap | P0 |
-| `skillEvidence[].provider`, `.evidence`, `.sessions` | Provider, explicit/inferred/unavailable method, selected count | P0 |
+| `toolMix[].name` | Bounded tool names | P0 |
+| `toolMix[].calls`, `omittedTools` | Observed counts and names beyond the list cap | P0 |
 | `compare_agents`: `agents[].provider`, `.totals`, `.profile` | Fixed provider enum and the same totals/profile objects | P0 |
-| `tool_stats`: `tools[].name`, `.calls`, `.observedResults`, `.errors` | Bounded tool name and observed counts | P0 |
-| `tools[].errorRate`, `.resultCoverage`, `totalTools`, `nextOffset` | Result-based ratios, full tool count and next page/null | P0 |
+| `tool_stats`: `tools[].name`, `.calls` | Bounded tool name and effective call count | P0 |
+| `totalTools`, `nextOffset` | Full tool count and next page/null | P0 |
 | `recent_sessions`: `sessions[].sessionKey`, `.repositoryId` | Existing pseudonymous session/repository keys | P1 |
 | `sessions[].provider`, `.executionKind`, `.workingSnapshot` | Fixed provider/execution enums and snapshot flag | P0 |
 | `sessions[].startedAt`, `.lastEventAt`, `.durationMilliseconds` | Validated timestamps/duration or null | P0 |
@@ -926,20 +523,10 @@ These fields also appear in the existing JSON/API session projection when suppor
 | `today/week.datedSessions`, `.undatedSessions` | API sessions with a dated value/token entry in-period; all scoped sessions without applicable daily ledgers | P0 |
 | `today/week.excludedProviderReportedUsd` | All-history scoped reported value excluded because timing is unavailable | P0 |
 | `today/week.elapsedHours`, `.apiEquivalentUsdPerHour` | UTC wall-hour denominator and guarded historical burn rate/null | P0 |
-| `rateLimits[].provider`, `.status` | Provider and available/unavailable evidence status | P0 |
-| `rateLimits[].windows[]` | The same four numeric/timestamp quota fields as session evidence, plus `remainingPercent` | P0 |
-| `unused_extensions`: `inventoryScope` | Always `launch-context` | P0 |
-| `providers[].provider`, `.inventoryCoverage`, `.skillEvidence` | Provider, always-partial inventory, explicit/inferred/unavailable invocation method | P0 |
-| `providers[].skillIdentityCoverage`, `.unresolvedSkills` | Available/partial/unavailable identity matching and installations excluded for unknown identity | P0 |
-| `providers[].sourcesRead`, `.unreadableSources`, `.truncated` | Readable/unreadable source counts and cap flag; no paths/errors | P0 |
-| `providers[].installedSkills`, `.configuredMcpServers` | Distinct bounded-name counts | P0 |
-| `providers[].skillsWithoutObservedUse[]` | Installed skill names without invocation evidence in the selected scope/window | P0 |
-| `providers[].serversWithoutObservedUse[]` | Configured MCP server names without observed use | P1 |
-| `providers[].omittedSkills`, `.omittedServers` | Names beyond the response cap | P0 |
 
-#### Worker inventory and protocol wrapper
+#### Worker output and protocol wrapper
 
-The MCP worker returns `{analytics, inventory}` to its parent over an anonymous pipe. `analytics` is the allowlisted machine snapshot above. Each `inventory[]` contains only `provider`, `skills[]`, `skillIdentities[].name`/`.aliases[]`, `unresolvedSkills`, `mcpServers[]`, `sourcesRead`, `unreadableSources`, and `truncated`; server names are P1, all other inventory fields P0. Skill names come only from bounded scalar frontmatter names and directory aliases, deduplicated by a canonical path that stays inside the worker. At most a 16 KiB skill prefix is read; description/body content is never projected. Unsupported metadata yields an unknown identity count, not a purportedly unused name. TOML escaped delimiters and quote runs cannot turn string values into table names; malformed string syntax rejects the source. Config values, URLs, environment values and commands are discarded inside the worker. This inventory is in memory only, never persisted, and bounded to 512 names/identities and 512 aliases per identity.
+The MCP worker returns `{analytics}`, the allowlisted machine snapshot above, to its parent over an anonymous pipe. It reads no skill directories or MCP-server configuration.
 
 The MCP wrapper contains standard JSON-RPC `jsonrpc`, caller-chosen `id` (protocol correlation only), `result` or `error`; errors use fixed `code`/`message` and, for unsupported versions, `data.supported`/`requested` protocol dates. Tool results contain `isError`, `content[].type`/`.text` (a fixed-template summary and serialized `McpPayload`), and `structuredContent` (the same payload). Modern results add `resultType` and `_meta.io.modelcontextprotocol/serverInfo`. Discovery/initialization contain only static product/version identifiers, protocol versions, tool capability declarations, instructions and catalog cache hints (`ttlMs`, `cacheScope`). `tools/list` returns static names/descriptions, JSON input schemas and read-only/idempotent/closed-world annotations. These are P0 and carry no local-history identifiers; caller request IDs are echoed as required by JSON-RPC, never used to query history.
 The dashboard stores view, theme, density and shortcut preferences in browser `localStorage`. No session data or time window is persisted in the browser. The separate local SQLite index is described above.
@@ -984,7 +571,7 @@ Fields in P2 or P3 additionally need an explicit opt-in that is off by default.
 
 ### Interchange metadata and export fields
 
-All formats retain only the declared P0/P1 fields and opted-in P2 counters; no P3 prose is exported. These fields extend the manifest above; the complete contracts and wire mappings are in [interop.md](interop.md). The two published schemas reject unknown nested fields. Snapshot import enforces hashed key syntax, fixed status labels, approved warning templates, bounded model/tool/skill names, and numeric reconciliation. Repository names and otherwise valid identifiers still require trusted provenance: syntax cannot certify their meaning. Arbitrary warning/error/status text and raw repository UUIDs are rejected.
+All formats retain only the declared P0/P1 fields; no content is exported. These fields extend the manifest above; the complete contracts and wire mappings are in [interop.md](interop.md). The two published schemas reject unknown nested fields. Snapshot import enforces hashed key syntax, fixed status labels, approved warning templates, bounded model/tool names, and numeric reconciliation. Removed analysis fields in older snapshots are dropped on load without validation; see [interop.md](interop.md#versioned-snapshots). Repository names and otherwise valid identifiers still require trusted provenance: syntax cannot certify their meaning. Arbitrary warning/error/status text and raw repository UUIDs are rejected.
 
 | Field / surface | Meaning | Tier |
 | --- | --- | --- |
@@ -1022,43 +609,25 @@ Only `export --format otlp-json --otlp-endpoint URL` can POST telemetry. It firs
 
 Shared totals always carry a CLI/dashboard caveat that they are observed lower bounds and may include running and partially parsed sessions. Pricing coverage does not establish evidence completeness. No new completeness flags, rare subgroup counts, or suppressed totals enter shared files. New fixed parser warnings cover omitted malformed metadata and cache-write totals reconciled from recorded TTL buckets.
 
-### Integrated quota replay (`SessionLimitsCache.quotaEvidence[]`)
-
-This optional per-session P1 namespace preserves normalized transcript observations for cold/warm/full index parity. It adds no parsing pass or raw source storage. Machine profile windows are rebuilt and freshness recomputed on each scan; quotas remain global under repository/date filtering.
-
-| Field | Meaning | Tier |
-| --- | --- | --- |
-| `profileKey`, `provider` | Existing pseudonymous profile key and Claude/Codex enum | P1/P0 |
-| `planType`, `planObservedAt`, `credits` | Existing allowlisted plan enum, observation date and credits flags/numeric balance | P0 |
-| `windows[].key`, `.label`, `.windowMinutes` | Fixed quota window identity/label and duration | P0 |
-| `windows[].observations[]` | Existing `LimitSample`: normalized timestamp, utilization, reset timestamp and source enum | P0 |
-| `windows[].duplicatesDiscarded`, `.historyLimited` | Reconciliation count and bounded-history flag | P0 |
-| `hits[].key`, `.timestamp`, `.kind`, `hitSessions[]` | Hashed hit/session identities, time and fixed limit-hit kind | P1/P0 |
-
 ### Integrated MCP summaries (`McpPayload.metrics`)
 
-These optional, bounded summaries use the selected sessions except explicitly global quota observations. No names, paths, commands, arbitrary text or unbounded event arrays are added.
+These optional, bounded summaries use the selected sessions. The envelope contains only `basis`, `pricing` and `velocity`. No names, paths, commands, arbitrary text or unbounded event arrays are added.
 
 | Namespace / fields | Meaning | Tier |
 | --- | --- | --- |
+| `basis` | Fixed `whole-sessions-selected-by-start` label | P0 |
 | `pricing.policy`, `.stale`, `.sources[]` (`source`, `fetchedAt`, `stale`, `models`) | Fixed policy/source enums, dates, freshness and catalog counts | P0 |
 | `velocity.coveredSessions`, `.selectedSessions`, `.timeZone`, `.datedApiEquivalentUsd`, `.undatedApiEquivalentUsd`, `.pricedTokens`, `.eligibleTokens` | Coverage and additive usage operands; timezone is identifying | P0/P1 |
-| `reliability.coveredSessions`, `.selectedSessions`, `.contentRuleSessions`, `.truncatedSessions`, `.calls`, `.errorRate`, `.errorDenominator`, `.latency`, `.verification` | Existing bounded reliability counts, guarded ratio, latency samples/p50/p95 and verification denominators | P0/P2 when enabled |
-| `limitsCache.minimumRequests`, `.minimumInputTokens`, `.coveredSessions`, `.selectedSessions`, `.requests`, `.inputTokens`, `.cacheReadTokens`, `.hitRatio`, `.pricedRequests`, `.netSavingsUsd`, `.flaggedBreakRequests`, `.contextRequests`, `.above80` | Guarded cache/context and coverage counters | P0 |
-| `limitsCache.quotaScope`, `.quota[]`, `.omittedQuotaWindows` | Fixed global scope; at most 20 hashed profile keys, provider/window, observation count/date, headroom/expiry/staleness, observed minutes and shareAbove90; omission count | P0/P1 |
-| `outcomes` | Existing `OutcomeSummary` field contract | P0 |
-| `workflow.coverage`, `.humanTurns`, `.toolRuns`, `.turnWallTime`, `.time`, `.interruptions`, `.archetypes`, `.abandonment`, `.concurrency` | Existing workflow summary fields; histograms expose only samples/p50/p95/max, concurrency only peak/eligible/effective parallelism | P0/P2 when enabled |
-| `insightSignals.coveredSessions`, `.selectedSessions`, `.knownRequestSizeTokens`, `.unknownRequestSizeTokens`, `.cacheGapTransitions`, `.estimatedCacheGapPremiumUsd` | Coverage and existing signal counters/value estimates | P0 |
 
 ### History recovery and coverage
 
-All new data is P0 counters/enums/model IDs/timestamps except the existing-style pseudonymous profile key (P1). Provider paths, profile directory names, message/session/request IDs and raw exceptions stay private. SQLite projects fixed metadata fields before SDK rows reach the JavaScript parser; message prose, reasoning, tool arguments/results and result text are never selected. Statistics files are read-only, size-bounded and explicitly projected. No network calls, P2 content rules or new secret are introduced. Recovery's public session namespace passes the same schema allowlist into and out of the index.
+All new data is P0 counters/enums/model IDs/timestamps except the existing-style pseudonymous profile key (P1). Provider paths, profile directory names, message/session/request IDs and raw exceptions stay private. SQLite projects fixed metadata fields before SDK rows reach the JavaScript parser; message prose, reasoning, tool arguments/results and result text are never selected. Statistics files are read-only, size-bounded and explicitly projected. No network calls, content rules or new secret are introduced. Recovery's public session namespace passes the same schema allowlist into and out of the index.
 
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `historyCoverage.version`, `historyCoverage.scope` | Optional machine-wide reconciliation version 1 and fixed machine scope | P0 |
 | `historyCoverage.profiles[]` | Discovered/deduplicated Claude statistics profile projections | P0/P1 |
-| `historyCoverage.profiles[].profileKey` | `profile-` plus 20 hex characters, same directory identity convention as Limits; no raw profile name/path | P1 |
+| `historyCoverage.profiles[].profileKey` | `profile-` plus 20 hex characters derived from the canonical profile directory, the same key as session `historyProfile.profileKey`; no raw profile name/path | P1 |
 | `historyCoverage.profiles[].ordinal` | Scan-local profile number used for a neutral display label | P0 |
 | `historyCoverage.profiles[].status` | available/missing/unsupported/unreadable statistics status | P0 |
 | `historyCoverage.profiles[].dailyTokensVersion` | Numeric daily statistics format version, or null | P0 |
@@ -1071,7 +640,7 @@ All new data is P0 counters/enums/model IDs/timestamps except the existing-style
 | `historyCoverage.profiles[].months[].models[].model` | Bounded public model ID | P0 |
 | `historyCoverage.profiles[].months[].models[].statisticsDays` | Number of reported day/model cells in the comparison | P0 |
 | `historyCoverage.profiles[].months[].models[].providerTokens` | Provider-reported stream counter totals over those cells; may repeat requests | P0 |
-| `historyCoverage.profiles[].months[].models[].sessionTokens` | Same-profile deduplicated native session tokens over those cells | P0 |
+| `historyCoverage.profiles[].months[].models[].sessionTokens` | Same-profile deduplicated native session tokens (`historyProfile.days[].tokens`) over those cells | P0 |
 | `historyCoverage.profiles[].months[].models[].sessionStatisticsTokens` | Same-profile native streamed-block counters, matching the provider statistics basis | P0 |
 | `historyCoverage.profiles[].months[].models[].gapTokens` | Sum of daily max(0, provider minus matching session stream counters) | P0 |
 | `historyCoverage.profiles[].months[].models[].possibleOverlapTokens` | Conservative share of unknown-profile recovered stream counters reserved once across profiles | P0 |
@@ -1117,7 +686,7 @@ All new data is P0 counters/enums/model IDs/timestamps except the existing-style
 
 Machine history coverage is omitted from repository-filtered analysis and filtered exports. Full snapshot exports preserve it; aggregate-only team sharing does not include the new namespace. The panel explicitly labels machine scope independently of interactive filters. See [the method and uncertainty](metrics.md#history-coverage-and-recovery), including provider retention and uncertain profile overlap.
 
-Calibration uses the same locally projected SDK metadata and already analyzed native sessions; only aggregate counters reach the snapshot. Query/response/record identities remain private, including the internal query-boundary field. No prompts, SDK result text, source paths, raw IDs or per-pair keys enter the calibration namespace. The local verifier emits hashed keys and numerical operands only. Receipt-floor selection preserves stream counters for statistics overlap; summary-only token evidence has no invented profile/day allocation. These additions are P0, require no secret or network request, and are not a P3 content review.
+Calibration uses the same locally projected SDK metadata and already analyzed native sessions; only aggregate counters reach the snapshot. Query/response/record identities remain private, including the internal query-boundary field. No prompts, SDK result text, source paths, raw IDs or per-pair keys enter the calibration namespace. The local verifier emits hashed keys and numerical operands only. Receipt-floor selection preserves stream counters for statistics overlap; summary-only token evidence has no invented profile/day allocation. These additions are P0 and require no secret or network request.
 
 ### v0.6.1 correctness audit boundary
 

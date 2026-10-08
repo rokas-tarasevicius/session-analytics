@@ -49,7 +49,6 @@ body:
         - label: Token counters (input, cached input, cache writes, output, reasoning)
         - label: A provider-computed cost
         - label: Tool calls with names and IDs
-        - label: Skill or slash-command invocations
         - label: Compactions or context resets
         - label: Sub-agent or delegated sessions
   - type: textarea

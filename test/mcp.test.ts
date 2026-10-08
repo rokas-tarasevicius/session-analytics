@@ -26,16 +26,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "session-analytics-mcp-"));
   const source = await createSessionAnalyticsFixture(root);
   await mkdir(join(source.repositoryRoot, ".git"));
-  // All sensitive strings are synthetic, including credentials and extension definitions.
-  await mkdir(join(root, "skills/review"), { recursive: true });
-  await mkdir(join(root, "skills/unused-skill"), { recursive: true });
-  await writeFile(join(root, "skills/review/SKILL.md"), "SECRET_SKILL_BODY");
-  await writeFile(join(root, "skills/unused-skill/SKILL.md"), "SECRET_SKILL_BODY");
-  await writeFile(join(root, ".claude.json"), JSON.stringify({ mcpServers: {
-    "fixture-server": { command: "SECRET_COMMAND", env: { API_KEY: "SECRET_CREDENTIAL" } },
-    "unused-server": { url: "https://SECRET_REMOTE.invalid" },
-  } }));
-  await writeFile(join(root, "config.toml"), '[mcp_servers.unused-codex]\ncommand = "SECRET_COMMAND"\n');
+  // All sensitive strings are synthetic, including tool results, errors and quota identifiers.
   const claudeDirectory = join(source.claudeRoot, (await readdir(source.claudeRoot))[0]!);
   const claudeFile = (await readdir(claudeDirectory)).find((name) => name.endsWith(".jsonl"))!;
   await appendFile(join(claudeDirectory, claudeFile), [
@@ -104,7 +95,8 @@ test("spawned MCP server negotiates both eras and calls every tool without conte
     assert.deepEqual((await c.request("ping")).result, {});
     const list = await c.request("tools/list");
     const tools = list.result?.["tools"] as Array<{ name: string; inputSchema: { additionalProperties: boolean }; annotations: { readOnlyHint: boolean } }>;
-    assert.equal(tools.length, 7);
+    assert.equal(tools.length, 6);
+    assert.ok(!tools.some((tool) => tool.name === "unused_extensions"));
     assert.ok(tools.every((tool) => tool.inputSchema.additionalProperties === false && tool.annotations.readOnlyHint));
     const calls = await Promise.all(tools.map((tool) => c.request("tools/call", { name: tool.name, arguments: tool.name === "budget_status" ? {} : { window: "all" } })));
     for (const response of calls) {
@@ -117,16 +109,10 @@ test("spawned MCP server negotiates both eras and calls every tool without conte
     }
     const stats = calls[tools.findIndex((tool) => tool.name === "tool_stats")]!.result!.structuredContent!;
     assert.ok("tools" in stats.data);
-    assert.equal(stats.data.tools.find((tool) => tool.name === "Bash")?.errors, 1);
-    assert.equal(stats.data.tools.find((tool) => tool.name === "Bash")?.errorRate.status, "insufficient-data");
+    assert.ok((stats.data.tools.find((tool) => tool.name === "Bash")?.calls ?? 0) > 0);
+    assert.ok(stats.data.tools.every((tool) => Object.keys(tool).sort().join() === "calls,name"));
     const budget = calls[tools.findIndex((tool) => tool.name === "budget_status")]!.result!.structuredContent!;
-    assert.ok("rateLimits" in budget.data);
-    assert.equal(budget.data.rateLimits.find((row) => row.provider === "codex")?.windows[0]?.remainingPercent, 58);
-    const extensions = calls[tools.findIndex((tool) => tool.name === "unused_extensions")]!.result!.structuredContent!;
-    assert.ok("providers" in extensions.data);
-    const claude = extensions.data.providers.find((row) => row.provider === "claude")!;
-    assert.deepEqual(claude.skillsWithoutObservedUse, ["unused-skill"]);
-    assert.deepEqual(claude.serversWithoutObservedUse, ["unused-server"]);
+    assert.deepEqual(Object.keys(budget.data).sort(), ["today", "week"]);
     const discover = await c.request("server/discover", { _meta: modernMeta });
     assert.equal(discover.result?.["resultType"], "complete");
     assert.ok((discover.result?.["supportedVersions"] as string[]).includes(PROTOCOL_VERSION));
@@ -225,7 +211,7 @@ test("stdio stays responsive during a coalesced scan, bounds concurrency and sup
   const f = await fixture();
   try {
     const analytics = await analyzeMachineSessions({ ...f.source, mcpCwd: f.source.repositoryRoot });
-    const snapshot: McpSnapshot = { analytics, inventory: [] };
+    const snapshot: McpSnapshot = { analytics };
     const input = new PassThrough(), output = new PassThrough();
     const responses: Response[] = [];
     createInterface({ input: output }).on("line", (line) => responses.push(JSON.parse(line) as Response));
@@ -316,15 +302,15 @@ test("additive evidence remains content-free in report JSON and is not MCP-only 
   try {
     const result = spawnSync(process.execPath, [bin, "report", "--json", ...f.args.slice(0, -2)], { encoding: "utf8" });
     assert.equal(result.status, 0);
-    const parsed = JSON.parse(result.stdout) as { sessions: Array<{ mcpEvidence?: { toolOutcomes: object[]; rateLimits: object[] } }> };
-    assert.ok(parsed.sessions.some((session) => session.mcpEvidence?.toolOutcomes.length));
-    assert.ok(parsed.sessions.some((session) => session.mcpEvidence?.rateLimits.length));
+    const parsed = JSON.parse(result.stdout) as { sessions: Array<{ mcpEvidence?: Record<string, unknown> }> };
+    assert.ok(parsed.sessions.some((session) => session.mcpEvidence?.["pricingByDay"]));
+    for (const session of parsed.sessions) for (const key of Object.keys(session.mcpEvidence ?? {})) assert.ok(["activityState", "pricingByDay", "undatedTokens"].includes(key), key);
     assert.doesNotMatch(result.stdout, /SECRET_|secret-command|secret-skill-args|content-is-not-returned/);
     assert.ok(!result.stdout.includes(f.root));
   } finally { await rm(f.root, { force: true, recursive: true }); }
 });
 
-test("MCP demo serves only synthetic repositories, outcome flags, extension names and fresh quotas", async () => {
+test("MCP demo serves only synthetic repositories and tool counts", async () => {
   const demo = fileURLToPath(new URL("../scripts/demo.ts", import.meta.url));
   const c = client([], process.cwd(), {}, demo);
   try {
@@ -336,57 +322,13 @@ test("MCP demo serves only synthetic repositories, outcome flags, extension name
     const summary = await call("usage_summary", { scope: "machine", groupBy: "repository", window: "all" });
     assert.ok("groups" in summary.data); assert.equal(summary.data.totalGroups, 6);
     const budget = await call("budget_status");
-    assert.equal(budget.scope.kind, "repository"); assert.ok("rateLimits" in budget.data);
-    assert.ok(budget.data.rateLimits.find((row) => row.provider === "codex")!.windows[0]!.remainingPercent <= 62, "the most conservative fresh quota wins across the combined demo");
+    assert.equal(budget.scope.kind, "repository"); assert.ok("today" in budget.data);
     const stats = await call("tool_stats", { window: "all", limit: 50 });
     assert.ok("tools" in stats.data);
-    assert.ok(stats.data.tools.some((row) => row.observedResults > 20 && row.errors > 0));
-    const unused = await call("unused_extensions", { window: "all" });
-    assert.ok("providers" in unused.data);
-    assert.ok(unused.data.providers[0]!.skillsWithoutObservedUse.includes("unused-demo-skill"));
+    assert.ok(stats.data.tools.some((row) => row.calls > 20));
     assert.doesNotMatch(JSON.stringify(c.responses), /synthetic demo request|synthetic demo prompt|synthetic-never-executed|\.jsonl|\/repos\//i);
     assert.equal(c.invalid(), "");
   } finally { await c.close(); }
-});
-
-test("spawned inventory keeps escaped TOML description content behind the privacy boundary", async () => {
-  const f = await fixture();
-  await writeFile(join(f.root, "config.toml"), ['description = """', '\\"""', '[mcp_servers.SECRET_CONTENT]', '"""', '[mcp_servers.real]'].join("\n"));
-  const c = client(f.args, f.root);
-  try {
-    await c.initialize();
-    const result = await c.request("tools/call", { name: "unused_extensions", arguments: { provider: "codex", window: "all" } });
-    assert.equal(result.result?.isError, false);
-    const payload = result.result!.structuredContent!;
-    assert.ok("providers" in payload.data);
-    assert.deepEqual(payload.data.providers[0]!.serversWithoutObservedUse, ["real"]);
-    assert.doesNotMatch(JSON.stringify(c.responses) + c.stderr(), /SECRET_/);
-  } finally { await c.close(); await rm(f.root, { recursive: true, force: true }); }
-});
-
-test("spawned inventory matches frontmatter names, canonical aliases and embedded MCP separators", async () => {
-  const f = await fixture();
-  await mkdir(join(f.root, "skills/release-review"));
-  await writeFile(join(f.root, "skills/release-review/SKILL.md"), '---\nname: review\ndescription: |\n  SECRET_DESCRIPTION\n---\nSECRET_BODY');
-  await rm(join(f.root, "skills/review"), { recursive: true });
-  await symlink(join(f.root, "skills/release-review"), join(f.root, "skills/review-alias"));
-  await writeFile(join(f.root, ".claude.json"), JSON.stringify({ mcpServers: { team: {}, team__search: {}, "unused-server": {} } }));
-  const directory = join(f.source.claudeRoot, (await readdir(f.source.claudeRoot))[0]!);
-  const file = (await readdir(directory)).find((name) => name.endsWith(".jsonl"))!;
-  await appendFile(join(directory, file), JSON.stringify({ type: "assistant", timestamp: "2026-07-20T12:05:00Z",
-    message: { id: "SECRET_EXTRA_MESSAGE", content: [{ type: "tool_use", id: "SECRET_EXTRA_CALL", name: "mcp__team__search__lookup", input: { query: "SECRET_ARGUMENT" } }] } }) + "\n");
-  const c = client(f.args, f.root);
-  try {
-    await c.initialize();
-    const result = await c.request("tools/call", { name: "unused_extensions", arguments: { provider: "claude", window: "all" } });
-    const payload = result.result!.structuredContent!;
-    assert.ok("providers" in payload.data);
-    const row = payload.data.providers[0]!;
-    assert.deepEqual(row.skillsWithoutObservedUse, ["unused-skill"]);
-    assert.equal(row.installedSkills, 2);
-    assert.deepEqual(row.serversWithoutObservedUse, ["team", "unused-server"]);
-    assert.doesNotMatch(JSON.stringify(c.responses) + c.stderr(), /SECRET_/);
-  } finally { await c.close(); await rm(f.root, { recursive: true, force: true }); }
 });
 
 test("missing and unreadable provider sources stay visible in empty filtered MCP results", async () => {

@@ -7,7 +7,7 @@
 
 <h3>Content-free analytics for the coding-agent sessions already on your machine.</h3>
 
-<p>Claude Code, Codex, and Cursor usage: tokens, API-equivalent cost, tools, and skills, grouped by Git repository.<br />
+<p>Claude Code, Codex, and Cursor usage: tokens, API-equivalent cost, models, and tools, grouped by Git repository.<br />
 Local only. Read-only analytics. No prompts, messages, or file paths in analytics outputs.</p>
 
 [![CI](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml)
@@ -59,12 +59,10 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 - **Cross-provider evidence.** Claude Code, Codex, Cursor, Copilot CLI, OpenCode and Gemini, with Conductor recovery when canonical history is missing. Summary and activity-only evidence carry explicit coverage and N/A values.
 - **Six dashboard views.** Overview: Summary, Velocity. Economics: Costs, Pricing. Usage: Tools, Activity. Every view has a sidebar entry, command-palette action, `g` shortcut and `?view=` URL hook.
 - **Control Room.** Shared cards and tables, repository focus, scoped provider chips, keyboard navigation, light/dark themes and compact/comfortable density. Summary provider chips affect its daily chart; Activity and Tools keep independent provider selections.
-- **Measured usage.** API-equivalent value with dated price provenance, token-class coverage, velocity, quota freshness, cache/context evidence and optional plan comparisons. Value is not an invoice; unknown evidence is never presented as zero.
-- **Reliability and workflow in reports and JSON.** Tool outcomes and latency, verification, permissions, active/wait timing, concurrency, steering, slash-command names and installed skills. Optional P2 content rules are off by default.
-- **Outcomes and insights.** Recorded edits, commits and PR links with confidence and denominator guards; ten grouped rules available through the insights CLI. Git/GitHub enrichment is opt-in. P3 review requires `review --send-content` on each run.
+- **Measured usage.** API-equivalent value with dated price provenance, token-class coverage, velocity, cache and context-window counters, and history coverage. Value is not an invoice; unknown evidence is never presented as zero.
 - **Private index.** Complete derived session facts survive provider cleanup. Unchanged Claude/Codex sessions replay from a private index; `--no-index` reads present sources directly.
-- **Every surface.** Localhost dashboard, terminal/JSON reports, versioned exports and aggregate-only sharing, seven metrics-only MCP tools, and an [agent skill](skills/session-analytics/SKILL.md).
-- **Small trust surface.** Node 24 built-ins, zero runtime dependencies, no telemetry and read-only provider access. Analysis reads cached prices; the dashboard can refresh fixed public price feeds (`--offline` disables pricing requests). GitHub enrichment, OTLP delivery and P3 review each require their own explicit option.
+- **Every surface.** Localhost dashboard, terminal/JSON reports, versioned exports and aggregate-only sharing, six metrics-only MCP tools, and an [agent skill](skills/session-analytics/SKILL.md).
+- **Small trust surface.** Node 24 built-ins, zero runtime dependencies, no telemetry and read-only provider access. Analysis reads cached prices; the dashboard can refresh fixed public price feeds (`--offline` disables pricing requests). OTLP delivery requires its own explicit option.
 
 <p align="center">
   <img alt="Velocity view: priced usage value by agent as a stacked area chart with period-over-period deltas" src="assets/screenshot-velocity.png" width="100%" />
@@ -115,9 +113,7 @@ Missing or timezone-free session starts are counted as undated and excluded from
 session-analytics report
 ```
 
-Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, workflow and concurrency measures, the 15 highest-value sessions by hashed key, and coverage warnings.
-
-The reliability section shows structured outcomes by default. To also classify shell commands and failed-result text locally and detect repeat/churn episodes, run `session-analytics report --reliability-content-rules` (the same option includes these counters in dashboard snapshots and exports). These P2 rules are off by default, send nothing to a model, and output only counters and class labels. Their matching key lives in `SESSION_ANALYTICS_DATA_DIR` (or `--data-dir`); path and argument hashes never appear in a snapshot. See the [reliability metric definitions](docs/metrics.md#reliability-m1) for coverage and thresholds. `npm run demo` enables these rules on synthetic data only.
+Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, the 15 highest-value sessions by hashed key, and coverage warnings.
 
 ### JSON snapshot
 
@@ -156,25 +152,6 @@ session-analytics --offline                  # dashboard using only local cached
 Analysis never waits for the network. The dashboard uses the local cache immediately and refreshes stale sources in the background after its first scan; **Refresh snapshot** applies the new evidence. A report only prints an update hint on stderr (including with `--json`). The default stale threshold is seven days. `--offline` or `SESSION_ANALYTICS_OFFLINE=1` prevents public requests in every command.
 
 Each request uses the latest available source snapshot at or before its timestamp. Requests older than the cache use the oldest available snapshot and carry an explicit label; this is an estimate, not reconstructed historical pricing. Every observation is retained, so a later price observation does not overwrite earlier evidence; unchanged rate tables share storage and indexed history keeps request lookup bounded. The dashboard's **Pricing** tab shows freshness, coverage, and the provenance used by selected sessions. [Pricing reference](docs/pricing.md) explains precedence, aliases, cache storage, and limitations.
-
-### Insights and optional content review
-
-```bash
-session-analytics insights
-session-analytics insights --json --from 2026-09-01 --through 2026-09-30
-session-analytics insights --rule session-outlier --all-scopes
-session-analytics insights --insights-config ./insights.json
-session-analytics review --session <hashed-session-key> --via claude  # metadata-only dry-run
-session-analytics review --session <hashed-session-key> --via codex --send-content
-```
-
-Insights cover peer outliers, cache reuse, model-price scenarios, compaction, delegation, large request contexts, installed skills/MCP servers without observed use, writes after idle gaps, and neutral start-time patterns. Missing evidence and insufficient activity are visible in rule coverage, never presented as 0%. [Thresholds and formulas](docs/insights.md) are documented and configurable with `--insights-config` or `SESSION_ANALYTICS_INSIGHTS_CONFIG`.
-
-`insights` prints ranked rule groups and their leading scopes; `--all-scopes` includes every finding. `insights --json` uses schema version 2 (`groups` plus `items`). Pricing defaults to a configurable same-provider **next-tier-down** mapping; each model moves once, with unmapped usage unchanged. Known partial/active sessions are excluded; unknown liveness is disclosed, and completed-peer comparisons require observed inactivity. Context-premium price scenarios require complete request-size coverage. Date filters select UTC instants, including timestamps written with offsets.
-
-**Content review is P3, opt-in and off by default.** The dry-run prints only rule IDs, sizes and redaction counts. `--send-content` permits bounded, redacted human/assistant excerpts to be sent through your own `claude -p` or `codex exec`; it has no environment-variable equivalent. Redaction is best effort, and remaining prose may still be sensitive. Your agent provider's retention and billing apply. Tools, reasoning and tool-result blocks are excluded; no content is sent from the dashboard. See [review behavior and limits](docs/insights.md#opt-in-review-p3).
-
-Try synthetic insights with `npm run demo -- insights`.
 
 ### Local index
 
@@ -228,19 +205,11 @@ Release verification uses `node scripts/verify-real.ts`: independent provider, r
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | all | Pin an alternative reviewed rate card; bypass cached API prices and automatic pricing refresh. |
 | `--offline` | all | Disable public pricing requests; retain access to cached prices. |
-| `--data-dir PATH` | all analysis commands | Private index, pricing cache, settings and optional reliability key directory. |
+| `--data-dir PATH` | all analysis commands | Private index, pricing cache and settings directory. |
 | `--pricing-policy MODE` | all | `reviewed-first` (default), `api-first`, or `reviewed-only`. |
 | `--pricing-sources LIST` | all | Ordered public sources; default `models.dev,litellm`. |
 | `--pricing-max-age-days DAYS` | all | Stale threshold, default `7`; `0` checks on every dashboard startup. |
 | `--rate-card PATH` | both | Alternative rate card with the same schema as `data/rate-cards.json`. |
-| `--reliability-content-rules` | both | Opt into local P2 command/error rules and HMAC-based behavior detectors. Also `SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES=1`. |
-| `--no-reliability-content-rules` | both | Disable those rules even when enabled by the environment. |
-| `--outcomes-git` | both | Opt in to bounded read-only local Git correlation on evidenced branches during session windows. No fetching. |
-| `--outcomes-github` | both | Opt in to authenticated `gh` queries for state and time to merge of GitHub PRs already evidenced locally. Sends those PR coordinates to GitHub. |
-| `--no-outcomes-git`, `--no-outcomes-github` | both | Disable the corresponding enrichment, including when enabled by environment. |
-| `--workflow-content-rules` | both | Opt into the local P2 rule that counts exact Claude interruption markers. Only counts leave the parser. Default off; `SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES=1` also enables it. |
-| `--no-workflow-content-rules` | both | Disable the rule, including an environment opt-in. |
-| `--insights-config PATH` | insights, review | Thresholds, disabled rules, next-tier mappings, explicit targets and optional extension inventory; see [configuration](docs/insights.md#configuration). |
 | `--no-index` | both | Read present provider evidence without accessing the index; also `SESSION_ANALYTICS_NO_INDEX=1`. |
 | `--version`, `--help` | all | Print the version or command help. |
 
@@ -248,13 +217,7 @@ Both commands also read `SESSION_ANALYTICS_*` environment variables for the same
 
 New-store variables are `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, and `SESSION_ANALYTICS_GEMINI_ROOT`. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable their default discovery. OpenCode also honors `XDG_DATA_HOME`. Each source override replaces only that source's default; isolated scans should supply all desired paths and disable additional discovery. The demo does this automatically.
 
-Outcome enrichment is off by default. Set `SESSION_ANALYTICS_OUTCOMES_GIT=1` or `SESSION_ANALYTICS_OUTCOMES_GITHUB=1` to opt in through configuration; other environment values do not enable it. Missing tools, authentication, branches, or deleted history are shown as unavailable. The [outcome metric definitions](docs/metrics.md#outcomes) explain confidence, coverage, deduplication, attribution, and scan limits. The snapshot always uses pseudonymous references, including when enrichment is enabled.
-
-The report shows enrichment status counts, evidence limits, and complete/partial/unavailable line coverage. Ambiguous or reset line counters stay partial and are excluded from line-value ratios; incomplete PR associations withhold PR-value ratios.
-
-Workflow estimates join work events at most five minutes apart; a terminal marker followed by a human supplies at most 30 minutes of estimated human waiting. Permission waiting is unavailable. Concurrency counts overlapping active session spans, with summed activity divided by its wall-clock union for effective parallelism. Claude child transcripts remain inside their parent for accounting but are excluded from the parent's interaction clock; Codex child threads have their own clocks. Cursor workflow timing is unavailable. See [workflow definitions and thresholds](docs/metrics.md#workflow-human-and-agent-interaction) before interpreting the comparisons or heuristics.
-
-Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations; boundary estimates and abandonment claims are suppressed. Slash-command names require built-in or discovered command/skill registry evidence.
+Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations.
 
 ## Supported agents and evidence
 
@@ -281,7 +244,6 @@ What the original native stores support (additional sources have their own fidel
 | Reasoning tokens | Exact when `thinking_tokens` is recorded; otherwise inside output | Exact | Unavailable |
 | Cost | API list-price equivalent | API list-price equivalent and upper estimate | Cursor's provider-reported local value, kept separate and not plotted by day |
 | Tool calls by name | Exact | Exact; code-mode calls expanded to the inner tool | From tool-call records |
-| Skill invocations | Explicit (`Skill` tool) | Inferred lower bound (`SKILL.md` reads) | Unavailable |
 | Turns and messages | Human turns, assistant messages | User turns, agent messages | User and assistant bubbles |
 | Compactions | Yes | Yes | Unavailable |
 | Sub-agents | `subagents/` transcripts, cost split | Spawned threads, cost split | Sub-agent composers |
@@ -296,15 +258,15 @@ Cursor SDK runs are priced only for exact model IDs in the reviewed rate card. C
 `session-analytics` reads transcripts on your machine and discards their content during parsing. Its outputs (dashboard, API, report, JSON, and skill) contain only:
 
 - token counters, cost figures, durations, and timestamps;
-- model IDs, tool names, and normalized skill identifiers;
+- model IDs and tool names;
 - repository display names and pseudonymous keys (a truncated SHA-256 session key, and a repository ID);
 - fixed-text parser warnings and the rate card's model list with source URLs.
 
-Analytics outputs never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages. The separate P3 review command sends redacted excerpts to your own agent only when `--send-content` is explicitly present; its console output remains a metadata preview and allowlisted assessment labels.
+Analytics outputs never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages.
 
 The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, has no telemetry, and serves all browser assets locally. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). `--offline` disables public pricing requests. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
 
-The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, loads only bundled resources, and has no telemetry. Analysis stays offline unless you explicitly enable GitHub outcome enrichment. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
+The dashboard binds to loopback, rejects requests whose `Host` or `Origin` is not local, serves a strict Content Security Policy, sends no CORS headers, loads only bundled resources, and has no telemetry. Analysis itself makes no network requests. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
 
 ## How it works
 
@@ -344,7 +306,7 @@ The v0.6.1 correctness suite includes independent raw-data oracles under `verify
 
 ## Use it from an agent
 
-For direct metric queries, run `session-analytics mcp`. Its seven read-only tools cover usage summaries, budget status, repository profiles, tool statistics, recent sessions, extensions without observed use, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes source health and interpretation notes; budget periods carry their own pricing coverage, and typical-session baselines exclude active or unknown lifecycle evidence. No transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](docs/mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
+For direct metric queries, run `session-analytics mcp`. Its six read-only tools cover usage summaries, budget status, repository profiles, tool statistics, recent sessions, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes source health and interpretation notes; budget periods carry their own pricing coverage, and typical-session baselines exclude active or unknown lifecycle evidence. No transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](docs/mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
 
 The repository ships an agent skill at [`skills/session-analytics`](skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
 
@@ -362,7 +324,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 
 ## Roadmap
 
-v0.6.0 delivers the integrated index, provider adapters, pricing, velocity, reliability, limits/cache, outcomes, workflow, insights, MCP and interchange work. Remaining items include additional provider formats, profile dimensions, task-matched baselines, hooks, and packaging/user-research gates. See the checked delivery list in [docs/roadmap.md](docs/roadmap.md); the [product proposals](docs/proposals/) distinguish research from shipped behavior.
+v0.6.0 delivers the integrated index, provider adapters, pricing, velocity, MCP and interchange work. Remaining items include additional provider formats, profile dimensions, task-matched baselines, hooks, and packaging/user-research gates. See the checked delivery list in [docs/roadmap.md](docs/roadmap.md); the [product proposals](docs/proposals/) distinguish research from shipped behavior.
 
 ## How it compares
 
@@ -379,7 +341,7 @@ The table below is a short orientation. The [dated competitive research](docs/pr
 | [CodexBar](https://github.com/steipete/CodexBar) | Menu bar app for provider usage limits and reset windows | You want to watch plan limits while you work. |
 | Claude Code `/usage` and `/insights` | Built-in usage and session insight views | You use only Claude Code and want answers inside the tool. |
 
-`session-analytics` is narrower. It never reads content into its outputs, so it has no transcript search or replay. It prices from cached public-feed snapshots with reviewed exceptions, discloses per-provider fidelity, groups everything by Git repository across agents and orchestrator workspaces, and provides tool reliability, outcome linkage, and a metrics-only MCP server.
+`session-analytics` is narrower. It never reads content into its outputs, so it has no transcript search or replay. It prices from cached public-feed snapshots with reviewed exceptions, discloses per-provider fidelity, groups everything by Git repository across agents and orchestrator workspaces, and provides a metrics-only MCP server.
 
 ## FAQ
 
@@ -388,7 +350,7 @@ The table below is a short orientation. The [dated competitive research](docs/pr
 
 No session data is uploaded, and there is no telemetry. The only requests are plain GETs of public price lists that carry no user data (no model lists or local values in URLs, headers, or bodies). Use `--offline` or `SESSION_ANALYTICS_OFFLINE=1` to disable public pricing requests. Fonts and provider marks are bundled; `--no-open` disables opening the localhost dashboard in a browser.
 
-There is no telemetry. Analysis reads cached prices; dashboard startup may refresh fixed public price feeds without sending local evidence. `--offline` disables those pricing requests. `--outcomes-github` allows authenticated PR-coordinate lookups, `export --otlp-endpoint` allows delivery of selected export data, and `review --send-content` allows bounded redacted prose through your own agent CLI for that run. Those explicit options are independent of the pricing offline setting. Fonts and provider marks are bundled; `--no-open` disables opening the loopback page.
+There is no telemetry. Analysis reads cached prices; dashboard startup may refresh fixed public price feeds without sending local evidence. `--offline` disables those pricing requests. `export --otlp-endpoint` allows delivery of selected export data; that explicit option is independent of the pricing offline setting. Fonts and provider marks are bundled; `--no-open` disables opening the loopback page.
 </details>
 
 <details>

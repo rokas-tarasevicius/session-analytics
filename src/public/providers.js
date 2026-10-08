@@ -69,7 +69,6 @@ export function metricEligible(session, metric) {
     case "cost": return session.costBasis !== "unavailable" && (session.costBasis === "provider-reported" || session.pricedTokenCoverage > 0 || (metricEligible(session, "tokens") && session.costComplete));
     case "apiCost": return session.costBasis === "api-list-price-equivalent" && metricEligible(session, "cost");
     case "reportedCost": return session.costBasis === "provider-reported" && metricEligible(session, "cost");
-    case "skills": return session.skillEvidence !== "unavailable";
     default: return false;
   }
 }

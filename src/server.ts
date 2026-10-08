@@ -42,12 +42,6 @@ The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it.
 ${pricingHelp}
---reliability-content-rules enables local P2 error, command and behavior rules (off by default).
---no-reliability-content-rules overrides the environment; --data-dir PATH locates the private hashing key.
-Optional outcomes: --outcomes-git (bounded local Git) and --outcomes-github (authenticated gh PR state).
-Both are off by default; --no-outcomes-git and --no-outcomes-github override environment settings.
---workflow-content-rules opts into local Claude interruption marker counts (P2).
---no-workflow-content-rules overrides an environment opt-in.
 --snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
 Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
 `);
@@ -139,8 +133,6 @@ const staticFiles = new Map<string, string>([
   ["/tools-data.js", join(publicRoot, "tools-data.js")],
   ["/tools.css", join(publicRoot, "tools.css")],
 
-  ["/metrics/outcomes-summary.js", join(toolRoot, "metrics", "outcomes-summary.js")],
-  ["/workflow-data.js", join(publicRoot, "workflow-data.js")],
   ["/styles.css", join(publicRoot, "styles.css")],
   ["/fonts/geist-latin.woff2", join(publicRoot, "fonts", "geist-latin.woff2")],
 

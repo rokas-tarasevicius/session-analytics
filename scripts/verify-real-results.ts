@@ -56,7 +56,6 @@ export async function inspectOracleResults(directory: string, areas: string[], s
       await check('../../conductor/.lane/conductor-current.json', 'independent-recovered-allocation', d => stable(d['differences'], 'independent-recovered-allocation').length);
       await check('reference-aggregates.json', 'provider-repository-model-conservation', d => array(d['checks']).filter(c => c.pass !== true).length);
       await check('model-rollup-gaps.json', 'model-allocation-conservation', d => array(d['sessions']).length);
-      await check('quota-diff.json', 'desktop-quota-raw-latest-and-timeline', d => array(d['desktop']).filter(w => counter(w.timelineMismatches) !== 0 || w.latestMatches !== true).length);
     } else if (area === 'pricing') {
       try {
         const {verifyPricingProvenance}=await import('./verify-real-evidence.ts');

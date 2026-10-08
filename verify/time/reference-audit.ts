@@ -56,16 +56,6 @@ for (const s of reference.sessions) {
       add(row.byProvider,s.provider,amount);add(row.byRepository,repositoryKey(s.repositoryId),amount);
     }
   }
-  const limitDays: Record<string, number> = {};
-  for (const b of s.limitsCache?.buckets??[]) {
-    if(!b.day)continue;
-    add(limitDays,b.day,b.apiEquivalentUsd);
-    const key=b.day.slice(0,7), row=monthlyWindows[key];
-    if(row && start?.slice(0,7)!==key) {row.omittedTokens+=b.observedTokens;add(row.byModel,b.model,b.apiEquivalentUsd);}
-  }
-  if(s.limitsCache)for(const day of new Set([...Object.keys(limitDays),...Object.keys(s.spendByDay)])) {
-    if(Math.abs((limitDays[day]??0)-(s.spendByDay[day]??0))>1e-6)parityErrors.push({sessionKey:s.sessionKey,day,kind:'limits-spend',limitsUsd:limitDays[day]??0,spendUsd:s.spendByDay[day]??0});
-  }
   const local: Record<string, number> = {};
   let vUsd=0,vInput=0,vOutput=0,vUndated=0;
   if(!s.velocity){add(p,'unavailableVelocitySessions',1);add(p,'unavailableVelocityUsd',s.cost.totalUsd);}

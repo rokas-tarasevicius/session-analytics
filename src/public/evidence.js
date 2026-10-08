@@ -42,6 +42,7 @@ export const fixedWarnings = [
   "Source availability could not be checked; showing the last indexed facts.",
   "Source-deleted history retains the pricing and parser results from its last successful ingest.",
   "Legacy activity dates could not be verified; history is kept until its source can be read again.",
+  // No longer emitted; retained so earlier snapshots and indexed sessions stay valid.
   "Workflow projection is unavailable; accounting was retained.",
   "A provider evidence fallback could not be read; canonical sessions were retained.",
   "Cursor SDK tool events were unavailable; run summaries were retained.",

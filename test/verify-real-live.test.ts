@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { proveLiveAggregates } from '../scripts/verify-real-live.ts';
 import { aggregateSessions } from '../src/public/export-data.js';
-import { summarizeOutcomes } from '../src/metrics/outcomes-summary.js';
 import type { SessionAnalytics } from '../src/types.ts';
 
 function session(key: string, n: number): SessionAnalytics {
@@ -22,7 +21,7 @@ function snapshot(rows: SessionAnalytics[]) {
   return { ...aggregate, sessions: rows, summary: { ...aggregate.summary, repositories: 1, repositoriesWithSessions: 1, workingSnapshots: rows.filter(s => s.transcript.snapshotWhileWorking).length },
     repositories: [{ ...aggregate, repository: { id: 'synthetic-repository' } }], historyCoverage: { unknown: 1, profiles: [],
       months: [{ month: '2026-10', sessionEvidenceUsd: rows.reduce((n, s) => n + s.cost.totalUsd, 0), sessionsWithDatedValue: rows.length, recoveredMessageUsd: 0 }],
-      undatedSessionValueUsd: 0, unassignedProfileTokens: 0 }, workflow: { unknown: 1 } };
+      undatedSessionValueUsd: 0, unassignedProfileTokens: 0 }, velocity: { unknown: 1 } };
 }
 test('exact live session contributions reconcile machine/repository money, tokens, coverage and ranked tables', () => {
   const before = snapshot([session('stable', 7), session('live', 2)]), after = snapshot([session('stable', 7), session('live', 5)]);
@@ -50,39 +49,30 @@ test('live proof fails closed for arithmetic corruption, stable changes and miss
 });
 test('unproved metadata namespaces, unexpected table fields and no-exclusion differences remain visible', () => {
   const before = snapshot([session('stable', 7), session('live', 2)]), after = snapshot([session('stable', 7), session('live', 5)]);
-  after.historyCoverage.unknown = 2; after.workflow.unknown = 2;
+  after.historyCoverage.unknown = 2; after.velocity.unknown = 2;
   const result = proveLiveAggregates(before, after, new Set(['live']));
   assert.notDeepEqual(result.left.historyCoverage, result.right.historyCoverage);
-  assert.notDeepEqual(result.left.workflow, result.right.workflow);
+  assert.notDeepEqual(result.left.velocity, result.right.velocity);
   (after.spendByModel[0] as unknown as Record<string, unknown>)['unexpected'] = 1;
   assert.ok(proveLiveAggregates(before, after, new Set(['live'])).failures.includes('machine.spendByModel'));
   assert.equal(proveLiveAggregates(before, after, new Set()).accepted.length, 0);
 });
 
-test('live outcome ratios and history session values require exact independent operands', () => {
-  const withOutcome = (key: string, n: number) => Object.assign(session(key, n), { outcomes: {
-    editsObserved: true, links: [], operations: { commits: 0, pushes: 0, prsCreated: 0, prsEdited: 0, prsMerged: 0, prsClosed: 0 },
-    lineCoverage: 'complete', linesAdded: n * 2, linesRemoved: n, truncated: false, enrichment: { git: 'off', github: 'off' },
-  } }) as unknown as SessionAnalytics;
+test('live history session values require exact independent operands', () => {
   const build = (n: number) => {
-    const rows = [...Array.from({ length: 5 }, (_, i) => withOutcome(`stable-${i}`, 7)), withOutcome('live', n)];
-    const result = snapshot(rows), outcomes = summarizeOutcomes(rows);
-    Object.assign(result, { outcomes, historyCoverage: { profiles: [], months: [{ month: '2026-10', sessionEvidenceUsd: 35 + n, sessionsWithDatedValue: 6, recoveredMessageUsd: 0,
+    const rows = [...Array.from({ length: 5 }, (_, i) => session(`stable-${i}`, 7)), session('live', n)];
+    const result = snapshot(rows);
+    Object.assign(result, { historyCoverage: { profiles: [], months: [{ month: '2026-10', sessionEvidenceUsd: 35 + n, sessionsWithDatedValue: 6, recoveredMessageUsd: 0,
       unattributedEstimateUsd: 4, possibleOverlapTokens: 10 }], undatedSessionValueUsd: 0, unassignedProfileTokens: 0 } });
-    Object.assign(result.repositories[0]!, { outcomes });
     return result;
   };
   const before = build(2), after = build(5);
   const result = proveLiveAggregates(before, after, new Set(['live']));
   assert.deepEqual(result.failures, []);
-  assert.equal(result.left.outcomes.linesPerApiDollar.denominator, 35);
-  assert.equal(result.left.outcomes.linesPerApiDollar.numerator, 105);
   assert.equal(result.left.historyCoverage.months[0].sessionEvidenceUsd, 35);
   assert.equal(result.left.historyCoverage.months[0].unattributedEstimateUsd, 4, 'external statistics estimate is preserved');
   const broken = build(5) as unknown as Record<string, any>;
-  broken.outcomes.linesPerApiDollar.denominator += 1;
   broken.historyCoverage.months[0].sessionEvidenceUsd += 1;
   const rejected = proveLiveAggregates(before, broken, new Set(['live']));
-  assert.ok(rejected.failures.includes('machine.outcomes'));
   assert.ok(rejected.failures.includes('historyCoverage.months.sessionEvidenceUsd'));
 });

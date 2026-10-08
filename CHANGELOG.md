@@ -7,7 +7,17 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Removed
 
 - The Costs repository and visible token-type breakdowns and the Models view (`G M`). Model details now appear in Costs; token-type dollars remain in row tooltips.
-- Dashboard Distributions, Reliability, Limits & cache, Workflow, Skills, Outcomes and Insights views, their assets and shortcuts, and the dashboard-only `/api/insights` endpoint. Analysis, reports, CLI/MCP features and snapshot data remain available.
+- Dashboard Distributions, Reliability, Limits & cache, Workflow, Skills, Outcomes and Insights views, their assets and shortcuts, and the dashboard-only `/api/insights` endpoint.
+- **Breaking:** the analysis behind those views, from every remaining surface. Tokens, cost, pricing, velocity, tool counts, compactions, context peaks and history coverage are unchanged (verified identical on the synthetic demo).
+  - Commands `insights` and `review`, and the options `--insights-config`, `--reliability-content-rules`, `--outcomes-git`, `--outcomes-github`, `--workflow-content-rules` with their `--no-*` forms and `SESSION_ANALYTICS_INSIGHTS_CONFIG`, `SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES`, `SESSION_ANALYTICS_OUTCOMES_GIT`, `SESSION_ANALYTICS_OUTCOMES_GITHUB` and `SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES`. The flags are now rejected as unknown; the variables are ignored. The opt-in GitHub (`gh`) outcome queries and local Git correlation are gone.
+  - Snapshot JSON fields `limitsCache`, `outcomes` and `workflow` (machine and repository), repository rollup `outcomes`, and per-session `reliability`, `limitsCache`, `outcomes`, `workflow`, `insightSignals`, `skills`, `skillEvidence`, `mcpEvidence.toolOutcomes`, `mcpEvidence.rateLimits` and `mcpEvidence.truncated`. `schemaVersion` stays 1: every remaining field keeps its meaning, and snapshots written by earlier versions still load with `--snapshot`, `export` and `merge`; their removed fields are ignored, and any other unknown field is still rejected.
+  - Terminal report sections for limits & cache, outcomes, workflow and reliability.
+  - MCP tool `unused_extensions`, tool error rates and result coverage in `tool_stats` (it now returns calls per tool), quota headroom in `budget_status`, skills in `repo_profile`/`compare_agents`, and the reliability, limits & cache, outcomes, workflow and insight families in each payload's `metrics`. The MCP worker no longer reads skill or MCP-server configuration.
+  - Demo `insights` mode and the synthetic limits, outcomes, reliability and workflow evidence.
+
+### Added
+
+- Per-session `historyProfile` (native Claude sessions): the hashed Claude profile key and deduplicated request tokens per UTC day and model. It carries the machine-wide history coverage inputs that used to live in `limitsCache`. Indexed sessions written by earlier versions are migrated on load, so history coverage for source-deleted sessions is unchanged. The index reparses present sessions once after upgrading.
 
 ### Changed
 

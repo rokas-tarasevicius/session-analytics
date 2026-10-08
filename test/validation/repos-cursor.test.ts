@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { analyzeMachineSessions, cursorSessions } from '../../src/analyzer.ts';
-import { NO_REPOSITORY_ID } from '../../verify/repos/inventory-roots.ts';
+import { NO_REPOSITORY_ID } from '../../verify/repos/git-oracle.ts';
 import type { RepositoryRow } from '../../src/analyzer.ts';
 
 async function fixture(t: { after(fn: () => Promise<void>): void }) {

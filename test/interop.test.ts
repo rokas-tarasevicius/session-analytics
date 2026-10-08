@@ -208,6 +208,24 @@ test("snapshot IO validates versions, rejects unknown fields, bounds input, and 
   await assert.rejects(loadSnapshot(bad), (error: unknown) => { assert.doesNotMatch(String(error), sentinels); return true; });
 });
 
+test("snapshots from earlier versions load with their removed analysis fields ignored", async () => {
+  const legacy = structuredClone(snapshot) as MachineAnalytics & Record<string, unknown>;
+  Object.assign(legacy, { limitsCache: { profiles: [] }, outcomes: { sessions: 1 }, workflow: { schemaVersion: 1 } });
+  Object.assign(legacy.repositories[0]!, { outcomes: { sessions: 1 } });
+  for (const session of legacy.sessions) {
+    Object.assign(session, { reliability: { version: 1 }, limitsCache: { buckets: [] }, outcomes: { editsObserved: false },
+      workflow: { schemaVersion: 1 }, insightSignals: {}, skills: { review: 1 }, skillEvidence: "explicit" });
+    if (session.mcpEvidence) Object.assign(session.mcpEvidence, { toolOutcomes: [], rateLimits: [], truncated: false });
+  }
+  const path = join(directory, "legacy-snapshot.json"); await writeFile(path, JSON.stringify(legacy));
+  assert.deepEqual(await loadMachineSnapshot(path), snapshot);
+  // Only the listed legacy fields are ignored; any other unknown field is still rejected.
+  const unknown = structuredClone(snapshot) as MachineAnalytics & Record<string, unknown>;
+  Object.assign(unknown.sessions[0]!, { rawContent: "content-is-not-returned" });
+  const unknownPath = join(directory, "unknown-field.json"); await writeFile(unknownPath, JSON.stringify(unknown));
+  await assert.rejects(loadMachineSnapshot(unknownPath));
+});
+
 test("export files are private, never overwrite earlier files, and roll back partial batches", async () => {
   const output = join(directory, "out");
   await writeNewFiles(output, { "tools.csv": "original" });
@@ -325,7 +343,7 @@ test("review: typed private strings cannot cross the import/export boundary", as
     (s) => { Object.assign(s.sessions[0]!, { status: "secret-command --token=secret" }); },
     (s) => { s.sessions[0]!.models[0]!.model = "/private/secret-path"; },
     (s) => { s.sessions[0]!.tools = { "secret-command --token=secret": s.sessions[0]!.metrics.toolCalls }; },
-    (s) => { s.sessions[0]!.skills = { "/private/secret-path": 1 }; },
+    (s) => { s.sessions[0]!.transportTools = { "/private/secret-path": s.sessions[0]!.metrics.transportToolCalls }; },
   ];
   for (const [index, mutate] of mutations.entries()) {
     const bad = structuredClone(snapshot); mutate(bad);
@@ -472,16 +490,11 @@ test("integration: every metric namespace and pricing provenance survives filter
   const filtered = filterSnapshot(snapshot, { providers: ["claude"] });
   validateSnapshot(filtered);
   assert.equal(filtered.sessions.length, 1);
-  assert.equal(filtered.outcomes?.sessions, 1);
-  assert.equal(filtered.workflow?.coverage.sessions, 1);
   assert.deepEqual(filtered.velocity, snapshot.velocity);
-  assert.deepEqual(filtered.limitsCache?.profiles, snapshot.limitsCache?.profiles, "quota scope remains global");
-  assert.equal(filtered.limitsCache?.subscriptions.reduce((n, s) => n + s.observedTokens, 0),
-    filtered.sessions.flatMap((s) => s.limitsCache?.buckets ?? []).reduce((n, b) => n + (b.day ? b.observedTokens : 0), 0));
   assert.ok(filtered.spendByModel.some((m) => m.pricing?.length && m.pricingCoverage));
   const metadata = JSON.parse(exportFiles(filtered, "ndjson")["snapshot.ndjson"]!.split("\n")[0]!);
-  for (const key of ["outcomes", "workflow", "limitsCache", "velocity"] as const) assert.deepEqual(metadata[key], filtered[key]);
-  for (const key of ["outcomes", "workflow", "limitsCache", "velocity", "reliability", "insightSignals"] as const) {
+  for (const key of ["velocity", "mcpSourceHealth"] as const) assert.deepEqual(metadata[key], filtered[key]);
+  for (const key of ["velocity", "historyProfile", "mcpEvidence"] as const) {
     const bad = structuredClone(filtered);
     assert.ok(bad.sessions[0]![key], `${key} is represented in the fixture`);
     Object.assign(bad.sessions[0]![key]!, { rawContent: "content-is-not-returned" });

@@ -7,17 +7,15 @@ import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { indexStatus, openIndexDatabase } from "../src/store/database.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
-import { addCommandHistoryFixture, commandSentinels } from "./workflow-fixtures.ts";
 import { seedDemoPricing } from "../scripts/demo-pricing.ts";
 
 const jsonl = (records: object[]) => records.map((record) => JSON.stringify(record)).join("\n") + "\n";
 
-test("integration: cold and warm indexes replay the complete projection, quota facts and pricing provenance", async (t) => {
+test("integration: cold and warm indexes replay the complete projection and pricing provenance", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-03T10:05:00Z") });
   const root = await mkdtemp(join(tmpdir(), "complete-index-"));
   try {
     const fixture = await createSessionAnalyticsFixture(root);
-    await addCommandHistoryFixture(fixture);
     await seedDemoPricing(fixture.dataDir);
     // Locate the fixture's known rollout without assuming its basename convention.
     const { readdir } = await import("node:fs/promises");
@@ -30,7 +28,7 @@ test("integration: cold and warm indexes replay the complete projection, quota f
       } } },
       { type: "event_msg", timestamp: "2026-10-03T10:01:00Z", payload: { type: "task_complete", turn_id: "PRIVATE_TURN_ID", error: { codex_error_info: "usage_limit_exceeded", message: "PRIVATE_ERROR_TEXT" } } },
     ]));
-    const options = { ...fixture, noIndex: false, offline: true, reliabilityContentRules: true, workflowContentRules: true };
+    const options = { ...fixture, noIndex: false, offline: true };
     const full = validateSnapshot(await analyzeMachineSessions({ ...options, noIndex: true }));
     const cold = validateSnapshot(await analyzeMachineSessions(options));
     const warm = validateSnapshot(await analyzeMachineSessions(options));
@@ -38,33 +36,24 @@ test("integration: cold and warm indexes replay the complete projection, quota f
     assert.deepEqual(warm, full);
     assert.equal(indexStatus(options).lastScan?.parsedSessions, 0);
     assert.equal(indexStatus(options).lastScan?.reusedSessions, 3);
-    assert.ok(full.limitsCache?.profiles.some((p) => p.windows.length && p.limitHitCount));
     const native = warm.sessions.filter((s) => s.provider === "claude" || s.provider === "codex");
-    for (const s of native) for (const key of ["velocity", "reliability", "limitsCache", "outcomes", "workflow", "insightSignals", "mcpEvidence"] as const) assert.ok(s[key], key);
+    for (const s of native) for (const key of ["velocity", "mcpEvidence"] as const) assert.ok(s[key], key);
+    const claude = warm.sessions.find((s) => s.provider === "claude")!;
+    assert.match(claude.historyProfile?.profileKey ?? "", /^profile-[a-f0-9]{20}$/);
+    assert.ok(claude.historyProfile!.days.length);
     const connection = openIndexDatabase(options);
     try {
       const payloads = connection.database.prepare("SELECT payload FROM sessions").all().map((row) => JSON.parse(String(row.payload)));
       assert.equal(payloads.length, warm.sessions.length);
       for (const s of warm.sessions) assert.deepEqual(payloads.find((p) => p.sessionKey === s.sessionKey), s);
       assert.doesNotMatch(JSON.stringify(payloads), /PRIVATE_|secret-command|secret-path|content-is-not-returned/);
-      assert.doesNotMatch(JSON.stringify(payloads), commandSentinels);
     } finally { connection.close(); }
-    // Command history is external to transcript fingerprints but changes Workflow facts.
-    await appendFile(join(dirname(fixture.claudeRoot), "history.jsonl"), jsonl([{ sessionId: "22222222-2222-4222-8222-222222222222", timestamp: Date.parse("2026-07-20T12:00:30Z"), display: "/review PRIVATE_HISTORY_ARGUMENT" }]));
-    const history = await analyzeMachineSessions(options);
-    assert.equal(indexStatus(options).lastScan?.parsedSessions, 1);
-    assert.deepEqual(history, await analyzeMachineSessions({ ...options, noIndex: true }));
-    assert.ok(history.sessions.find((s) => s.provider === "claude")!.workflow!.commands.length > warm.sessions.find((s) => s.provider === "claude")!.workflow!.commands.length);
-    // Disabling P2 is a cache boundary: earlier rule-derived evidence cannot leak into a P0/P1 scan.
+    // Source-deleted history keeps its profile attribution for machine history coverage.
     t.mock.timers.tick(1);
-    const disabled = await analyzeMachineSessions({ ...options, reliabilityContentRules: false, workflowContentRules: false });
-    assert.ok(disabled.sessions.filter((s) => s.reliability).every((s) => s.reliability!.contentRules === "disabled"));
-    assert.ok(disabled.sessions.filter((s) => s.workflow).every((s) => !s.workflow!.coverage.contentRules));
-    assert.equal(indexStatus(options).lastScan?.parsedSessions, 3);
     await rm(fixture.claudeRoot, { recursive: true });
-    const retained = await analyzeMachineSessions({ ...options, reliabilityContentRules: false, workflowContentRules: false });
-    assert.ok(retained.sessions.some((s) => s.provider === "claude" && s.transcript.sourceDeleted));
-    assert.ok(retained.sessions.filter((s) => s.reliability).every((s) => s.reliability!.contentRules === "disabled"));
-    assert.ok(retained.sessions.filter((s) => s.workflow).every((s) => !s.workflow!.coverage.contentRules));
+    const retained = await analyzeMachineSessions(options);
+    const deleted = retained.sessions.find((s) => s.provider === "claude" && s.transcript.sourceDeleted);
+    assert.ok(deleted);
+    assert.deepEqual(deleted.historyProfile, claude.historyProfile);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

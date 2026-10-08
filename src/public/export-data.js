@@ -6,8 +6,6 @@
 /** @typedef {{schemaVersion: number, repositoryId: string, repositoryName: string, provider: string}} CsvBase */
 // Pure interchange helpers shared by the browser and Node; no transcript access.
 import { coverageWarnings, filteredWarning, scanWarnings } from "./evidence.js";
-import { summarizeOutcomes } from "../metrics/outcomes-summary.js";
-import { summarizeWorkflow } from "./workflow-data.js";
 import { timestampMilliseconds } from "./timestamps.js";
 /** @type {Array<keyof import("../types.ts").TokenUsage>} */
 const tokenFields = ["inputTokens", "uncachedInputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "outputTokens", "reasoningOutputTokens", "nonReasoningOutputTokens"];
@@ -162,46 +160,15 @@ export function filterSnapshot(snapshot, filters = {}) {
   }
   const repositories = snapshot.repositories.filter((r) => (!repositoryId || r.repository.id === repositoryId) && (!repositoryIds || repositoryIds.includes(r.repository.id))).map((r) => {
     const rollup = aggregateSessions(byRepository.get(r.repository.id) || []);
-    return { repository: { id: r.repository.id, name: r.repository.name }, ...rollup, ...(r.outcomes ? { outcomes: summarizeOutcomes(byRepository.get(r.repository.id) || []) } : {}), warnings: [...new Set([...scanWarnings(r.warnings || []), ...rollup.warnings])] };
+    return { repository: { id: r.repository.id, name: r.repository.name }, ...rollup, warnings: [...new Set([...scanWarnings(r.warnings || []), ...rollup.warnings])] };
   });
   const combined = aggregateSessions(sessions);
   const discovery = scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]);
-  const repositoryScope = repositories.map((r) => r.repository.id);
   const extras = {
     ...(snapshot.historyCoverage && !Object.values(filters).some((value) => value !== null && value !== undefined) ? { historyCoverage: snapshot.historyCoverage } : {}),
     ...(snapshot.mcpSourceHealth ? { mcpSourceHealth: snapshot.mcpSourceHealth } : {}),
     ...(snapshot.mcpContext ? { mcpContext: snapshot.mcpContext } : {}),
     ...(snapshot.velocity ? { velocity: snapshot.velocity } : {}),
-    ...(snapshot.outcomes ? { outcomes: summarizeOutcomes(sessions) } : {}),
-    ...(snapshot.workflow ? { workflow: summarizeWorkflow(sessions, { ...snapshot.workflow.inventory, skills: snapshot.workflow.installedSkills }, snapshot.generatedAt, repositoryScope) } : {}),
-    ...(snapshot.limitsCache ? { limitsCache: { ...snapshot.limitsCache, subscriptions: subscriptionSelection(snapshot, sessions, Boolean(repositoryId || repositoryIds)) } } : {}),
   };
   return { ...extras, schemaVersion: 1, generatedAt: snapshot.generatedAt, rateCard: snapshot.rateCard, repositories, sessions, ...combined, summary: { ...combined.summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter((r) => r.summary.sessions > 0).length, workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking && !s.transcript.sourceDeleted && !s.transcript.warnings.includes("Source availability could not be checked; showing the last indexed facts.")).length }, warnings: [...new Set([...discovery, ...combined.warnings, filteredWarning])] };
-}
-
-/** Quota observations are global; subscription values follow the selected sessions.
- * @param {MachineAnalytics} snapshot @param {SessionAnalytics[]} sessions @param {boolean} selectedRepository
- * @returns {import("../metrics/limits-cache-types.ts").SubscriptionMonth[]} */
-function subscriptionSelection(snapshot, sessions, selectedRepository) {
-  /** @type {Map<string, {profileKey: string, month: string, usd: number, priced: number, tokens: number, days: Set<string>}>} */
-  const groups = new Map();
-  for (const s of sessions) {
-    const profileKey = s.limitsCache?.profileKey;
-    if (!profileKey || s.costBasis !== "api-list-price-equivalent") continue;
-    for (const bucket of s.limitsCache?.buckets || []) {
-      if (!bucket.day) continue;
-      const month = bucket.day.slice(0, 7), key = `${profileKey}:${month}`;
-      const row = groups.get(key) || { profileKey, month, usd: 0, priced: 0, tokens: 0, days: new Set() };
-      row.usd += bucket.apiEquivalentUsd; row.priced += bucket.pricedTokens; row.tokens += bucket.observedTokens;
-      row.days.add(bucket.day); groups.set(key, row);
-    }
-  }
-  return [...groups.values()].sort((a, b) => a.profileKey.localeCompare(b.profileKey) || a.month.localeCompare(b.month)).map((r) => {
-    const original = snapshot.limitsCache?.subscriptions.find((s) => s.profileKey === r.profileKey && s.month === r.month);
-    const price = original?.monthlyPriceUsd ?? null, coverage = r.tokens ? r.priced / r.tokens : null;
-    return { profileKey: r.profileKey, month: r.month, apiEquivalentUsd: r.usd, monthlyPriceUsd: price,
-      leverage: price !== null && price > 0 && coverage === 1 && r.days.size >= 3 ? r.usd / price : null,
-      observedTokens: r.tokens, pricedTokens: r.priced, pricingCoverage: coverage, activeDays: r.days.size,
-      partialMonth: r.month === snapshot.generatedAt.slice(0, 7), scope: selectedRepository ? "selected-repository" : original?.scope ?? "all-repositories" };
-  });
 }

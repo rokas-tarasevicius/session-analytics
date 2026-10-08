@@ -12,7 +12,6 @@ import { projectSession } from "../src/store/projection.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { monthlyTotals, parityDiff, paritySession, schemaFailureFields } from "../scripts/parity.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
-import { createOutcomeFixture, outcomeSentinels } from "./outcomes-fixtures.ts";
 import { changedEvidence, evidenceGenerations } from "../scripts/parity-evidence.ts";
 import { rotatingSample } from "../src/store/parity.ts";
 
@@ -104,34 +103,6 @@ for (const target of ["session", "ledger"] as const) test(`a warm ${target} audi
     const result = await analyzeMachineSessions(options);
     assert.deepEqual(parityDiff(full.sessions.map(paritySession), result.sessions.map(paritySession)), []);
     assert.ok(result.warnings.some((warning) => warning.includes("full scan")));
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("outcome-bearing Codex and streamed Claude composites retain exact cold/warm/full accounting", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-03T10:05:00Z") });
-  const root = await mkdtemp(join(tmpdir(), "index-outcomes-"));
-  try {
-    const fixture = await createOutcomeFixture(root);
-    const children = join(fixture.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", "22222222-2222-4222-8222-222222222222", "subagents");
-    const child = join(children, (await readdir(children))[0]!);
-    await appendFile(child, [
-      { type: "user", uuid: "synthetic-operation", timestamp: "2026-07-20T12:02:00Z",
-        message: { content: [{ type: "tool_result", tool_use_id: "synthetic-call", content: "PRIVATE_CHILD_CONTENT" }] },
-        toolUseResult: { gitOperation: { commit: { kind: "committed" }, pr: { action: "created" } } } },
-    ].map((row) => JSON.stringify(row)).join("\n") + "\n");
-    const options = { ...fixture, noIndex: false, offline: true };
-    const full = await analyzeMachineSessions({ ...options, noIndex: true });
-    const prefixes = new Set(full.sessions.flatMap((s) => s.outcomes?.links.map((l) => l.ref.replace(/-[a-f0-9]{24}$/, "")) ?? []));
-    for (const prefix of ["branch", "commit", "pr", "commit-event", "pr-event", "workspace-pr"]) assert.ok(prefixes.has(prefix), prefix);
-    for (const session of full.sessions) assert.deepEqual(projectSession(session), JSON.parse(JSON.stringify(session)));
-    validateSnapshot(full);
-    const cold = await analyzeMachineSessions(options), warm = await analyzeMachineSessions(options);
-    assert.deepEqual(cold, full);
-    assert.deepEqual(warm, full);
-    assert.equal(indexStatus(options).lastScan?.parsedSessions, 0);
-    assert.equal(indexStatus(options).lastScan?.reusedSessions, 3);
-    const serialized = JSON.stringify([full, cold, warm]) + (await readFile(join(fixture.dataDir, "index.sqlite"))).toString("utf8");
-    for (const sentinel of [...outcomeSentinels, "PRIVATE_CHILD_CONTENT"]) assert.ok(!serialized.includes(sentinel));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

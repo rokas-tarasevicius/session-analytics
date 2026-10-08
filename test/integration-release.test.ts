@@ -14,11 +14,16 @@ const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
 
 test("release: every dispatcher command shares help and version without scanning", () => {
-  for (const command of ["dashboard", "report", "rates", "insights", "review", "export", "merge", "index", "mcp"]) {
+  for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp"]) {
     const help = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--help"], { encoding: "utf8" });
     assert.equal(help.status, 0, `${command}: ${help.stderr}`); assert.match(help.stdout, /session-analytics/i);
     const result = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--version"], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.trim(), version);
+  }
+  // Removed commands and options fail as unknown instead of being silently accepted.
+  for (const command of ["insights", "review"]) assert.equal(spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--help"], { encoding: "utf8" }).status, 2, command);
+  for (const flag of ["--reliability-content-rules", "--outcomes-git", "--outcomes-github", "--workflow-content-rules", "--insights-config"]) {
+    assert.equal(spawnSync(process.execPath, ["bin/session-analytics.ts", "report", flag, ...(flag === "--insights-config" ? ["x"] : [])], { encoding: "utf8" }).status, 2, flag);
   }
 });
 
@@ -45,7 +50,7 @@ test("release: complete demo API, all six renderers, static modules and privacy 
     const snapshot = validateSnapshot(JSON.parse(raw));
     assert.ok(snapshot.sessions.length > 100); assert.ok(snapshot.repositories.length >= 6);
     for (const provider of ["claude", "codex", "cursor", "copilot", "opencode", "gemini"]) assert.ok(snapshot.sessions.some((s) => s.provider === provider), provider);
-    for (const key of ["velocity", "reliability", "limitsCache", "outcomes", "workflow", "insightSignals", "mcpEvidence"] as const) assert.ok(snapshot.sessions.some((s) => s[key]), key);
+    for (const key of ["velocity", "historyProfile", "mcpEvidence"] as const) assert.ok(snapshot.sessions.some((s) => s[key]), key);
     assert.ok(snapshot.spendByModel.some((m) => m.pricing?.length));
     const refreshed = await realFetch(`${base}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);
@@ -55,7 +60,7 @@ test("release: complete demo API, all six renderers, static modules and privacy 
     const server = await readFile(new URL("../src/server.ts", import.meta.url), "utf8");
     const staticBlock = server.slice(server.indexOf("const staticFiles ="), server.indexOf("let analyticsPromise"));
     const assets = [...staticBlock.matchAll(/\["(\/[^"\n]*)",\s*join\(/g)].map((m) => m[1]!);
-    for (const asset of ["/workflow-data.js", "/metrics/outcomes-summary.js", "/export-data.js", "/chart-colors.js", "/chart-legend.js", "/chart-scale.js"]) assert.ok(assets.includes(asset), asset);
+    for (const asset of ["/export-data.js", "/chart-colors.js", "/chart-legend.js", "/chart-scale.js"]) assert.ok(assets.includes(asset), asset);
     for (const asset of assets) { const r = await realFetch(base + asset); assert.equal(r.status, 200, asset); assert.ok((await r.arrayBuffer()).byteLength, asset); }
     const html = await (await realFetch(base)).text();
     const document = documentFromHtml(html), storage = { getItem: () => null, setItem() {} };
