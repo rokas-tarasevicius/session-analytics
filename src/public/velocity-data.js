@@ -28,6 +28,13 @@ const blank = () => Array(14).fill(0);
 const add = (a, b) => { for (let i = 0; i < 14; i += 1) a[i] += b[i] || 0; return a; };
 const sum = (a) => a.reduce((total, value) => total + value, 0);
 
+/** Dated usage value per active and calendar day; expects data built with metric "value". */
+export function averagePrice(data) {
+  const total = data.totals[metricDefinitions.value.index], days = data.daily.length;
+  const activeDays = data.daily.filter((day) => day.total > 0).length;
+  return { total, days, activeDays, perActiveDay: activeDays ? total / activeDays : null, perCalendarDay: days ? total / days : null };
+}
+
 // Evidence is kept alongside observations at every aggregation level. A zero
 // observation with eligible but unknown tokens must never look like inactivity.
 const evidenceMetrics = { value: 10, reasoning: 11, uncached: 12, cacheRead: 12, cacheWrite: 13 };

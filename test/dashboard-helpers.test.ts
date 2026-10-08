@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  clampWindow, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
+  clampWindow, costByModel, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
   matchesQuery, previousPeriod, shortMoney, sortRepositories, sparklineSummary, summarize, tickScale, windowStartFor,
 } from "../src/public/view-model.js";
 
@@ -24,6 +24,58 @@ function session(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+test("costByModel aggregates provider bases, shares, model details and unattributed value", () => {
+  const model = { model: "claude-opus-5", totalUsd: 2, inputUsd: 1, cachedInputUsd: 0.25, cacheWriteUsd: 0.25, outputUsd: 0.5, calls: 3, inputTokens: 100, outputTokens: 20, priced: true };
+  const result = costByModel([
+    session({ models: [model] }), session({ models: [model] }),
+    session({ costBasis: "provider-reported", cost: { totalUsd: 6 } }),
+    session({ provider: "codex", cost: { totalUsd: 10 }, models: [{ ...model, model: "gpt-5", totalUsd: 8 }] }),
+    session({ provider: "cursor", costBasis: "provider-reported", cost: { totalUsd: 5 } }),
+  ]);
+  assert.equal(result.total, 25);
+  assert.deepEqual(result.providers.map(({ provider, total, api, reported, unattributed }) => ({ provider, total, api, reported, unattributed })), [
+    { provider: "codex", total: 10, api: 10, reported: 0, unattributed: 2 },
+    { provider: "claude", total: 10, api: 4, reported: 6, unattributed: 6 },
+    { provider: "cursor", total: 5, api: 0, reported: 5, unattributed: 5 },
+  ]);
+  for (const provider of result.providers) assert.equal(provider.total, provider.api + provider.reported);
+  assert.equal(result.providers.reduce((sum, provider) => sum + provider.unattributed, 0) + result.models.reduce((sum, model) => sum + model.value, 0), result.total);
+  assert.deepEqual(result.models.map(({ provider, share }) => [provider, share]), [["codex", 8 / 25], ["claude", 4 / 25]]);
+  assert.deepEqual(result.models[1], { provider: "claude", model: "claude-opus-5", value: 4, share: 4 / 25, sessions: 2, calls: 6, inputTokens: 200, outputTokens: 40, components: { input: 2, cached: 0.5, write: 0.5, output: 1 }, priced: true, eligible: 2, selected: 2, evidence: { calls: 2, tokens: 2 } });
+  assert.deepEqual(result.providers[1]!.coverage, { eligible: 3, selected: 3 });
+});
+
+test("costByModel excludes ineligible cost and token evidence while retaining selected and unpriced models", () => {
+  const model = { model: "claude-opus-5", totalUsd: 2, inputUsd: 1, outputUsd: 1, calls: 3, inputTokens: 100, outputTokens: 20, priced: true };
+  const result = costByModel([
+    session({ models: [model] }),
+    session({ models: [model], transcript: { status: "invalid" } }),
+    session({ models: [{ ...model, priced: false }], costBasis: "unavailable" }),
+    session({ provider: "codex", models: [], costBasis: "unavailable" }),
+  ]);
+  assert.equal(result.total, 2); assert.equal(result.providers.length, 1);
+  const row = result.models[0]!;
+  assert.equal(row.value, 2); assert.equal(row.share, 1); assert.equal(row.eligible, 1);
+  assert.equal(row.selected, 3); assert.equal(row.sessions, 3); assert.equal(row.priced, false);
+  assert.equal(row.calls, 6); assert.equal(row.inputTokens, 200); assert.equal(row.outputTokens, 40);
+  assert.deepEqual(row.components, { input: 1, cached: 0, write: 0, output: 1 });
+  assert.deepEqual(result.providers[0]!.coverage, { eligible: 1, selected: 3 });
+});
+
+test("costByModel sorts by descending value, provider and model, including zero-value evidence", () => {
+  const result = costByModel([
+    session({ provider: "codex", models: [{ model: "z-model", totalUsd: 2 }] }),
+    session({ models: [{ model: "b-model", totalUsd: 2 }, { model: "a-model", totalUsd: 2 }, { model: "high-model", totalUsd: 3 }] }),
+    session({ provider: "gemini", costBasis: "unavailable", models: [{ model: "unpriced-model", totalUsd: 100, priced: false }] }),
+  ]);
+  assert.deepEqual(result.models.map(({ provider, model }) => `${provider}:${model}`), ["claude:high-model", "claude:a-model", "claude:b-model", "codex:z-model", "gemini:unpriced-model"]);
+  assert.deepEqual(result.providers.find(({ provider }) => provider === "claude")!.models.map(({ model }) => model), ["high-model", "a-model", "b-model"]);
+  assert.equal(result.providers.find(({ provider }) => provider === "gemini")!.total, 0);
+  assert.deepEqual(costByModel([]), { total: 0, providers: [], models: [] });
+  const zero = costByModel([session({ costBasis: "unavailable", models: [{ model: "unpriced-model", totalUsd: 100 }] })]);
+  assert.equal(zero.total, 0); assert.equal(zero.models[0]!.share, 0);
+});
 
 test("clampWindow keeps a stale custom range inside the refreshed snapshot and ordered", () => {
   // Review scenario: history now starts on September 15 after the user picked August 10 through September 8.

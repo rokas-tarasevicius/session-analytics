@@ -133,7 +133,7 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
 
     // Native Tab order: skip link, wordmark, palette trigger, then every sidebar view button in sidebar order.
     const navOrder = await browser.evaluate<string[]>(`[...document.querySelectorAll('.view-nav [data-view-button]')].map((button) => button.dataset.viewButton)`);
-    assert.deepEqual(navOrder, ["summary", "velocity", "costs", "models", "pricing", "tools", "activity"]);
+    assert.deepEqual(navOrder, ["summary", "velocity", "costs", "pricing", "tools", "activity"]);
     const tabbed: string[] = [];
     for (let index = 0; index < 3 + navOrder.length; index += 1) {
       await browser.key("Tab");
@@ -189,6 +189,29 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     assert.equal(await browser.evaluate(`document.querySelector('#metric-spend').textContent`), headline);
     await browser.evaluate(`document.querySelector('[data-provider-filter="claude"]').click()`);
 
+    // Retired G M does nothing; model detail now lives in Costs with equal-width rails across each panel.
+    await browser.evaluate(`document.body.focus()`);
+    await browser.key("g", { code: "KeyG", text: "g" });
+    await browser.key("m", { code: "KeyM", text: "m" });
+    assert.equal(await browser.evaluate(`document.querySelector('[data-view-button][aria-current="page"]').dataset.viewButton`), "summary");
+    await browser.evaluate(`document.querySelector('[data-view-button="costs"]').click()`);
+    assert.equal(await browser.evaluate(`document.querySelector('#repository-cost-components')`), null);
+    for (const theme of ["light", "dark"]) for (const width of [1440, 390]) {
+      await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width });
+      await delay(100);
+      for (const selector of [".cost-rail", ".cost-model-track"]) {
+        const widths = await browser.evaluate<number[]>(`[...document.querySelectorAll('${selector}')].map((rail) => rail.getBoundingClientRect().width)`);
+        assert.ok(widths.length > 0 && widths.every((value) => value > 0 && Math.abs(value - widths[0]!) < 1));
+      }
+      assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`), true);
+    }
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
+    await browser.evaluate(`document.documentElement.dataset.theme = 'dark'; document.querySelector('[data-view-button="velocity"]').click()`);
+    assert.equal(await browser.evaluate(`document.querySelector('#velocity-view').firstElementChild.classList.contains('velocity-lead')`), true);
+    assert.equal(await browser.evaluate(`document.querySelector('.velocity-lead article:last-child strong').textContent`), headline);
+    await browser.evaluate(`document.querySelector('[data-view-button="summary"]').click()`);
+
     // A single-day custom window draws persistent data points.
     const spendDay = Object.keys(snapshot.sessions.find((item) => Object.keys(item.spendByDay).length)?.spendByDay ?? {})[0];
     assert.ok(spendDay, "fixture has a day with priced usage");
@@ -233,6 +256,17 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
         await delay(50);
       }
       assert.equal(await browser.evaluate(`document.querySelector('#window-segment [aria-pressed="true"]').dataset.windowPreset`), expected);
+    }
+
+    for (const query of ["?view=models", ""]) {
+      await browser.evaluate(`localStorage.setItem('session-analytics-view', 'models')`);
+      await browser.send("Page.navigate", { url: `${origin}/${query}` });
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await browser.evaluate(`document.querySelector('#sync-context')?.dataset.state`)) === "live" &&
+          (await browser.evaluate(`location.search`)) === query) break;
+        await delay(50);
+      }
+      assert.equal(await browser.evaluate(`document.querySelector('[data-view-panel="costs"]').hidden`), false);
     }
 
     // Icon rail keeps every view name in the accessibility tree and shows a hover label.

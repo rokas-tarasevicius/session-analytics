@@ -8,7 +8,7 @@ import test from "node:test";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { analyzeMachineSessionsIsolated } from "../src/analysis-process.ts";
 import { claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed, localClock, VelocityAccumulator, velocityDimension, velocityEffort, zeroVelocity } from "../src/metrics/velocity.ts";
-import { buildVelocity, calendarDays, guardedDelta, localDay, metricDefinitions, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
+import { averagePrice, buildVelocity, calendarDays, guardedDelta, localDay, metricDefinitions, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
 import type { SessionAnalytics, SessionVelocity, VelocityValues } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 import { addUnsafeVelocityModels, unsafeVelocityModels } from "./velocity-fixtures.ts";
@@ -221,6 +221,16 @@ function synthetic(dailyValues: Array<[string, number]>, options: { agent?: stri
     velocity: { dimensions: [{ agent: options.agent ?? "claude-cli", model: options.model ?? "synthetic-model", executionKind: "top-level", effort: "high" }], buckets: dailyValues.map(([day, value]) => [day, 12, 0, values(value)]), undated: [[0, values(2)]] },
   } as SessionAnalytics;
 }
+
+test("averagePrice uses dated value and only positive-value days, with a separate calendar average", () => {
+  const sessions = [synthetic([["2026-09-30", 500], ["2026-10-01", 4], ["2026-10-01", 2], ["2026-10-02", 0], ["2026-10-04", 6], ["2026-10-05", 100]])];
+  const data = buildVelocity(sessions, { start: "2026-10-01", end: "2026-10-04", metric: "value" });
+  assert.deepEqual(averagePrice(data), { total: 12, days: 4, activeDays: 2, perActiveDay: 6, perCalendarDay: 3 });
+  const idle = buildVelocity([synthetic([["2026-10-01", 0]])], { start: "2026-10-01", end: "2026-10-04", metric: "value" });
+  assert.deepEqual(averagePrice(idle), { total: 0, days: 4, activeDays: 0, perActiveDay: null, perCalendarDay: 0 });
+  const empty = buildVelocity([], { start: "2026-10-04", end: "2026-10-01", metric: "value" });
+  assert.deepEqual(averagePrice(empty), { total: 0, days: 0, activeDays: 0, perActiveDay: null, perCalendarDay: null });
+});
 
 test("all dimensions, token classes and granularities conserve totals within the activity window", () => {
   const sessions = Array.from({ length: 12 }, (_, i) => synthetic([["2026-09-30", 500], ["2026-10-01", i + 1], ["2026-10-03", 10], ["2026-10-04", 100]], { repository: `synthetic-${i}`, model: `model-${i}` }));

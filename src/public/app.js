@@ -1,9 +1,9 @@
-import { componentColor, modelColor, providerColor } from "./chart-colors.js";
+import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
-  clampWindow, costTotals, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
+  clampWindow, costByModel, costTotals, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
   groupByRepository, heatLevel, matchesQuery, mergeModels, namedTotals, percent, previousPeriod, providerLabels,
   providerOrder, repositoryKey, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, spendDays, summarize, tickScale,
   windowStartFor,
@@ -41,13 +41,11 @@ const elements = {
   input: $("#metric-input"), live: $("#metric-live"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
   liveNote: $("#metric-live-note"), retentionNote: $("#retention-note"),
-  modelsByProvider: $("#models-by-provider"), modelMetricSwitch: $("#model-metric-switch"),
   pageTitle: $("#page-title"), palette: $("#command-palette"),
-  providerCostComponents: $("#provider-cost-components"),
+  providerCostModels: $("#provider-cost-models"), costModels: $("#cost-models"),
   providerDonut: $("#provider-donut"), providerLegend: $("#provider-legend"),
   rateCardDate: $("#rate-card-date"), rateCardLinks: $("#rate-card-links"), refresh: $("#refresh-button"),
   repositories: $("#metric-repositories"), repositorySubagentSpend: $("#repository-subagent-spend"),
-  repositoryCostComponents: $("#repository-cost-components"),
   repositoryFilter: $("#repository-filter"), repositoryList: $("#repository-list"), repositoryNote: $("#metric-repository-note"),
   repositoryNav: $(".repo-nav"), repositoryNavCount: $("#repo-nav-count"),
   repositoryRows: $("#repository-rows"), repositorySpend: $("#repository-spend"),
@@ -69,9 +67,9 @@ const viewPanels = [...document.querySelectorAll("[data-view-panel]")];
 const windowButtons = [...elements.windowSegment.querySelectorAll("[data-window-preset]")];
 const sortButtons = [...document.querySelectorAll("th .sort[data-sort]")];
 
-const viewOrder = ["summary", "velocity", "costs", "models", "pricing", "tools", "activity"];
-const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", models: "Models", pricing: "Pricing", tools: "Tools", activity: "Activity" };
-const viewChords = { s: "summary", v: "velocity", c: "costs", m: "models", p: "pricing", t: "tools", a: "activity" };
+const viewOrder = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
+const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", pricing: "Pricing", tools: "Tools", activity: "Activity" };
+const viewChords = { s: "summary", v: "velocity", c: "costs", p: "pricing", t: "tools", a: "activity" };
 const providerScopedViews = ["activity", "tools"];
 const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
@@ -79,7 +77,6 @@ const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days",
 
 let snapshot = null;
 let sessionsByRepository = new Map();
-let modelMetric = "value";
 let toolsSelectedName = null;
 let toolsExpanded = false;
 let windowPreset = "30";
@@ -470,96 +467,66 @@ function renderActivity(view) {
   renderBars(elements.activityRepositories, repositories, (value) => integer.format(value), 12);
 }
 
-const componentLabels = { cached: "Cache read", input: "Input", output: "Output", reported: "Provider-reported", write: "Cache write" };
+const componentLabels = { input: "Input", cached: "Cache read", write: "Cache write", output: "Output" };
+const unattributedColor = "repeating-linear-gradient(45deg, var(--muted) 0 4px, var(--surface-3) 4px 6px)";
 
-function renderCostRows(container, groups) {
+function renderCostRows(container, providers) {
   clear(container); const list = node("div", null, "cost-stack-list");
-  const maximum = scaleMaximum(groups.map(({ cost }) => cost.total + cost.reported));
-  const names = ["input", "cached", "write", "output", "reported"];
-  for (const group of groups) {
-    const total = group.cost.total + group.cost.reported;
-    if (total <= 0 && !group.coverage) continue;
-    const row = node("div", null, "cost-stack-row"); row.append(node("strong", group.name));
+  const maximum = scaleMaximum(providers.map(({ total }) => total));
+  for (const group of providers) {
+    const row = node("div", null, "cost-stack-row"); row.append(node("strong", providerLabels[group.provider]));
     const rail = node("div", null, "cost-rail"), stack = node("div", null, "cost-stack");
-    const base = group.provider ? providerColor(group.provider) : "var(--chart-neutral)";
-    const parts = names.map((name) => [name, group.cost[name]]).filter(([, value]) => value > 0);
-    const widths = stackPercents(parts.map(([, value]) => value), maximum);
+    const parts = group.models.filter(({ value }) => value > 0).map(({ model, value }) => ({ name: model, value, color: modelColor(group.provider, model), id: `${group.provider}:${model}` }));
+    if (group.unattributed > 0) parts.push({ name: "No model evidence", value: group.unattributed, color: unattributedColor, id: `${group.provider}:unattributed` });
+    const widths = stackPercents(parts.map(({ value }) => value), maximum);
+    const detail = parts.map(({ name, value }) => `${name}: ${money(value)} (${percent(group.total ? value / group.total : 0)} of provider)`);
     stack.setAttribute("role", "img");
-    stack.setAttribute("aria-label", parts.map(([name, value]) => `${componentLabels[name]} ${money(value)}`).join(", "));
-    stack.title = parts.map(([name, value]) => `${componentLabels[name]}: ${money(value)} (${((value / total) * 100).toFixed(1)}%)`).join("\n");
-    for (const [index, [name, value]] of parts.entries()) {
-      const bar = node("i"); bar.dataset.component = name; bar.setAttribute("data-series", name);
-      bar.style.width = `${widths[index]}%`; bar.style.background = componentColor(name, base); stack.append(bar);
+    stack.setAttribute("aria-label", `${providerLabels[group.provider]}: ${money(group.total)}. ${detail.join(", ")}`);
+    stack.title = detail.join("\n");
+    for (const [index, part] of parts.entries()) {
+      const bar = node("i"); bar.setAttribute("data-series", part.id);
+      bar.style.width = `${widths[index]}%`; bar.style.background = part.color; stack.append(bar);
     }
-    rail.append(stack);
-    row.append(rail, group.coverage ? valueWithCoverage(total, group.coverage, money, "priced value") : node("strong", money(total))); list.append(row);
+    rail.append(stack); row.append(rail, valueWithCoverage(group.total, group.coverage, money, "priced value")); list.append(row);
   }
   if (list.childElementCount === 0) emptyState(list, "No priced activity in this view.");
   container.append(list);
-  const legend = node("div", null, "cost-legend");
-  renderLegend(legend, names.map((name) => {
-    const value = groups.reduce((sum, group) => sum + group.cost[name], 0);
-    return { id: name, label: componentLabels[name], color: componentColor(name, "var(--text-2)"), value, valueLabel: money(value), mark: "rect" };
-  }), { target: list });
-  container.append(legend);
+}
+
+function renderModelCosts(container, data) {
+  clear(container); const list = node("div", null, "cost-model-list");
+  const rows = data.models.map((model) => ({ ...model, coverage: { eligible: model.eligible, selected: model.selected } }));
+  for (const provider of data.providers) if (provider.unattributed > 0.000001) rows.push({ provider: provider.provider, model: "No model evidence", value: provider.unattributed, share: data.total ? provider.unattributed / data.total : 0, coverage: provider.coverage, unattributed: true });
+  rows.sort((left, right) => right.value - left.value || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
+  const maximum = scaleMaximum(rows.map(({ value }) => value));
+  for (const model of rows) {
+    const row = node("div", null, "cost-model-row"), label = node("div", null, "cost-model-label");
+    const provider = node("small", providerLabels[model.provider]); provider.style.setProperty("--provider-color", providerColor(model.provider));
+    label.append(node("span", model.model), provider);
+    const meta = model.unattributed ? "Provider value without model evidence" : [
+      `${integer.format(model.sessions)} session${model.sessions === 1 ? "" : "s"}`,
+      model.evidence.calls && model.calls > 0 ? `${integer.format(model.calls)} calls` : null,
+      model.evidence.tokens && model.inputTokens + model.outputTokens > 0 ? `${compact.format(model.inputTokens)} in / ${compact.format(model.outputTokens)} out tokens` : "no model token evidence",
+      model.priced ? null : model.value > 0 ? "partly unpriced" : "unpriced",
+    ].filter(Boolean).join(" · ");
+    const detail = model.unattributed ? meta : Object.entries(componentLabels).map(([key, name]) => `${name}: ${money(model.components[key])}`).join(", ");
+    row.title = `${model.model} · ${providerLabels[model.provider]}: ${money(model.value)} (${percent(model.share)} of total). ${meta}. ${detail}`;
+    const track = node("div", null, "cost-model-track"), fill = node("i");
+    track.setAttribute("role", "img"); track.setAttribute("aria-label", row.title);
+    fill.style.width = `${barPercent(model.value, maximum)}%`; fill.style.background = model.unattributed ? unattributedColor : modelColor(model.provider, model.model);
+    fill.setAttribute("data-series", `${model.provider}:${model.unattributed ? "unattributed" : model.model}`); track.append(fill);
+    row.append(label, track, valueWithCoverage(model.value, model.coverage, money, "priced value"), node("span", percent(model.share), "cost-model-share"), node("small", meta, "cost-model-meta muted")); list.append(row);
+  }
+  if (list.childElementCount === 0) emptyState(list, "No priced activity in this view.");
+  container.append(list);
 }
 
 function renderCosts(view) {
-  const cost = costTotals(view.sessions);
+  const cost = costTotals(view.sessions), data = costByModel(view.sessions);
   renderMetricValue(elements.costApiTotal, cost.total, metricCoverage(view.sessions, "apiCost"), money, "API-priced value", elements.costApiCoverage); renderMetricValue(elements.costUpperTotal, cost.upper, metricCoverage(view.sessions, "apiCost"), money, "API-priced value", elements.costUpperCoverage);
   renderMetricValue(elements.costProviderTotal, cost.reported, metricCoverage(view.sessions, "reportedCost"), money, "provider-reported value", elements.costProviderCoverage); elements.costCoverage.textContent = view.summary.pricedTokenCoverage === null ? DASH : percent(view.summary.pricedTokenCoverage);
-  renderCostRows(elements.providerCostComponents, providerOrder.map((provider) => ({
-    provider, name: providerLabels[provider], coverage: metricCoverage(view.sessions.filter((session) => session.provider === provider), "cost"), cost: costTotals(view.sessions.filter((session) => session.provider === provider)),
-  })));
-  renderCostRows(elements.repositoryCostComponents, view.repositories.map(({ repository }) => ({
-    name: repository.name, coverage: metricCoverage(view.sessions.filter(({ repositoryId }) => repositoryId === repository.id), "cost"), cost: costTotals(view.sessions.filter(({ repositoryId }) => repositoryId === repository.id)),
-  })).sort((left, right) => (right.cost.total + right.cost.reported) - (left.cost.total + left.cost.reported)).slice(0, 12));
-}
-
-function renderModels(view) {
-  clear(elements.modelsByProvider); const sessions = view.sessions;
-  const models = mergeModels(sessions);
-  const sessionsPerModel = new Map();
-  for (const session of sessions) for (const model of session.models) {
-    const key = `${session.provider}:${model.model}`; sessionsPerModel.set(key, (sessionsPerModel.get(key) || 0) + 1);
-  }
-  const metric = {
-    calls: { format: (value) => `${integer.format(value)} calls`, value: (model) => model.calls },
-    input: { format: (value) => `${compact.format(value)} tokens`, value: (model) => model.inputTokens },
-    output: { format: (value) => `${compact.format(value)} tokens`, value: (model) => model.outputTokens },
-    value: { format: money, value: (model) => model.totalUsd },
-  }[modelMetric];
-  const maximum = scaleMaximum(models.map(metric.value));
-  for (const provider of providerOrder) {
-    const providerModels = models.filter((model) => model.provider === provider);
-    const providerSessions = sessions.filter((session) => session.provider === provider);
-    const sourceMetric = { value: "cost", input: "tokens", output: "tokens", calls: "calls" }[modelMetric];
-    const sourceValue = (session) => ({ value: session.cost.totalUsd, input: session.tokens.inputTokens, output: session.tokens.outputTokens, calls: session.metrics.modelCalls })[modelMetric];
-    const eligibleSessions = providerSessions.filter((session) => metricEligible(session, sourceMetric));
-    const unattributed = Math.max(0, eligibleSessions.reduce((total, session) => total + sourceValue(session), 0) - providerModels.reduce((total, model) => total + metric.value(model), 0));
-    if (providerModels.length === 0 && !unattributed) continue;
-    const group = node("section", null, "provider-model-group"); group.style.setProperty("--provider-color", providerColor(provider));
-    const header = node("header"); const title = node("div");
-    title.append(node("h2", providerLabels[provider]), node("div", `${sessions.filter((session) => session.provider === provider).length} sessions`));
-    const bases = new Set(sessions.filter((s) => s.provider === provider).map((s) => s.costBasis));
-    header.append(title, node("span", bases.has("provider-reported") ? bases.has("api-list-price-equivalent") ? "API-equivalent + reported" : "Provider-reported value" : "API-equivalent value", "pill")); group.append(header);
-    for (const model of providerModels.sort((left, right) => metric.value(right) - metric.value(left))) {
-      const row = node("div", null, "model-row"); row.append(node("span", model.model));
-      const track = node("div", null, "model-track"), fill = node("i"); fill.style.width = `${barPercent(metric.value(model), maximum)}%`;
-      fill.style.setProperty("--series-color", modelColor(provider, model.model)); fill.setAttribute("data-series", `${provider}:${model.model}`);
-      if (model.eligible[modelMetric]) track.append(fill);
-      const holder = valueWithCoverage(metric.value(model), { eligible: model.eligible[modelMetric], selected: model.selected }, metric.format, modelMetric === "calls" ? "request evidence" : modelMetric === "value" ? "priced value" : "token evidence");
-      holder.append(node("span", ` · ${model.selected} sessions${model.priced ? "" : " · unpriced"}`, "muted"));
-      row.append(track, holder); group.append(row);
-    }
-    if (unattributed > 0.000001) {
-      const row = node("div", null, "model-row");
-      row.append(node("span", "Unattributed · no model evidence"), node("div"), node("strong", metric.format(unattributed)));
-      group.append(row);
-    }
-    elements.modelsByProvider.append(group);
-  }
-  if (elements.modelsByProvider.childElementCount === 0) emptyState(elements.modelsByProvider, "No model activity in this view.");
+  renderCostRows(elements.providerCostModels, data.providers);
+  renderModelCosts(elements.costModels, data);
 }
 
 function renderTools(view) {
@@ -577,8 +544,7 @@ function renderTools(view) {
 function clearInactiveAnalyticsViews(activeName) {
   const containers = {
     activity: [elements.activityProviderFilters, elements.activityHeatmap, elements.activityRepositories],
-    costs: [elements.providerCostComponents, elements.repositoryCostComponents],
-    models: [elements.modelsByProvider],
+    costs: [elements.providerCostModels, elements.costModels],
     tools: [elements.toolsProviderFilters, elements.toolsView],
   };
   for (const [name, elementsForView] of Object.entries(containers)) {
@@ -598,7 +564,6 @@ function renderActiveAnalyticsView(view) {
   if (name === "activity") renderActivity(view);
   if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, velocityContext());
   if (name === "costs") renderCosts(view);
-  if (name === "models") renderModels(view);
   if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.sessions);
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
@@ -1268,20 +1233,14 @@ for (const button of sortButtons) button.addEventListener("click", () => {
   else tableSort = { key, direction: key === "name" ? "ascending" : "descending" };
   if (snapshot) renderRepositoryTable(activeView().repositories);
 });
-for (const button of elements.modelMetricSwitch.querySelectorAll("[data-model-metric]")) {
-  button.addEventListener("click", () => {
-    modelMetric = button.dataset.modelMetric;
-    for (const peer of elements.modelMetricSwitch.querySelectorAll("[data-model-metric]")) peer.setAttribute("aria-pressed", String(peer === button));
-    if (snapshot) renderModels(activeView());
-  });
-}
 elements.theme.addEventListener("click", toggleTheme);
 elements.density.addEventListener("click", toggleDensity);
 
 const macLike = /Mac|iPhone|iPad/.test(navigator.platform);
 for (const key of document.querySelectorAll(".key-command")) key.textContent = macLike ? "⌘" : "Ctrl ";
-const urlView = urlParameters.get("view");
-const storedView = urlView && viewOrder.includes(urlView) ? urlView : readPreference("session-analytics-view");
+const viewAlias = (view) => view === "models" ? "costs" : view;
+const urlView = viewAlias(urlParameters.get("view"));
+const storedView = urlView && viewOrder.includes(urlView) ? urlView : viewAlias(readPreference("session-analytics-view"));
 const resetExportMenu = installExportMenu(() => {
   if (elements.sync.dataset.state === "loading") return null;
   if (!snapshot || snapshot.kind === "shared") return snapshot;

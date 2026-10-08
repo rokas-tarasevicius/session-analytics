@@ -112,6 +112,27 @@ export function costTotals(sessions) {
   return result;
 }
 
+/** Whole-session provider value, with model evidence kept separate from unattributed value. */
+export function costByModel(sessions) {
+  const models = mergeModels(sessions).map((model) => ({
+    provider: model.provider, model: model.model, value: model.totalUsd, share: 0,
+    sessions: model.selected, calls: model.calls, inputTokens: model.inputTokens, outputTokens: model.outputTokens,
+    components: { input: model.inputUsd, cached: model.cachedInputUsd, write: model.cacheWriteUsd, output: model.outputUsd },
+    priced: model.priced, eligible: model.eligible.value, selected: model.selected,
+    evidence: { calls: model.eligible.calls, tokens: model.eligible.input },
+  })).sort((left, right) => right.value - left.value || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
+  const providers = providerOrder.map((provider) => {
+    const selected = sessions.filter((session) => session.provider === provider), cost = costTotals(selected);
+    const providerModels = models.filter((model) => model.provider === provider), total = cost.total + cost.reported;
+    return { provider, total, api: cost.total, reported: cost.reported,
+      unattributed: Math.max(0, total - providerModels.reduce((sum, model) => sum + model.value, 0)),
+      coverage: metricCoverage(selected, "cost"), models: providerModels };
+  }).filter(({ total, models }) => total > 0 || models.length);
+  const total = providers.reduce((sum, provider) => sum + provider.total, 0);
+  for (const model of models) model.share = total > 0 ? model.value / total : 0;
+  return { total, providers, models };
+}
+
 /** Groups sessions by repository ID once per snapshot so views never rescan the full list per repository. */
 export function groupByRepository(sessions) {
   const groups = new Map();

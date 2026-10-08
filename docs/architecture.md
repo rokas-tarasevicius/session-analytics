@@ -191,7 +191,7 @@ Retained facts use the parser and price card from their last successful ingest. 
 
 ## Dashboard client
 
-Navigation groups are Overview (Summary, Velocity), Economics (Costs, Models, Pricing), and Usage (Tools, Activity). Activity is last in navigation, view stepping and the command palette. The shared window defaults to 30 days; an explicit `?window=` preset overrides it without browser persistence.
+Navigation groups are Overview (Summary, Velocity), Economics (Costs, Pricing), and Usage (Tools, Activity). Activity is last in navigation, view stepping and the command palette. The shared window defaults to 30 days; an explicit `?window=` preset overrides it without browser persistence.
 
 `src/public/app.js` is a plain ES module with no framework or build step. It fetches one snapshot and derives every view from the flattened `sessions` list, so time-window, repository, and provider filters are applied in the browser without another scan. Velocity filters event-date cells independently of session-start filtering, so a long-running session can contribute activity after its start falls outside the window. The snapshot declares the analysis timezone. Legacy UTC spend fields remain available to other consumers. Only the active view is rendered. Charts are built as inline SVG and DOM nodes; no inline scripts or styles are used, which keeps the CSP strict.
 

@@ -66,7 +66,6 @@
           <div class="nav-section" role="group" aria-label="Economics">
             <p class="nav-heading">Economics</p>
             <button type="button" data-view-button="costs" data-label="Costs"><svg aria-hidden="true"><use href="#i-costs"/></svg><span>Costs</span><kbd aria-hidden="true">G C</kbd></button>
-            <button type="button" data-view-button="models" data-label="Models"><svg aria-hidden="true"><use href="#i-models"/></svg><span>Models</span><kbd aria-hidden="true">G M</kbd></button>
             <button type="button" data-view-button="pricing" data-label="Pricing"><svg aria-hidden="true"><use href="#i-pricing"/></svg><span>Pricing</span><kbd aria-hidden="true">G P</kbd></button>
           </div>
           <div class="nav-section" role="group" aria-label="Usage">
@@ -210,22 +209,18 @@
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
-            <header class="view-header"><div><p class="kicker">Usage value</p><h2 id="costs-title">Costs</h2><p>API-equivalent components and provider-reported value remain separate.</p></div></header>
+            <header class="view-header"><div><p class="kicker">Usage value</p><h2 id="costs-title">Costs</h2><p>API-equivalent and provider-reported value by provider and model. Whole-session values.</p></div></header>
             <div class="kpi-grid compact-metrics" aria-label="Cost totals">
               <article class="kpi accent"><span class="kpi-label">API-equivalent value</span><strong id="cost-api-total">—</strong><small class="kpi-coverage" id="cost-api-total-coverage"></small><small class="kpi-note">Rate-card priced providers</small></article>
               <article class="kpi"><span class="kpi-label">Upper estimate</span><strong id="cost-upper-total">—</strong><small class="kpi-coverage" id="cost-upper-total-coverage"></small><small class="kpi-note">Cache-write assumption</small></article>
               <article class="kpi"><span class="kpi-label">Provider-reported value</span><strong id="cost-provider-total">—</strong><small class="kpi-coverage" id="cost-provider-total-coverage"></small><small class="kpi-note">Retained local estimates</small></article>
               <article class="kpi"><span class="kpi-label">Pricing coverage</span><strong id="cost-coverage">—</strong><small class="kpi-note">Share of observed tokens with a rate</small></article>
             </div>
+            <p class="chart-note">A session’s full value counts when it is in the window. Summary and Velocity use the dated activity ledger.</p>
             <div class="view-grid costs-grid">
-              <article class="panel"><header><div><p class="kicker">Providers</p><h2>Cost components</h2></div></header><div class="chart-slot" id="provider-cost-components"></div></article>
-              <article class="panel"><header><div><p class="kicker">Repositories</p><h2>Cost components by repository</h2></div></header><div class="chart-slot" id="repository-cost-components"></div></article>
+              <article class="panel"><header><div><p class="kicker">Providers</p><h2>Cost by provider</h2></div></header><div class="chart-slot" id="provider-cost-models"></div></article>
+              <article class="panel"><header><div><p class="kicker">Models</p><h2>Cost by model</h2></div></header><div class="chart-slot" id="cost-models"></div></article>
             </div>
-          </section>
-
-          <section class="analytics-view" data-view-panel="models" hidden aria-labelledby="models-title">
-            <header class="view-header"><div><p class="kicker">Providers</p><h2 id="models-title">Models</h2><p>Bars share one scale across all providers.</p></div><div class="segmented" id="model-metric-switch" role="group" aria-label="Model metric"><button type="button" data-model-metric="value" aria-pressed="true">Usage value</button><button type="button" data-model-metric="calls" aria-pressed="false">Model calls</button><button type="button" data-model-metric="input" aria-pressed="false">Input</button><button type="button" data-model-metric="output" aria-pressed="false">Output</button></div></header>
-            <div class="chart-slot" id="models-by-provider"></div>
           </section>
 
           <section class="analytics-view" data-view-panel="tools" hidden aria-labelledby="tools-title">
@@ -294,7 +289,6 @@
           <div><dt>Summary</dt><dd><kbd>g</kbd><kbd>s</kbd></dd></div>
           <div><dt>Velocity</dt><dd><kbd>g</kbd><kbd>v</kbd></dd></div>
           <div><dt>Costs</dt><dd><kbd>g</kbd><kbd>c</kbd></dd></div>
-          <div><dt>Models</dt><dd><kbd>g</kbd><kbd>m</kbd></dd></div>
           <div><dt>Pricing</dt><dd><kbd>g</kbd><kbd>p</kbd></dd></div>
           <div><dt>Tools</dt><dd><kbd>g</kbd><kbd>t</kbd></dd></div>
           <div><dt>Activity</dt><dd><kbd>g</kbd><kbd>a</kbd></dd></div>

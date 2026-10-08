@@ -7,7 +7,10 @@
 #velocity-view { display: grid; gap: var(--gap); }
 #velocity-view .filter-bar { margin: 0; }
 #velocity-view .kpi-grid { margin: 0; }
+.velocity-lead { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.velocity-totals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 #velocity-view .panel { min-height: 0; margin: 0; }
+#velocity-view .panel-meta { white-space: normal; overflow-wrap: anywhere; }
 .velocity-chart { min-width: 0; }
 .velocity-chart > svg { display: block; width: 100%; height: auto; max-height: none; touch-action: pan-y; }
 .velocity-chart svg:focus-visible { outline: 2px solid var(--coral); outline-offset: 4px; border-radius: var(--radius-sm); }
@@ -28,3 +31,4 @@
 .velocity-projection h3 { margin: 0; }
 .velocity-projection .projected { font: 500 22px/1.1 var(--font-mono); letter-spacing: -0.03em; margin: 6px 0 2px; }
 @media (max-width: 760px) { .velocity-chart > svg { min-height: 180px; } .velocity-inspection { max-height: 200px; overflow: auto; } }
+@media (max-width: 520px) { .velocity-lead, .velocity-totals { grid-template-columns: 1fr; } }

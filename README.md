@@ -57,7 +57,7 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 ## Features
 
 - **Cross-provider evidence.** Claude Code, Codex, Cursor, Copilot CLI, OpenCode and Gemini, with Conductor recovery when canonical history is missing. Summary and activity-only evidence carry explicit coverage and N/A values.
-- **Seven dashboard views.** Overview: Summary, Velocity. Economics: Costs, Models, Pricing. Usage: Tools, Activity. Every view has a sidebar entry, command-palette action, `g` shortcut and `?view=` URL hook.
+- **Six dashboard views.** Overview: Summary, Velocity. Economics: Costs, Pricing. Usage: Tools, Activity. Every view has a sidebar entry, command-palette action, `g` shortcut and `?view=` URL hook.
 - **Control Room.** Shared cards and tables, repository focus, scoped provider chips, keyboard navigation, light/dark themes and compact/comfortable density. Summary provider chips affect its daily chart; Activity and Tools keep independent provider selections.
 - **Measured usage.** API-equivalent value with dated price provenance, token-class coverage, velocity, quota freshness, cache/context evidence and optional plan comparisons. Value is not an invoice; unknown evidence is never presented as zero.
 - **Reliability and workflow in reports and JSON.** Tool outcomes and latency, verification, permissions, active/wait timing, concurrency, steering, slash-command names and installed skills. Optional P2 content rules are off by default.

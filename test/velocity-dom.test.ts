@@ -3,10 +3,60 @@ import test from "node:test";
 import { agentLabels, buildVelocity } from "../src/public/velocity-data.js";
 import type { SessionAnalytics } from "../src/types.ts";
 
-import { Element } from "./release-dom.ts";
+import { Element, documentFromHtml } from "./release-dom.ts";
 
 const descendants = (node: Element): Element[] => node.children.flatMap((child) => [child, ...descendants(child)]);
 const hasClass = (node: Element, name: string) => `${node.className} ${node.getAttribute("class") ?? ""}`.split(" ").includes(name);
+
+test("Velocity leads with value cards before filters and keeps them independent of the plotted metric", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocity, formatMetric } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const sessions = ["claude", "codex"].map((provider, i) => ({
+      provider, createdAt: "2026-08-01T12:00:00Z", repositoryId: "synthetic", repositoryName: "Synthetic", velocity: {
+        dimensions: [{ agent: `${provider}-cli`, model: "synthetic", executionKind: "top-level", effort: "unknown" }],
+        buckets: [["2026-09-01", 12, 0, [i + 2, 100, 100, 0, 0, 20, 0, 4, 0, 0, i ? 100 : 120, 20, 100, 100]], ["2026-09-03", 12, 0, [i + 2, 100, 100, 0, 0, 20, 0, 4, 0, 0, 120, 20, 100, 100]]],
+        undated: [[0, [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]],
+      },
+    })) as unknown as SessionAnalytics[];
+    const container = new Element(), context = { start: "2026-09-01", end: "2026-09-04", generatedAt: "2026-09-04T12:00:00Z", timeZone: "Europe/London" };
+    renderVelocity(container, sessions, context);
+    const lead = container.querySelector(".velocity-lead")!;
+    assert.equal(container.children[0], lead); assert.ok(container.children[1]!.classList.contains("filter-bar"));
+    assert.ok(container.children[2]!.classList.contains("panel")); assert.equal(container.children[3], container.querySelector(".velocity-totals"));
+    assert.deepEqual(lead.querySelectorAll(".kpi-label").map((node) => node.textContent.trim()), ["Average price", "Usage value"]);
+    assert.ok(lead.children[0]!.classList.contains("accent"));
+    const total = buildVelocity(sessions, { ...context, metric: "value" }).totals[0]!;
+    const assertLead = (value: number) => assert.equal(lead.querySelectorAll("strong")[1]!.textContent.trim(), formatMetric(value, "value"));
+    assertLead(total); assert.equal(lead.querySelector("strong")!.textContent.trim(), "$5.00");
+    assert.match(lead.textContent, /per active day · 2 of 4 days active · \$2.50 per calendar day/);
+    assert.match(lead.textContent, /4 calendar days · API-equivalent · partially observed/);
+    assert.equal(container.querySelectorAll(".velocity-totals")[0]!.children.length, 3);
+    assert.doesNotMatch(container.textContent, /Selected period/);
+    const metric = container.querySelector("#velocity-metric")!, granularity = container.querySelector("#velocity-granularity")!;
+    const change = (control: Element, value: string) => { control.value = value; control.listeners.get("change")!(); };
+    change(metric, "input"); assertLead(total);
+    assert.equal(container.querySelector("[data-velocity-total]")!.textContent.trim(), "400");
+    assert.match(container.querySelector(".panel-meta")!.textContent, /Total\s+400\s+· 2026-09-01 → 2026-09-04 · Europe\/London/);
+    for (const value of ["week", "month", "hour", "day"]) { change(granularity, value); assertLead(total); }
+    change(metric, "value");
+    for (const value of ["week", "month", "hour", "day"]) { change(granularity, value); assertLead(total); }
+    change(container.querySelector("#velocity-mode")!, "cumulative"); assertLead(total);
+    const codex = container.querySelector('[data-provider="codex"]')!.querySelector("input")!;
+    codex.checked = false; codex.listeners.get("change")!(); assertLead(4);
+    assert.match(lead.textContent, /6 of 7 providers/); assert.doesNotMatch(lead.textContent, /partially observed/);
+    renderVelocity(container, sessions, { ...context, end: "2026-09-02" }); assertLead(2);
+    assert.match(lead.textContent, /1 of 2 days active · \$1.00 per calendar day/);
+    const claude = container.querySelector('[data-provider="claude"]')!.querySelector("input")!;
+    claude.checked = false; claude.listeners.get("change")!(); assertLead(0);
+    assert.equal(lead.querySelector("strong")!.textContent.trim(), "—");
+    assert.match(lead.textContent, /No days with positive usage value/);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
 
 test("agent SVG encodings are unique, stable under filtering and reproduced in the legend", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");

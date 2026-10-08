@@ -203,7 +203,7 @@ Every metric added by this roadmap carries interpretation notes in its registry 
 
 ## v0.6.0 release integration
 
-- [x] Control Room shell with consistent theme components, palette, shortcuts and URL entry points. The current dashboard has seven views: Summary, Velocity, Costs, Models, Pricing, Tools and Activity.
+- [x] Control Room shell with consistent theme components, palette, shortcuts and URL entry points. The current dashboard has six views: Summary, Velocity, Costs, Pricing, Tools and Activity.
 - [x] One dispatcher, shared options, complete schema/index projection and cross-lane MCP summaries.
 - [x] Cold/warm/full projection parity including pricing, P2 settings and quota replay; one synthetic demo for every view.
 - [x] Reconciled release documentation and explicit privacy/network boundaries.

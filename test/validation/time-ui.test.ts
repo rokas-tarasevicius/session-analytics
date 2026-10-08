@@ -38,7 +38,7 @@ test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch
 
 test('time-ui: priced-value KPI and sparkline follow activity dates like Velocity, including earlier starts', () => {
   // A session started before the window still contributes the value it used inside the window; the KPI,
-  // its sparkline and Velocity's "Selected period" all read the same activity ledger.
+  // its sparkline and Velocity's "Usage value" card all read the same activity ledger.
   const bucket = (day: string, value: number) => [day, 12, 0, [value, 100, 100, 0, 0, 20, 0, 1, 0, 0, 120, 0, 100, 0]];
   const velocity = (cells: unknown[]) => ({ dimensions: [{ agent: 'claude-cli', model: 'm', executionKind: 'top-level', effort: 'unknown' }], buckets: cells, undated: [] });
   const old = {provider:'claude',repositoryId:'r',createdAt:'2026-08-31T12:00:00Z',spendByDay:{'2026-09-01':7},velocity:velocity([bucket('2026-08-31',1),bucket('2026-09-01',7)])};

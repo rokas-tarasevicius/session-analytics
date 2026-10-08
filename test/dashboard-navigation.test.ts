@@ -3,20 +3,20 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { harness, sample } from "./validation/aggregation-ui-harness.ts";
 
-const views = ["summary", "velocity", "costs", "models", "pricing", "tools", "activity"];
+const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 
-test("dashboard navigation, stepping, palette and shortcut help share the seven-view order", async () => {
+test("dashboard navigation, stepping, palette and shortcut help share the six-view order", async () => {
   const { document, run } = await harness([]);
   run("snapshot = null");
   assert.deepEqual(document.querySelectorAll("[data-view-button]").map((button) => button.dataset.viewButton), views);
   assert.deepEqual([...run("viewOrder")], views);
   assert.deepEqual(document.querySelectorAll(".nav-section").map((group) => [group.getAttribute("aria-label"), group.querySelectorAll("[data-view-button]").map((button) => button.dataset.viewButton)]), [
-    ["Overview", ["summary", "velocity"]], ["Economics", ["costs", "models", "pricing"]], ["Usage", ["tools", "activity"]],
+    ["Overview", ["summary", "velocity"]], ["Economics", ["costs", "pricing"]], ["Usage", ["tools", "activity"]],
   ]);
   assert.deepEqual([...run("paletteItems().filter(item => item.group === 'Views').map(item => item.keywords)")], views.map((view) => `view ${view}`));
   const chords = run("viewChords");
   assert.deepEqual(Object.values(chords), views);
-  for (const key of ["d", "r", "l", "w", "k", "o", "i"]) assert.equal(chords[key], undefined);
+  for (const key of ["m", "d", "r", "l", "w", "k", "o", "i"]) assert.equal(chords[key], undefined);
   assert.equal(chords.a, "activity");
   run("switchView('summary')");
   for (const expected of [...views.slice(1), "summary"]) {
@@ -30,8 +30,25 @@ test("dashboard navigation, stepping, palette and shortcut help share the seven-
   assert.deepEqual([...help.matchAll(/<dt>([^<]+)<\/dt>/g)].slice(0, views.length).map((match) => match[1]!.toLowerCase()), views);
   assert.equal(document.querySelectorAll("[data-view-panel]").length, views.length);
   const icons = new Set([...html.matchAll(/<symbol id="i-([^"]+)"/g)].map((match) => match[1]));
+  assert.ok(icons.has("models"));
+  assert.ok(document.querySelector('[data-export="models"]'));
+  assert.ok(document.querySelector("#model-spend"));
   for (const item of run("paletteItems()")) assert.ok(icons.has(item.icon), item.icon);
   for (const match of html.matchAll(/href="#i-([^"]+)"/g)) assert.ok(icons.has(match[1]), match[1]);
+});
+
+test("old Models URLs and preferences open Costs, with valid URLs taking precedence", async () => {
+  const { context, run } = await harness([]); run("snapshot = null");
+  const app = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
+  const startup = app.slice(app.indexOf("const viewAlias ="), app.indexOf("const resetExportMenu = installExportMenu"));
+  for (const [query, preference, expected] of [
+    ["view=models", "activity", "costs"], ["", "models", "costs"], ["view=tools", "models", "tools"],
+    ["view=unknown", "models", "costs"], ["view=unknown", "unknown", "summary"],
+  ]) {
+    context.query = query; context.localStorage = { getItem: () => preference, setItem() {} };
+    run(`{ const urlParameters = new URLSearchParams(query); ${startup} switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary"); }`);
+    assert.equal(run("currentViewName()"), expected);
+  }
 });
 
 test("dashboard defaults to 30 observed days and URL windows override without persisting", async () => {

@@ -406,12 +406,19 @@ Costs retain these estimates, and the Pricing view shows their assumptions besid
 
 `rates diff` emits source comparisons (previous/latest timestamps, null if unavailable) and changed model rates (`before`/`after`, null for additions/removals). `large` flags changes greater than 50%, removed prices and changed tier structure; a first snapshot has no comparable changes. `rates update` returns a fixed result status, per-source result/model/rejection counts and the same changes. Partial/failed updates preserve previously valid cache evidence. Neither command interprets a price change as an invoice change.
 
+## Costs
+
+Provider and model rows use whole-session values for sessions started in the selected window (UTC).
+Provider totals combine API-equivalent and provider-reported value. Model rows include only eligible
+priced value; **No model evidence** is provider value not attributed to any model. Each panel shares
+one zero-based scale across its rows. Token-type dollar detail is available in model row tooltips.
+
 ## Velocity (snapshot version 1)
 
 The Velocity tab and Summary share the same deduplicated activity ledger. **Usage value has one
 dashboard definition:** dated API-equivalent value by activity date in the declared timezone. The
 Summary "Priced usage value" KPI, its sparkline and delta, the sidebar repository values, the
-"Usage value by repository" bars, Summary's daily chart and Velocity's "Selected period" all sum this
+"Usage value by repository" bars, Summary's daily chart and Velocity's "Usage value" card all sum this
 ledger over the same selected dates, so they agree for the same window, repository focus and providers
 (Velocity's provider chips state "N of M providers" when some are off; Summary always uses all).
 Undated value (including Cursor's provider-reported value) and sessions from sources without a ledger
@@ -426,6 +433,12 @@ values of sessions started in the window (UTC); their value can differ for that 
 `version: 1` and the analysis process's IANA `timeZone`. Each session optionally carries
 `agentIdentity` and `velocity`. Old snapshots without these additions remain readable;
 the velocity view asks for a refresh instead of reconstructing activity from session totals.
+
+Velocity opens with **Average price** and **Usage value**, both from dated usage value for the selected
+window and provider chips, independent of the chart's Metric selector. Average price divides dated
+usage value by the number of calendar days with value greater than zero; it is unavailable when no
+days are active. Its note also shows active days out of all calendar days and value per calendar day.
+The chart header shows the selected metric's period total.
 
 ### Calendar and attribution
 
