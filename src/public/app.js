@@ -9,7 +9,7 @@ import { providerColors, providerMark, renderProviderEvidence, dailySpendByProvi
 
 import { renderPricingPanel } from "./pricing.js";
 import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
-import { localDay, sessionStartWindow } from "./velocity-data.js";
+import { buildVelocity, localDay, sessionStartWindow } from "./velocity-data.js";
 import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
 import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
@@ -830,16 +830,15 @@ function populateRepositories() {
 function renderRepositoryNav() {
   if (!wideLayout.matches) { navDirty = true; return; }
   navDirty = false;
-  const start = elements.windowStart.value, end = elements.windowEnd.value;
+  const start = elements.windowStart.value || elements.windowStart.min, end = elements.windowEnd.value || elements.windowEnd.max;
   const key = `${snapshot.generatedAt}|${start}|${end}`;
   if (navCache.key !== key) {
     const days = daysBetween(start, end);
-    const windowSessions = sessionsInWindow(snapshot.sessions);
     const rows = snapshot.repositories.map((item) => {
-      const sessions = sessionsInWindow(repositorySessions(item.repository.id));
-      return { id: item.repository.id, name: item.repository.name, series: dailySpendSeries(sessions, days), value: summarize(sessions).estimatedSpendUsd };
+      const activity = buildVelocity(repositorySessions(item.repository.id), { start, end, metric: "value" });
+      return { id: item.repository.id, name: item.repository.name, series: activity.daily.map(({ total }) => total), value: activity.totals[0] };
     }).sort((left, right) => right.value - left.value || left.name.localeCompare(right.name));
-    navCache = { days, key, rows, total: summarize(windowSessions).estimatedSpendUsd };
+    navCache = { days, key, rows, total: buildVelocity(snapshot.sessions, { start, end, metric: "value" }).totals[0] };
     const scrollTop = elements.repositoryList.scrollTop;
     navHoverListeners.clear();
     clear(elements.repositoryList);
@@ -883,6 +882,7 @@ function renderSharedView(view) {
   elements.retentionNote.textContent = `${retained} source-deleted sessions retain facts and prices from their last successful ingest. Historical working status does not establish current activity.`;
   const selected = selectedRepository();
   const population = currentViewName() === "velocity" ? `Activity observed during ${windowCaption()} (${snapshot.velocity?.timeZone || "UTC"}).`
+    : currentViewName() === "summary" ? `Usage value by activity date (${snapshot.velocity?.timeZone || "UTC"}); other totals for sessions started during ${windowCaption()} (UTC).`
     : `Sessions started during ${windowCaption()} (UTC); whole-session totals.`;
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${population}`;
   elements.scopeChip.hidden = !selected;
@@ -902,11 +902,21 @@ function renderSummary(view) {
   renderHistoryCoverage($("#history-coverage"), snapshot.historyCoverage, snapshot.sessions);
   const summary = view.summary;
   const days = windowDays();
+  const context = velocityContext();
+  const activity = buildVelocity(view.scopeSessions, { start: context.start, end: context.end, metric: "value" });
   // Deltas compare against the equal-length period immediately before the window, only when that period is fully observed.
   const previous = windowPreset === "all" ? null : previousPeriod({ end: elements.windowEnd.value, min: elements.windowStart.min, start: elements.windowStart.value });
   const previousSummary = previous ? summarize(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay)) : null;
-  renderMetricValue(elements.spend, summary.estimatedSpendUsd, summary.coverage.cost, money, "priced or reported value", elements.spendCoverage);
-  elements.spendNote.textContent = `${summary.coverage.apiCost.eligible ? money(summary.apiEquivalentSpendUsd) : DASH} API-equivalent · ${summary.coverage.reportedCost.eligible ? money(summary.providerReportedSpendUsd) : DASH} provider-reported · not an invoice`;
+  const previousActivity = previous ? buildVelocity(view.scopeSessions, { start: previous.startDay, end: previous.endDay, metric: "value" }) : null;
+  const unavailable = activity.contributingSessions === 0 && activity.totals[0] === 0 && (activity.unledgered.sessions > 0 || activity.missingSessions > 0);
+  setValue(elements.spend, activity.totals[0], unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { reason: "No activity-dated value in this selection" });
+  clear(elements.spendCoverage);
+  if (!activity.evidence.complete && activity.evidence.eligible > 0) {
+    const badge = node("small", `${Math.floor(100 * activity.evidence.known / activity.evidence.eligible)}% priced`, "coverage");
+    badge.title = "Share of dated Claude/Codex tokens with an API price";
+    badge.setAttribute("aria-label", badge.title); elements.spendCoverage.append(badge);
+  }
+  elements.spendNote.textContent = `By activity date (${context.timeZone}) · excludes ${money(activity.undated[0])} undated (all time)${activity.unledgered.sessions ? ` and ${money(activity.unledgered.value)} in ${activity.unledgered.sessions} session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates` : ""} · not an invoice`;
   if (summary.retainedSessions) elements.spendNote.textContent += " · retained history uses last-ingest prices";
   elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
@@ -915,7 +925,7 @@ function renderSummary(view) {
   elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached · repeated context included` : "Cache share unavailable · repeated context included";
   renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer.format(summary.workingSnapshots);
   const metrics = [
-    ["spend", "Dated API-equivalent value only (UTC); sessions started in the selected window, undated and out-of-window value excluded", money, summary.estimatedSpendUsd, previousSummary?.estimatedSpendUsd, dailySpendSeries(view.sessions, days)],
+    ["spend", `Dated API-equivalent value by activity date (${context.timeZone}); undated value excluded`, money, activity.totals[0], previousActivity?.totals[0], activity.daily.map(({ total }) => total)],
     ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
     ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.inputTokens)],
     ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.outputTokens)],
@@ -923,11 +933,12 @@ function renderSummary(view) {
     ["compactions", "Compactions per session-start day", integer.format, summary.compactions, previousSummary?.compactions, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.compactions)],
   ];
   for (const [name, label, format, current, before, series] of metrics) {
-    renderDelta($(`#metric-${name}-delta`), previousSummary ? deltaDescription(current, before, previous.length) : null);
+    const hasPrevious = name === "spend" ? previousActivity : previousSummary;
+    renderDelta($(`#metric-${name}-delta`), hasPrevious ? deltaDescription(current, before, previous.length) : null);
     renderSparkline($(`#metric-${name}-spark`), series, days, { format, label });
   }
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
-  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.estimatedSpendUsd, coverage: item.summary.coverage.cost, what: "priced or reported value" })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
+  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: buildVelocity(repositorySessions(item.repository.id), { start: context.start, end: context.end, metric: "value" }).totals[0] })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
   renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
   renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd, eligible, selected }) => ({ name: model, value: totalUsd, provider, coverage: { eligible: eligible.value, selected }, what: "priced value" })), money, 8);
   renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);

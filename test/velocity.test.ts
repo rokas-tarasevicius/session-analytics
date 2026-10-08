@@ -272,7 +272,8 @@ test("comparisons use matched complete dates; projection and burn expose their d
   const historical = velocityIndicators(data, "2026-10-02");
   assert.equal(historical.burn.today, null); assert.equal(historical.completeThrough, "2026-09-20");
   const monday = velocityIndicators(buildVelocity([session], { start: "2026-08-01", end: "2026-09-14" }), "2026-09-14");
-  assert.equal(monday.week.delta, null); assert.equal(monday.week.current.days, 0);
+  assert.equal(monday.week.rolledBack, true, "A Monday compares the week that just finished");
+  assert.equal(monday.week.current.days, 7); assert.equal(monday.week.delta, 0);
 });
 
 test("month comparisons handle unequal months and projections retain an honest nonzero scenario band", () => {

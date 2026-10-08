@@ -408,7 +408,15 @@ Costs retain these estimates, and the Pricing view shows their assumptions besid
 
 ## Velocity (snapshot version 1)
 
-The Velocity tab and Summary's agent lines share the same deduplicated activity ledger.
+The Velocity tab and Summary share the same deduplicated activity ledger. **Usage value has one
+dashboard definition:** dated API-equivalent value by activity date in the declared timezone. The
+Summary "Priced usage value" KPI, its sparkline and delta, the sidebar repository values, the
+"Usage value by repository" bars, Summary's daily chart and Velocity's "Selected period" all sum this
+ledger over the same selected dates, so they agree for the same window, repository focus and providers.
+Undated value (including Cursor's provider-reported value) and sessions from sources without a ledger
+are disclosed beside the KPI, never added to a dated window. Session-start cohort views (session,
+token, tool and compaction KPIs, the fleet table, model mix, Costs and the CLI report) keep whole-session
+values of sessions started in the window (UTC); their value can differ for that reason alone.
 `MachineAnalytics.velocity` (also present on the single-repository result) declares
 `version: 1` and the analysis process's IANA `timeZone`. Each session optionally carries
 `agentIdentity` and `velocity`. Old snapshots without these additions remain readable;
@@ -430,6 +438,11 @@ the velocity view asks for a refresh instead of reconstructing activity from ses
   Global session-start filtering normalizes offset-free database timestamps as UTC.
   Missing starts and file-mtime fallbacks are excluded from bounded start-date scopes
   and counted as unknown starts; all-time totals retain them.
+- Sessions from secondary sources (OpenCode, Gemini CLI, Copilot CLI, Cursor SDK runs and
+  transcripts, Conductor results; any session with `evidence.source` set) have no hourly ledger.
+  They are counted, with their whole-session value, as **sources without activity dates** and are
+  excluded from dated totals. Only a canonical session without `velocity` (a snapshot written before
+  the ledger existed) counts as missing and asks for a refresh.
 - Claude prices the final streamed usage once at the first positive-usage snapshot's
   timestamp in the owning execution kind. A usage-free parent placeholder cannot assign a
   subagent's usage to the parent's date. Tools use their first deduplicated call timestamp.
@@ -531,28 +544,41 @@ Agent colors and patterns do not change when date/provider filters change spend 
 ### Change, burn and projection guardrails
 
 “Today” is the snapshot date in the declared timezone. Historical windows use their end
-date as the comparison anchor. Week-to-date compares completed dates with the same dates
-one week earlier. Month-to-date compares completed dates with the same number of dates
-at the start of the previous month; when the prior month is shorter, **both** sides are
-clipped to its length. Today is excluded from both comparisons. Coverage shows selected,
-observed calendar days / required calendar days for each period. It does not prove the
-provider retained all historical transcripts. A range clipped by the global window or the
-first observed date is not a complete comparison.
+date as the comparison anchor. Today is partial and excluded, so comparisons run through the
+last completed date. Week comparisons use the Monday-start week containing that date: Monday
+through the last completed date versus the same weekdays one week earlier. Month comparisons use
+its month: the first N completed dates versus the first N dates of the previous month; when the
+prior month is shorter, **both** sides are clipped to its length. On a Monday, or on the 1st,
+the last completed date belongs to the period that just finished, so the cards compare that
+whole week/month with the one before and are relabeled “Last week vs week before” / “Last month
+vs month before”. The calendar indicators (week, month, burn and projection) read the ledger from
+two whole months before the anchor month, independent of the selected window's start, so a
+“Last 7 days” window still compares this week with last week. Their periods must still lie inside
+observed history: dates before the first observed activity are not zero. Notes show both periods'
+dates and values. Coverage does not prove the provider retained all historical transcripts.
 
 Calendar coverage and **metric evidence** are separate. Known/eligible counters are retained
-per day, period and mover group, including groups with zero measured value. Pricing,
-reasoning, cache-read/uncached and cache-write inferences require 100% evidence over their
-eligible tokens on both sides. Even equally partial coverage is insufficient. Known and
+per day, period and mover group, including groups with zero measured value. Week and month
+comparisons need at least **90%** metric evidence (for value: priced tokens) over the eligible
+tokens of **each** period; between 90% and 100% the change is shown on observed values and marked
+partially priced/observed, with both sides' counts in the explanation. Burn, rolling averages,
+projections and movers still require 100% evidence on both sides. Even equally partial coverage
+is insufficient for those. Known and
 eligible counts for current/prior periods are displayed beside percentages; incomplete
 evidence returns N/A. Recorded zeroes and inactive dates remain valid observations, but
 0/0 evidence coverage is labeled N/A, never 100%. Unsupported providers have no eligible
 denominator; a numeric unsupported contribution (Cursor's legacy uncached input) also
-blocks inference. Sessions without any velocity data block comparisons. Observed totals
-remain visible and are labeled partial when applicable.
+blocks inference. Canonical sessions without velocity data (stale snapshots) block comparisons;
+sources without activity dates do not. Observed totals remain visible and are labeled partial
+when applicable.
 
 Percent changes require a previous value of at least $0.01, 100 tokens, 3 sessions/model
 calls, or 5 tool calls. Value/token percentages also require at least 3 prior model calls.
-A zero or tiny baseline produces N/A, never an infinite percentage or a fabricated 0%.
+A tiny baseline produces N/A with the minimum stated, never an infinite percentage or a
+fabricated 0%. An observed prior period with exactly zero value shows **New** when the current
+period has activity and **No activity** when both are zero. Unavailable comparisons state their
+specific reason (no observed prior history, partly observed period, insufficient evidence,
+small baseline, or a stale snapshot).
 Top movers rank absolute increases separately for repository, model and agent over the
 last seven completed days versus the preceding seven. Percent guards use each group's
 own prior calls; new groups can have a positive absolute increase with an N/A percentage.
@@ -763,7 +789,7 @@ Repository grouping canonicalizes existing symlinks, resolves Git `commondir`, a
 
 Velocity pricing coverage sums the exact count of explicitly priced token classes. Partial receipts and activity-only sessions are not missing-price sessions; `unpricedSessions` counts positive observed token denominators with nonnull coverage below one. `cacheReadRatio` is null when its input denominator is zero. Saved v1 snapshots with the independently reproducible v0.6.0 coverage/live-count formulas normalize those derived fields on import; session evidence and all other accounting consistency checks remain required.
 
-Summary's daily chart uses the same local activity-day ledger as Velocity. Its whole-session KPI and UTC dated API-value sparkline have separately labeled populations. Models exposes any unallocated value or token balance without inventing a model identity. Unknown starts never contribute Activity heatmap starts. Source-deleted and unavailable historical observations stay outside live counts in filtered exports.
+Summary's daily chart, usage-value KPI (with its sparkline and delta), sidebar repository values and repository value bars use the same local activity-day ledger as Velocity; the other Summary KPIs are labeled session-start cohorts. Models exposes any unallocated value or token balance without inventing a model identity. Unknown starts never contribute Activity heatmap starts. Source-deleted and unavailable historical observations stay outside live counts in filtered exports.
 
 ### v0.6.1 receipt and pricing corrections
 

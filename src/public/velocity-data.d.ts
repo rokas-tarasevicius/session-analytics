@@ -10,10 +10,12 @@ export interface VelocityData {
   rolling: Array<number | null>; totals: number[]; undated: number[];
   coverage: { priceTokens: number; cacheReadInput: number; cacheWriteInput: number; reasoningOutput: number };
   evidence: Evidence;
-  earliest: string | null; missingSessions: number; contributingSessions: number;
+  earliest: string | null; missingSessions: number; unledgered: { sessions: number; value: number }; contributingSessions: number;
 }
 export interface Period { start: string; end: string; days: number; coveredDays: number; covered: boolean; value: number; calls: number; evidence: Evidence }
-export interface Comparison { current: Period; previous: Period; delta: number | null }
+export type ComparisonStatus = "change" | "new" | "idle" | "unavailable";
+export interface Comparison { current: Period; previous: Period; delta: number | null; status: ComparisonStatus; reason: string | null; partial: boolean }
+export interface PeriodComparison extends Comparison { rolledBack: boolean }
 export const metricDefinitions: Record<Metric, { index: number; label: string; unit: string; minimum: number }>;
 export const agentLabels: Record<string, string>;
 export function localDay(timestamp: unknown, timeZone?: string): string | null;
@@ -23,9 +25,12 @@ export function calendarDays(start: string, end: string): string[];
 export function periodKey(day: string, granularity: string): string;
 export function buildVelocity(sessions: SessionAnalytics[], options: VelocityOptions): VelocityData;
 export function guardedDelta(current: number, previous: number, metric: Metric, previousCalls?: number): number | null;
+export const comparisonEvidenceFloor: number;
+export function comparisonSpan(end: string, today: string | null): { start: string; end: string };
+export function comparePeriods(current: Period, previous: Period, metric: Metric, options?: { missingSessions?: number }): Comparison;
 export function quantile(values: number[], fraction: number): number | null;
 export function velocityIndicators(data: VelocityData, today: string): {
-  week: Comparison; month: Comparison;
+  week: PeriodComparison; month: PeriodComparison;
   burn: { today: number | null; median: number | null; days: number; activeDays: number; ratio: number | null; todayEvidence: Evidence; baselineEvidence: Evidence };
   projection: { value: number; low: number; high: number; observed: number; sampleDays: number; activeDays: number; remainingDays: number; monthEnd: string } | null;
   projectionEvidence: { sample: Evidence; observed: Evidence };
