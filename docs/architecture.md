@@ -31,7 +31,7 @@
 | `src/metrics/outcomes-summary.js`, `outcomes-report.ts` | Shared pure outcome aggregation for the analyzer/browser and terminal presentation. |
 | `src/metrics/workflow.ts`, `workflow-types.ts` | Streaming workflow projection and namespaced public types; primary-transcript timing, bounded metadata, deduplicated events and heuristic labels. |
 | `src/metrics/workflow-inventory.ts` | Read-only matched Claude command history and scoped skill-directory inventories. Raw IDs remain internal. |
-| `src/public/workflow-data.js` | Pure workflow calculations shared by the worker and browser: exact pooled quantiles, interval sweep, UTC patterns and guarded comparisons. The adjacent declaration file defines its TypeScript contract. |
+| `src/public/workflow-data.js` | Pure workflow calculations shared by analysis, MCP and browser exports: exact pooled quantiles, interval sweep, UTC patterns and guarded comparisons. The adjacent declaration file defines its TypeScript contract. |
 | `src/report/workflow.ts` | Workflow terminal formatting. |
 | `src/interop/` | Validated snapshot IO, sharing/merge, private file export, and explicit opt-in OTLP delivery. No additional provider parsing. |
 | `schemas/`, `scripts/snapshot-schema.ts` | Published v1 schemas and exhaustive TypeScript-checked field maps. |

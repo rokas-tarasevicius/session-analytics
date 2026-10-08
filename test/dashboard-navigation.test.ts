@@ -62,3 +62,35 @@ test("dashboard defaults to 30 observed days and URL windows override without pe
   assert.equal(run("windowPreset"), "30");
   assert.deepEqual(stored, []);
 });
+
+test("the 30-day default excludes unknown starts and limits view exports to the window", async () => {
+  const old = sample(), recent = sample(), undated = sample();
+  old.createdAt = "2026-07-01T12:00:00Z";
+  recent.createdAt = "2026-10-01T12:00:00Z";
+  undated.transcript.startTimeKnown = false;
+  const { document, run } = await harness([old, recent, undated]);
+  run("resetExportMenu = () => {}; configureWindow(); renderSummary(activeView())");
+  assert.equal(run("windowPreset"), "30");
+  assert.match(document.querySelector("#metric-session-note")!.textContent, /1 unknown starts excluded/);
+  assert.equal(run("filterSnapshot(snapshot, { ...selectedWindow() }).sessions.length"), 1);
+  run("applyWindowPreset('all', { render: false }); renderSummary(activeView())");
+  assert.match(document.querySelector("#metric-session-note")!.textContent, /1 unknown starts included/);
+  assert.equal(run("filterSnapshot(snapshot, { ...selectedWindow() }).sessions.length"), 3);
+});
+
+test("observed date bounds still include trailing compaction dates", async () => {
+  const session = sample();
+  session.createdAt = "2026-09-29T10:00:00Z"; session.spendByDay = {};
+  (session as { limitsCache?: unknown }).limitsCache = { buckets: [], compactions: [{ timestamp: "2026-09-30T10:00:00.000Z" }], cacheBreaks: [] };
+  const { run } = await harness([session]);
+  assert.equal(run("observedRange().maximum"), "2026-09-30");
+});
+
+test("scope caption distinguishes Velocity activity dates from session-start views", async () => {
+  const { document, run } = await harness([sample()]);
+  run("currentViewName = () => 'velocity'; renderSharedView(activeView())");
+  assert.match(document.querySelector("#scope-description")!.textContent, /Activity observed during .* \(/);
+  assert.doesNotMatch(document.querySelector("#scope-description")!.textContent, /Sessions started/);
+  run("currentViewName = () => 'costs'; renderSharedView(activeView())");
+  assert.match(document.querySelector("#scope-description")!.textContent, /Sessions started during .*\(UTC\); whole-session totals/);
+});

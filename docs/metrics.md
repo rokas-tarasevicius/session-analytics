@@ -106,7 +106,7 @@ Skill names are a reviewed derived field rather than raw tool input. Accept only
 
 ## Reliability (M1)
 
-`sessions[].reliability` is an optional, versioned namespace for Claude and Codex. Cursor and unsupported/invalid sessions omit it. Its absence is **unavailable**, not evidence of successful calls. The terminal report aggregates the session projections; repository, agent and time filters recompute counts and percentiles. Accounting and the existing effective/transport tool counters are unchanged.
+`sessions[].reliability` is an optional, versioned namespace for Claude and Codex. Cursor and unsupported/invalid sessions omit it. Its absence is **unavailable**, not evidence of successful calls. The terminal report and MCP tools aggregate the session projections; repository selection (and MCP agent/provider filters) recompute counts and percentiles. Accounting and the existing effective/transport tool counters are unchanged.
 
 ### Evidence and outcomes
 
@@ -170,7 +170,7 @@ The optional snapshot `limitsCache` namespace carries profile quota timelines an
 - Context peak is the maximum paired per-request input/window ratio, replacing the ratio of two independent maxima. Codex windows are recorded; Claude windows are reviewed model capacities. Strictly-above-40/60/80% shares use eligible requests with a three-request guard. Missing compaction sizes stay null; intervals count human turns within a stream.
 - Monthly leverage compares dated input-plus-output API-equivalent value with an explicitly configured full monthly USD plan price. Three active days, positive price and complete coverage are required. Plan type never supplies a price. There is no extrapolation or claim of cash saved.
 
-Quota panels ignore repository/date filters because quota is shared. Cache/context panels use request dates; compaction events use their own dates even without usage that day, and extend date-picker bounds. The shared caption is view-aware. Unknown time is excluded from dated views/monthly comparisons, not fabricated from file modification time. Claude chronology compares normalized UTC instants with undated requests last. Reports include undated request totals. All cumulative fallbacks, including all-zero last usage, retain totals but are excluded from request context and counterfactual pricing.
+Quota observations stay account-wide because quota is shared. Cache/context buckets carry request dates; compaction events carry their own dates even without usage that day, and still extend the dashboard's date-picker bounds. Unknown time is excluded from dated views/monthly comparisons, not fabricated from file modification time. Claude chronology compares normalized UTC instants with undated requests last. Reports include undated request totals. All cumulative fallbacks, including all-zero last usage, retain totals but are excluded from request context and counterfactual pricing.
 
 Curve detail has a 240-point session cap and a 20,000-point snapshot budget; `curveSampled` covers either reduction. Aggregate counters, daily buckets and peaks use all eligible requests. `compactionCountExact` is false for missing timestamps or ambiguous representation matches; summary counts and event details use the same reconciliation. Model dimensions share the bounded identifier policy in [privacy.md](privacy.md); rejected values become `<unknown>` without losing observed totals.
 
