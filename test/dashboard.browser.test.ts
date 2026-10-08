@@ -125,10 +125,15 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
       await delay(100);
     }
     assert.equal(await browser.evaluate(`document.querySelector('#sync-context').dataset.state`), "live");
+    assert.equal(await browser.evaluate(`document.querySelector('[data-window-preset="30"]').getAttribute('aria-pressed')`), "true");
+    assert.equal(await browser.evaluate(`document.querySelector('[data-window-preset="all"]').getAttribute('aria-pressed')`), "false");
+    // The fixture spans more than 30 days; the interactions below exercise the whole observed history.
+    await browser.evaluate(`document.querySelector('[data-window-preset="all"]').click()`);
+    await delay(150);
 
     // Native Tab order: skip link, wordmark, palette trigger, then every sidebar view button in sidebar order.
     const navOrder = await browser.evaluate<string[]>(`[...document.querySelectorAll('.view-nav [data-view-button]')].map((button) => button.dataset.viewButton)`);
-    assert.equal(navOrder.length, 14);
+    assert.deepEqual(navOrder, ["summary", "velocity", "costs", "models", "pricing", "tools", "activity"]);
     const tabbed: string[] = [];
     for (let index = 0; index < 3 + navOrder.length; index += 1) {
       await browser.key("Tab");
@@ -218,6 +223,17 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     await delay(150);
     assert.equal(await browser.evaluate(`document.querySelector('#command-palette').open`), true);
     await browser.key("Escape");
+
+    // URL windows override the default without persisting into the next visit.
+    for (const [query, expected] of [["?window=all", "all"], ["?window=7", "7"], ["?window=invalid", "30"], ["", "30"]]) {
+      await browser.send("Page.navigate", { url: `${origin}/${query}` });
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await browser.evaluate(`document.querySelector('#sync-context')?.dataset.state`)) === "live" &&
+          (await browser.evaluate(`location.search`)) === query) break;
+        await delay(50);
+      }
+      assert.equal(await browser.evaluate(`document.querySelector('#window-segment [aria-pressed="true"]').dataset.windowPreset`), expected);
+    }
 
     // Icon rail keeps every view name in the accessibility tree and shows a hover label.
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 900 });

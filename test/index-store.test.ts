@@ -286,7 +286,7 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
       return elements.get(selector);
     } };
     (globalThis as any).document = document;
-    const [view, filtered] = runInNewContext(source + `\nsnapshot = fixture;
+    const [view, filtered] = runInNewContext(source + `\nsnapshot = fixture; windowPreset = "all";
       const all = activeView();
       renderSparkline = renderLine = renderDonut = renderBars = renderRepositoryTable = renderRepositoryNav = renderProviderEvidence = () => {};
       renderSharedView(all); renderSummary(all);

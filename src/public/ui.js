@@ -1,5 +1,5 @@
-// Shared dashboard components: one page header, filter bar, KPI card, panel, table, evidence disclosure,
-// coverage badge and empty state for every view. DOM-only helpers; no analytics semantics live here.
+// Shared dashboard components: filter bar, KPI card, table, evidence disclosure and coverage badge.
+// DOM-only helpers; no analytics semantics live here.
 // Harness note: only append/replaceChildren/textContent/setAttribute/dataset/classList are used so the
 // dependency-free DOM stubs in test/ can execute every renderer.
 
@@ -74,17 +74,6 @@ export function kpi({ label, value, note: caption = null, coverage = null, reaso
   return card;
 }
 
-export function panel({ kicker = null, title, meta = null, className = "", level = "h2" } = {}) {
-  const article = el("article", null, `panel${className ? ` ${className}` : ""}`);
-  const header = el("header"), block = el("div");
-  if (kicker) block.append(el("p", kicker, "kicker"));
-  block.append(el(level, title));
-  header.append(block);
-  if (meta) header.append(typeof meta === "string" ? el("span", meta, "panel-meta") : meta);
-  article.append(header);
-  return article;
-}
-
 export function field(label, control, { inline = false } = {}) {
   const wrapper = el("label", null, `field${inline ? " field-inline" : ""}`);
   wrapper.append(el("span", label, "field-label"), control);
@@ -152,25 +141,4 @@ export function dataTable(headers, rows, { empty = "No observations in this scop
   }
   table.append(head, body); wrap.append(table);
   return wrap;
-}
-
-export function emptyState(container, message, title = null) {
-  const box = el("div", null, "empty-state");
-  if (title) box.append(el("strong", title));
-  box.append(el("span", message));
-  container.append(box);
-  return box;
-}
-
-/** Stat row for panels: label on the left, mono value on the right. */
-export function statList(entries) {
-  const list = el("dl", null, "stat-list");
-  for (const [label, value, detail] of entries) {
-    const row = el("div");
-    row.append(el("dt", label));
-    const dd = el("dd", value == null ? DASH : value);
-    if (detail) dd.title = detail;
-    row.append(dd); list.append(row);
-  }
-  return list;
 }

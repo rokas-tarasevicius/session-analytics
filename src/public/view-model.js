@@ -112,14 +112,6 @@ export function costTotals(sessions) {
   return result;
 }
 
-export function evidenceLabel(sessions) {
-  const evidence = new Set(sessions.map(({ skillEvidence }) => skillEvidence));
-  if (evidence.has("explicit") && evidence.has("inferred")) return "Explicit + lower bound";
-  if (evidence.has("explicit")) return "Explicit";
-  if (evidence.has("inferred")) return "Lower bound";
-  return "N/A";
-}
-
 /** Groups sessions by repository ID once per snapshot so views never rescan the full list per repository. */
 export function groupByRepository(sessions) {
   const groups = new Map();

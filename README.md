@@ -57,27 +57,18 @@ Claude Code, Codex, and Cursor already keep detailed session history on your dis
 ## Features
 
 - **Cross-provider evidence.** Claude Code, Codex, Cursor, Copilot CLI, OpenCode and Gemini, with Conductor recovery when canonical history is missing. Summary and activity-only evidence carry explicit coverage and N/A values.
-- **Fourteen views.** Overview: Summary, Distributions, Activity, Velocity. Economics: Costs, Models, Pricing. Reliability: Reliability, Limits & cache. Workflow & outcomes: Workflow, Tools, Skills, Outcomes. Insights: grouped investigations. Every view has a sidebar entry, command-palette action, `g` shortcut and `?view=` URL hook.
-- **Control Room.** Shared cards and tables, repository focus, scoped provider chips, keyboard navigation, light/dark themes and compact/comfortable density. Summary provider chips affect its daily chart; Activity, Tools and Skills keep independent provider selections.
+- **Seven dashboard views.** Overview: Summary, Velocity. Economics: Costs, Models, Pricing. Usage: Tools, Activity. Every view has a sidebar entry, command-palette action, `g` shortcut and `?view=` URL hook.
+- **Control Room.** Shared cards and tables, repository focus, scoped provider chips, keyboard navigation, light/dark themes and compact/comfortable density. Summary provider chips affect its daily chart; Activity and Tools keep independent provider selections.
 - **Measured usage.** API-equivalent value with dated price provenance, token-class coverage, velocity, quota freshness, cache/context evidence and optional plan comparisons. Value is not an invoice; unknown evidence is never presented as zero.
-- **Reliability and workflow.** Tool outcomes and latency, verification, permissions, active/wait timing, concurrency, steering, slash-command names and installed skills. Optional P2 content rules are off by default.
-- **Outcomes and insights.** Recorded edits, commits and PR links with confidence and denominator guards; ten grouped rules with locally stored dismiss/snooze state. Git/GitHub enrichment is opt-in. P3 review requires `review --send-content` on each run.
+- **Reliability and workflow in reports and JSON.** Tool outcomes and latency, verification, permissions, active/wait timing, concurrency, steering, slash-command names and installed skills. Optional P2 content rules are off by default.
+- **Outcomes and insights.** Recorded edits, commits and PR links with confidence and denominator guards; ten grouped rules available through the insights CLI. Git/GitHub enrichment is opt-in. P3 review requires `review --send-content` on each run.
 - **Private index.** Complete derived session facts survive provider cleanup. Unchanged Claude/Codex sessions replay from a private index; `--no-index` reads present sources directly.
 - **Every surface.** Localhost dashboard, terminal/JSON reports, versioned exports and aggregate-only sharing, seven metrics-only MCP tools, and an [agent skill](skills/session-analytics/SKILL.md).
 - **Small trust surface.** Node 24 built-ins, zero runtime dependencies, no telemetry and read-only provider access. Analysis reads cached prices; the dashboard can refresh fixed public price feeds (`--offline` disables pricing requests). GitHub enrichment, OTLP delivery and P3 review each require their own explicit option.
 
-<table>
-  <tr>
-    <td width="33%"><img alt="Velocity view: priced usage value by agent as a stacked area chart with period-over-period deltas" src="assets/screenshot-velocity.png" /></td>
-    <td width="33%"><img alt="Reliability view: tool outcomes, error classes, latency, MCP servers, and loop and churn signals" src="assets/screenshot-reliability.png" /></td>
-    <td width="33%"><img alt="Insights view: grouped, ranked coaching cards with evidence and guardrails" src="assets/screenshot-insights.png" /></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Velocity by agent</sub></td>
-    <td align="center"><sub>Tool reliability</sub></td>
-    <td align="center"><sub>Grouped insights</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img alt="Velocity view: priced usage value by agent as a stacked area chart with period-over-period deltas" src="assets/screenshot-velocity.png" width="100%" />
+</p>
 
 ## Quick start
 
@@ -112,7 +103,7 @@ session-analytics --no-open       # serve without opening a browser
 session-analytics --port 4180     # use another loopback port
 ```
 
-The server binds to `127.0.0.1` only and answers read-only `GET` requests. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
+The server binds to `127.0.0.1` only and answers read-only `GET` requests. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`. The dashboard starts with the last 30 days of observed history; `?window=7`, `?window=30`, `?window=90`, or `?window=all` overrides this for the visit. The window is not saved in browser storage.
 
 Velocity follows **activity dates**, even when the session began before the selected window. Other totals select sessions by start date. The analysis timezone is shown in the view; set `TZ` before launching to choose a different one. Cursor value and other activity without timestamps stay undated. Projection bands are workload scenarios, not confidence intervals or invoices. See the [velocity definitions](docs/metrics.md#velocity-snapshot-version-1) for denominators and attribution rules.
 
@@ -126,7 +117,7 @@ session-analytics report
 
 Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, workflow and concurrency measures, the 15 highest-value sessions by hashed key, and coverage warnings.
 
-The reliability section shows structured outcomes by default. To also classify shell commands and failed-result text locally and detect repeat/churn episodes, run `session-analytics report --reliability-content-rules` (the same option works for the dashboard). These P2 rules are off by default, send nothing to a model, and output only counters and class labels. Their matching key lives in `SESSION_ANALYTICS_DATA_DIR` (or `--data-dir`); path and argument hashes never appear in a snapshot. See the [reliability metric definitions](docs/metrics.md#reliability-m1) for coverage and thresholds. `npm run demo` enables these rules on synthetic data only.
+The reliability section shows structured outcomes by default. To also classify shell commands and failed-result text locally and detect repeat/churn episodes, run `session-analytics report --reliability-content-rules` (the same option includes these counters in dashboard snapshots and exports). These P2 rules are off by default, send nothing to a model, and output only counters and class labels. Their matching key lives in `SESSION_ANALYTICS_DATA_DIR` (or `--data-dir`); path and argument hashes never appear in a snapshot. See the [reliability metric definitions](docs/metrics.md#reliability-m1) for coverage and thresholds. `npm run demo` enables these rules on synthetic data only.
 
 ### JSON snapshot
 
@@ -179,11 +170,11 @@ session-analytics review --session <hashed-session-key> --via codex --send-conte
 
 Insights cover peer outliers, cache reuse, model-price scenarios, compaction, delegation, large request contexts, installed skills/MCP servers without observed use, writes after idle gaps, and neutral start-time patterns. Missing evidence and insufficient activity are visible in rule coverage, never presented as 0%. [Thresholds and formulas](docs/insights.md) are documented and configurable with `--insights-config` or `SESSION_ANALYTICS_INSIGHTS_CONFIG`.
 
-The tab starts with at most 10 grouped cards, each with total estimated impact, affected counts and an expandable ranked scope table. Search scope rows, filter to a repository, inspect denominators/guardrails, or copy a session review dry-run command. `insights --json` uses schema version 2 (`groups` plus `items`). Pricing defaults to a configurable same-provider **next-tier-down** mapping; each model moves once, with unmapped usage unchanged. Known partial/active sessions are excluded; unknown liveness is disclosed, and completed-peer comparisons require observed inactivity. Context-premium price scenarios require complete request-size coverage. Date filters select UTC instants, including timestamps written with offsets.
+`insights` prints ranked rule groups and their leading scopes; `--all-scopes` includes every finding. `insights --json` uses schema version 2 (`groups` plus `items`). Pricing defaults to a configurable same-provider **next-tier-down** mapping; each model moves once, with unmapped usage unchanged. Known partial/active sessions are excluded; unknown liveness is disclosed, and completed-peer comparisons require observed inactivity. Context-premium price scenarios require complete request-size coverage. Date filters select UTC instants, including timestamps written with offsets.
 
 **Content review is P3, opt-in and off by default.** The dry-run prints only rule IDs, sizes and redaction counts. `--send-content` permits bounded, redacted human/assistant excerpts to be sent through your own `claude -p` or `codex exec`; it has no environment-variable equivalent. Redaction is best effort, and remaining prose may still be sensitive. Your agent provider's retention and billing apply. Tools, reasoning and tool-result blocks are excluded; no content is sent from the dashboard. See [review behavior and limits](docs/insights.md#opt-in-review-p3).
 
-Try synthetic insights with `npm run demo -- insights`, or open the demo dashboard's Insights tab.
+Try synthetic insights with `npm run demo -- insights`.
 
 ### Local index
 
@@ -249,7 +240,7 @@ Release verification uses `node scripts/verify-real.ts`: independent provider, r
 | `--no-outcomes-git`, `--no-outcomes-github` | both | Disable the corresponding enrichment, including when enabled by environment. |
 | `--workflow-content-rules` | both | Opt into the local P2 rule that counts exact Claude interruption markers. Only counts leave the parser. Default off; `SESSION_ANALYTICS_WORKFLOW_CONTENT_RULES=1` also enables it. |
 | `--no-workflow-content-rules` | both | Disable the rule, including an environment opt-in. |
-| `--insights-config PATH` | insights, review, dashboard | Thresholds, disabled rules, next-tier mappings, explicit targets and optional extension inventory; see [configuration](docs/insights.md#configuration). |
+| `--insights-config PATH` | insights, review | Thresholds, disabled rules, next-tier mappings, explicit targets and optional extension inventory; see [configuration](docs/insights.md#configuration). |
 | `--no-index` | both | Read present provider evidence without accessing the index; also `SESSION_ANALYTICS_NO_INDEX=1`. |
 | `--version`, `--help` | all | Print the version or command help. |
 
@@ -259,13 +250,11 @@ New-store variables are `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_
 
 Outcome enrichment is off by default. Set `SESSION_ANALYTICS_OUTCOMES_GIT=1` or `SESSION_ANALYTICS_OUTCOMES_GITHUB=1` to opt in through configuration; other environment values do not enable it. Missing tools, authentication, branches, or deleted history are shown as unavailable. The [outcome metric definitions](docs/metrics.md#outcomes) explain confidence, coverage, deduplication, attribution, and scan limits. The snapshot always uses pseudonymous references, including when enrichment is enabled.
 
-The report and Outcomes tab show enrichment status counts, evidence limits, and complete/partial/unavailable line coverage. Ambiguous or reset line counters stay partial and are excluded from line-value ratios; incomplete PR associations withhold PR-value ratios.
-
-To open the demo directly in the Outcomes tab, visit `http://127.0.0.1:4175/?view=outcomes` after starting `npm run demo`.
+The report shows enrichment status counts, evidence limits, and complete/partial/unavailable line coverage. Ambiguous or reset line counters stay partial and are excluded from line-value ratios; incomplete PR associations withhold PR-value ratios.
 
 Workflow estimates join work events at most five minutes apart; a terminal marker followed by a human supplies at most 30 minutes of estimated human waiting. Permission waiting is unavailable. Concurrency counts overlapping active session spans, with summed activity divided by its wall-clock union for effective parallelism. Claude child transcripts remain inside their parent for accounting but are excluded from the parent's interaction clock; Codex child threads have their own clocks. Cursor workflow timing is unavailable. See [workflow definitions and thresholds](docs/metrics.md#workflow-human-and-agent-interaction) before interpreting the comparisons or heuristics.
 
-Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations; boundary estimates and abandonment claims are suppressed. Slash-command names require built-in or discovered command/skill registry evidence. Workflow reuses full-snapshot results and computes filtered scopes in a browser worker; empty repositories and date windows still show discovered skill installations.
+Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations; boundary estimates and abandonment claims are suppressed. Slash-command names require built-in or discovered command/skill registry evidence.
 
 ## Supported agents and evidence
 
@@ -462,7 +451,7 @@ Please report vulnerabilities privately through [GitHub private vulnerability re
 
 [MIT](LICENSE). Bundled fonts (Geist and Geist Mono) are licensed under the [SIL Open Font License 1.1](src/public/fonts/OFL-1.1.txt). Provider names and marks shown in the dashboard identify the data source and remain trademarks of their owners; see [src/public/brands/NOTICE.md](src/public/brands/NOTICE.md).
 
-Provider evidence has metric-specific coverage: unavailable observations display **N/A**, partial totals show eligible/selected session counts, and distributions require five eligible observations. Conductor recovery groups cumulative Claude SDK receipts and labels uncertain accounting partial; reported USD is not an invoice. OpenCode forks exclude inherited requests. See [provider fidelity and resource limits](docs/providers.md#review-hardening-and-resource-limits).
+Provider evidence has metric-specific coverage: unavailable observations display **N/A**, partial totals show eligible/selected session counts. Conductor recovery groups cumulative Claude SDK receipts and labels uncertain accounting partial; reported USD is not an invoice. OpenCode forks exclude inherited requests. See [provider fidelity and resource limits](docs/providers.md#review-hardening-and-resource-limits).
 
 ### History coverage
 

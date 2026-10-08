@@ -49,7 +49,7 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 
 Local histories already record tool errors, exit codes, timeouts, durations, MCP call status, hook timing, permission modes, and denials. M1 turns them into content-free measures.
 
-- [x] Tool outcomes/error rates by tool, normalized class and MCP server, with low-cardinality error classes and denominator guards. Environment, policy and interruption evidence stays distinguishable; causal blame is not inferred. Reliability tab, report, and repository/agent comparisons.
+- [x] Tool outcomes/error rates by tool, normalized class and MCP server, with low-cardinality error classes and denominator guards. Environment, policy and interruption evidence stays distinguishable; causal blame is not inferred. Reliability report and repository/agent comparisons.
 - [ ] Tool reliability attributed to explicit skills (separate from tool-name attribution).
 - [x] Tool latency (mergeable approximate p50/p95 with timing coverage) and timeouts.
 - [x] **Opt-in P2:** Loop and churn episodes from internal keyed hashes: exact repeats, repeated failing calls, failed-edit cascades, edit thrash, re-read churn, and search loops. Persistent 0600 machine key and stream-wide hashing/reference budgets; no digests in outputs.
@@ -96,7 +96,7 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 
 M2 links agent sessions to the code they produced, retroactively from existing logs, without hooks installed in advance and without uploading content.
 
-- [x] Evidence-ranked session links from structured commit/PR operations and PR-link records, with weak branch/starting-checkout/workspace context kept separate from produced outcomes. Dashboard, report, and JSON include confidence and coverage.
+- [x] Evidence-ranked session links from structured commit/PR operations and PR-link records, with weak branch/starting-checkout/workspace context kept separate from produced outcomes. Reports and JSON include confidence and coverage.
 - [x] Opt-in bounded local Git branch/window correlation, agent co-author trailer counts, and authenticated GitHub state/time-to-merge lookup for already evidenced PRs.
 - [x] Guarded API-equivalent value per merged PR, changed lines per dollar, and edits-without-commit value labeled as a linkage heuristic, with deduplicated PRs and explicit pricing denominators.
 - [x] Lines added and removed from Claude patches/cumulative totals, Codex completed FileChange diffs, and Cursor composer totals; missing and partial coverage remain visible.
@@ -116,9 +116,9 @@ M2 links agent sessions to the code they produced, retroactively from existing l
 - [x] Model, effort, CLI-version, entrypoint and originator mix with guarded, descriptive before/after comparisons.
 - [ ] Task-matched regression attribution; observed timing changes alone cannot establish a regression.
 - [x] Leading slash-command names and skill usage, including discovered installations without an observed invocation in scope.
-- [x] Workflow dashboard and report, UTC active-time/value heatmaps and activity streaks.
+- [x] Workflow report and JSON with UTC active-time/value patterns and activity streaks.
 - [x] Fail closed on unregistered slash-history tokens and incomplete primary lifecycle evidence; isolate optional workflow failures from accounting.
-- [x] Reuse full-snapshot workflow aggregates, compute filtered cohorts in a browser worker, and preserve skill inventories in empty scopes.
+- [x] Preserve full-snapshot workflow aggregates and skill inventories in reports and JSON.
 
 ## M3: Agent-facing
 
@@ -146,9 +146,9 @@ An MCP server that answers with metrics, never transcript text, so an agent cann
 Content-free coaching is local (P0/P1). Content review is **opt-in, off by default (P3)**.
 
 - [x] Bounded review scaffolding: run content-free detectors first, preview sizes and redaction counts, then optionally review up to three windows through the user's CLI with explicit `--send-content` and an `unknown` fallback. Main Claude/Codex transcripts only; no causal attribution claim.
-- [x] Ten coaching rules with denominators, configurable guards, estimated impact, confidence and suggested actions: repository peer outliers, cache reuse, price scenarios, compaction, delegation, large contexts, no-observed-use skills/MCP servers, idle-gap write associations and neutral start-time patterns. Insights tab with bounded rendering and session dry-run commands, CLI/JSON, dismiss/snooze/restore.
+- [x] Ten coaching rules with denominators, configurable guards, estimated impact, confidence and suggested actions: repository peer outliers, cache reuse, price scenarios, compaction, delegation, large contexts, no-observed-use skills/MCP servers, idle-gap write associations and neutral start-time patterns. Insights CLI/JSON with per-scope evidence and guardrails.
 - [x] Coaching evidence guards: owned request peaks/size coverage, explicit partial/liveness states, completed-peer eligibility, per-target activity guards, unambiguous MCP attribution and stable eligible review sources.
-- [x] Group coaching by rule/scope level with unique affected counts, ranked expandable scope tables, independent rule/scope dismiss/snooze, grouped CLI output and versioned `groups` + `items` JSON.
+- [x] Group coaching by rule/scope level with unique affected counts, ranked scope findings, grouped CLI output and versioned `groups` + `items` JSON.
 - [ ] Coaching extensions requiring richer evidence: request-level context fill above 60%, correction streaks, unverified final edits, repeated-approval context and hotspots. Permission approvals alone carry little signal.
 
 ## M4: Breadth and export
@@ -203,7 +203,7 @@ Every metric added by this roadmap carries interpretation notes in its registry 
 
 ## v0.6.0 release integration
 
-- [x] Fourteen views grouped in the Control Room shell, consistent theme components, palette, shortcuts and URL entry points.
+- [x] Control Room shell with consistent theme components, palette, shortcuts and URL entry points. The current dashboard has seven views: Summary, Velocity, Costs, Models, Pricing, Tools and Activity.
 - [x] One dispatcher, shared options, complete schema/index projection and cross-lane MCP summaries.
 - [x] Cold/warm/full projection parity including pricing, P2 settings and quota replay; one synthetic demo for every view.
 - [x] Reconciled release documentation and explicit privacy/network boundaries.

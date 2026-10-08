@@ -12,9 +12,6 @@ import { loadSnapshot } from "./interop/snapshot.ts";
 import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
-import { loadInsightContext, parseInsightConfig } from "./insights/config.ts";
-import { insightsForSnapshot } from "./insights/service.ts";
-import type { InsightContext } from "./insights/types.ts";
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
@@ -101,7 +98,6 @@ function safeError(error: unknown): string {
   const indexError = indexErrorMessage(indexErrorCode(error));
   if (indexError) return indexError;
   const message = error instanceof Error ? error.message : "";
-  if (message.includes("insights")) return "Insights are unavailable. Check the configured thresholds, inventory and filters.";
   if (message.includes("Snapshot")) return "The snapshot file is invalid, unsupported, or unavailable.";
   if (message.includes("rate card")) return "The configured rate card is invalid or unavailable.";
   if (message.includes("repository")) return "The requested repository could not be selected.";
@@ -134,30 +130,15 @@ const staticFiles = new Map<string, string>([
   ["/velocity.js", join(publicRoot, "velocity.js")],
   ["/velocity-data.js", join(publicRoot, "velocity-data.js")],
   ["/velocity.css", join(publicRoot, "velocity.css")],
-  ["/reliability-data.js", join(publicRoot, "reliability-data.js")],
-  ["/reliability-view.js", join(publicRoot, "reliability-view.js")],
-  ["/reliability.css", join(publicRoot, "reliability.css")],
 
-  ["/views/limits-cache.js", join(publicRoot, "views", "limits-cache.js")],
-  ["/views/limits-cache.css", join(publicRoot, "views", "limits-cache.css")],
-  ["/outcomes.js", join(publicRoot, "outcomes.js")],
-  ["/outcomes.css", join(publicRoot, "outcomes.css")],
   ["/metrics/outcomes-summary.js", join(toolRoot, "metrics", "outcomes-summary.js")],
-  ["/outcomes-summary.js", join(toolRoot, "metrics", "outcomes-summary.js")],
-  ["/workflow.js", join(publicRoot, "workflow.js")],
-  ["/workflow-scope.js", join(publicRoot, "workflow-scope.js")],
-  ["/workflow-worker.js", join(publicRoot, "workflow-worker.js")],
   ["/workflow-data.js", join(publicRoot, "workflow-data.js")],
-  ["/workflow.css", join(publicRoot, "workflow.css")],
   ["/styles.css", join(publicRoot, "styles.css")],
   ["/fonts/geist-latin.woff2", join(publicRoot, "fonts", "geist-latin.woff2")],
 
   ["/pricing.js", join(publicRoot, "pricing.js")],
   ["/model-id.js", join(publicRoot, "model-id.js")],
   ["/pricing.css", join(publicRoot, "pricing.css")],
-  ["/views/insights.js", join(publicRoot, "views", "insights.js")],
-  ["/views/insights-state.js", join(publicRoot, "views", "insights-state.js")],
-  ["/views/insights.css", join(publicRoot, "views", "insights.css")],
   ["/export-data.js", join(publicRoot, "export-data.js")],
   ["/evidence.js", join(publicRoot, "evidence.js")],
   ["/timestamps.js", join(publicRoot, "timestamps.js")],
@@ -182,7 +163,6 @@ const snapshotFile = argument(process.argv, "--snapshot");
 
 let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
-let insightContext: { generatedAt: string; promise: Promise<InsightContext> } | null = null;
 let snapshotReady = false;
 function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> {
   if (analyticsPending && analyticsPromise) return analyticsPromise;
@@ -224,30 +204,6 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, await analytics(url.searchParams.get("refresh") === "1"));
       return;
     }
-    if (url.pathname === "/api/insights") {
-      if ([...url.searchParams.keys()].some((key) => !["repo-id", "from", "through"].includes(key))) {
-        sendJson(response, 400, { error: "Invalid insights filters." });
-        return;
-      }
-      const snapshot = await analytics();
-      if ("kind" in snapshot) { sendJson(response, 400, { error: "Insights require a full session snapshot." }); return; }
-      if (!insightContext || insightContext.generatedAt !== snapshot.generatedAt) {
-        insightContext = { generatedAt: snapshot.generatedAt, promise: snapshotFile ? Promise.resolve({ ...parseInsightConfig({}), inventory: [],
-          rateCard: { currency: "USD", effectiveDate: snapshot.rateCard.effectiveDate, models: {} },
-          warnings: ["Snapshot insights use saved evidence. Local inventory and comparison rates are unavailable."] }) : loadInsightContext(analyzeOptions) };
-      }
-      const context = await insightContext.promise;
-      try {
-        sendJson(response, 200, insightsForSnapshot(snapshot, context, {
-          repositoryId: url.searchParams.get("repo-id") || undefined,
-          from: url.searchParams.get("from") || undefined,
-          through: url.searchParams.get("through") || undefined,
-        }));
-      } catch {
-        sendJson(response, 400, { error: "Invalid insights filters." });
-      }
-      return;
-    }
     const path = staticFiles.get(url.pathname);
     if (path) {
       await sendFile(response, path);
@@ -256,7 +212,6 @@ const server = createServer(async (request, response) => {
     sendJson(response, 404, { error: "Not found." });
   } catch (error) {
     if (url.pathname === "/api/analytics") analyticsPromise = null;
-    if (url.pathname === "/api/insights") insightContext = null;
     sendJson(response, 502, { error: safeError(error) });
   }
 });

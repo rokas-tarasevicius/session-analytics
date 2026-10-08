@@ -10,7 +10,7 @@ import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { Element, Option, documentFromHtml } from "./release-dom.ts";
 import { version } from "../src/version.ts";
 
-const views = ["summary", "distributions", "activity", "velocity", "costs", "models", "pricing", "reliability", "limits-cache", "workflow", "tools", "skills", "outcomes", "insights"];
+const views = ["summary", "velocity", "costs", "models", "pricing", "tools", "activity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
 
 test("release: every dispatcher command shares help and version without scanning", () => {
@@ -22,7 +22,7 @@ test("release: every dispatcher command shares help and version without scanning
   }
 });
 
-test("release: complete demo API, all fourteen renderers, static modules and privacy work together", { timeout: 120_000 }, async (t) => {
+test("release: complete demo API, all seven renderers, static modules and privacy work together", { timeout: 120_000 }, async (t) => {
   const listener = createServer(); await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
   const address = listener.address(); assert.ok(address && typeof address === "object");
   await new Promise<void>((resolve) => listener.close(() => resolve()));
@@ -51,12 +51,11 @@ test("release: complete demo API, all fourteen renderers, static modules and pri
     assert.equal(refreshed.status, 200);
     const warm = validateSnapshot(await refreshed.json());
     assert.deepEqual(warm.sessions, snapshot.sessions, "warm demo replays every provider and namespace");
-    const insights = await realFetch(`${base}/api/insights`); assert.equal(insights.status, 200); assert.doesNotMatch(await insights.text(), forbidden);
     // Cover the exact server allowlist, including modules imported transitively by views.
     const server = await readFile(new URL("../src/server.ts", import.meta.url), "utf8");
     const staticBlock = server.slice(server.indexOf("const staticFiles ="), server.indexOf("let analyticsPromise"));
     const assets = [...staticBlock.matchAll(/\["(\/[^"\n]*)",\s*join\(/g)].map((m) => m[1]!);
-    assert.ok(assets.length >= 35);
+    for (const asset of ["/workflow-data.js", "/metrics/outcomes-summary.js", "/export-data.js"]) assert.ok(assets.includes(asset), asset);
     for (const asset of assets) { const r = await realFetch(base + asset); assert.equal(r.status, 200, asset); assert.ok((await r.arrayBuffer()).byteLength, asset); }
     const html = await (await realFetch(base)).text();
     const document = documentFromHtml(html), storage = { getItem: () => null, setItem() {} };
@@ -66,31 +65,24 @@ test("release: complete demo API, all fourteen renderers, static modules and pri
     const app = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
     const helpers: Record<string, any> = {};
     for (const [, specifiers, path] of app.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["'];/g)) {
-      let exports;
-      if (path === "./outcomes.js") {
-        const source = (await readFile(new URL("../src/public/outcomes.js", import.meta.url), "utf8")).replace('"./outcomes-summary.js"', JSON.stringify(new URL("../src/metrics/outcomes-summary.js", import.meta.url).href)).replace('"./ui.js"', JSON.stringify(new URL("../src/public/ui.js", import.meta.url).href));
-        exports = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-      } else exports = await import(new URL(`../src/public/${path!.replace(/^\.\//, "").replace(/^\//, "")}`, import.meta.url).href);
+      const exports = await import(new URL(`../src/public/${path!.replace(/^\.\//, "")}`, import.meta.url).href);
       for (const name of specifiers!.split(",").map((s) => s.trim()).filter(Boolean)) helpers[name] = exports[name];
     }
     const source = app.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
     const context = { ...helpers, document, window, HTMLElement: Element, Option, URLSearchParams, localStorage: storage, fetch: boundFetch,
       setTimeout, clearTimeout, resetExportMenu: () => {}, fixture: snapshot, CSS: { escape: (s: string) => s } };
     const api = runInNewContext(source + `\nsnapshot = fixture; sessionsByRepository = groupByRepository(snapshot.sessions);
-      elements.repositoryFilter.value = 'all'; elements.workflowProvider?.value;
+      elements.repositoryFilter.value = 'all';
       elements.windowStart.value = elements.windowStart.min = '2026-01-01'; elements.windowEnd.value = elements.windowEnd.max = snapshot.generatedAt.slice(0,10);
       applyUrlAfterRender = () => {};
       ({ switchView, activeView, paletteItems, viewChords, viewOrder, renderSharedView });`, context);
-    document.querySelector("#workflow-provider")!.value = "all";
     assert.deepEqual([...api.viewOrder], views);
-    assert.equal(new Set(Object.values(api.viewChords)).size, 14);
-    assert.equal(document.querySelectorAll("[data-view-button]").length, 14);
-    assert.equal(api.paletteItems().filter((i: any) => i.group === "Views").length, 14);
+    assert.equal(new Set(Object.values(api.viewChords)).size, views.length);
+    assert.equal(document.querySelectorAll("[data-view-button]").length, views.length);
+    assert.equal(api.paletteItems().filter((i: any) => i.group === "Views").length, views.length);
+    assert.deepEqual([...api.paletteItems()].filter((i: any) => i.group === "Views").map((i: any) => i.keywords), views.map((view) => `view ${view}`));
     for (const view of views) {
       api.switchView(view);
-      // Await async Insights/Workflow through their actual API/aggregate paths.
-      if (view === "workflow") await helpers.renderWorkflow(api.activeView(), snapshot);
-      if (view === "insights") await helpers.renderInsights(document.querySelector("#insights-root"), { repositories: snapshot.repositories, generatedAt: snapshot.generatedAt });
       assert.equal(document.querySelector("#page-title")!.textContent.trim().length > 0, true, view);
       assert.equal(document.querySelector(`[data-view-panel="${view}"]`)!.hidden, false, view);
       const rendered = document.body.textContent;
