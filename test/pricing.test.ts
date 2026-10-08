@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { findModelRate } from "../src/pricing/aliases.ts";
-import { catalogFromSnapshots, latestDiff, loadPricingCatalog, loadReviewed, pricingCoverage, publicRateCard,
+import { catalogFromSnapshots, latestDiff, loadPricingCatalog, loadReviewed, pricingCoverage, publicRate, publicRateCard,
   rateForContext, resolveRate } from "../src/pricing/catalog.ts";
 import { fetchSource, normalizeSource, sha256, SOURCE_URLS } from "../src/pricing/sources.ts";
 import { pricingDirectory, readSnapshots, saveSnapshot, type ReviewedSnapshot } from "../src/pricing/store.ts";
@@ -252,6 +252,23 @@ test("status includes age per source, guarded coverage and sanitized provenance"
   const publicCard = publicRateCard(catalog);
   assert.equal(publicCard.models.find(({ model }) => model === "gpt-fixture")?.provenance?.source, "models.dev");
   assert.doesNotMatch(JSON.stringify(publicCard), new RegExp(privateSentinel));
+});
+
+test("public rate card carries an allowlisted numeric rate for the Pricing view", () => {
+  const planted = { provider: "claude", inputPerMillion: 5, outputPerMillion: 25, cacheReadPerMillion: 0.5,
+    cacheWrite5mPerMillion: 6.25, cacheWrite1hPerMillion: Number.NaN, cacheWriteObservable: true,
+    longContext: { inputMultiplier: 2, outputMultiplier: 1.5, thresholdInputTokens: 200_000, note: privateSentinel },
+    contextTiers: [{ aboveInputTokens: 200_000, inputPerMillion: 10, outputPerMillion: 37.5, assumptions: ["context-cache-read-at-base"], note: privateSentinel }],
+    assumptions: ["anthropic-cache-1h-2x"], source: `https://example.com/${privateSentinel}`, note: privateSentinel } as unknown as ModelRate;
+  const projected = publicRate(planted);
+  assert.deepEqual(projected, { provider: "claude", inputPerMillion: 5, outputPerMillion: 25, cacheReadPerMillion: 0.5,
+    cacheWrite5mPerMillion: 6.25, cacheWriteObservable: true,
+    longContext: { inputMultiplier: 2, outputMultiplier: 1.5, thresholdInputTokens: 200_000 },
+    contextTiers: [{ aboveInputTokens: 200_000, inputPerMillion: 10, outputPerMillion: 37.5 }] });
+  assert.doesNotMatch(JSON.stringify(projected), new RegExp(privateSentinel));
+  const catalog = catalogFromSnapshots(reviewed(), [], { pricingPolicy: "reviewed-only" }, now);
+  assert.deepEqual(publicRateCard(catalog).models.find(({ model }) => model === "gpt-fixture")?.rate,
+    { provider: "codex", inputPerMillion: 9, outputPerMillion: 10 });
 });
 
 test("platform data directories and configuration precedence are explicit", () => {

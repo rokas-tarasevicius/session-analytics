@@ -20,7 +20,8 @@
 | `src/providers/` | Additional-source registry, bounded readers and projection, Cursor SDK/transcripts, Copilot, OpenCode, Gemini, and Conductor result fallback. |
 | `src/public/providers.js` | Provider labels, daily series, and source-specific evidence coverage. |
 | `src/pricing/` | Fixed public-feed fetchers, normalization, validation, content-addressed rate tables with immutable observations, indexed request-time history, token-class pricing/coverage, provenance and rates CLI. |
-| `src/public/pricing.js` | Isolated Pricing tab renderer using selected sessions. |
+| `src/public/pricing.js` | Isolated Pricing tab renderer: source freshness, coverage, model cards and the model details dialog. |
+| `src/public/pricing-data.js` | Pricing model cards from the rate card and selected sessions (usage-value ordering, unused models, rate rows). |
 | `src/public/model-id.js` | Shared bounded model projection for provider parsing, catalogs and Pricing rendering. |
 | `src/metrics/velocity.ts` | Fixed agent enums and a streaming hourly counter accumulator attached at existing deduplicated parser counting points. |
 | `src/public/velocity-data.js` | Pure calendar rollups, coverage, comparisons, projection scenarios and movers; exercised directly by tests. |

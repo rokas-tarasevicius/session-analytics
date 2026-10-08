@@ -145,6 +145,7 @@ const staticFiles = new Map<string, string>([
   ["/fonts/geist-latin.woff2", join(publicRoot, "fonts", "geist-latin.woff2")],
 
   ["/pricing.js", join(publicRoot, "pricing.js")],
+  ["/pricing-data.js", join(publicRoot, "pricing-data.js")],
   ["/model-id.js", join(publicRoot, "model-id.js")],
   ["/pricing.css", join(publicRoot, "pricing.css")],
   ["/export-data.js", join(publicRoot, "export-data.js")],

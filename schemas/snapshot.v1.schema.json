@@ -7103,6 +7103,136 @@
       ],
       "additionalProperties": false
     },
+    "PublicModelRate": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "anyOf": [
+            {
+              "const": "claude"
+            },
+            {
+              "const": "codex"
+            },
+            {
+              "const": "cursor"
+            },
+            {
+              "const": "copilot"
+            },
+            {
+              "const": "opencode"
+            },
+            {
+              "const": "gemini"
+            },
+            {
+              "const": "unsupported"
+            }
+          ]
+        },
+        "inputPerMillion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cachedInputPerMillion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cacheReadPerMillion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cacheWrite5mPerMillion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cacheWrite1hPerMillion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cacheWriteMultiplier": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cacheWriteObservable": {
+          "type": "boolean"
+        },
+        "outputPerMillion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "longContext": {
+          "type": "object",
+          "properties": {
+            "inputMultiplier": {
+              "type": "number",
+              "minimum": 0
+            },
+            "outputMultiplier": {
+              "type": "number",
+              "minimum": 0
+            },
+            "thresholdInputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "inputMultiplier",
+            "outputMultiplier",
+            "thresholdInputTokens"
+          ],
+          "additionalProperties": false
+        },
+        "contextTiers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "aboveInputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "inputPerMillion": {
+                "type": "number",
+                "minimum": 0
+              },
+              "outputPerMillion": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheReadPerMillion": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheWrite5mPerMillion": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cacheWrite1hPerMillion": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "aboveInputTokens",
+              "inputPerMillion",
+              "outputPerMillion"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "provider",
+        "inputPerMillion",
+        "outputPerMillion"
+      ],
+      "additionalProperties": false
+    },
     "RateCard": {
       "type": "object",
       "properties": {
@@ -7131,6 +7261,9 @@
               },
               "provenance": {
                 "$ref": "#/$defs/RateProvenance"
+              },
+              "rate": {
+                "$ref": "#/$defs/PublicModelRate"
               }
             },
             "required": [

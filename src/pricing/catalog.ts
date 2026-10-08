@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import type { AnalyzeOptions, ModelRate, ModelUsage, PricingCoverage, PricingPolicy,
+import type { AnalyzeOptions, ModelRate, ModelUsage, PricingCoverage, PublicModelRate, PricingPolicy,
   PricingSource, PricingStatus, RateCard, RateProvenance, RepositoryAnalytics } from "../types.ts";
 import { findModelRate, normalizedModelId } from "./aliases.ts";
 import { diffSource, type PriceChange } from "./diff.ts";
@@ -181,8 +181,32 @@ export function publicRateCard(catalog: PricingCatalog): RepositoryAnalytics["ra
   return { currency: "USD", effectiveDate: catalog.effectiveDate, pricing: catalog.status,
     models: Object.keys(catalog.models).map((model) => {
       const selected = resolveRate(catalog, model)!;
-      return { model, source: selected.rate.source, provenance: selected.provenance };
+      return { model, source: selected.rate.source, provenance: selected.provenance, rate: publicRate(selected.rate) };
     }) };
+}
+
+const finite = (value: unknown): number | undefined => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+/** Allowlisted numeric rate fields only; source URLs and assumptions already travel in `source`/`provenance`. */
+export function publicRate(rate: ModelRate): PublicModelRate {
+  const output: PublicModelRate = { provider: rate.provider, inputPerMillion: rate.inputPerMillion, outputPerMillion: rate.outputPerMillion };
+  for (const key of ["cachedInputPerMillion", "cacheReadPerMillion", "cacheWrite5mPerMillion", "cacheWrite1hPerMillion", "cacheWriteMultiplier"] as const) {
+    const value = finite(rate[key]);
+    if (value !== undefined) output[key] = value;
+  }
+  if (typeof rate.cacheWriteObservable === "boolean") output.cacheWriteObservable = rate.cacheWriteObservable;
+  if (rate.longContext) output.longContext = { inputMultiplier: rate.longContext.inputMultiplier,
+    outputMultiplier: rate.longContext.outputMultiplier, thresholdInputTokens: rate.longContext.thresholdInputTokens };
+  if (rate.contextTiers?.length) output.contextTiers = rate.contextTiers.map((tier) => {
+    const projected: NonNullable<PublicModelRate["contextTiers"]>[number] = { aboveInputTokens: tier.aboveInputTokens,
+      inputPerMillion: tier.inputPerMillion, outputPerMillion: tier.outputPerMillion };
+    for (const key of ["cacheReadPerMillion", "cacheWrite5mPerMillion", "cacheWrite1hPerMillion"] as const) {
+      const value = finite(tier[key]);
+      if (value !== undefined) projected[key] = value;
+    }
+    return projected;
+  });
+  return output;
 }
 
 export function mergeProvenance(target: ModelUsage, incoming: RateProvenance[]): void {
