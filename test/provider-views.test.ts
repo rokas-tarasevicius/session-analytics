@@ -7,7 +7,8 @@ import type { ProviderEvidence, SessionAnalytics } from "../src/types.ts";
 
 class Element {
   tag: string; children: Element[] = []; attributes: Record<string, string> = {}; dataset: Record<string, string> = {};
-  style: Record<string, unknown> = { setProperty() {} }; className = ""; value = ""; namespaceURI = "svg"; text = "";
+  style: Record<string, unknown> = { setProperty(name: string, value: string) { this[name] = value; } }; className = ""; value = ""; namespaceURI = "svg"; text = "";
+  listeners: Record<string, () => void> = {};
   constructor(tag = "div") { this.tag = tag; }
   set textContent(value: string) { this.text = String(value); this.children = []; }
   get textContent(): string { return this.text + this.children.map((c) => c.textContent).join(" "); }
@@ -17,7 +18,7 @@ class Element {
   viewBox = { baseVal: { width: 680, height: 230 } };
   removeAttribute(key: string) { delete this.attributes[key]; }
   setAttribute(key: string, value: string) { this.attributes[key] = value; }
-  addEventListener() {}
+  addEventListener(name: string, listener: () => void) { this.listeners[name] = listener; }
   querySelectorAll() { return []; }
   querySelector() { return new Element(); }
   classList = { add() {}, remove() {}, toggle() {} };
@@ -32,7 +33,9 @@ async function harness() {
   const exportHelpers = await import(new URL("../src/public/export-data.js", import.meta.url).href);
   const ui = await import(new URL("../src/public/ui.js", import.meta.url).href);
   const velocityData = await import(new URL("../src/public/velocity-data.js", import.meta.url).href);
-  const context = createContext({ renderHistoryCoverage() {}, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, document, Intl, Set, Map, console, HTMLElement: Element,
+  const tools = await import(new URL("../src/public/tools.js", import.meta.url).href);
+  const toolsData = await import(new URL("../src/public/tools-data.js", import.meta.url).href);
+  const context = createContext({ renderHistoryCoverage() {}, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, ...tools, ...toolsData, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   source = source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
@@ -97,9 +100,81 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
     assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2" : "" : `No tool evidence in ${selected}`);
     assert.equal(h.elements.get("#metric-compactions")!.textContent, "—");
     h.run('renderTools(view)');
+    const renderedTools = h.elements.get("#tools-view")!;
+    const callsKpi = descend(renderedTools).find((node) => node.className === "kpi")!;
+    assert.equal(callsKpi.children.find((node) => node.tag === "strong")!.textContent, sessions.includes(activity) ? "0" : "—");
     if (!sessions.includes(activity)) {
-      assert.match(h.elements.get("#tools-by-repository")!.textContent, /—/);
-      assert.match(h.elements.get("#tools-detail")!.textContent, /—/);
+      assert.match(renderedTools.textContent, /—/);
+      assert.doesNotMatch(renderedTools.textContent, /0 calls|999/);
     }
+    if (sessions.length === 2) assert.match(renderedTools.textContent, /1\/2/);
   }
+});
+
+test("Tools ranking selects and retains a profile, expands, and resets when the selected tool disappears", async () => {
+  const h = await harness(), native = sample(undefined);
+  native.tools = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`tool_${i}`, 15 - i]));
+  native.metrics.toolCalls = 120;
+  h.context["sessions"] = [native];
+  h.run('windowPreset="all"; view={sessions,repositories:[]}; renderActiveAnalyticsView=renderTools; renderTools(view)');
+  const container = h.elements.get("#tools-view")!;
+  const buttons = () => descend(container).filter((node) => node.className === "tools-select");
+  assert.equal(buttons().length, 12); assert.equal(h.run("toolsSelectedName"), "tool_0");
+  assert.equal(buttons()[0]!.attributes["aria-pressed"], "true");
+  buttons()[1]!.listeners["click"]!();
+  assert.equal(h.run("toolsSelectedName"), "tool_1");
+  assert.equal(buttons()[1]!.attributes["aria-pressed"], "true");
+  assert.equal(buttons()[1]!.dataset["focusKey"], "tools:tool:tool_1");
+  descend(container).find((node) => node.dataset["focusKey"] === "tools:toggle")!.listeners["click"]!();
+  assert.equal(buttons().length, 15); assert.match(container.textContent, /Show fewer/);
+  buttons()[14]!.listeners["click"]!();
+  descend(container).find((node) => node.dataset["focusKey"] === "tools:toggle")!.listeners["click"]!();
+  assert.equal(buttons().length, 12); assert.equal(h.run("toolsSelectedName"), "tool_14");
+  h.run("renderTools(view)"); assert.equal(h.run("toolsSelectedName"), "tool_14");
+  delete native.tools["tool_14"];
+  h.run("renderTools(view)"); assert.equal(h.run("toolsSelectedName"), "tool_0");
+  for (const chart of descend(container).filter((node) => node.attributes["role"] === "img")) assert.ok(chart.attributes["aria-label"]);
+  const fills = descend(container).filter((node) => node.className === "bar-track tools-bar").map((node) => node.children[0]!);
+  assert.equal(fills[0]!.style["width"], "100%"); assert.equal(fills[1]!.style["width"], `${14 / 15 * 100}%`);
+  assert.match(container.textContent, /no cost or duration of their own/);
+});
+
+test("Tools compares the same provider selection and combines excess repositories without losing calls", async () => {
+  const h = await harness();
+  const sessions = Array.from({ length: 10 }, (_, i) => {
+    const item = sample(undefined); item.tools = { Read: 10 - i }; item.repositoryId = `repo_${i}`; item.repositoryName = `Repo ${i}`;
+    item.createdAt = "2026-07-20T09:00:00Z"; return item;
+  });
+  const previous = sample(undefined); previous.tools = { Read: 50 }; previous.createdAt = "2026-07-19T09:00:00Z";
+  const excluded = sample(undefined); excluded.provider = "codex"; excluded.tools = { Read: 1000 }; excluded.createdAt = previous.createdAt;
+  h.context["sessions"] = sessions; h.context["scopeSessions"] = [...sessions, previous, excluded];
+  h.run('elements.windowStart.value="2026-07-20"; elements.windowStart.min="2026-07-01"; elements.windowEnd.value="2026-07-20"; viewProviderFilters.tools=new Set(["claude"]); view={sessions,scopeSessions,repositories:[]}; renderTools(view)');
+  const container = h.elements.get("#tools-view")!;
+  assert.match(container.textContent, /\+10% vs previous window/);
+  assert.match(container.textContent, /Other 3/);
+  assert.doesNotMatch(container.textContent, /1,000/);
+  const repositories = descend(container).find((node) => node.className === "tools-breakdown" && node.textContent.startsWith("By repository"))!;
+  const widths = descend(repositories).filter((node) => node.className === "bar-track tools-bar").map((node) => parseFloat(String(node.children[0]!.style["width"])));
+  assert.equal(widths.length, 9); assert.ok(Math.abs(widths.reduce((sum, width) => sum + width, 0) - 100) < 1e-10);
+  h.run('clearInactiveAnalyticsViews("summary")');
+  assert.equal(container.textContent, "");
+});
+
+test("Tools daily columns start at zero and unavailable days never present zero calls", async () => {
+  const h = await harness(), first = sample(undefined), last = sample(undefined), missing = sample(evidence());
+  first.tools = { Read: 2 }; last.tools = { Read: 8 };
+  first.createdAt = "2026-07-20T09:00:00Z"; missing.createdAt = "2026-07-21T09:00:00Z"; last.createdAt = "2026-07-22T09:00:00Z";
+  h.context["sessions"] = [first, missing, last];
+  h.run('windowPreset="all"; view={sessions,repositories:[]}; renderTools(view)');
+  const container = h.elements.get("#tools-view")!;
+  const columns = descend(container).filter((node) => node.className === "tools-column");
+  assert.deepEqual(columns.map((column) => column.children[0]!.style["height"]), ["25%", "0%", "100%"]);
+  assert.match(columns[1]!.attributes["title"]!, /— no tool evidence/);
+  assert.doesNotMatch(columns[1]!.attributes["title"]!, /0 calls/);
+  first.transcript.startTimeKnown = false; last.transcript.startTimeKnown = false;
+  h.run("renderTools(view)");
+  const trend = descend(container).find((node) => node.className === "tools-trend")!;
+  assert.match(trend.textContent, /— No tool evidence/);
+  assert.match(trend.textContent, /10 calls have no known session-start day/);
+  assert.doesNotMatch(trend.textContent, /0 calls plotted/);
 });

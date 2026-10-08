@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="/interop.css" />
     <link rel="stylesheet" href="/pricing.css" />
     <link rel="stylesheet" href="/velocity.css" />
+    <link rel="stylesheet" href="/tools.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -228,9 +229,8 @@
           </section>
 
           <section class="analytics-view" data-view-panel="tools" hidden aria-labelledby="tools-title">
-            <header class="view-header"><div><p class="kicker">Repositories</p><h2 id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
-            <article class="panel"><div class="distribution-table chart-slot" id="tools-by-repository"></div><div class="comparison-key" id="tools-key"></div></article>
-            <article class="panel detail-panel"><header><div><p class="kicker">Selected repository</p><h2 id="tools-detail-title">—</h2></div></header><div class="bar-list sage chart-slot" id="tools-detail"></div></article>
+            <header class="view-header"><div><p class="kicker">Usage</p><h2 id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
+            <div id="tools-view" class="chart-slot"></div>
           </section>
 
           <section class="analytics-view" data-view-panel="pricing" hidden aria-labelledby="pricing-title">

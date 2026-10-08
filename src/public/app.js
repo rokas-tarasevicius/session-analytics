@@ -8,6 +8,8 @@ import {
 import { providerColors, providerMark, renderProviderEvidence, dailySpendByProvider, metricEligible, metricCoverage, coveredValue } from "./providers.js";
 
 import { renderPricingPanel } from "./pricing.js";
+import { renderToolsView } from "./tools.js";
+import { toolsDays } from "./tools-data.js";
 import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
 import { buildVelocity, comparePeriods, localDay, periodFromVelocity, sessionStartWindow } from "./velocity-data.js";
 import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
@@ -53,8 +55,7 @@ const elements = {
   spend: $("#metric-spend"), spendNote: $("#metric-spend-note"),
   sync: $("#sync-context"), syncLabel: $("#sync-label"),
   theme: $("#theme-switch"), themeLabel: $("#theme-label"), toolCalls: $("#tool-calls"),
-  toolsByRepository: $("#tools-by-repository"), toolsDetail: $("#tools-detail"),
-  toolsDetailTitle: $("#tools-detail-title"), toolsKey: $("#tools-key"), toolsProviderFilters: $("#tools-provider-filters"),
+  toolsView: $("#tools-view"), toolsProviderFilters: $("#tools-provider-filters"),
   tools: $("#metric-tools"), warning: $("#warning-banner"), warningList: $("#warning-list"),
   windowEnd: $("#window-end"), windowSegment: $("#window-segment"), windowStart: $("#window-start"),
 };
@@ -71,12 +72,12 @@ const providerScopedViews = ["activity", "tools"];
 const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
 const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", all: "All observed time", custom: "Custom range" };
-const seriesSlots = 6;
 
 let snapshot = null;
 let sessionsByRepository = new Map();
 let modelMetric = "value";
-let toolsDetailRepositoryId = null;
+let toolsSelectedName = null;
+let toolsExpanded = false;
 let windowPreset = "30";
 let tableSort = { direction: "descending", key: "value" };
 let shortcutsEnabled = true;
@@ -368,8 +369,6 @@ function stepView(offset) {
   switchView(viewOrder[(index + offset + viewOrder.length) % viewOrder.length]);
 }
 
-function seriesColor(index) { return `var(--series-${(index % seriesSlots) + 1})`; }
-
 function renderViewProviderFilters(container, scope) {
   clear(container);
   for (const provider of providerOrder) {
@@ -551,56 +550,15 @@ function renderModels(view) {
 }
 
 function renderTools(view) {
-  const { toolsKey: keyContainer, toolsByRepository: tableContainer, toolsDetail: detailContainer, toolsDetailTitle: detailTitle } = elements;
   const sessions = sessionsForProviders(view.sessions, "tools");
-  const names = namedTotals(sessions, "tools").slice(0, seriesSlots);
-  clear(tableContainer); clear(keyContainer);
-  const header = node("div", null, "distribution-row header-row");
-  header.append(node("span", "Repository"), node("span", "Distribution"), node("span", "Calls"), node("span", "Top")); tableContainer.append(header);
-  const rows = view.repositories.map(({ repository }) => {
-    const selected = sessions.filter(({ repositoryId }) => repositoryId === repository.id);
-    const repositorySessions = selected.filter((s) => metricEligible(s, "tools"));
-    const totals = new Map(namedTotals(repositorySessions, "tools").map(({ name, value }) => [name, value]));
-    return { repository, selected, sessions: repositorySessions, total: [...totals.values()].reduce((sum, value) => sum + value, 0), totals };
-  }).filter(({ selected }) => selected.length > 0).sort((left, right) => right.total - left.total);
-  let selectedId = toolsDetailRepositoryId;
-  if (!rows.some(({ repository }) => repository.id === selectedId)) selectedId = rows[0]?.repository.id ?? null;
-  toolsDetailRepositoryId = selectedId;
-  for (const item of rows) {
-    const row = node("div", null, "distribution-row"); const open = node("button", item.repository.name);
-    if (item.repository.id === selectedId) row.setAttribute("aria-current", "true");
-    open.type = "button"; open.dataset.focusKey = `tools:${item.repository.id}`;
-    open.setAttribute("aria-label", `Show tools for ${item.repository.name}`); open.addEventListener("click", () => {
-      toolsDetailRepositoryId = item.repository.id;
-      renderActiveAnalyticsView(view);
-    }); row.append(open);
-    const stack = node("div", null, "distribution-stack");
-    const parts = [];
-    for (const [index, { name }] of names.entries()) {
-      const value = item.totals.get(name) || 0; if (value === 0) continue;
-      const fill = node("i"); fill.style.setProperty("--series-color", seriesColor(index)); fill.style.width = `${(value / item.total) * 100}%`; stack.append(fill);
-      parts.push(`${name} ${integer.format(value)}`);
-    }
-    const represented = names.reduce((sum, { name }) => sum + (item.totals.get(name) || 0), 0);
-    if (represented < item.total) {
-      const other = node("i"); other.dataset.other = "true"; other.style.width = `${((item.total - represented) / item.total) * 100}%`; stack.append(other);
-      parts.push(`Other ${integer.format(item.total - represented)}`);
-    }
-    stack.title = parts.join("\n"); stack.setAttribute("role", "img"); stack.setAttribute("aria-label", parts.join(", "));
-    const top = [...item.totals.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || "—";
-    row.append(stack, valueWithCoverage(item.total, { eligible: item.sessions.length, selected: item.selected.length }, (v) => integer.format(v), "tools evidence"), node("span", top)); tableContainer.append(row);
-  }
-  if (rows.length === 0) { clear(tableContainer); emptyState(tableContainer, "No tool activity in this view."); }
-  for (const [index, { name }] of names.entries()) {
-    const item = node("span"); const swatch = node("i"); swatch.style.setProperty("--series-color", seriesColor(index)); item.append(swatch, document.createTextNode(name)); keyContainer.append(item);
-  }
-  if (rows.some((item) => names.reduce((sum, { name }) => sum + (item.totals.get(name) || 0), 0) < item.total)) {
-    const item = node("span"); const swatch = node("i"); swatch.className = "other-swatch"; item.append(swatch, document.createTextNode("Other")); keyContainer.append(item);
-  }
-  const selectedRow = rows.find(({ repository }) => repository.id === selectedId);
-  detailTitle.textContent = selectedRow?.repository.name || "No repository selected";
-  renderBars(detailContainer, selectedRow ? namedTotals(selectedRow.sessions, "tools") : [], (value) => integer.format(value), 10);
-  if (selectedRow && !selectedRow.sessions.length) { clear(detailContainer); detailContainer.append(node("p", `${DASH} No tools evidence in 0/${selectedRow.selected.length} selected sessions`, "empty-line")); }
+  const previous = windowPreset === "all" ? null : previousPeriod({ end: elements.windowEnd.value, min: elements.windowStart.min, start: elements.windowStart.value });
+  const previousSessions = previous ? sessionsForProviders(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay), "tools") : null;
+  const days = windowPreset === "all" ? toolsDays(sessions) : windowDays();
+  toolsSelectedName = renderToolsView(elements.toolsView, {
+    sessions, previousSessions, days, selectedTool: toolsSelectedName, expanded: toolsExpanded, repositories: view.repositories,
+    onSelect: (name) => { toolsSelectedName = name; renderActiveAnalyticsView(view); },
+    onToggle: () => { toolsExpanded = !toolsExpanded; renderActiveAnalyticsView(view); },
+  });
 }
 
 function clearInactiveAnalyticsViews(activeName) {
@@ -608,7 +566,7 @@ function clearInactiveAnalyticsViews(activeName) {
     activity: [elements.activityProviderFilters, elements.activityHeatmap, elements.activityRepositories],
     costs: [elements.providerCostComponents, elements.repositoryCostComponents],
     models: [elements.modelsByProvider],
-    tools: [elements.toolsProviderFilters, elements.toolsByRepository, elements.toolsKey, elements.toolsDetail],
+    tools: [elements.toolsProviderFilters, elements.toolsView],
   };
   for (const [name, elementsForView] of Object.entries(containers)) {
     if (name === activeName) continue;
