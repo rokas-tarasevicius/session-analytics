@@ -1,3 +1,5 @@
+import { providerColor } from "./chart-colors.js";
+import { barPercent } from "./chart-scale.js";
 import { buildToolsView, toolProfile } from "./tools-data.js";
 import { DASH, coverageBadge, dataTable, el, evidence, kpi, note } from "./ui.js";
 
@@ -20,10 +22,11 @@ function panel(kicker, title, id) {
   return { result, header };
 }
 
-function bar(value, maximum, label) {
+function bar(value, maximum, label, color = null) {
   const track = el("div", null, "bar-track tools-bar"), fill = el("i");
   track.setAttribute("role", "img"); track.setAttribute("aria-label", label);
-  fill.style.width = `${maximum > 0 ? value / maximum * 100 : 0}%`;
+  fill.style.width = `${barPercent(value, maximum)}%`;
+  if (color) fill.style.setProperty("--series-color", color);
   track.append(fill);
   return track;
 }
@@ -35,7 +38,7 @@ function breakdown(title, items, total) {
   for (const item of items) {
     const row = el("div", null, "bar-row"), label = el("div", null, "bar-label");
     label.append(el("span", item.name), el("strong", `${integer.format(item.calls)} · ${percent(item.calls / total)}`));
-    row.append(label, bar(item.calls, total, `${item.name}: ${integer.format(item.calls)} calls, ${percent(item.calls / total)} of this tool’s calls`));
+    row.append(label, bar(item.calls, total, `${item.name}: ${integer.format(item.calls)} calls, ${percent(item.calls / total)} of this tool’s calls`, item.provider ? providerColor(item.provider) : null));
     list.append(row);
   }
   section.append(list);
@@ -136,7 +139,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
     profilePanel.result.append(stats, trend(profile));
     const splits = el("div", null, "tools-splits"), repositoryRows = profile.byRepository.slice(0, 8);
     if (profile.byRepository.length > 8) repositoryRows.push({ name: "Other", calls: profile.byRepository.slice(8).reduce((sum, row) => sum + row.calls, 0) });
-    splits.append(breakdown("By provider", profile.byProvider.map((row) => ({ name: row.label, calls: row.calls })), profile.calls),
+    splits.append(breakdown("By provider", profile.byProvider.map((row) => ({ name: row.label, calls: row.calls, provider: row.provider })), profile.calls),
       breakdown("By repository", repositoryRows, profile.calls));
     profilePanel.result.append(splits);
   } else profilePanel.result.append(note(available ? "A profile appears when there are recorded tool calls." : `${DASH} ${reason}.`, "empty-line"));

@@ -1,3 +1,5 @@
+import { modelColor, providerColor, providerKey } from "./chart-colors.js";
+import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
 import { agentLabels, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
@@ -44,13 +46,20 @@ function evidenceText(evidence, metric) {
   const ratio = evidence.eligible > 0 ? `${number.format(evidence.known)}/${number.format(evidence.eligible)} ${evidenceLabels[metric]} (${number.format(100 * evidence.known / evidence.eligible)}%)` : "N/A · no eligible tokens";
   return `${ratio}${evidence.unsupported ? `; ${number.format(evidence.unsupported)} without an applicable breakdown` : ""}`;
 }
-// Sixteen supported identities: eight colors × solid/striped area (or solid/
-// dashed line). Slots belong to identity, never spend rank or visible position.
-const agentSlots = new Map(Object.keys(agentLabels).map((id, index) => [id, index]));
+// Slots belong to identity within each provider, never spend rank or visible position.
+const agentSlots = new Map(Object.keys(agentLabels).map((id) => [id, Object.keys(agentLabels).filter((key) => key.split("-")[0] === id.split("-")[0]).indexOf(id)]));
 let chartSequence = 0;
 function seriesEncoding(series, index, group) {
-  const slot = group === "agent" ? agentSlots.get(series.id) ?? 15 : index;
-  return { color: `var(--velocity-${slot % 8})`, pattern: slot >= 8 ? "diagonal" : "solid", dash: slot >= 8 ? "6 3" : "none" };
+  if (group === "provider") return { color: providerColor(series.id), pattern: "solid", dash: "none" };
+  if (group === "model") {
+    const split = series.id.indexOf(":");
+    return { color: modelColor(series.id.slice(0, split), series.id.slice(split + 1)), pattern: "solid", dash: "none" };
+  }
+  if (group === "agent") {
+    const slot = agentSlots.get(series.id) ?? 0, provider = providerKey(series.id.split("-")[0]);
+    return { color: `var(--provider-${provider}-${[1, 0, 2, 3][slot % 4]})`, pattern: slot >= 4 ? "diagonal" : "solid", dash: slot >= 4 ? "6 3" : "none" };
+  }
+  return { color: `var(--velocity-${index % 8})`, pattern: index >= 8 ? "diagonal" : "solid", dash: index >= 8 ? "6 3" : "none" };
 }
 const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : granularity === "week" ? `Week of ${key}` : key;
 
@@ -100,7 +109,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     const path = svgElement("path", { d: upper.map((value, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(value)}`).join(" ") + (stacked ? ` ${floor.map((_, i) => { const j = floor.length - i - 1; return `L${x(j)},${y(floor[j])}`; }).join(" ")} Z` : ""), class: stacked ? "velocity-area" : "velocity-line", stroke: encoding.color, fill: stacked ? encoding.fill : "none", "data-series": series.id, "data-pattern": encoding.pattern });
     if (!stacked) path.setAttribute("stroke-dasharray", encoding.dash);
     svg.append(path);
-    if (upper.length === 1) svg.append(svgElement("circle", { cx: x(0), cy: y(upper[0]), r: 4, stroke: encoding.color, "stroke-width": 2, fill: stacked ? encoding.fill : encoding.pattern === "solid" ? encoding.color : "var(--surface)" }));
+    if (upper.length === 1) svg.append(svgElement("circle", { cx: x(0), cy: y(upper[0]), r: 4, "data-series": series.id, stroke: encoding.color, "stroke-width": 2, fill: stacked ? encoding.fill : encoding.pattern === "solid" ? encoding.color : "var(--surface)" }));
     if (stacked) floor = upper;
   });
   if (overlay) {
@@ -111,17 +120,11 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   const marker = svgElement("line", { x1: x(0), x2: x(0), y1: top, y2: height - bottom, class: "velocity-marker", visibility: "hidden" });
   svg.append(marker);
   const legend = element("div", undefined, "velocity-legend");
-  data.series.forEach((series, index) => {
-    const encoding = encodings[index];
-    const item = element("span"), swatch = svgElement("svg", { viewBox: "0 0 28 14", "aria-hidden": "true", class: "velocity-swatch" });
-    item.setAttribute("data-series", series.id);
-    swatch.append(stacked
-      ? svgElement("rect", { x: 1, y: 1, width: 26, height: 12, fill: encoding.fill, stroke: encoding.color, "fill-opacity": 0.65 })
-      : svgElement("line", { x1: 0, x2: 28, y1: 7, y2: 7, stroke: encoding.color, "stroke-width": 2.2, "stroke-dasharray": encoding.dash }));
-    if (!stacked && data.keys.length === 1) swatch.append(svgElement("circle", { cx: 14, cy: 7, r: 3, stroke: encoding.color, "stroke-width": 2, fill: encoding.pattern === "solid" ? encoding.color : "var(--surface)" }));
-    item.append(swatch, element("span", series.label), element("strong", formatMetric(series.total, data.metric, true)));
-    legend.append(item);
-  });
+  renderLegend(legend, data.series.map((series, index) => ({
+    id: series.id, label: series.label, color: encodings[index].color, value: series.total,
+    valueLabel: formatMetric(series.total, data.metric, true), mark: stacked ? "rect" : "line",
+    pattern: encodings[index].pattern === "solid" ? "solid" : stacked ? "diagonal" : "dashed",
+  })), { target: svg });
   if (overlay) legend.append(element("span", "Dashed: total · rolling 7-day average", "velocity-average-key"));
   const inspection = element("div", undefined, "velocity-inspection");
   inspection.setAttribute("aria-live", "polite"); inspection.setAttribute("aria-atomic", "true");
@@ -258,7 +261,7 @@ export function renderVelocity(container, sessions, context) {
     controller.update = update;
     for (const provider of providerIds) {
       const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = true;
-      label.dataset.provider = provider; input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
+      label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider)); input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
       label.append(input, el("span", providerLabels[provider]));
       input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); }); filters.append(label);
     }
