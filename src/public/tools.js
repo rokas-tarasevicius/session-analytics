@@ -4,8 +4,13 @@ import { DASH, coverageBadge, dataTable, el, evidence, kpi, note } from "./ui.js
 const integer = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 const decimal = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 const percent = (share) => `${decimal.format(share * 100)}%`;
-const changeLabel = (change) => change === null ? DASH : change === "new" ? "new"
-  : `${change > 0 ? "+" : change < 0 ? "−" : ""}${integer.format(Math.abs(change) * 100)}%`;
+/** Signs follow the rounded value, so a change that rounds to 0% never reads as "+0%" or "−0%". */
+export function changeLabel(change) {
+  if (change === null || change === undefined) return DASH;
+  if (change === "new") return "new";
+  const rounded = Math.round(Math.abs(change) * 100);
+  return `${rounded === 0 ? "" : change > 0 ? "+" : "−"}${integer.format(rounded)}%`;
+}
 
 function panel(kicker, title, id) {
   const result = el("article", null, "panel"), header = el("header"), heading = el("div");

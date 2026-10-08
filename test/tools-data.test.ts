@@ -102,3 +102,32 @@ test("all-time day range fills calendar gaps and caps at the latest 366 days", (
   const profile = toolProfile(sessions, "Read", { days });
   assert.equal(profile.calls, 6); assert.equal(profile.outsideDaysCalls, 2);
 });
+
+test("change labels follow the rounded value, never a signed zero", async () => {
+  const { changeLabel } = await import(new URL("../src/public/tools.js", import.meta.url).href);
+  assert.equal(changeLabel(null), "—"); assert.equal(changeLabel("new"), "new");
+  assert.equal(changeLabel(0.004), "0%"); assert.equal(changeLabel(-0.004), "0%"); assert.equal(changeLabel(0), "0%");
+  assert.equal(changeLabel(0.005), "+1%"); assert.equal(changeLabel(-0.12), "−12%"); assert.equal(changeLabel(1), "+100%");
+});
+
+test("invalid call counts never count, and zero-call names are not distinct tools", () => {
+  const result = buildToolsView([session({ Read: 3, Bad: Number.NaN, Negative: -4, Infinite: Number.POSITIVE_INFINITY, Zero: 0 })]);
+  assert.equal(result.totalCalls, 3); assert.equal(result.distinctTools, 1);
+  assert.deepEqual(result.tools.map((tool) => tool.name), ["Read"]);
+});
+
+test("a provider without a label still appears in the profile split, so the split sums to the tool's calls", () => {
+  const profile = toolProfile([session({ Read: 2 }), session({ Read: 3 }, { provider: "future" as SessionAnalytics["provider"] })], "Read", { days: ["2026-10-01"] });
+  assert.deepEqual(profile.byProvider.map(({ provider, label, calls }) => ({ provider, label, calls })), [
+    { provider: "claude", label: "Claude", calls: 2 }, { provider: "future", label: "future", calls: 3 },
+  ]);
+  assert.equal(profile.byProvider.reduce((sum, row) => sum + row.calls, 0), profile.calls);
+});
+
+test("all-time day range keeps exactly 366 days and clips the 367th", () => {
+  const span = (first: string) => toolsDays([session({ Read: 1 }, { createdAt: `${first}T12:00:00Z` }), session({ Read: 1 })]);
+  assert.equal(span("2025-10-01").length, 366); assert.equal(span("2025-10-01")[0], "2025-10-01");
+  assert.equal(span("2025-09-30").length, 366); assert.equal(span("2025-09-30")[0], "2025-10-01");
+  const undated = session({ Read: 1 }); undated.transcript.startTimeKnown = false;
+  assert.deepEqual(toolsDays([undated]), []);
+});

@@ -2,6 +2,7 @@ import { metricCoverage, metricEligible, providerIds, providerLabels } from "./p
 import { daysBetween } from "./view-model.js";
 import { localDay, shiftDay } from "./velocity-data.js";
 
+const order = (provider) => { const index = providerIds.indexOf(provider); return index < 0 ? providerIds.length : index; };
 const callCount = (value) => Number.isFinite(value) && value > 0 ? value : 0;
 const startDay = (session) => session.transcript?.startTimeKnown === false || session.evidence?.timing === "file-mtime"
   ? null : localDay(session.createdAt, "UTC");
@@ -84,8 +85,8 @@ export function toolProfile(sessions, name, { days = toolsDays(sessions), reposi
   return { name, coverage, calls: coverage.eligible ? calls : null, share: totalCalls ? calls / totalCalls : null,
     sessions: coverage.eligible ? using : null, repositories: coverage.eligible ? repositories.size : null,
     callsPerSession: using ? calls / using : null, byDay: [...byDay.values()], undatedCalls, outsideDaysCalls,
-    byProvider: providerIds.filter((provider) => providers.has(provider)).map((provider) => ({ provider,
-      label: providerLabels[provider], calls: providers.get(provider), share: providers.get(provider) / calls })),
+    byProvider: [...providers.keys()].sort((a, b) => order(a) - order(b) || a.localeCompare(b)).map((provider) => ({ provider,
+      label: providerLabels[provider] ?? provider, calls: providers.get(provider), share: providers.get(provider) / calls })),
     byRepository: [...repositories.values()].sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name))
       .map((repository) => ({ id: repository.id, name: repository.name, calls: repository.calls, share: repository.calls / calls })) };
 }
