@@ -1,5 +1,7 @@
 export type ProviderKey = "codex" | "claude" | "cursor" | "copilot" | "opencode" | "gemini" | "unknown";
 export const brandPalette: { light: Record<string, string>; dark: Record<string, string> };
+export const categorySlotCount: 4;
+export function categoryColor(slot: number): string;
 export function providerKey(provider?: string | null): ProviderKey;
 export function providerColor(provider?: string | null): string;
 export function modelProvider(model?: string | null, fallbackProvider?: string | null): ProviderKey;

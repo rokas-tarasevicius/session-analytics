@@ -1,4 +1,4 @@
-import { modelColor, providerColor, providerKey } from "./chart-colors.js";
+import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
@@ -48,6 +48,12 @@ function evidenceText(evidence, metric) {
 }
 // Slots belong to identity within each provider, never spend rank or visible position.
 const agentSlots = new Map(Object.keys(agentLabels).map((id) => [id, Object.keys(agentLabels).filter((key) => key.split("-")[0] === id.split("-")[0]).indexOf(id)]));
+// Fixed vocabularies keep both colour and texture when dates, filters or rank change.
+const categorySlots = new Map([
+  ["execution", new Map([["top-level", 0], ["subagent", 1]])],
+  ["effort", new Map(["low", "medium", "high", "xhigh", "minimal", "none", "max", "ultra"].map((id, slot) => [id, slot]))],
+]);
+const neutralCategories = new Set(["other", "unknown", "<unknown>", "not recorded", "unknown execution"]);
 let chartSequence = 0;
 function seriesEncoding(series, index, group) {
   if (group === "provider") return { color: providerColor(series.id), pattern: "solid", dash: "none" };
@@ -59,7 +65,12 @@ function seriesEncoding(series, index, group) {
     const slot = agentSlots.get(series.id) ?? 0, provider = providerKey(series.id.split("-")[0]);
     return { color: `var(--provider-${provider}-${[1, 0, 2, 3][slot % 4]})`, pattern: slot >= 4 ? "diagonal" : "solid", dash: slot >= 4 ? "6 3" : "none" };
   }
-  return { color: `var(--velocity-${index % 8})`, pattern: index >= 8 ? "diagonal" : "solid", dash: index >= 8 ? "6 3" : "none" };
+  const id = series.id.trim().toLowerCase();
+  const fixedSlots = categorySlots.get(group);
+  const slot = fixedSlots ? fixedSlots.get(id) : index;
+  if (neutralCategories.has(id) || slot === undefined) return { color: providerColor("unknown"), pattern: "solid", dash: "none" };
+  const repeated = slot >= categorySlotCount;
+  return { color: categoryColor(slot), pattern: repeated ? "diagonal" : "solid", dash: repeated ? "6 3" : "none" };
 }
 const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : granularity === "week" ? `Week of ${key}` : key;
 
