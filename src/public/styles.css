@@ -469,7 +469,8 @@ h2 { font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.01em; }
 /* ---------------------------------------------------------------- tables */
 .comparison-section { margin-top: var(--gap); min-height: 0; }
 .table-hint { color: var(--muted); font-size: var(--fs-xs); white-space: normal; }
-.table-wrap { min-width: 0; max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); max-height: 560px; }
+/* Positioned so visually hidden (absolute) text in a cell stays inside the scroll area instead of widening the page. */
+.table-wrap { position: relative; min-width: 0; max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); max-height: 560px; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 880px; font-size: var(--fs-sm); }
 thead th { height: 34px; padding: 0 12px; vertical-align: middle; background: var(--surface-2); color: var(--muted); border-bottom: 1px solid var(--line); font: 500 var(--fs-xs)/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; text-align: left; position: sticky; top: 0; z-index: 2; }
 thead th:not(:first-child):not(.align-left) { text-align: right; }
@@ -739,7 +740,7 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: blur(2px); }
 .kpi .kpi-note, .kpi > small:last-child:not(.kpi-coverage) { grid-area: note; margin-top: 6px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; font-family: var(--font-sans); }
 .kpi strong[title] { cursor: help; }
 .kpi strong:has(+ .kpi-coverage.kpi-reason) { color: var(--muted); }
-.coverage { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface-2); color: var(--muted); font: 500 var(--fs-xs)/1 var(--font-mono); letter-spacing: 0; white-space: nowrap; cursor: help; vertical-align: middle; }
+.coverage { position: relative; display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface-2); color: var(--muted); font: 500 var(--fs-xs)/1 var(--font-mono); letter-spacing: 0; white-space: nowrap; cursor: help; vertical-align: middle; }
 strong .coverage, td .coverage { margin-left: 6px; }
 .unavailable > span { color: var(--muted); }
 .bar-label strong .coverage { margin-left: 6px; }
@@ -843,6 +844,7 @@ tbody tr[data-row-link] { cursor: pointer; }
 .row-link { border: 0; background: none; padding: 0; color: inherit; font: 500 var(--fs-sm) var(--font-sans); text-align: left; cursor: pointer; }
 .row-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-xs); }
 .date-range-note { color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; cursor: help; }
+#generated-at[data-stale="true"] { color: var(--warn-text); cursor: help; }
 .view-status { margin-bottom: var(--gap); }
 .view-status .status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 

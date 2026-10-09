@@ -86,3 +86,14 @@ test("focus rings use one colour and panels have no decorative left stripes", as
     }
   }
 });
+
+test("visually hidden text in coverage badges and tables cannot widen the page", async () => {
+  // `.sr-only` is absolutely positioned; without a positioned ancestor inside the table's scroll area it escapes the
+  // overflow clip and lets a 390px page scroll sideways (seen with the fleet table's coverage badges).
+  const css = await readCss("styles.css");
+  for (const selector of [".table-wrap", ".coverage"]) {
+    const rule = rules(css).find((entry) => entry.selector === selector);
+    assert.ok(rule, selector);
+    assert.match(rule.body, /(?:^|;)\s*position:\s*relative\s*;/, `${selector} must be positioned`);
+  }
+});
