@@ -21,7 +21,7 @@ import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { renderSharedSnapshot } from "./shared-view.js";
-import { DASH, coverageBadge, setValue, valueWithCoverage } from "./ui.js";
+import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -724,6 +724,7 @@ function dailyProviderSpend(sessions) {
 }
 
 function renderLine(items) {
+  redrawOnResize(elements.dailySpend, () => renderLine(items));
   clear(elements.dailySpend);
   const selectedProviders = activeProviders();
   const totals = Object.fromEntries(selectedProviders.map((provider) => [provider, items.reduce((sum, item) => sum + item[provider], 0)]));
@@ -736,7 +737,7 @@ function renderLine(items) {
         : "No daily priced activity in this view.";
     emptyState(elements.dailySpend, message, "Nothing to plot"); syncHover(null); return;
   }
-  const width = 900, height = 272, left = 52, right = 14, top = 14, bottom = 34;
+  const width = chartWidth(elements.dailySpend, 900), height = width < 560 ? 220 : 272, left = 52, right = 14, top = 14, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
   const { axisMaximum } = tickScale(maximum);
@@ -748,7 +749,7 @@ function renderLine(items) {
     addSvgText(svg, shortMoney(value), left - 10, y + 4, "end");
   }
   const xAt = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
-  const tickIndexes = [...new Set([0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
+  const tickIndexes = [...new Set(width < 560 ? [0, Math.round((items.length - 1) / 2), items.length - 1] : [0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
   for (const index of tickIndexes) addSvgText(svg, shortDate(items[index].name), xAt(index), height - 12, index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
   const xs = items.map((_, index) => xAt(index));
   const baseline = top + plotHeight;

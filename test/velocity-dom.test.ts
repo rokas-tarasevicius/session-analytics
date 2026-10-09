@@ -261,3 +261,27 @@ test("Velocity provider and model groups use shared brand colours and reciprocal
     else Reflect.deleteProperty(globalThis, "document");
   }
 });
+
+test("Velocity keeps CSS-pixel chart dimensions and reduces date ticks on narrow charts", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const data = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-05", group: "repository" });
+    for (const width of [390, 480, 800]) for (const compactView of [false, true]) {
+      const container = Object.assign(new Element(), { clientWidth: width });
+      renderVelocityChart(container, data, { compactView });
+      const svg = container.querySelector("svg")!;
+      const height = compactView ? (width < 560 ? 240 : 290) : (width < 560 ? 260 : 330);
+      assert.equal(svg.getAttribute("viewBox"), `0 0 ${width} ${height}`);
+      const ticks = svg.querySelectorAll(".axis-label").filter((node) => node.getAttribute("y") === String(height - 12));
+      assert.equal(ticks.length, width < 420 ? 2 : width < 560 ? 3 : 5);
+      assert.equal(svg.querySelector(".grid-line")!.getAttribute("x1"), width < 560 ? "64" : "86");
+      assert.equal(ticks[0]!.textContent, "2026-09-01");
+      assert.equal(ticks.at(-1)!.textContent, "2026-09-05");
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});

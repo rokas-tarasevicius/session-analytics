@@ -1,7 +1,7 @@
 import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
-import { DASH, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
+import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
 import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
@@ -86,12 +86,13 @@ const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : gra
 
 /** One focus stop, arrow-key inspection, and a text equivalent for every plotted bucket. */
 export function renderVelocityChart(container, data, { rolling = false, compactView = false } = {}) {
+  redrawOnResize(container, () => renderVelocityChart(container, data, { rolling, compactView }));
   container.replaceChildren(); container.classList.add("velocity-chart");
   if (!data.series.length) {
     container.append(element("p", data.missingSessions ? "Velocity is unavailable in this snapshot. Refresh to collect activity buckets." : "No observed activity for this metric in the selected dates and providers.", "empty-state"));
     return;
   }
-  const width = 1040, height = compactView ? 290 : 330, left = 86, right = 18, top = 22, bottom = 40;
+  const width = chartWidth(container, 1040), height = compactView ? (width < 560 ? 240 : 290) : (width < 560 ? 260 : 330), left = width < 560 ? 64 : 86, right = 18, top = 22, bottom = 40;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const stacked = data.mode === "stacked";
   const overlay = rolling && data.granularity === "day" && data.mode !== "cumulative";
@@ -121,7 +122,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     svg.append(svgElement("line", { x1: left, x2: width - right, y1: y(value), y2: y(value), class: "grid-line" }));
     svg.append(svgElement("text", { x: left - 12, y: y(value) + 4, "text-anchor": "end", class: "axis-label" }, formatMetric(value, data.metric, true)));
   }
-  const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((fraction) => Math.round(fraction * (data.keys.length - 1))))];
+  const ticks = [...new Set((width < 420 ? [0, 1] : width < 560 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1]).map((fraction) => Math.round(fraction * (data.keys.length - 1))))];
   for (const index of ticks) svg.append(svgElement("text", { x: x(index), y: height - 12, "text-anchor": index === 0 ? "start" : index === data.keys.length - 1 ? "end" : "middle", class: "axis-label" }, caption(data.keys[index], data.granularity)));
   let floor = data.keys.map(() => 0);
   data.series.forEach((series, seriesIndex) => {

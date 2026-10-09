@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 
 import {
   clampWindow, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
@@ -186,4 +188,46 @@ test("sortRepositories orders by any column in both directions with a stable nam
   assert.deepEqual(sortRepositories(rows, "value", "descending").map((row) => row.repository.name), ["alpha", "beta", "gamma"]);
   assert.deepEqual(sortRepositories(rows, "value", "ascending").map((row) => row.repository.name), ["beta", "gamma", "alpha"]);
   assert.deepEqual(sortRepositories(rows, "name", "ascending").map((row) => row.repository.name), ["alpha", "beta", "gamma"]);
+});
+
+
+test("chart sizing falls back in hidden views and redraws only meaningful width changes with the latest data", async () => {
+  const source = await readFile(new URL("../src/public/ui.js", import.meta.url), "utf8");
+  const callbacks: Array<() => void> = [], frames: Array<() => void> = [], observed: unknown[] = [];
+  const observer = class {
+    constructor(callback: () => void) { callbacks.push(callback); }
+    observe(container: unknown) { observed.push(container); }
+  };
+  const helpers = runInNewContext(source.replaceAll("export ", "") + "\n({ chartWidth, redrawOnResize })", {
+    ResizeObserver: observer, requestAnimationFrame: (callback: () => void) => frames.push(callback),
+  });
+  assert.equal(helpers.chartWidth({}, 900), 900);
+  assert.equal(helpers.chartWidth(null, 1040), 1040);
+  assert.equal(helpers.chartWidth({ clientWidth: 0 }, 1040), 1040);
+  assert.equal(helpers.chartWidth({ clientWidth: 240 }, 900), 280);
+  assert.equal(helpers.chartWidth({ clientWidth: 391.8 }, 900), 391);
+  assert.equal(helpers.chartWidth({ clientWidth: 240 }, 900, 200), 240);
+  const container = { clientWidth: 400 };
+  let oldDraws = 0, latestDraws = 0;
+  helpers.redrawOnResize(container, () => oldDraws++);
+  callbacks[0]!(); assert.equal(frames.length, 0, "initial notification does not redraw");
+  container.clientWidth = 416; callbacks[0]!(); assert.equal(frames.length, 0);
+  container.clientWidth = 432; callbacks[0]!();
+  container.clientWidth = 464; callbacks[0]!();
+  assert.equal(frames.length, 1, "multiple notifications coalesce into one frame");
+  frames.shift()!(); assert.equal(oldDraws, 1);
+  helpers.redrawOnResize(container, () => latestDraws++);
+  assert.equal(observed.length, 1, "registration updates the callback without adding observers");
+  container.clientWidth = 496; callbacks[0]!(); frames.shift()!();
+  assert.equal(oldDraws, 1); assert.equal(latestDraws, 1);
+  container.clientWidth = 0; callbacks[0]!(); assert.equal(frames.length, 0, "hidden views do not redraw");
+  container.clientWidth = 600; callbacks[0]!();
+  helpers.redrawOnResize(container, () => latestDraws++);
+  frames.shift()!(); assert.equal(latestDraws, 1, "an intervening data render cancels a redundant queued redraw");
+  const fallback = runInNewContext(source.replaceAll("export ", "") + "\n({ redrawOnResize })", {});
+  assert.doesNotThrow(() => fallback.redrawOnResize({}, () => assert.fail("no observer in test DOM")));
+  const immediate = runInNewContext(source.replaceAll("export ", "") + "\n({ redrawOnResize })", { ResizeObserver: observer });
+  const second = { clientWidth: 300 };
+  immediate.redrawOnResize(second, () => latestDraws++);
+  second.clientWidth = 332; callbacks[1]!(); assert.equal(latestDraws, 2, "works without requestAnimationFrame");
 });
