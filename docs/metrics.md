@@ -152,8 +152,8 @@ Current Cursor builds keep global composer headers in a `composerHeaders` table 
 New sources populate the optional `evidence` namespace. `source` identifies the store; `fidelity` distinguishes message, summary, and activity-only evidence. `tokens` is reported/unavailable; `tools` and `turns` are observed/unavailable. `timing` distinguishes provider timestamps from file modification times. `usageUnit` describes request/run/session granularity, or unavailable. Original native-provider outputs keep their previous shape. Availability labels apply to existing numeric fields: an unavailable numeric placeholder is not an observation of zero activity. The terminal and dashboard share metric-specific eligibility: invalid/missing transcripts are ineligible; tools, compactions, tokens, requests, durations, and costs have separate coverage. Totals with no eligible sessions display N/A; partial totals carry eligible/selected counts. Only eligible values enter rankings. Successful parsing does not imply complete metric coverage. `evidence.accounting` is an optional complete/partial label for retained accounting, independent of parser success.
 
 - **Conductor results:** `conductor.resultRecords` counts distinct receipts, not runs. All eligible rows are grouped by provider identity before accounting. Cumulative `total_cost_usd`/`modelUsage` snapshots replace earlier progress. Explicit reset identities remain separate. Verified Claude Code 2.1 versions before 2.1.277 with distinct SDK `init` UUIDs establish disjoint process epochs; their final snapshots can be added. Newer resumes restore totals and remain one cumulative interval. Without sufficient boundary/version evidence, retain one observed snapshot and mark `evidence.accounting: partial`; counter decreases alone never establish disjoint usage. Zeroed crash receipts cannot erase earlier snapshots. See the [SDK accounting scopes](https://code.claude.com/docs/en/agent-sdk/cost-tracking#track-costs-in-streaming-input-mode).
-- **Conductor counter scopes:** `conductor.turnLocalTokens` sums deduplicated turn-local `usage` into the existing nine-field `TokenUsage` shape (null when no usage counters are recorded), separately from session/model cumulative totals. It is never added to `modelUsage`. A lone receipt can supply session tokens when model counters are absent; multiple turn-local receipts do not substitute for cumulative session usage. `reportedTurns`, `durationMilliseconds`, `apiDurationMilliseconds`, and `permissionDenials` retain a lone receipt's values; with multiple receipts their scopes are not established, so they are null. `errorResults` and `terminalReasons` count receipts regardless of snapshot selection. Missing counters remain null. These flags are not task-success verdicts. Top-level reported USD takes precedence over model allocations; neither is an invoice. No daily attribution or model-request counts are inferred.
-- **Cursor SDK:** latest retained snapshot per run ID; input, cache reads, cache writes, and output are disjoint counters. Reasoning is included in output. One started run is one observed run turn, not an inferred number of human messages or model requests. Tool calls are deduplicated by run plus call ID. Exact rate-card model matches are priced, with unknown models unpriced. Run aggregates cannot establish request context sizes: ordinary rates form the lower estimate, and the upper estimate applies any configured long-context premium to all aggregate usage. No aggregate cost is assigned to a day or `maxInputTokensPerCall`. When cache-write TTL is absent, the ordinary estimate uses the default write rate and the upper estimate also allows the configured one-hour rate; both assumptions are labeled.
+- **Conductor counter scopes:** `conductor.turnLocalTokens` sums deduplicated turn-local `usage` into the existing nine-field `TokenUsage` shape (null when no usage counters are recorded), separately from session/model cumulative totals. It is never added to `modelUsage`. A lone receipt can supply session tokens when model counters are absent; multiple turn-local receipts do not substitute for cumulative session usage. `reportedTurns`, `durationMilliseconds`, `apiDurationMilliseconds`, and `permissionDenials` retain a lone receipt's values; with multiple receipts their scopes are not established, so they are null. `errorResults` and `terminalReasons` count receipts regardless of snapshot selection. Missing counters remain null. These flags are not task-success verdicts. Top-level reported USD takes precedence over model allocations; neither is an invoice. No per-request daily attribution or model-request counts are inferred; the receipt value is [session-dated](#session-dated-value).
+- **Cursor SDK:** latest retained snapshot per run ID; input, cache reads, cache writes, and output are disjoint counters. Reasoning is included in output. One started run is one observed run turn, not an inferred number of human messages or model requests. Tool calls are deduplicated by run plus call ID. Exact rate-card model matches are priced, with unknown models unpriced. Run aggregates cannot establish request context sizes: ordinary rates form the lower estimate, and the upper estimate applies any configured long-context premium to all aggregate usage. A run's value is dated by the run's own time (`startedAt`, else `endedAt`, else the run's `createdAt`) in `spendByDay` (UTC) and the velocity ledger; a run without any of these is [session-dated](#session-dated-value). No run value is assigned to `maxInputTokensPerCall`. When cache-write TTL is absent, the ordinary estimate uses the default write rate and the upper estimate also allows the configured one-hour rate; both assumptions are labeled.
 - **Cursor transcripts:** human-message turns and structured assistant tool-use blocks only; tool IDs deduplicate streamed copies. `createdAt`/`updatedAt` are explicitly labeled file mtime, `firstEventAt`/`lastEventAt` remain null, and duration is unavailable. The session-start heatmap and duration distributions exclude these sessions. Date filters use their labeled file date. Models, tokens, cost, skills, and compactions are unavailable.
 - **Copilot CLI:** persisted user/assistant messages, tool starts, turn lifecycle, and successful compaction markers, deduplicated by event and call/message IDs. Per-call usage is transient and shutdown token semantics are not calibrated here, so tokens and value remain unavailable. Request multipliers, premium requests, and AI credits are never USD. Skill evidence is unavailable.
 - **OpenCode:** retained step-finish token counters are per request; the assistant snapshot contains the last step and is used only when no step counters survive for that message. Input/cache classes are disjoint, output includes reasoning. Tools deduplicate by call ID; `parent_id` supplies subagent evidence. Provider-calculated `cost` is not added to API estimates. Models use exact rate-card matches, including namespaced IDs. Pre-session messages in forks are matched to compact original-evidence fingerprints and excluded from the fork. Unmatched or undated request ownership is marked partial and excluded from additive tokens/cost; new post-fork requests remain independent. Daily values use owned request evidence only.
@@ -206,12 +206,13 @@ one zero-based scale across its rows. Token-type dollar detail is available in m
 ## Velocity (snapshot version 1)
 
 The Velocity tab and Summary share the same deduplicated activity ledger. **Usage value has one
-dashboard definition:** dated API-equivalent value by activity date in the declared timezone. The
+dashboard definition:** dated value by activity date in the declared timezone, including
+[session-dated value](#session-dated-value), which the Summary and Velocity notes state separately. The
 Summary "Priced usage value" KPI, its sparkline and delta, the sidebar repository values, the
 "Usage value by repository" bars, Summary's daily chart and Velocity's "Usage value" card all sum this
 ledger over the same selected dates, so they agree for the same window, repository focus and providers
 (Velocity's provider chips state "N of M providers" when some are off; Summary always uses all).
-Undated value (including Cursor's provider-reported value) and sessions from sources without a ledger
+Undated value (including Cursor's provider-reported value) and sessions from older snapshots written before their source had a ledger
 are disclosed beside the KPI as **all-time** amounts for the scope, never added to a dated window;
 stale sessions that need a refresh are counted there too and mark the KPI partial. The Summary delta
 uses the same guarded comparison as Velocity's cards (observed prior window, at least 90% pricing
@@ -240,18 +241,19 @@ The chart header shows the selected metric's period total.
   filtering even when its own timezone differs. Existing `spendByDay` fields retain their
   UTC semantics for compatibility; new charts use `velocity`, not those legacy fields.
 - Missing, invalid or timezone-free timestamps go to `undated`. No cost or activity is
-  moved to the session creation time, file modification time or last update. Undated totals
+  moved to the session creation time, file modification time or last update, except
+  [session-dated value](#session-dated-value) from the sources listed there, which is labeled. Undated totals
   are labeled as **all-time for the selected repository/provider scope**: a date window
   cannot assign them honestly. Dated plus undated counters reconcile with session totals.
   Global session-start filtering normalizes offset-free database timestamps as UTC.
   Missing starts and file-mtime fallbacks are excluded from bounded start-date scopes
   and counted as unknown starts; all-time totals retain them.
-- Sessions from secondary sources whose parsers write no hourly ledger (`evidence.source` of
-  `opencode-db`, `gemini-chat`, `copilot-events`, `cursor-sdk`, `cursor-transcript` or
-  `conductor-result`) have no activity dates. Conductor-message recovery does write a ledger.
-  They are counted, with their whole-session value, as **sources without activity dates** and are
-  excluded from dated totals. Only a other session without `velocity` (a snapshot written before
-  the ledger existed) counts as missing and asks for a refresh.
+- Every source now writes a ledger; the dating evidence differs by source (see
+  [Session-dated value](#session-dated-value)). A session from `opencode-db`, `gemini-chat`,
+  `copilot-events`, `cursor-sdk`, `cursor-transcript` or `conductor-result` without `velocity`
+  comes from an older snapshot: it is disclosed with its whole-session value as **older snapshots
+  without activity dates** and excluded from dated totals until the next refresh. Any other session
+  without `velocity` (a snapshot written before the ledger existed) counts as missing and asks for a refresh.
 - Claude prices the final streamed usage once at the first positive-usage snapshot's
   timestamp in the owning execution kind. A usage-free parent placeholder cannot assign a
   subagent's usage to the parent's date. Tools use their first deduplicated call timestamp.
@@ -278,6 +280,36 @@ The chart header shows the selected metric's period total.
   observed history. It is available on daily lines/areas; it is disabled for cumulative,
   weekly, monthly and hour views so incompatible units are never overlaid.
 
+### Session-dated value
+
+Each source's cells use the finest time it records:
+
+| Source | Time evidence | Ledger dating |
+| --- | --- | --- |
+| Claude, Codex, Conductor messages | Per request | Request-dated |
+| OpenCode (`opencode-db`) | Per step-finish part `time_created`, else the message's `time.created`; tool parts use their own `time_created` | Request-dated |
+| Gemini CLI (`gemini-chat`) | Per retained message `timestamp` | Request-dated; a message without one is session-dated |
+| Copilot CLI (`copilot-events`) | Per persisted event `timestamp` | Tool calls event-dated; no usage or value is recorded |
+| Cursor SDK (`cursor-sdk`) | Per run `startedAt`/`endedAt`/`createdAt`; per tool event `createdAt` | Run-dated (a run is one turn); a run without a time is session-dated |
+| Conductor results (`conductor-result`) | One cumulative receipt total per retained session | Session-dated at the selected receipt's time |
+| Cursor transcripts (`cursor-transcript`) | None (file mtime is not activity evidence) | Undated; no value is recorded |
+| Cursor database | Bubble `clientStartTime`; provider-reported cost has none | Tokens/tools bubble-dated; reported value undated |
+
+**Session-dated value** is value whose own request or run time the source does not record. It is
+placed in `velocity.sessionDated` on the session's **last evidenced activity time**: the selected
+cumulative receipt's database time for Conductor results, otherwise the latest observed event time,
+falling back to the recorded session update time. If none is a valid absolute time it stays undated.
+A single point was chosen over spreading the value evenly from start to end because it conserves the
+total without inventing a daily distribution: a cumulative receipt only proves the value had accrued
+by that time, and an even spread would put value on idle days of a session resumed days later. The
+cost is that a session spanning several days shows all of its session-dated value on its last day.
+
+Session-dated cells count in every dated total (Summary, sidebar, repository bars, Summary's daily
+chart, Velocity and its comparisons), so those views still agree. The Summary note and Velocity's
+coverage line state how much of the window's value is session-dated and from how many sessions.
+`spendByDay` (UTC) excludes session-dated value; it records only value with its own request or run
+time. Hour-of-day profiles place session-dated value at the hour of the session's last activity.
+
 ### Agent evidence
 
 Claude `entrypoint` maps `cli` → `cli`, `sdk-ts` → `sdk` (SDK/orchestrated), and
@@ -292,8 +324,8 @@ allowlisted: `codex_cli_rs`, `codex_exec`, `codex_vscode`, and `Codex Desktop` m
 `cli`, `exec`, `vscode`, and `desktop`. The source takes precedence for grouping; a known
 originator is the fallback when source is unknown. Session identity describes the first
 metadata record; cells retain segment-specific identity. Parent IDs, nicknames and
-custom attribution strings never leave the parser. Cursor has a provider-level agent
-identity. Velocity effort is restricted to `none`, `minimal`, `low`, `medium`, `high`,
+custom attribution strings never leave the parser. Cursor, Copilot CLI, OpenCode and Gemini CLI have provider-level agent
+identities (`cursor`, `copilot`, `opencode`, `gemini`); Conductor result receipts use `claude-sdk`. Velocity effort is restricted to `none`, `minimal`, `low`, `medium`, `high`,
 `xhigh`, `max`, `ultra`, or `unknown`, independently of the legacy session effort field.
 
 Public model IDs match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; missing or invalid labels
@@ -304,7 +336,9 @@ pricing lookup; the same validated label is used by model summaries and warnings
 ### Compact counters and coverage
 
 `session.velocity.dimensions` is a per-session dictionary. `buckets` entries are
-`[day, hour, dimensionIndex, values]`; `undated` entries are `[dimensionIndex, values]`.
+`[day, hour, dimensionIndex, values]`; `undated` entries are `[dimensionIndex, values]`. The optional
+`sessionDated` entries have the bucket shape and hold [session-dated value](#session-dated-value);
+the field is absent when a session has none.
 The fixed `values` tuple has 14 positions:
 
 | Index | Counter | Meaning |
@@ -324,10 +358,11 @@ The fixed `values` tuple has 14 positions:
 | 12 | `cacheReadKnownInputTokens` | Input on requests exposing cache-read counters |
 | 13 | `cacheWriteKnownInputTokens` | Input on requests exposing cache-write counters |
 
-Pricing coverage is index 10 / (1 + 5) for eligible Claude/Codex cells. Separate-reasoning
-coverage is 11 / 5 and cache-read coverage is 12 / 1 for Claude/Codex; cache-write
-coverage is 13 / 1 for Claude only. Cursor has no applicable API-price or split-counter
-denominator, and Codex has no cache-write denominator. The UI names these eligible
+Pricing coverage is index 10 / (1 + 5) for eligible cells: every source except the Cursor
+database. Conductor receipt value covers its reported tokens when a receipt reports a cost.
+Separate-reasoning coverage is 11 / 5 and cache-read coverage is 12 / 1 for the same cells;
+cache-write coverage is 13 / 1 for Claude, OpenCode and Cursor SDK. The Cursor database has no
+applicable API-price or split-counter denominator, and Codex and Gemini have no cache-write denominator. The UI names these eligible
 providers and shows numerators and denominators; a missing denominator is N/A. These are evidence-coverage ratios, not
 reasoning shares or cache-hit rates. Missing provider fields remain missing evidence,
 even when the underlying legacy counter is zero. Token classes overlap: reasoning is
@@ -539,7 +574,7 @@ Conductor often stores assistant blocks before output is final. Deduplicated `re
 
 Only the positive difference between final query output and its retained output is added. It adds no input, request, tool, reasoning or non-reasoning count. `outputTokensRecovered` records this difference; it describes the message reconstruction even when the monetary floor wins. One shared UTC request day permits daily allocation; otherwise the output/value stays undated. Velocity requires a shared request hour and can therefore have more undated value than the UTC daily ledger. Receipt time is never substituted for a request date. Aggregate output uses ordinary pricing with no invented request context size.
 
-Verification conserves these ledgers separately: `sum(spendByDay) + history.undatedValueUsd = cost.totalUsd`, and the sum of hourly velocity buckets plus `velocity.undated` also equals `cost.totalUsd`. The hourly remainder must never be added to the UTC daily ledger. The independent oracle also checks the history token total and each day against its model allocations.
+Verification conserves these ledgers separately: `sum(spendByDay) + history.undatedValueUsd = cost.totalUsd`, and the sum of hourly velocity buckets, `velocity.sessionDated` and `velocity.undated` also equals `cost.totalUsd`. The hourly remainder must never be added to the UTC daily ledger. The independent oracle also checks the history token total and each day against its model allocations.
 
 If the selected cumulative receipt exceeds reconstructed API value, `receiptFloorApplied: true` selects `costBasis: provider-reported` and `evidence.source: conductor-result`. Message token classes, model request counts, tools and stream-overlap evidence survive. Model **dollars** come only from receipt allocations; unallocated dollars remain `<unknown>`. Thus token/request counters and reported dollars can describe different retained intervals. Price coverage stays null, accounting stays partial, and all selected reported dollars remain undated. `messageValueUsd` continues to expose the alternate API reconstruction; it is not added to the floor or used to allocate reported dollars. A receipt floor can exceed native API value because the sources/prices differ; it is a retained-evidence lower bound, not a promise to be numerically below a surviving transcript.
 

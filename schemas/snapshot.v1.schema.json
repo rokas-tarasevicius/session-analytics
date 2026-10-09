@@ -1529,6 +1529,15 @@
             },
             {
               "const": "cursor"
+            },
+            {
+              "const": "copilot"
+            },
+            {
+              "const": "opencode"
+            },
+            {
+              "const": "gemini"
             }
           ]
         },
@@ -1718,6 +1727,33 @@
             ],
             "minItems": 2,
             "maxItems": 2
+          }
+        },
+        "sessionDated": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "$ref": "#/$defs/VelocityValues"
+              }
+            ],
+            "minItems": 4,
+            "maxItems": 4
           }
         }
       },
@@ -2573,6 +2609,9 @@
                 "const": "Cursor SDK usage is aggregated by run. Model request counts and daily cost attribution are unavailable; one started run counts as one observed turn."
               },
               {
+                "const": "Cursor SDK usage is aggregated by run and dated by run time. Model request counts and per-request cost attribution are unavailable; one started run counts as one observed turn."
+              },
+              {
                 "const": "Aggregate usage has no per-request context sizes; the upper estimate applies the long-context premium to all usage."
               },
               {
@@ -2580,6 +2619,9 @@
               },
               {
                 "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and daily cost attribution are unavailable. Reported value is not an invoice."
+              },
+              {
+                "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and per-request cost dates are unavailable; reported value is session-dated. Reported value is not an invoice."
               },
               {
                 "const": "Reported model allocations are incomplete; recovered value is an observed lower bound."
@@ -3185,6 +3227,9 @@
                 "const": "Cursor SDK usage is aggregated by run. Model request counts and daily cost attribution are unavailable; one started run counts as one observed turn."
               },
               {
+                "const": "Cursor SDK usage is aggregated by run and dated by run time. Model request counts and per-request cost attribution are unavailable; one started run counts as one observed turn."
+              },
+              {
                 "const": "Aggregate usage has no per-request context sizes; the upper estimate applies the long-context premium to all usage."
               },
               {
@@ -3192,6 +3237,9 @@
               },
               {
                 "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and daily cost attribution are unavailable. Reported value is not an invoice."
+              },
+              {
+                "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and per-request cost dates are unavailable; reported value is session-dated. Reported value is not an invoice."
               },
               {
                 "const": "Reported model allocations are incomplete; recovered value is an observed lower bound."
@@ -3543,6 +3591,9 @@
                 "const": "Cursor SDK usage is aggregated by run. Model request counts and daily cost attribution are unavailable; one started run counts as one observed turn."
               },
               {
+                "const": "Cursor SDK usage is aggregated by run and dated by run time. Model request counts and per-request cost attribution are unavailable; one started run counts as one observed turn."
+              },
+              {
                 "const": "Aggregate usage has no per-request context sizes; the upper estimate applies the long-context premium to all usage."
               },
               {
@@ -3550,6 +3601,9 @@
               },
               {
                 "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and daily cost attribution are unavailable. Reported value is not an invoice."
+              },
+              {
+                "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and per-request cost dates are unavailable; reported value is session-dated. Reported value is not an invoice."
               },
               {
                 "const": "Reported model allocations are incomplete; recovered value is an observed lower bound."
@@ -4057,6 +4111,9 @@
                 "const": "Cursor SDK usage is aggregated by run. Model request counts and daily cost attribution are unavailable; one started run counts as one observed turn."
               },
               {
+                "const": "Cursor SDK usage is aggregated by run and dated by run time. Model request counts and per-request cost attribution are unavailable; one started run counts as one observed turn."
+              },
+              {
                 "const": "Aggregate usage has no per-request context sizes; the upper estimate applies the long-context premium to all usage."
               },
               {
@@ -4064,6 +4121,9 @@
               },
               {
                 "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and daily cost attribution are unavailable. Reported value is not an invoice."
+              },
+              {
+                "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and per-request cost dates are unavailable; reported value is session-dated. Reported value is not an invoice."
               },
               {
                 "const": "Reported model allocations are incomplete; recovered value is an observed lower bound."

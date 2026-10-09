@@ -21,7 +21,7 @@ export const agentLabels = {
   "claude-plan": "Claude · Plan", "claude-subagent": "Claude · other / unknown subagent",
   "codex-cli": "Codex · CLI", "codex-exec": "Codex · exec", "codex-vscode": "Codex · VS Code",
   "codex-desktop": "Codex · desktop", "codex-subagent": "Codex · subagent", "codex-review": "Codex · review", "codex-unknown": "Codex · source unknown",
-  cursor: "Cursor",
+  cursor: "Cursor", copilot: "Copilot CLI", opencode: "OpenCode", gemini: "Gemini CLI",
 };
 const providers = providerLabels;
 const blank = () => Array(14).fill(0);
@@ -44,10 +44,15 @@ function addEvidence(target, source) {
   target.complete = target.known === target.eligible && target.unsupported === 0;
   return target;
 }
-function metricEvidence(provider, values, metric) {
+// Native Cursor composer evidence (no evidence source) has provider-reported, undated value and no
+// API pricing or cache split. Every other ledger records the evidence columns of its cells.
+const nativeCursor = (session) => session.provider === "cursor" && !session.evidence?.source;
+const cacheWriteSources = new Set(["opencode-db", "cursor-sdk"]);
+const recordsCacheWrites = (session) => session.provider === "claude" || cacheWriteSources.has(session.evidence?.source);
+function metricEvidence(session, values, metric) {
   const index = evidenceMetrics[metric];
   if (index === undefined) return blankEvidence();
-  const applicable = metric === "cacheWrite" ? provider === "claude" : provider !== "cursor";
+  const applicable = metric === "cacheWrite" ? recordsCacheWrites(session) : !nativeCursor(session);
   const known = applicable ? values[index] : 0;
   const eligible = applicable ? metric === "value" ? values[1] + values[5] : metric === "reasoning" ? values[5] : values[1] : 0;
   // Cursor's legacy unsplit input can have a numeric uncached value but no
@@ -107,9 +112,17 @@ function groupIdentity(session, dimension, group) {
   return [dimension.agent, agentLabels[dimension.agent] || "Unknown agent"];
 }
 
-/** Evidence sources whose parsers never write an hourly activity ledger. Their sessions are
- * disclosed (all time) rather than treated as a stale snapshot that needs a refresh. */
+/** Evidence sources whose parsers wrote no activity ledger before session-dated value existed. Their
+ * sessions from such older snapshots are disclosed (all time) rather than treated as needing a refresh. */
 export const ledgerlessSources = new Set(["conductor-result", "cursor-sdk", "cursor-transcript", "copilot-events", "opencode-db", "gemini-chat"]);
+
+/** Activity-dated cells, then session-dated cells (`[day, hour, dimension, values, sessionDated]`).
+ * Session-dated cells carry value whose own request/run time the source does not record; they are
+ * placed on the session's last evidenced activity time and count in every dated total. */
+export function ledgerCells(velocity) {
+  if (!velocity) return [];
+  return [...velocity.buckets.map((cell) => [...cell, false]), ...(velocity.sessionDated ?? []).map((cell) => [...cell, true])];
+}
 
 /** Sum occupied hourly cells; never use session creation as the activity date. */
 export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7 } = {}) {
@@ -119,34 +132,37 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   const keys = granularity === "hour" ? Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")) : [...new Set(dates.map((day) => periodKey(day, granularity)))];
   const keyIndexes = new Map(keys.map((key, i) => [key, i]));
   const groups = new Map();
-  const totals = blank(), undated = blank();
+  const totals = blank(), undated = blank(), sessionDated = blank();
   const evidence = blankEvidence();
   const coverage = { priceTokens: 0, cacheReadInput: 0, cacheWriteInput: 0, reasoningOutput: 0 };
-  let earliest = null, missingSessions = 0, contributingSessions = 0;
+  let earliest = null, missingSessions = 0, contributingSessions = 0, sessionDatedSessions = 0;
   const unledgered = { sessions: 0, value: 0 };
   for (const session of sessions) {
     if (!session.velocity) {
       if (ledgerlessSources.has(session.evidence?.source)) { unledgered.sessions += 1; unledgered.value += session.cost?.totalUsd || 0; } else missingSessions += 1;
       continue;
     }
-    let contributes = false;
+    let contributes = false, inferred = false;
     for (const [, values] of session.velocity.undated) add(undated, values);
-    for (const [day, hour, dimensionId, values] of session.velocity.buckets) {
+    // Iterate the two cell lists in place: this loop runs over every occupied cell of the history.
+    for (const [cells, isSessionDated] of [[session.velocity.buckets, false], [session.velocity.sessionDated ?? [], true]]) for (const [day, hour, dimensionId, values] of cells) {
       if (earliest === null || day < earliest) earliest = day;
       const daily = dailyMap.get(day);
       if (!daily) continue;
       const dimension = session.velocity.dimensions[dimensionId];
       if (!dimension) continue;
       contributes = true;
+      // Count a session only when it session-dates some of the selected metric.
+      if (isSessionDated) { inferred ||= values[index] !== 0; add(sessionDated, values); }
       add(totals, values); add(daily.values, values); daily.total += values[index];
-      const observedEvidence = metricEvidence(session.provider, values, metric);
+      const observedEvidence = metricEvidence(session, values, metric);
       addEvidence(evidence, observedEvidence); addEvidence(daily.evidence, observedEvidence);
-      if (session.provider !== "cursor") {
+      if (!nativeCursor(session)) {
         coverage.priceTokens += values[1] + values[5];
         coverage.cacheReadInput += values[1];
         coverage.reasoningOutput += values[5];
       }
-      if (session.provider === "claude") coverage.cacheWriteInput += values[1];
+      if (recordsCacheWrites(session)) coverage.cacheWriteInput += values[1];
       const [id, label] = groupIdentity(session, dimension, group);
       let series = groups.get(id);
       if (!series) { series = { id, label, total: 0, values: keys.map(() => 0), calls: 0, evidence: blankEvidence() }; groups.set(id, series); }
@@ -156,6 +172,7 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
       if (position !== undefined) { series.values[position] += values[index]; series.total += values[index]; }
     }
     if (contributes) contributingSessions += 1;
+    if (inferred) sessionDatedSessions += 1;
   }
   // Retain zero-valued groups in the accounting view: they can carry missing
   // evidence. Only the chart omits empty series.
@@ -169,7 +186,7 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   const daily = [...dailyMap.values()];
   const rolling = daily.map((_, i) => i < 6 || daily[i - 6].day < earliest || missingSessions || !daily.slice(i - 6, i + 1).every((item) => item.evidence.complete) ? null : sum(daily.slice(i - 6, i + 1).map((item) => item.total)) / 7);
   if (mode === "cumulative" && granularity !== "hour") series = series.map((item) => { let running = 0; return { ...item, values: item.values.map((value) => running += value) }; });
-  return { start, end, group, metric, granularity, mode, keys, series, allSeries, daily, rolling, totals, undated, coverage, evidence, earliest, missingSessions, unledgered, contributingSessions };
+  return { start, end, group, metric, granularity, mode, keys, series, allSeries, daily, rolling, totals, undated, sessionDated, sessionDatedSessions, coverage, evidence, earliest, missingSessions, unledgered, contributingSessions };
 }
 
 /** Percentages need enough observed activity as well as a nonzero denominator. */

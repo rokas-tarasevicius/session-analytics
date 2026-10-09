@@ -1,4 +1,5 @@
 import { basename, dirname, join } from "node:path";
+import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter } from "./adapter.ts";
 import { emptySession, files, finish, increment, jsonLines, name, observeTime, record, text, timestamp } from "./common.ts";
 
@@ -24,6 +25,8 @@ export const copilotAdapter: ProviderAdapter = {
   async analyze(identity, context) {
     const session = emptySession(identity, "copilot", context, { source: "copilot-events", fidelity: "activity-only", tokens: "unavailable", tools: "observed", turns: "observed", timing: "provider", usageUnit: "unavailable" });
     const seen = new Set<string>(), calls = new Set<string>(), messages = new Set<string>();
+    // Persisted events carry their own times; they date tool calls. No usage or value is recorded.
+    const velocity = new VelocityAccumulator(), dimension = velocityDimension("copilot", {}, session.executionKind, "<unknown>", null);
     for await (const event of jsonLines(identity.path)) {
       if (!event) { session.transcript.warnings.push("Malformed Copilot events were skipped."); continue; }
       const id = text(event["id"]), data = record(event["data"]);
@@ -41,10 +44,11 @@ export const copilotAdapter: ProviderAdapter = {
       if (type === "session.compaction_complete" && data?.["success"] === true) session.metrics.compactions++;
       if (type === "tool.execution_start") {
         const call = text(data?.["toolCallId"]), tool = name(data?.["toolName"]);
-        if (call && tool && !calls.has(call)) { calls.add(call); increment(session.tools, tool); }
+        if (call && tool && !calls.has(call)) { calls.add(call); increment(session.tools, tool); velocity.tool(timestamp(event["timestamp"]), dimension, 1, "session"); }
       }
     }
     session.updatedAt = session.lastEventAt ?? identity.updatedAt;
+    session.velocity = velocity.finish(identity.createdAt, dimension, session.updatedAt);
     session.transcript.warnings.push("Copilot persisted events provide activity counts. Per-call usage events are ephemeral; tokens and USD value are unavailable. Premium-request multipliers and AI credits are not dollar costs.");
     return finish(session);
   },

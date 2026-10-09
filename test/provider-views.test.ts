@@ -100,7 +100,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
     assert.equal(h.elements.get("#metric-spend")!.textContent, "—");
     assert.equal(h.elements.get("#metric-spend-coverage")!.textContent.trim(), "");
     const note = h.elements.get("#metric-spend-note")!.textContent;
-    if (sessions.includes(summary)) assert.match(note, /\$1\.00 in \d sessions? without activity dates/);
+    if (sessions.includes(summary)) assert.match(note, /\$1\.00 in \d older-snapshot sessions? without activity dates/);
     assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? "0" : "—");
     assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2" : "" : `No tool evidence in ${selected}`);
     assert.equal(h.elements.get("#metric-compactions")!.textContent, "—");

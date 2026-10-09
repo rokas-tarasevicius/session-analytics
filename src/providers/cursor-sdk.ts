@@ -1,9 +1,12 @@
 import { dirname, join } from "node:path";
+import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
-import { addUsage, emptySession, files, finish, hasCounters, increment, jsonLines, modelName, name, statusName, observeTime, record, text, timestamp, tokens } from "./common.ts";
+import { addUsage, emptySession, files, finite, finish, hasCounters, increment, jsonLines, modelName, name, statusName, observeTime, record, text, timestamp, tokens } from "./common.ts";
 
-type Run = { eventRecovered?: true; model: string; usage: ReturnType<typeof tokens> | null; started: string | null; ended: string | null; updated: string; status: string };
-type Projection = { runs: Map<string, Run>; tools: Map<string, string>; eventsAvailable: boolean; malformed: boolean };
+/** `at` is the run's own time (start, else end, else creation); null when the run records none. */
+type Run = { eventRecovered?: true; model: string; usage: ReturnType<typeof tokens> | null; reasoningKnown: boolean; started: string | null; ended: string | null; at: string | null; updated: string; status: string };
+type Tool = { name: string; run: string; at: string | null };
+type Projection = { runs: Map<string, Run>; tools: Map<string, Tool>; eventsAvailable: boolean; malformed: boolean };
 // Identity-scoped, never a path cache: rescans see fresh data and completed stores can be collected.
 const projections = new WeakMap<ProviderSession, Projection>();
 async function projectStore(path: string, agents: Map<string, ProviderSession>): Promise<Map<string, Projection>> {
@@ -18,7 +21,8 @@ async function projectStore(path: string, agents: Map<string, ProviderSession>):
     const usage = record(row["usage"]);
     const run: Run = { model: modelName(record(row["model"])?.["id"]),
       usage: hasCounters(usage, ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"]) ? tokens(usage!["inputTokens"], usage!["cacheReadTokens"], usage!["cacheWriteTokens"], usage!["outputTokens"], usage!["reasoningTokens"]) : null,
-      started: timestamp(row["startedAt"]), ended: timestamp(row["endedAt"]), updated: timestamp(row["updatedAt"]) ?? timestamp(row["endedAt"]) ?? timestamp(row["createdAt"]) ?? agents.get(agent)!.createdAt, status: name(row["status"]) ?? "unknown" };
+      reasoningKnown: finite(usage?.["reasoningTokens"]) !== null,
+      started: timestamp(row["startedAt"]), ended: timestamp(row["endedAt"]), at: timestamp(row["startedAt"]) ?? timestamp(row["endedAt"]) ?? timestamp(row["createdAt"]), updated: timestamp(row["updatedAt"]) ?? timestamp(row["endedAt"]) ?? timestamp(row["createdAt"]) ?? agents.get(agent)!.createdAt, status: name(row["status"]) ?? "unknown" };
     const previous = projection.runs.get(id);
     if (!previous || run.updated >= previous.updated) projection.runs.set(id, run);
   }
@@ -55,10 +59,10 @@ async function projectStore(path: string, agents: Map<string, ProviderSession>):
       const key = JSON.stringify([agent, run, call]);
       if (seen.has(key)) continue;
       if (seen.size >= 200_000) throw new Error("Cursor SDK tool projection exceeds the memory budget.");
-      seen.add(key); projection.tools.set(key, tool);
+      seen.add(key); projection.tools.set(key, { name: tool, run, at: timestamp(row["createdAt"]) });
     }
   } catch { for (const projection of result.values()) { projection.eventsAvailable = false; projection.tools.clear(); } }
-  for (const [run, aggregate] of eventUsage) { run.usage = aggregate.usage; run.eventRecovered = true; }
+  for (const [run, aggregate] of eventUsage) { run.usage = aggregate.usage; run.eventRecovered = true; run.reasoningKnown = false; }
   for (const projection of result.values()) projection.malformed = malformed;
   return result;
 }
@@ -103,18 +107,32 @@ export const cursorSdkAdapter: ProviderAdapter = {
     const latest = [...runs.values()].sort((a, b) => b.updated.localeCompare(a.updated))[0]!;
     session.status = latest.status === "finished" ? "completed" : latest.status === "running" ? "working" : latest.status === "queued" ? "pending" : statusName(latest.status);
     session.transcript.snapshotWhileWorking = session.status === "working";
+    // Run usage is dated by the run's own time (run-level, like a turn); a run without one is session-dated.
+    const velocity = new VelocityAccumulator(), execution = session.executionKind;
+    const dimension = (model: string) => velocityDimension("cursor", {}, execution, model, null);
     for (const run of runs.values()) {
       if (run.started) { session.metrics.userTurns++; session.metrics.taskStarts++; observeTime(session, run.started); }
       if (run.status === "finished") session.metrics.taskCompletions++;
       observeTime(session, run.ended);
-      if (run.usage) { session.evidence!.tokens = "reported"; addUsage(session, context, run.model, run.usage, run.started ?? run.ended ?? run.updated, "summary", 0); }
+      if (run.usage) {
+        session.evidence!.tokens = "reported";
+        // Pricing keeps its established time selection; velocity placement requires the run's own time.
+        addUsage(session, context, run.model, run.usage, run.started ?? run.ended ?? run.updated, "summary", 0, {
+          velocity, dimension: dimension(run.model), coverage: { reasoning: run.reasoningKnown, cacheRead: true, cacheWrite: true }, at: run.at,
+        });
+      }
     }
-    for (const tool of projection.tools.values()) increment(session.tools, tool);
+    for (const tool of projection.tools.values()) {
+      increment(session.tools, tool.name);
+      const run = runs.get(tool.run);
+      velocity.tool(tool.at ?? run?.at ?? null, dimension(run?.model ?? "<unknown>"), 1, "session");
+    }
     session.transcript.files = projection.eventsAvailable ? 3 : 2;
     if (!projection.eventsAvailable) session.transcript.warnings.push("Cursor SDK tool events were unavailable; run summaries were retained.");
     if (projection.malformed) session.transcript.warnings.push("Malformed Cursor SDK records were skipped.");
     session.updatedAt = session.lastEventAt && session.lastEventAt > identity.updatedAt ? session.lastEventAt : identity.updatedAt;
-    session.transcript.warnings.push("Cursor SDK usage is aggregated by run. Model request counts and daily cost attribution are unavailable; one started run counts as one observed turn.");
+    session.velocity = velocity.finish(identity.createdAt, dimension("<unknown>"), session.lastEventAt ?? session.updatedAt);
+    session.transcript.warnings.push("Cursor SDK usage is aggregated by run and dated by run time. Model request counts and per-request cost attribution are unavailable; one started run counts as one observed turn.");
     const finished = finish(session);
     if ([...runs.values()].some((run) => run.eventRecovered)) {
       finished.evidence!.accounting = "partial";

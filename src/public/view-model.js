@@ -94,7 +94,7 @@ export function coverageWarnings(sessions) {
   const activityOnly = sessions.filter((s) => s.evidence?.tokens === "unavailable").length;
   const summaries = sessions.filter((s) => s.evidence?.fidelity === "summary").length;
   if (activityOnly) warnings.push(`${activityOnly}/${sessions.length} sessions have no token evidence; their usage value is unavailable, not zero.`);
-  if (summaries) warnings.push(`${summaries}/${sessions.length} sessions use summary evidence with no per-request daily cost attribution. See evidence coverage below.`);
+  if (summaries) warnings.push(`${summaries}/${sessions.length} sessions use summary evidence: their value is dated by run or session time, not per request. See evidence coverage below.`);
   if (unpriced) warnings.push(`${unpriced} sessions have incomplete token pricing.`);
   return warnings;
 }

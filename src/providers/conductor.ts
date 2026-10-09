@@ -4,7 +4,8 @@ import { applyConductorReceiptFloor, conductorMessage, recoverConductorMessages,
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
-import type { ConductorResultMetrics, ConductorTerminalReason, ModelUsage, SessionAnalytics, SessionDatabaseRow, SessionProvider, TokenUsage } from "../types.ts";
+import type { ConductorResultMetrics, ConductorTerminalReason, ModelUsage, SessionAnalytics, SessionDatabaseRow, SessionProvider, SessionVelocity, TokenUsage } from "../types.ts";
+import { VelocityAccumulator, addSessionDated, usageVelocity, velocityDimension, zeroVelocity } from "../metrics/velocity.ts";
 import type { ProviderContext } from "./adapter.ts";
 import { count, emptySession, finite, finish, hash, hasCounters, modelName, parse, record, reportedModel, statusName, sum, text, timestamp, tokens, zeroTokens } from "./common.ts";
 
@@ -128,6 +129,35 @@ function privateRecords(records: ConductorRowRecords, key: (value: string) => st
       tools: message.tools.map((tool) => ({ id: k(tool.id), name: tool.name })) })),
     resets: records.resets.map(([before, after]) => [k(before), k(after)]),
   };
+}
+
+/** A receipt total is cumulative over the retained session, so it has no request or turn dates. It is
+ * one session-dated observation at the selected receipt's time (the last evidenced point), split by model
+ * only when the reported allocations reconcile exactly with the session total. A receipt floor keeps the
+ * same rule: its recovered tokens, calls and tools are session-dated with the value they belong to. */
+function receiptVelocity(session: SessionAnalytics, at: string | null): SessionVelocity {
+  const dimension = (model: string) => velocityDimension("claude", { claudeEntrypoint: "sdk" }, session.executionKind, model, null);
+  const reported = session.costBasis === "provider-reported";
+  const allocated = zeroTokens(); let allocatedUsd = 0;
+  for (const model of session.models) { sum(allocated, model); allocatedUsd += model.totalUsd; }
+  const reconciles = session.models.length > 0 && Math.abs(allocatedUsd - session.cost.totalUsd) <= 1e-6 &&
+    (Object.keys(allocated) as Array<keyof TokenUsage>).every((key) => allocated[key] === session.tokens[key]);
+  const parts: Array<[string, TokenUsage, number, number]> = reconciles && session.models.reduce((n, model) => n + model.calls, 0) === session.metrics.modelCalls
+    ? session.models.map((model) => [model.model, model, model.totalUsd, model.calls])
+    : [["<unknown>", session.tokens, session.cost.totalUsd, session.metrics.modelCalls]];
+  let velocity = new VelocityAccumulator().finish(session.createdAt, dimension("<unknown>"));
+  const sessionAt = at || session.updatedAt;
+  for (const [model, usage, value, calls] of parts) {
+    if (value <= 0 && calls === 0 && usage.inputTokens + usage.outputTokens === 0) continue;
+    // Reported receipt value covers its reported tokens; no reasoning split is recorded.
+    const values = usageVelocity(usage, value, reported ? usage.inputTokens + usage.outputTokens : 0, { reasoning: false, cacheRead: true, cacheWrite: true }, calls);
+    velocity = addSessionDated(velocity, sessionAt, dimension(model), values);
+  }
+  if (session.metrics.toolCalls) {
+    const values = zeroVelocity(); values[8] = session.metrics.toolCalls;
+    velocity = addSessionDated(velocity, sessionAt, dimension("<unknown>"), values);
+  }
+  return velocity;
 }
 
 /** Collect all eligible rows before grouping. Canonical identities are read-only native precedence. */
@@ -277,7 +307,7 @@ export function conductorFallback(database: DatabaseSync | null, rows: SessionDa
     }
     session.models = [...models.values()]; if (costSnapshots) session.costBasis = "provider-reported";
     session.cost.upperEstimateUsd = session.cost.totalUsd; session.conductor = metrics;
-    session.transcript.warnings.push("Recovered from Conductor result receipts. Tools, human turns, model request counts, and daily cost attribution are unavailable. Reported value is not an invoice.");
+    session.transcript.warnings.push("Recovered from Conductor result receipts. Tools, human turns, model request counts, and per-request cost dates are unavailable; reported value is session-dated. Reported value is not an invoice.");
     if (!complete) session.transcript.warnings.push("Accounting is partial: retained receipts do not prove disjoint process epochs or complete resumed history. Ambiguous cumulative snapshots are not added; zeroed crash results cannot erase earlier evidence.");
     if (receipts.length > 1) session.transcript.warnings.push("Turn-local usage is separate from cumulative model usage. SDK turns, durations, and denial totals are unavailable across multiple receipts because their scopes are not established.");
     if (conflict) session.transcript.warnings.push("Conductor rows disagree on repository attribution; the recovered identity is grouped as unassigned.");
@@ -290,6 +320,8 @@ export function conductorFallback(database: DatabaseSync | null, rows: SessionDa
     const messages = group.messages.flatMap((chunk) => JSON.parse(inflateRawSync(chunk).toString("utf8")) as ConductorMessage[]);
     const recovered = recoverConductorMessages(finalized, messages, pricing, receipts.map(r => ({ id: r.id, usage: r.localUsage })));
     const selected = recovered ? applyConductorReceiptFloor(finalized, recovered) : receipts.length ? finalized : null;
+    // Message recovery writes its own request-dated ledger; receipt evidence is session-dated.
+    if (selected?.evidence?.source === "conductor-result") selected.velocity = receiptVelocity(selected, snapshots.at(-1)?.at || null);
     if (selected) {
       if (canonicalIdentities.has(key)) onPaired?.(selected);
       else sessions.push(selected);

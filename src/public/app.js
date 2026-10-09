@@ -14,7 +14,7 @@ import { renderPricingPanel } from "./pricing.js";
 import { renderToolsView } from "./tools.js";
 import { toolsDays } from "./tools-data.js";
 import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
-import { buildVelocity, comparePeriods, localDay, periodFromVelocity, sessionStartWindow } from "./velocity-data.js";
+import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity, sessionStartWindow } from "./velocity-data.js";
 import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
 import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
@@ -576,7 +576,7 @@ function dailyProviderSpend(sessions) {
   const days = new Map(daysBetween(elements.windowStart.value, elements.windowEnd.value).map((name) => [name, { name, ...Object.fromEntries(providerOrder.map((provider) => [provider, 0])) }]));
   for (const session of sessions) {
     if (!providerOrder.includes(session.provider)) continue;
-    for (const [day, , , values] of session.velocity?.buckets || []) {
+    for (const [day, , , values] of ledgerCells(session.velocity)) {
       const row = days.get(day);
       if (row) row[session.provider] += values[0];
     }
@@ -593,7 +593,7 @@ function renderLine(items) {
     const message = !selectedProviders.length
       ? "Choose at least one provider."
       : selectedProviders.length === 1 && selectedProviders[0] === "cursor"
-        ? "Cursor database and SDK summaries have no per-request cost times; their values remain in the usage summaries."
+        ? "Cursor database values have no per-request cost times; they remain in the usage summaries."
         : "No daily priced activity in this view.";
     emptyState(elements.dailySpend, message, "Nothing to plot"); syncHover(null); return;
   }
@@ -858,11 +858,11 @@ function renderSummary(view) {
   const pricedShare = activity.evidence.eligible > 0 ? activity.evidence.known / activity.evidence.eligible : 1;
   if (!unavailable && (pricedShare < 1 || activity.missingSessions)) {
     const badge = node("small", activity.missingSessions ? "partial" : `${Math.floor(100 * pricedShare)}% priced`, "coverage");
-    badge.title = activity.missingSessions ? `${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh to collect activity dates` : "Share of dated Claude/Codex tokens with an API price";
+    badge.title = activity.missingSessions ? `${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh to collect activity dates` : "Share of dated tokens with a price";
     badge.setAttribute("aria-label", badge.title); elements.spendCoverage.append(badge);
   }
-  const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates`] : [])];
-  elements.spendNote.textContent = `By activity date (${context.timeZone}) · excludes, across all time, ${excluded.join(" and ")}${activity.missingSessions ? ` · ${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh` : ""} · not an invoice`;
+  const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} older-snapshot session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates (refresh to include)`] : [])];
+  elements.spendNote.textContent = `By activity date (${context.timeZone})${activity.sessionDated[0] > 0 ? ` · includes ${money(activity.sessionDated[0])} session-dated (${activity.sessionDatedSessions} session${activity.sessionDatedSessions === 1 ? "" : "s"} without request times, dated by last activity)` : ""} · excludes, across all time, ${excluded.join(" and ")}${activity.missingSessions ? ` · ${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh` : ""} · not an invoice`;
   if (summary.retainedSessions) elements.spendNote.textContent += " · retained history uses last-ingest prices";
   elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
@@ -871,7 +871,7 @@ function renderSummary(view) {
   elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached · repeated context included` : "Cache share unavailable · repeated context included";
   renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer.format(summary.workingSnapshots);
   const metrics = [
-    ["spend", `Dated API-equivalent value by activity date (${context.timeZone}); undated value excluded`, money, activity.totals[0], previousActivity?.totals[0], activity.daily.map(({ total }) => total)],
+    ["spend", `Usage value by activity date (${context.timeZone}), including session-dated value; undated value excluded`, money, activity.totals[0], previousActivity?.totals[0], activity.daily.map(({ total }) => total)],
     ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
     ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.inputTokens)],
     ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.outputTokens)],
@@ -922,7 +922,7 @@ function setWindowPreset(preset) {
 function observedRange() {
   const dates = snapshot.sessions.flatMap(({ createdAt, transcript, evidence, spendByDay, velocity }) => [
     ...(transcript?.startTimeKnown !== false && evidence?.timing !== "file-mtime" && normalizeTimestamp(createdAt) ? [normalizeTimestamp(createdAt).slice(0, 10)] : []), ...Object.keys(spendByDay),
-    ...(velocity?.buckets ?? []).map(([day]) => day)]).filter(Boolean).sort();
+    ...ledgerCells(velocity).map(([day]) => day)]).filter(Boolean).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10);
   // UTC session-start dates can run a day ahead of the snapshot's local date; never end a window in the future.
   const today = localDay(snapshot.generatedAt, snapshot.velocity?.timeZone || "UTC");

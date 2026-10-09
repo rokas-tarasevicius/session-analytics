@@ -191,7 +191,7 @@ test("Cursor SDK prices disjoint token classes once per run and suppresses activ
     assert.equal(sdk.costBasis, "api-list-price-equivalent");
     assert.equal(sdk.cost.totalUsd, 0.001395);
     assert.equal(sdk.metrics.modelCalls, 0); assert.equal(sdk.metrics.userTurns, 1);
-    assert.deepEqual(sdk.tools, { read_file: 2 }); assert.deepEqual(sdk.spendByDay, {});
+    assert.deepEqual(sdk.tools, { read_file: 2 }); assert.deepEqual(sdk.spendByDay, { "2026-07-20": 0.001395 });
     const cli = snapshot.sessions.filter((s) => s.evidence?.source === "cursor-transcript");
     assert.equal(cli.length, 1); assert.equal(cli[0]!.createdAt, at);
     assert.equal(cli[0]!.evidence!.timing, "file-mtime"); assert.equal(cli[0]!.firstEventAt, null);
@@ -267,7 +267,7 @@ test("run summaries bound long-context pricing without mistaking aggregate input
     assert.equal(s.cost.totalUsd, 0.000189);
     assert.ok(Math.abs(s.cost.upperEstimateUsd - 0.000348) < 1e-12);
     assert.equal(s.metrics.maxInputTokensPerCall, 0);
-    assert.deepEqual(s.spendByDay, {});
+    assert.deepEqual(s.spendByDay, { "2026-07-20": 0.000189 });
   });
 });
 

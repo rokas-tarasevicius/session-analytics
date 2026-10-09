@@ -19,7 +19,7 @@ export type VelocityAgent =
   | "claude-cli" | "claude-sdk" | "claude-desktop" | "claude-unknown"
   | "claude-general-purpose" | "claude-explore" | "claude-plan" | "claude-subagent"
   | "codex-cli" | "codex-exec" | "codex-vscode" | "codex-desktop" | "codex-subagent" | "codex-review" | "codex-unknown"
-  | "cursor";
+  | "cursor" | "copilot" | "opencode" | "gemini";
 export type VelocityEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "unknown";
 export interface AgentIdentity {
   claudeEntrypoint?: ClaudeEntrypoint;
@@ -45,6 +45,9 @@ export interface SessionVelocity {
   dimensions: VelocityDimension[];
   buckets: Array<[day: string, hour: number, dimension: number, values: VelocityValues]>;
   undated: Array<[dimension: number, values: VelocityValues]>;
+  /** Session-dated cells: counters whose own request/run time the source does not record,
+   * placed on the session's last evidenced activity time (see docs/metrics.md). Absent when empty. */
+  sessionDated?: Array<[day: string, hour: number, dimension: number, values: VelocityValues]>;
 }
 export interface VelocityMetadata {
   version: 1;

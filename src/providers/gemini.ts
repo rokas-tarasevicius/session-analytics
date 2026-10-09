@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
 import { addUsage, count, emptySession, files, finish, increment, jsonLines, modelName, name, observeTime, readJson, record, text, timestamp, tokens, type RecordValue } from "./common.ts";
 
@@ -151,14 +152,19 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
         }
       }
       const seenTools = new Set<string>();
+      // Each retained message carries its own time; a message without one is session-dated.
+      const velocity = new VelocityAccumulator(), execution = session.executionKind;
+      const dimension = (model: string) => velocityDimension("gemini", {}, execution, model, null);
       for (const message of messages.values()) {
         observeTime(session, message.at);
         if (message.type === "user") { session.metrics.userTurns++; continue; }
         if (message.type !== "gemini") continue;
         session.metrics.assistantMessages++;
-        if (message.usage) { session.evidence!.tokens = "reported"; addUsage(session, context, message.model, message.usage, message.at, "request"); }
-        for (const tool of message.tools) if (!seenTools.has(tool.id)) { seenTools.add(tool.id); increment(session.tools, tool.name); }
+        // Input includes cache reads; thoughts are a recorded reasoning split; cache writes are not recorded.
+        if (message.usage) { session.evidence!.tokens = "reported"; addUsage(session, context, message.model, message.usage, message.at, "request", 1, { velocity, dimension: dimension(message.model), coverage: { reasoning: true, cacheRead: true, cacheWrite: false } }); }
+        for (const tool of message.tools) if (!seenTools.has(tool.id)) { seenTools.add(tool.id); increment(session.tools, tool.name); velocity.tool(message.at, dimension(message.model), 1, "session"); }
       }
+      session.velocity = velocity.finish(identity.createdAt, dimension("<unknown>"), session.lastEventAt ?? session.updatedAt);
       session.transcript.warnings.push("Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced.");
       const finalized = finish(session);
       if (session.evidence!.accounting === "partial") finalized.costComplete = false;

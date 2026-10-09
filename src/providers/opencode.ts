@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { openSourceDatabase } from "../source-database.ts";
+import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
 import { addUsage, emptySession, finish, increment, hash, modelName, name, observeTime, parse, record, text, timestamp, tokens } from "./common.ts";
 
@@ -79,6 +80,9 @@ export const opencodeAdapter: ProviderAdapter = {
       }
       const seen = new Set<string>();
       const stepped = new Set<string>();
+      // Step and message rows carry their own creation times; OpenCode records disjoint cache reads/writes and reasoning.
+      const velocity = new VelocityAccumulator(), execution = session.executionKind;
+      const ledger = (model: string) => ({ velocity, dimension: velocityDimension("opencode", {}, execution, model, null), coverage: { reasoning: true, cacheRead: true, cacheWrite: true } });
       for (const row of database.prepare("SELECT message_id, time_created, data FROM part WHERE session_id = ? ORDER BY id").iterate(identity.id)) {
         if (excluded.has(String(row["message_id"]))) continue;
         const part = parse(row["data"]);
@@ -90,18 +94,21 @@ export const opencodeAdapter: ProviderAdapter = {
           const messageId = String(row["message_id"]), message = messages.get(messageId), usage = record(part["tokens"]), cache = record(usage?.["cache"]);
           if (message && usage) {
             stepped.add(messageId); session.evidence!.tokens = "reported";
-            addUsage(session, context, message.model, tokens(usage["input"], cache?.["read"], cache?.["write"], usage["output"], usage["reasoning"]), timestamp(row["time_created"]) ?? message.at, "request");
+            addUsage(session, context, message.model, tokens(usage["input"], cache?.["read"], cache?.["write"], usage["output"], usage["reasoning"]), timestamp(row["time_created"]) ?? message.at, "request", 1, ledger(message.model));
           }
         }
         if (part?.["type"] !== "tool") continue;
         const id = text(part["callID"]), tool = name(part["tool"]);
         if (!id || !tool || seen.has(id)) continue;
         seen.add(id); increment(session.tools, tool);
+        const owner = messages.get(String(row["message_id"]));
+        velocity.tool(timestamp(row["time_created"]) ?? owner?.at ?? null, ledger(owner?.model ?? "<unknown>").dimension, 1, "session");
       }
       for (const [id, message] of messages) if (!stepped.has(id) && message.usage) {
         session.evidence!.tokens = "reported";
-        addUsage(session, context, message.model, message.usage, message.at, "request");
+        addUsage(session, context, message.model, message.usage, message.at, "request", 1, ledger(message.model));
       }
+      session.velocity = velocity.finish(identity.createdAt, ledger("<unknown>").dimension, session.lastEventAt ?? identity.updatedAt);
       if (malformed) { session.evidence!.accounting = "partial"; session.transcript.warnings.push("OpenCode accounting is partial because some records could not be parsed."); }
       if (inherited) session.transcript.warnings.push(`${inherited} inherited assistant records are owned by earlier sessions and excluded here.`);
       if (ambiguous) {

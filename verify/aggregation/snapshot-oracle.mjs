@@ -51,7 +51,8 @@ for(const s of snapshot.sessions){const extra=scopeSession(s),scope=`session:${e
   check(scope,'history.tokens',sum(s.history.days,d=>d.tokens)+s.history.undatedTokens,s.tokens.inputTokens+s.tokens.outputTokens,extra);
   const days=grouped(s.history.days,d=>d.day);
   for(const day of new Set([...days.keys(),...Object.keys(s.spendByDay)]))check(scope,`spendByDay.${day}`,s.spendByDay[day]??0,sum(days.get(day)??[],d=>d.valueUsd),extra);
- }else if(s.velocity)check(scope,'cost.datedAndUndatedUsd',dated+sum(s.velocity.undated,c=>c[1][0]),s.cost.totalUsd,extra);
+ // Session-dated cells are value without its own request time: outside spendByDay, inside the total.
+ }else if(s.velocity)check(scope,'cost.datedAndUndatedUsd',dated+sum(s.velocity.undated,c=>c[1][0])+sum(s.velocity.sessionDated??[],c=>c[3][0]),s.cost.totalUsd,extra);
  else check(scope,'cost.datedWithinTotal',dated<=s.cost.totalUsd+1e-7,true,extra);
  if(s.conductor?.reconciliation?.receiptFloorApplied){
   check(scope,'cost.receiptFloorBasis',s.costBasis,'provider-reported',extra);
@@ -59,15 +60,15 @@ for(const s of snapshot.sessions){const extra=scopeSession(s),scope=`session:${e
   check(scope,'cost.receiptFloorValue',s.cost.totalUsd,s.conductor.reconciliation.reportedUsd,extra);
  }
  if(s.mcpEvidence&&api(s)){check(scope,'mcp.pricing.eligible',sum(s.mcpEvidence.pricingByDay,d=>d.eligibleTokens)+s.mcpEvidence.undatedTokens,s.tokens.inputTokens+s.tokens.outputTokens,extra);}
- if(s.velocity){const values=[...s.velocity.buckets.map(b=>b[3]),...s.velocity.undated.map(b=>b[1])],v=Array.from({length:14},(_,i)=>sum(values,x=>x[i]));
+ if(s.velocity){const placed=[...s.velocity.buckets,...(s.velocity.sessionDated??[])],values=[...placed.map(b=>b[3]),...s.velocity.undated.map(b=>b[1])],v=Array.from({length:14},(_,i)=>sum(values,x=>x[i]));
   for(const [i,f]of [[1,'inputTokens'],[2,'uncachedInputTokens'],[3,'cachedInputTokens'],[4,'cacheWriteInputTokens'],[5,'outputTokens'],[6,'reasoningOutputTokens']])check(scope,`velocity.${f}`,v[i],s.tokens[f],extra);
   check(scope,'velocity.valueUsd',v[0],s.cost.totalUsd,extra);check(scope,'velocity.modelCalls',v[7],s.metrics.modelCalls,extra);check(scope,'velocity.toolCalls',v[8],s.metrics.toolCalls,extra);check(scope,'velocity.sessionsStarted',v[9],1,extra);
   if(api(s))check(scope,'velocity.pricedTokens',v[10],coverage([s]).priced,extra);
   for(const [kind,field]of [['top-level','topLevelUsd'],['subagent','subagentUsd'],['unknown','unknownUsd']]){
-   const attributed=sum(s.velocity.buckets,c=>s.velocity.dimensions[c[2]].executionKind===kind?c[3][0]:0)+sum(s.velocity.undated,c=>s.velocity.dimensions[c[0]].executionKind===kind?c[1][0]:0);
+   const attributed=sum(placed,c=>s.velocity.dimensions[c[2]].executionKind===kind?c[3][0]:0)+sum(s.velocity.undated,c=>s.velocity.dimensions[c[0]].executionKind===kind?c[1][0]:0);
    check(scope,`velocity.execution.${kind}`,attributed,s.costByExecution[field],extra);
   }
-  if(api(s))for(const model of s.models){const matching=[...s.velocity.buckets.filter(c=>s.velocity.dimensions[c[2]].model===model.model).map(c=>c[3]),...s.velocity.undated.filter(c=>s.velocity.dimensions[c[0]].model===model.model).map(c=>c[1])];
+  if(api(s))for(const model of s.models){const matching=[...placed.filter(c=>s.velocity.dimensions[c[2]].model===model.model).map(c=>c[3]),...s.velocity.undated.filter(c=>s.velocity.dimensions[c[0]].model===model.model).map(c=>c[1])];
    for(const [i,f]of [[0,'totalUsd'],[1,'inputTokens'],[2,'uncachedInputTokens'],[3,'cachedInputTokens'],[4,'cacheWriteInputTokens'],[5,'outputTokens'],[6,'reasoningOutputTokens'],[7,'calls']])check(scope,`velocity.model.${model.model}.${f}`,sum(matching,c=>c[i]),model[f],extra);
   }
  }
