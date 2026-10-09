@@ -37,7 +37,7 @@ const elements = {
   coverageButton: $("#coverage-button"), coverageClose: $("#coverage-close"), coverageDialog: $("#coverage-dialog"), coverageDot: $("#coverage-dot"), coverageLabel: $("#coverage-label"), coverageSummary: $("#coverage-summary"),
   spendCoverage: $("#metric-spend-coverage"), inputCoverage: $("#metric-input-coverage"), outputCoverage: $("#metric-output-coverage"), toolsCoverage: $("#metric-tools-coverage"), compactionsCoverage: $("#metric-compactions-coverage"),
   dateRange: $("#date-range"), density: $("#density-switch"),
-  error: $("#error-banner"), errorMessage: $("#error-message"), errorRetry: $("#error-retry"),
+  error: $("#error-banner"), errorMessage: $("#error-message"), errorRetry: $("#error-retry"), errorTitle: $("#error-title"),
   generated: $("#generated-at"), help: $("#help-overlay"), helpButton: $("#help-button"), helpClose: $("#help-close"),
   input: $("#metric-input"), live: $("#metric-live"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
@@ -1457,7 +1457,8 @@ document.addEventListener("keydown", (event) => {
 
 const urlParameters = new URLSearchParams(window.location.search);
 
-function showError(message) {
+function showError(message, title = "Analysis failed") {
+  elements.errorTitle.textContent = title;
   elements.errorMessage.textContent = message;
   elements.errorRetry.hidden = false;
   elements.error.hidden = false;
@@ -1536,7 +1537,7 @@ async function loadSnapshot(refresh = false) {
       // Keep the last good snapshot on screen and say how old it is.
       elements.syncLabel.textContent = "Refresh failed";
       markStale(true);
-      showError(`Refresh failed: ${message} Showing the snapshot from ${dateTime(snapshot.generatedAt)}.`);
+      showError(`${message} Showing the snapshot from ${dateTime(snapshot.generatedAt)}.`, "Refresh failed");
     } else {
       elements.syncLabel.textContent = "Analysis failed";
       loadFailed = true;

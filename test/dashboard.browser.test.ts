@@ -384,7 +384,8 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     await browser.evaluate(`document.querySelector('#refresh-button').click()`);
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "error");
     assert.equal(await browser.evaluate(`document.querySelector('#error-banner').hidden`), false);
-    assert.match(await browser.evaluate<string>(`document.querySelector('#error-message').textContent`), /^Refresh failed: .* Showing the snapshot from /);
+    assert.equal(await browser.evaluate(`document.querySelector('#error-title').textContent`), 'Refresh failed');
+    assert.match(await browser.evaluate<string>(`document.querySelector('#error-message').textContent`), / Showing the snapshot from /);
     assert.match(await browser.evaluate<string>(`document.querySelector('#generated-at').textContent`), /· stale$/);
     assert.equal(await browser.evaluate(`document.querySelector('#metric-spend').textContent`), headline);
     assert.equal(await browser.evaluate(`document.querySelector('#error-retry').hidden`), false);

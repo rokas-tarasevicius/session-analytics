@@ -116,7 +116,7 @@
           </div>
           <div class="topbar-actions">
             <span class="status" id="sync-context" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
-            <button class="coverage-button" id="coverage-button" type="button" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Evidence and coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
+            <button class="coverage-button" id="coverage-button" type="button" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
             <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
               <summary class="icon-button" title="Export view" aria-label="Export view"><svg aria-hidden="true"><use href="#i-export"/></svg></summary>
@@ -144,7 +144,7 @@
           <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></span></p>
           <section class="view-status" id="view-status" aria-label="View status" hidden></section>
 
-          <div class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
+          <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
             <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
             <section class="kpi-grid" aria-label="Machine totals">
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Usage value, not an invoice</small></article>
@@ -213,7 +213,7 @@
                 <th scope="col"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
               </tr></thead><tbody id="repository-rows"></tbody></table></div>
             </section>
-          </div>
+          </section>
 
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
             <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>

@@ -262,23 +262,39 @@ test("Velocity provider and model groups use shared brand colours and reciprocal
   }
 });
 
-test("Velocity keeps CSS-pixel chart dimensions and reduces date ticks on narrow charts", async () => {
+test("Velocity keeps CSS-pixel chart dimensions and fits its axis labels on narrow charts", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
   try {
     const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
-    const data = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-05", group: "repository" });
-    for (const width of [390, 480, 800]) for (const compactView of [false, true]) {
-      const container = Object.assign(new Element(), { clientWidth: width });
-      renderVelocityChart(container, data, { compactView });
-      const svg = container.querySelector("svg")!;
-      const height = compactView ? (width < 560 ? 240 : 290) : (width < 560 ? 260 : 330);
-      assert.equal(svg.getAttribute("viewBox"), `0 0 ${width} ${height}`);
-      const ticks = svg.querySelectorAll(".axis-label").filter((node) => node.getAttribute("y") === String(height - 12));
-      assert.equal(ticks.length, width < 420 ? 2 : width < 560 ? 3 : 5);
-      assert.equal(svg.querySelector(".grid-line")!.getAttribute("x1"), width < 560 ? "64" : "86");
-      assert.equal(ticks[0]!.textContent, "2026-09-01");
-      assert.equal(ticks.at(-1)!.textContent, "2026-09-05");
+    // Axis text is drawn at CSS-pixel size; 7 px per mono character is the estimate the chart uses.
+    const extent = (node: Element) => {
+      const x = Number(node.getAttribute("x")), width = node.textContent.length * 7, anchor = node.getAttribute("text-anchor");
+      return anchor === "end" ? [x - width, x] : anchor === "middle" ? [x - width / 2, x + width / 2] : [x, x + width];
+    };
+    const cases = [
+      { granularity: "day", start: "2026-09-01", end: "2026-09-05" },
+      { granularity: "week", start: "2026-06-01", end: "2026-09-27" },
+    ];
+    for (const { granularity, start, end } of cases) {
+      const data = buildVelocity(categorySessions("repository", ["repo-a"]), { start, end, group: "repository", granularity });
+      for (const width of [280, 390, 480, 800, 1040]) for (const compactView of [false, true]) {
+        const container = Object.assign(new Element(), { clientWidth: width });
+        renderVelocityChart(container, data, { compactView });
+        const svg = container.querySelector("svg")!;
+        const height = compactView ? (width < 560 ? 240 : 290) : (width < 560 ? 260 : 330);
+        const label = `${granularity} at ${width}px${compactView ? " (compact)" : ""}`;
+        assert.equal(svg.getAttribute("viewBox"), `0 0 ${width} ${height}`, label);
+        const left = Number(svg.querySelector(".grid-line")!.getAttribute("x1"));
+        const yLabels = svg.querySelectorAll(".axis-label").filter((node) => node.getAttribute("y") !== String(height - 12));
+        for (const node of yLabels) assert.ok(extent(node)[0]! >= 0, `${label}: y label ${node.textContent} is clipped`);
+        const ticks = svg.querySelectorAll(".axis-label").filter((node) => node.getAttribute("y") === String(height - 12));
+        assert.ok(ticks.length >= 1 && ticks.length <= 5, label);
+        assert.ok(extent(ticks[0]!)[0]! >= left - 1 && extent(ticks.at(-1)!)[1]! <= width, `${label}: ticks stay in the plot`);
+        for (let index = 1; index < ticks.length; index += 1) assert.ok(extent(ticks[index - 1]!)[1]! < extent(ticks[index]!)[0]!, `${label}: ticks ${index - 1} and ${index} overlap`);
+        if (width >= (granularity === "week" ? 1040 : 800)) assert.equal(ticks.length, 5, label);
+        if (granularity === "day") assert.equal(ticks.at(-1)!.textContent, "2026-09-05", label);
+      }
     }
   } finally {
     if (previous) Object.defineProperty(globalThis, "document", previous);
