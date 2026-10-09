@@ -14,6 +14,12 @@ All notable changes to this project are documented here. The format follows [Kee
 - A failed first load shows a "No snapshot" state with **Retry**; a failed refresh keeps the last snapshot on screen, marks its time as stale and offers **Retry**. The export menu says when there is nothing to export because the analysis failed.
 - Accessibility: legend entries are list items instead of focusable buttons that did nothing; the Summary repository table's first cell is a real button instead of a focusable row; coverage badges such as `87/116` carry their sentence for screen readers; repository bars, the Coverage button and the repository scope chip have accessible names that include their visible text and values; the density control is a named toggle; the wordmark goes to Summary. Tooltips name a shortcut key only while single-key shortcuts are on, key caps are lowercase everywhere, and `/` is listed in the shortcut help.
 - The money metric is called "Usage value" everywhere, with one definition (API list-price equivalent of recorded usage; provider-reported values included; not an invoice). Velocity's value metric, Summary's KPI and daily chart drop "Priced".
+- Dashboard visual system: every table uses one header style, with text cells in Geist and figures in Geist Mono; text follows one type scale (11 / 12.5 / 14 / 20 px, 26 px figures) that comfortable density enlarges; one focus-ring colour.
+- Errors and warnings use their own status colours with an icon and title instead of the coral brand accent. Usage deltas are neutral (▲/▼) rather than coral for "went up".
+- The coverage dialog is titled "Data coverage", opens on its title instead of flashing a focus ring on Close, and its table scrolls inside the dialog on small screens.
+- Phones (390 px): no view scrolls sideways; KPIs sit two per row; cost bars get full-width rows; touch targets are at least 40 px and keyboard hints are hidden on touch screens. Line charts are drawn at the container's pixel width, so axis labels stay readable on narrow screens.
+- The view title appears once, in the top bar, with a one-line description under the scope line (Summary included); repeated panel kickers, the KPI accent stripe and the heavy pricing-card stripe are gone.
+- Theme and density sit together under Display in the sidebar footer, with a spacing icon for density. Compact money labels (sidebar, daily chart axis) show whole dollars from $10 ("$76", not "$76.2") and one decimal from $1,000 ("$1.9K").
 
 ### Fixed
 
