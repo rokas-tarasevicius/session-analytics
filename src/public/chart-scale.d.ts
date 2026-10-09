@@ -1,3 +1,11 @@
 export function scaleMaximum(values: number[]): number;
 export function barPercent(value: number, maximum: number): number;
 export function stackPercents(parts: number[], maximum: number): number[];
+export function formatShare(share: number | null | undefined): string;
+export function linearTicks(maximum: number, options?: { count?: number; whole?: boolean }): { maximum: number; step: number; ticks: number[] };
+export function formatAxisMoney(value: number, step: number): string;
+export function evenTicks(length: number, maxTicks: number, options?: { steps?: number[]; anchor?: "start" | "end" }): number[];
+export function dayTicks(days: string[], maxTicks?: number): { indices: number[]; months: boolean };
+export function spansYears(keys: string[]): boolean;
+export function formatAxisDate(key: string, options?: { withYear?: boolean }): string;
+export function axisTicks(keys: string[], granularity?: "day" | "week" | "month" | "hour", maxTicks?: number): Array<{ index: number; label: string }>;

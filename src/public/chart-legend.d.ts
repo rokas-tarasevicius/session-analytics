@@ -7,7 +7,7 @@ export interface LegendItem {
   /** Fraction (0..1), or a preformatted percentage. */
   share?: number | string;
   mark: "rect" | "line" | "logo";
-  pattern?: "solid" | "diagonal" | "dashed";
+  pattern?: "solid" | "diagonal" | "dashed" | "marker";
   icon?: object;
 }
 /** Structural DOM contracts keep browser globals out of the Node test type environment. */

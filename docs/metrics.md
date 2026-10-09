@@ -216,7 +216,7 @@ Undated value (including Cursor's provider-reported value) and sessions from old
 are disclosed beside the KPI and on Costs as **all-time** amounts for the scope, never added to a dated window;
 stale sessions that need a refresh are counted there too and mark the KPI partial. A repository whose sessions have
 no ledger at all shows an unavailable value (—), not $0. The Summary delta
-uses the same guarded comparison as Velocity's cards (observed prior window, at least 90% pricing
+uses the same guarded comparison as Velocity's cards (observed prior window, at least 75% pricing
 evidence, minimum baseline). The window's latest selectable date is capped at the snapshot's local
 date, so a session start "tomorrow" in UTC cannot add an empty future day.
 
@@ -238,7 +238,14 @@ all-time amounts no window can hold (undated value, older-snapshot sessions with
 from the highest value down and end with a total line equal to the usage value. Model rows are one per provider and
 model; **No model evidence** is ledger value whose cells carry no model (`<unknown>`). Each panel shares one
 zero-based scale across its rows. Model row tooltips give the API-equivalent/provider-reported split and the
-ledger's token classes for the window. **Pricing coverage** is priced over eligible ledger tokens for the window,
+ledger's token classes for the window. Shares below 0.1% read "<0.1%", never "0.0%".
+
+Every row is coloured by the provider that ran it, so a Cursor or OpenCode row of a Claude model stays in Cursor's
+or OpenCode's colours. Each model visible in the window gets its own shade of its provider (four per provider,
+slot 0 being the brand colour); the shade is chosen by model family and version, never by value or rank, and a
+provider bar segment always matches its model row. A provider with more than four models repeats a shade with a
+diagonal texture, picked so neighbouring segments never share one. Segments over 8% of the scale carry a direct
+label when it fits; hovering a segment highlights its model row and the reverse. **Pricing coverage** is priced over eligible ledger tokens for the window,
 rounded down to 0.1% so it reads 100.0% only when every eligible token has a rate; the Pricing view shows the same
 figure.
 
@@ -254,8 +261,8 @@ dated value. It is shown in the API-equivalent card's note, not as a separate to
 `agentIdentity` and `velocity`. Old snapshots without these additions remain readable;
 the velocity view asks for a refresh instead of reconstructing activity from session totals.
 
-Velocity opens with **Average price** and **Usage value**, both from dated usage value for the selected
-window and provider chips, independent of the chart's Metric selector. Average price divides dated
+Velocity opens with **Avg per day** and **Usage value**, both from dated usage value for the selected
+window and provider chips, independent of the chart's Metric selector. Avg per day divides dated
 usage value by the number of calendar days with value greater than zero; it is unavailable when no
 days are active. Its note also shows active days out of all calendar days and value per calendar day.
 The chart header shows the selected metric's period total.
@@ -306,7 +313,9 @@ The chart header shows the selected metric's period total.
   restart at the selected start date and are disabled for unordered hour profiles.
 - The rolling overlay is the total over the last seven calendar dates divided by seven,
   including zero-activity dates. It needs seven dates inside both the selected range and
-  observed history. It is available on daily lines/areas; it is disabled for cumulative,
+  observed history and at least 75% metric evidence over those dates (see the guardrails
+  below); between 75% and 100% the point uses observed value and is drawn faded as partial.
+  It is available on daily lines/areas; it is disabled for cumulative,
   weekly, monthly and hour views so incompatible units are never overlaid.
 
 ### Session-dated value
@@ -407,13 +416,24 @@ excluded. This changes coverage, not existing token/value accounting.
 
 Counters aggregate on the server before serialization. There are no public per-request
 records, no IDs in cells, and no duplicate daily/hour or six-dimensional marginal payloads.
-Model/repository charts show the largest seven series plus an exact Other remainder; agent,
+Model/repository charts show the largest seven series plus an exact Other remainder and agent
+charts the largest five (a single remaining series is shown itself, never as "Other (1)");
 provider, execution and effort charts retain every evidenced group. This cap changes only
-presentation, never totals. All chart modes share a text readout, pointer inspection, and
-one keyboard focus stop with Left/Right, Home/End navigation.
-All 16 supported agents have fixed identity slots: eight theme-aware colors, each with
-solid/diagonal area fills or solid/dashed lines. Legends reproduce the actual SVG encoding.
-Agent colors and patterns do not change when date/provider filters change spend rankings.
+presentation, never totals. The chart groups by provider by default. All chart modes share a text readout
+(a label/value list of the inspected bucket), a floating tooltip at the crosshair that lists the
+non-zero series by value, pointer inspection, and one keyboard focus stop with Left/Right, Home/End
+navigation. The money axis steps in whole dollars once its top reaches $2; date ticks step evenly
+back from the latest date (1, 2, 3, 7 or 14 days, month starts on long ranges) and carry the year
+when the range spans years, in the same format as the Summary chart.
+
+Series colours follow identity, never value or rank. Providers use their brand colour. Models and
+agents use the shades of the provider that ran them (four per provider, slot 0 the brand colour,
+every shade at least 3:1 against the chart track in both themes); each visible series gets its own
+shade, chosen by model family/version or the agent's fixed slot, so collisions such as two Opus
+versions no longer share one. Past four series of one provider, a shade repeats with a diagonal
+texture (areas) or point markers (lines). Dashes are reserved for the 7-day average. Other and
+unknown series are a neutral grey at least 3:1 against the track. Legends reproduce the actual SVG
+encoding.
 
 ### Change, burn and projection guardrails
 
@@ -438,14 +458,15 @@ observed history: dates before the first observed activity are not zero. Notes s
 dates and values. Coverage does not prove the provider retained all historical transcripts.
 
 Calendar coverage and **metric evidence** are separate. Known/eligible counters are retained
-per day, period and mover group, including groups with zero measured value. Week and month
-comparisons need at least **90%** metric evidence (for value: priced tokens) over the eligible
-tokens of **each** period; between 90% and 100% the change is shown on observed values and marked
-partially priced/observed, with both sides' counts in the explanation. Burn, rolling averages,
-projections and movers still require 100% evidence on both sides. Even equally partial coverage
-is insufficient for those. Known and
-eligible counts for current/prior periods are displayed beside percentages; incomplete
-evidence returns N/A. Recorded zeroes and inactive dates remain valid observations, but
+per day, period and mover group, including groups with zero measured value, together with the
+models whose eligible tokens lack evidence. Week and month comparisons, the today/median ratio,
+the month-end scenario, the rolling average and top movers need at least **75%** metric evidence
+(for value: priced tokens) over the eligible tokens of **each** period they use. Between 75% and
+100% the figure is shown on observed values, tagged **partial**, and names the cause, for example
+“1 model with unpriced tokens: gpt-5.3-codex-spark”; below 75% it is unavailable and the reason names the same
+models and the share. One unpriced model therefore no longer blanks the rolling average or every
+card. Known and
+eligible counts for current/prior periods are displayed beside percentages. Recorded zeroes and inactive dates remain valid observations, but
 0/0 evidence coverage is labeled N/A, never 100%. Unsupported providers have no eligible
 denominator; a numeric unsupported contribution (Cursor's legacy uncached input) also
 blocks inference. Canonical sessions without velocity data (stale snapshots) block comparisons;
@@ -459,19 +480,22 @@ fabricated 0%. An observed prior period with exactly zero value shows **New** wh
 period has activity and **No activity** when both are zero. Unavailable comparisons state their
 specific reason (no observed prior history, partly observed period, insufficient evidence,
 small baseline, or a stale snapshot).
-Top movers rank absolute increases separately for repository, model and agent over the
-last seven completed days versus the preceding seven. Percent guards use each group's
-own prior calls; new groups can have a positive absolute increase with an N/A percentage.
-Groups with incomplete evidence in either period are excluded from mover rankings; their
-count is displayed. Ranked rows show each period's known/eligible counts. This prevents a
-return of pricing or token telemetry from being described as a workload increase.
+Top movers list the largest changes, increases and decreases, for repository, model and agent
+over the last seven completed days versus the preceding seven: three per dimension by absolute
+change, ordered by absolute change. A percentage needs a prior value of at least **$1** for usage
+value (the metric minimum otherwise) and the usual prior-call guard; a new group shows **New** and a
+smaller base shows — with “Base under $1”. Groups below the evidence floor in either period are
+excluded from mover rankings and counted; partly evidenced rows are tagged, and each row's
+known/eligible counts are in its tooltip. This prevents a return of pricing or token telemetry from
+being described as a workload change.
 
 Burn is today's partial value divided by the median of the previous 14 full calendar
 days. It needs all 14 dates, at least 3 active dates, and the same minimum-activity guard.
 The full denominator and its coverage are displayed. **This is not a same-hour comparison**
 and will usually rise during the day. Historical windows do not show a “today” ratio.
-Both today's evidence and all baseline evidence must be complete, with their known/eligible
-counters shown alongside the ratio. Rolling averages also return N/A over any evidence gap.
+Today's and the baseline's evidence follow the floor above, with their known/eligible counters
+shown alongside the ratio; when there is no ratio the card names the first unmet requirement
+(baseline days observed, evidence, active days or minimum).
 
 The end-of-month projection uses the observed total through the last complete date plus
 remaining calendar days at the median of up to 14 trailing complete daily values. The
@@ -480,9 +504,10 @@ contribution is the larger of the observed value and the scenario daily rate; a 
 today does not consume the projection for future full days. It requires the month
 from its start inside the selected/observed range, at least 7 complete sample dates,
 at least 3 active dates, and a minimum-activity guard. Zero dates count. Metric evidence
-must be complete for the whole observed month
-(including today) and every sampled day. Gaps are not zero samples and are not silently
-dropped. Month/sample evidence counts stay visible even when the projection is unavailable.
+for the whole observed month (including today) and for the sampled days follows the 75% floor;
+a partly evidenced scenario is tagged partial and names the models. Gaps are not zero samples and are not silently
+dropped. Month/sample evidence counts stay visible even when the projection is unavailable, and
+the card states the first unmet requirement instead of a generic “more history needed”.
 The band is a **rate scenario, not a confidence interval**: no normality, independence or probability
 of future usage is claimed. It assumes the workload continues and cannot anticipate
 project changes. API-equivalent value is not an invoice; activity counters do not prove

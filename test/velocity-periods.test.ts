@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildVelocity, calendarDays, comparePeriods, comparisonSpan, localDay, periodFromVelocity, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
+import { buildVelocity, calendarDays, comparePeriods, comparisonSpan, evidenceCause, localDay, periodFromVelocity, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
 import type { Period } from "../src/public/velocity-data.js";
 import type { SessionAnalytics, VelocityValues } from "../src/types.ts";
 
@@ -100,13 +100,103 @@ test("empty and zero prior periods never produce Infinity, NaN or an invented 0%
   assert.match(comparePeriods(period(5), period(1, 2), "value").reason!, /3 model calls/);
 });
 
-test("comparisons accept small pricing gaps with a partial flag and refuse large ones", () => {
+test("comparisons accept small pricing gaps with a partial flag naming the model and refuse large ones", () => {
   const nearly = indicators([ledger(every("2026-08-01", "2026-10-08", () => 10), { priced: 0.95 })], "2026-10-08").week;
   assert.equal(nearly.status, "change"); assert.equal(nearly.partial, true); assert.equal(nearly.delta, 0);
+  assert.equal(nearly.cause, "1 model with unpriced tokens: synthetic-model");
+  // 89% priced in the prior period (the demo's case) still shows a percentage, tagged partial.
+  const prior = indicators([ledger(every("2026-08-01", "2026-10-08", (day) => day >= "2026-10-05" ? 12 : 10), { priced: 0.89 })], "2026-10-08").week;
+  assert.equal(prior.status, "change"); assert.equal(prior.partial, true); assert.ok(Math.abs(prior.delta! - 0.2) < 1e-9);
   const half = indicators([ledger(every("2026-08-01", "2026-10-08", () => 10), { priced: 0.5 })], "2026-10-08").week;
-  assert.equal(half.status, "unavailable"); assert.equal(half.reason, "50% of tokens priced in the current period; 90% needed");
+  assert.equal(half.status, "unavailable");
+  assert.equal(half.reason, "1 model with unpriced tokens: synthetic-model · 50% of tokens priced in the current period; 75% needed");
   const unsupported = comparePeriods(period(5), period(5, 10, { evidence: { known: 0, eligible: 0, unsupported: 3, complete: false } }), "uncached");
-  assert.equal(unsupported.status, "unavailable");
+  assert.equal(unsupported.status, "unavailable"); assert.equal(unsupported.reason, "Metric not recorded by some providers");
+  const complete = indicators([ledger(every("2026-08-01", "2026-10-08", () => 10))], "2026-10-08").week;
+  assert.equal(complete.partial, false); assert.equal(complete.cause, null);
+});
+
+test("the cause names every model missing evidence, largest gap first, for each metric", () => {
+  const model = (name: string, priced: number, size = 10) => {
+    const session = ledger(every("2026-08-01", "2026-10-08", () => size), { priced });
+    session.velocity!.dimensions[0]!.model = name;
+    return session;
+  };
+  const week = indicators([model("priced-model", 1, 100), model("small-gap", 0.5, 1), model("large-gap", 0, 3), model("<unknown>", 0.2, 2)], "2026-10-08").week;
+  assert.equal(week.status, "change"); assert.equal(week.partial, true);
+  assert.equal(week.cause, "3 models with unpriced tokens: large-gap, unattributed model +1 more");
+  assert.equal(evidenceCause(new Map([["only", 5]]), "reasoning"), "1 model without reasoning detail: only");
+  assert.equal(evidenceCause(new Map([["a", 5], ["b", 9]]), "cacheRead"), "2 models without cache-read detail: b, a");
+  assert.equal(evidenceCause(new Map(), "value"), null);
+  assert.equal(evidenceCause(null, "value"), null);
+});
+
+test("Today / 14-day median states its real blocker and shows partial ratios", () => {
+  const today = "2026-10-08";
+  const full = indicators([ledger(every("2026-08-01", today, () => 10))], today).burn;
+  assert.equal(full.ratio, 1); assert.equal(full.reason, null); assert.equal(full.partial, false); assert.equal(full.days, 14);
+  // 14/14 days covered but one model partly unpriced: the ratio is shown and tagged, not "needs a 14-day baseline".
+  const partial = indicators([ledger(every("2026-08-01", today, () => 10), { priced: 0.9 })], today).burn;
+  assert.equal(partial.days, 14); assert.equal(partial.ratio, 1); assert.equal(partial.partial, true);
+  assert.equal(partial.cause, "1 model with unpriced tokens: synthetic-model"); assert.equal(partial.reason, null);
+  const weak = indicators([ledger(every("2026-08-01", today, () => 10), { priced: 0.4 })], today).burn;
+  assert.equal(weak.ratio, null); assert.match(weak.reason!, /^1 model with unpriced tokens: synthetic-model · 40% of tokens priced in the 14-day baseline; 75% needed$/);
+  const short = indicators([ledger(every("2026-09-30", today, () => 10))], today).burn;
+  assert.equal(short.reason, "8 of 14 baseline days observed; all 14 needed");
+  const sparse = indicators([ledger(every("2026-08-01", today, (day) => ["2026-10-01", "2026-10-03", today].includes(day) ? 10 : 0))], today).burn;
+  assert.equal(sparse.reason, "2 active days in the 14-day baseline; 3 needed");
+  const past = indicators([ledger(every("2026-08-01", today, () => 10))], today, "2026-10-05").burn;
+  assert.equal(past.ratio, null); assert.equal(past.reason, "Only for a window that includes today");
+});
+
+test("the month-end scenario names why it is missing and projects partly priced months with a tag", () => {
+  const today = "2026-10-20";
+  const partial = indicators([ledger(every("2026-08-01", today, () => 10), { priced: 0.9 })], today);
+  assert.equal(partial.projectionReason, null);
+  assert.equal(partial.projection!.partial, true); assert.equal(partial.projection!.cause, "1 model with unpriced tokens: synthetic-model");
+  assert.equal(partial.projection!.value, 190 + 10 * 12 + 0, "19 completed days, 12 to go at the median, today's 10 already in the rate");
+  const weak = indicators([ledger(every("2026-08-01", today, () => 10), { priced: 0.3 })], today);
+  assert.equal(weak.projection, null); assert.match(weak.projectionReason!, /^1 model with unpriced tokens: synthetic-model · 30% of tokens priced in this month; 75% needed$/);
+  assert.equal(indicators([ledger(every("2026-10-12", today, () => 10))], today).projectionReason, "Observed history starts after the 1st of this month");
+  assert.equal(indicators([ledger(every("2026-10-01", "2026-10-05", () => 10))], "2026-10-05").projectionReason, "4 completed days of observed history; 7 needed");
+  assert.equal(indicators([ledger(every("2026-08-01", "2026-10-01", () => 10))], "2026-10-01").projectionReason, "No completed day this month yet");
+  const quiet = indicators([ledger(every("2026-08-01", today, (day) => ["2026-10-10", "2026-10-15"].includes(day) ? 10 : 0))], today);
+  assert.equal(quiet.projectionReason, "2 active days in the last 14; 3 needed");
+  assert.equal(indicators([ledger(every("2026-07-01", "2026-10-08", () => 10))], "2026-10-08", "2026-09-30").projectionReason, "No days left to project in this month");
+});
+
+test("the rolling average uses observed value, marks partly priced days and withholds only below the floor", () => {
+  const partial = buildVelocity([ledger(every("2026-09-01", "2026-09-14", () => 10), { priced: 0.9 })], { start: "2026-09-01", end: "2026-09-14" });
+  assert.deepEqual(partial.rolling.slice(5, 8), [null, 10, 10], "one unpriced model no longer blanks the window");
+  assert.equal(partial.rollingPartial[6], true); assert.equal(partial.rollingPartial[5], false);
+  const complete = buildVelocity([ledger(every("2026-09-01", "2026-09-14", () => 10))], { start: "2026-09-01", end: "2026-09-14" });
+  assert.equal(complete.rolling.at(-1), 10); assert.equal(complete.rollingPartial.at(-1), false);
+  // Mixed: a fully priced week, then a week that is mostly unpriced; the average returns once the window is back above the floor.
+  const mixed = buildVelocity([
+    ledger(every("2026-09-01", "2026-09-07", () => 10)),
+    ledger(every("2026-09-08", "2026-09-14", () => 10), { priced: 0 }),
+  ], { start: "2026-09-01", end: "2026-09-14" });
+  assert.equal(mixed.rolling[6], 10); assert.equal(mixed.rollingPartial[6], false);
+  assert.equal(mixed.rolling[7], 10); assert.equal(mixed.rollingPartial[7], true, "6 of 7 days priced: partial");
+  assert.equal(mixed.rolling[8], null, "5 of 7 days priced is below 75%");
+  const empty = buildVelocity([], { start: "2026-09-01", end: "2026-09-14" });
+  assert.deepEqual(empty.rolling, Array(14).fill(null), "no observed history, no average");
+});
+
+test("agent charts keep the five largest agents and fold the rest into Other", () => {
+  const agents = ["claude-cli", "claude-sdk", "claude-explore", "codex-cli", "codex-exec", "cursor", "gemini"];
+  const sessions = agents.map((agent, i) => {
+    const session = ledger([["2026-09-01", 10 + i]]);
+    session.velocity!.dimensions[0]!.agent = agent as never;
+    return session;
+  });
+  const data = buildVelocity(sessions, { start: "2026-09-01", end: "2026-09-01", group: "agent" });
+  assert.deepEqual(data.series.map((series) => series.id), ["gemini", "cursor", "codex-exec", "codex-cli", "claude-explore", "other"]);
+  assert.equal(data.series.at(-1)!.label, "Other (2)"); assert.equal(data.series.at(-1)!.total, 21);
+  assert.equal(data.allSeries.length, 7, "accounting keeps every agent");
+  const six = buildVelocity(sessions.slice(1), { start: "2026-09-01", end: "2026-09-01", group: "agent" });
+  assert.equal(six.series.length, 6, "a single remaining agent is shown itself, never as Other (1)");
+  assert.ok(!six.series.some((series) => series.id === "other"));
 });
 
 test("sources without an activity ledger are disclosed; only stale snapshots block comparisons", () => {

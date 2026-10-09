@@ -1,12 +1,12 @@
-import { modelColor, providerColor } from "./chart-colors.js";
+import { modelColor, modelSlots, providerColor, separateAdjacent, slotColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
-import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
+import { axisTicks, barPercent, formatAxisMoney, formatShare, linearTicks, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
   coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
   groupByRepository, heatLevel, isTextEntryTarget, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
   providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
-  sortRepositories, sparklineSummary, summarize, tickScale, validDay, windowStartFor,
+  sortRepositories, sparklineSummary, summarize, validDay, windowStartFor,
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
 import { providerMark, renderProviderEvidence, metricCoverage } from "./providers.js";
@@ -122,8 +122,6 @@ function dateTime(value) {
   if (!value) return "Unknown time";
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(normalizeTimestamp(value)));
 }
-
-const shortDate = (day) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(`${day}T00:00:00`));
 
 function node(tag, value, className) {
   const element = document.createElement(tag);
@@ -304,6 +302,14 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
   const visible = items.slice(0, limit);
   const maximum = scaleMaximum(visible.map(({ value }) => value));
   if (!visible.length) { emptyState(container, "No activity in this view."); return; }
+  // Model rows (Summary's model mix) get the same per-provider shades as Costs: one per visible model.
+  const slots = modelSlots(visible.filter((item) => item.model && item.provider).map((item) => ({ id: `${item.provider}:${item.model}`, provider: item.provider, model: item.model })));
+  const modelFill = (item) => {
+    const slot = slots.get(`${item.provider}:${item.model}`);
+    if (!slot) return modelColor(item.provider, item.model);
+    const color = slotColor(slot.provider, slot.slot);
+    return slot.overflow ? `repeating-linear-gradient(45deg, ${color} 0 4px, var(--surface) 4px 6px)` : color;
+  };
   for (const item of visible) {
     const row = node(onSelect ? "button" : "div", null, `bar-row${onSelect ? " repository-link" : ""}`);
     if (onSelect) {
@@ -320,7 +326,7 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
     const track = node("div", null, "bar-track");
     const fill = node("i");
     fill.setAttribute("data-series", item.id ?? (item.provider ? `${item.provider}:${item.model ?? item.name}` : item.name));
-    fill.style.setProperty("--series-color", item.model ? modelColor(item.provider, item.model) : item.provider ? providerColor(item.provider) : "var(--chart-neutral)");
+    fill.style.setProperty("--series-color", item.model ? modelFill(item) : item.provider ? providerColor(item.provider) : "var(--chart-neutral)");
     fill.style.width = `${barPercent(item.value, maximum)}%`;
     if (!item.coverage || item.coverage.eligible) track.append(fill); row.append(label, track); container.append(row);
   }
@@ -581,22 +587,48 @@ function ledgerValue(value, evidence, tag = "strong") {
 }
 
 /** Provider stacks, high to low, then the window total: the rows add up to the total line. */
-function renderCostRows(container, ledger) {
-  clear(container); const list = node("div", null, "cost-stack-list");
+function renderCostRows(container, ledger, slots, highlight = () => {}) {
+  slots ??= modelSlots(ledger.providers.flatMap((group) => group.models.filter((model) => model.model !== "<unknown>").map((model) => ({ id: `${group.provider}:${model.model}`, provider: group.provider, model: model.model }))));
+  redrawOnResize(container, () => renderCostRows(container, ledger, slots, highlight));
+  highlight(null);
+  clear(container); const list = node("div", null, "cost-stack-list"), labels = [];
   const maximum = scaleMaximum(ledger.providers.map(({ total }) => total));
+  let hasUnattributed = false, overflowColor = null;
   for (const group of ledger.providers) {
-    const row = node("div", null, "cost-stack-row"); row.append(node("strong", providerLabels[group.provider] ?? "Unknown provider"));
+    const provider = providerLabels[group.provider] ?? "Unknown provider";
+    const row = node("div", null, "cost-stack-row"); row.append(node("strong", provider));
     const rail = node("div", null, "cost-rail"), stack = node("div", null, "cost-stack");
-    const parts = group.models.filter(({ value }) => value > 0).map(({ model, value }) => ({ name: model, value, color: modelColor(group.provider, model), id: `${group.provider}:${model}` }));
-    if (group.unattributed > 0) parts.push({ name: "No model evidence", value: group.unattributed, color: unattributedColor, id: `${group.provider}:unattributed` });
+    const parts = separateAdjacent(group.models.filter(({ model, value }) => model !== "<unknown>" && value > 0).map(({ model, value }) => {
+      const id = `${group.provider}:${model}`;
+      return { name: model, value, id, ...slots.get(id) };
+    })).map((part) => {
+      // Keep the adjacent-segment adjustment in the shared map so the model row uses the same shade.
+      slots.set(part.id, { provider: part.provider, slot: part.slot, overflow: part.overflow });
+      const color = slotColor(part.provider, part.slot);
+      if (part.overflow) overflowColor = color;
+      return { ...part, color, background: part.overflow ? `repeating-linear-gradient(45deg, ${color} 0 4px, var(--surface) 4px 6px)` : color };
+    });
+    if (group.unattributed > 0) {
+      hasUnattributed = true;
+      parts.push({ name: "No model evidence", value: group.unattributed, background: unattributedColor, id: `${group.provider}:unattributed` });
+    }
     const widths = stackPercents(parts.map(({ value }) => value), maximum);
-    const detail = parts.map(({ name, value }) => `${name}: ${money(value)} (${percent(group.total ? value / group.total : 0)} of provider)`);
+    const detail = parts.map(({ name, value }) => `${name}: ${money(value)} (${formatShare(group.total ? value / group.total : 0)} of provider)`);
     stack.setAttribute("role", "img");
-    stack.setAttribute("aria-label", `${providerLabels[group.provider] ?? "Unknown provider"}: ${money(group.total)}. ${detail.join(", ")}`);
+    stack.setAttribute("aria-label", `${provider}: ${money(group.total)}. ${detail.join(", ")}`);
     stack.title = detail.join("\n");
     for (const [index, part] of parts.entries()) {
       const bar = node("i"); bar.setAttribute("data-series", part.id);
-      bar.style.width = `${widths[index]}%`; bar.style.background = part.color; stack.append(bar);
+      const share = formatShare(group.total ? part.value / group.total : 0);
+      bar.title = `${part.name} · ${provider}: ${money(part.value)} (${share} of ${provider})`;
+      bar.style.width = `${widths[index]}%`; bar.style.background = part.background;
+      bar.addEventListener("pointerenter", () => highlight(part.id)); bar.addEventListener("pointerleave", () => highlight(null));
+      if (widths[index] >= 8) {
+        const short = part.name.replace(/^(anthropic\/|openai\/)/, "").replace(/^claude-/, "");
+        const label = node("span", `${short} · ${share}`, "cost-segment-label"); label.setAttribute("aria-hidden", "true");
+        bar.append(label); labels.push({ bar, label, short });
+      }
+      stack.append(bar);
     }
     rail.append(stack); row.append(rail, ledgerValue(group.total, group.evidence)); list.append(row);
   }
@@ -605,13 +637,31 @@ function renderCostRows(container, ledger) {
     const total = node("div", null, "cost-stack-row cost-stack-total");
     total.append(node("strong", "Total"), node("div"), ledgerValue(ledger.total, ledger.evidence));
     list.append(total);
+    const key = node("p", "Each segment is one model, largest first, in a shade of its provider's colour. Hover a segment to find its row under Cost by model.", "cost-key");
+    const addKey = (text, color) => {
+      const entry = node("span"), swatch = node("i", null, "chart-legend-swatch"); swatch.setAttribute("aria-hidden", "true");
+      swatch.dataset.pattern = "diagonal"; swatch.style.setProperty("--series-color", color);
+      entry.append(swatch, node("span", text)); key.append(entry);
+    };
+    if (hasUnattributed) addKey("No model evidence", "var(--muted)");
+    if (overflowColor) addKey("Extra models share a shade, hatched", overflowColor);
+    list.append(key);
   }
   container.append(list);
+  const fit = () => {
+    for (const { bar, label, short } of labels) {
+      if (!bar.clientWidth) continue;
+      if (label.scrollWidth > bar.clientWidth - 6) label.textContent = short;
+      if (label.scrollWidth > bar.clientWidth - 6) label.hidden = true;
+    }
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(fit); else fit();
 }
 
 const tokenClasses = [["Input", 1], ["cache read", 3], ["cache write", 4], ["output", 5]];
 
-function renderModelCosts(container, ledger) {
+function renderModelCosts(container, ledger, slots, highlight = () => {}) {
+  slots ??= modelSlots(ledger.models.filter((model) => model.model !== "<unknown>").map((model) => ({ id: `${model.provider}:${model.model}`, provider: model.provider, model: model.model })));
   clear(container); const list = node("div", null, "cost-model-list");
   const rows = ledger.models.filter(({ model }) => model !== "<unknown>");
   for (const provider of ledger.providers) if (provider.unattributed > 0.000001) rows.push({ provider: provider.provider, model: "No model evidence", value: provider.unattributed, api: 0, reported: 0, share: ledger.total ? provider.unattributed / ledger.total : 0, evidence: noEvidence(), unattributed: true });
@@ -630,12 +680,17 @@ function renderModelCosts(container, ledger) {
     ].filter(Boolean).join(" · ");
     const basis = model.api > 0 && model.reported > 0 ? `${money(model.api)} API-equivalent + ${money(model.reported)} provider-reported. ` : model.reported > 0 ? "Provider-reported. " : "";
     const detail = model.unattributed ? meta : `${tokenClasses.map(([name, index]) => `${name} ${compact.format(model.sums[index])}`).join(", ")} tokens`;
-    row.title = `${model.model} · ${providerLabels[model.provider] ?? "Unknown provider"}: ${money(model.value)} (${percent(model.share)} of total). ${basis}${meta}. ${detail}`;
+    row.title = `${model.model} · ${providerLabels[model.provider] ?? "Unknown provider"}: ${money(model.value)} (${formatShare(model.share)} of total). ${basis}${meta}. ${detail}`;
     const track = node("div", null, "cost-model-track"), fill = node("i");
     track.setAttribute("role", "img"); track.setAttribute("aria-label", row.title);
-    fill.style.width = `${barPercent(model.value, maximum)}%`; fill.style.background = model.unattributed ? unattributedColor : modelColor(model.provider, model.model);
-    fill.setAttribute("data-series", `${model.provider}:${model.unattributed ? "unattributed" : model.model}`); track.append(fill);
-    row.append(label, track, ledgerValue(model.value, model.evidence), node("span", percent(model.share), "cost-model-share"), node("small", meta, "cost-model-meta muted")); list.append(row);
+    const id = `${model.provider}:${model.unattributed ? "unattributed" : model.model}`, slot = slots.get(id);
+    const color = slot ? slotColor(slot.provider, slot.slot) : null;
+    fill.style.width = `${barPercent(model.value, maximum)}%`;
+    fill.style.background = model.unattributed ? unattributedColor : slot.overflow ? `repeating-linear-gradient(45deg, ${color} 0 4px, var(--surface) 4px 6px)` : color;
+    fill.setAttribute("data-series", id); track.append(fill);
+    row.setAttribute("data-series", id);
+    row.addEventListener("pointerenter", () => highlight(id)); row.addEventListener("pointerleave", () => highlight(null));
+    row.append(label, track, ledgerValue(model.value, model.evidence), node("span", formatShare(model.share), "cost-model-share"), node("small", meta, "cost-model-meta muted")); list.append(row);
   }
   if (list.childElementCount === 0) emptyState(list, "No priced activity in this view.");
   container.append(list);
@@ -663,8 +718,21 @@ function renderCosts(view) {
   elements.costCoverageNote.textContent = ledger.evidence.eligible > 0 ? `${compact.format(ledger.evidence.known)} of ${compact.format(ledger.evidence.eligible)} eligible tokens priced` : "No eligible tokens in this window";
   const excluded = ledgerExclusions(ledger);
   elements.costReconciliation.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${range.start} to ${range.end} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
-  renderCostRows(elements.providerCostModels, ledger);
-  renderModelCosts(elements.costModels, ledger);
+  const slots = modelSlots(ledger.models.filter((model) => model.model !== "<unknown>").map((model) => ({ id: `${model.provider}:${model.model}`, provider: model.provider, model: model.model })));
+  const highlight = (id) => {
+    for (const container of [elements.providerCostModels, elements.costModels]) {
+      if (id === null) container.removeAttribute("data-highlight"); else container.setAttribute("data-highlight", id);
+      for (const mark of container.querySelectorAll("[data-series]")) {
+        const active = id !== null && mark.getAttribute("data-series") === id;
+        if (active) mark.setAttribute("data-series-active", "true"); else mark.removeAttribute("data-series-active");
+        if (mark.classList.contains("cost-model-row")) {
+          if (active) mark.setAttribute("data-active", "true"); else mark.removeAttribute("data-active");
+        }
+      }
+    }
+  };
+  renderCostRows(elements.providerCostModels, ledger, slots, highlight);
+  renderModelCosts(elements.costModels, ledger, slots, highlight);
 }
 
 function renderTools(view) {
@@ -740,17 +808,19 @@ function renderLine(items) {
   const width = chartWidth(elements.dailySpend, 900), height = width < 560 ? 220 : 272, left = 52, right = 14, top = 14, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
-  const { axisMaximum } = tickScale(maximum);
+  const { maximum: axisMaximum, step, ticks } = linearTicks(maximum, { whole: true });
   const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
-  for (let index = 0; index < 5; index += 1) {
-    const y = top + (index / 4) * plotHeight;
-    const value = axisMaximum * (1 - index / 4);
+  for (const value of ticks) {
+    const y = top + (1 - value / axisMaximum) * plotHeight;
     svg.append(svgNode("line", { x1: left, x2: width - right, y1: y, y2: y, class: "grid-line" }));
-    addSvgText(svg, shortMoney(value), left - 10, y + 4, "end");
+    addSvgText(svg, formatAxisMoney(value, step), left - 10, y + 4, "end");
   }
   const xAt = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
-  const tickIndexes = [...new Set(width < 560 ? [0, Math.round((items.length - 1) / 2), items.length - 1] : [0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
-  for (const index of tickIndexes) addSvgText(svg, shortDate(items[index].name), xAt(index), height - 12, index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
+  // The shared date ticks (even day steps ending on the latest day); a label that would cross an edge is anchored to it.
+  for (const { index, label } of axisTicks(items.map((item) => item.name), "day", width < 560 ? 3 : 6)) {
+    const half = label.length * 3.5;
+    addSvgText(svg, label, xAt(index), height - 12, xAt(index) - half < left ? "start" : xAt(index) + half > width - right ? "end" : "middle");
+  }
   const xs = items.map((_, index) => xAt(index));
   const baseline = top + plotHeight;
   const dots = {};
@@ -987,7 +1057,7 @@ function renderDelta(element, delta) {
 function spendDelta(comparison, length) {
   if (!comparison || (comparison.status !== "change" && comparison.status !== "new")) return null;
   const delta = deltaDescription(comparison.current.value, comparison.status === "new" ? 0 : comparison.previous.value, length);
-  return delta && comparison.partial ? { ...delta, text: `${delta.text} · partial`, label: `${delta.label}, partially priced` } : delta;
+  return delta && comparison.partial ? { ...delta, text: `${delta.text} · partial`, label: `${delta.label}, partially priced${comparison.cause ? ` (${comparison.cause})` : ""}` } : delta;
 }
 
 /** Top-level, sub-agent, mixed and unknown sessions: each session counted once, so the parts add up to the total. */

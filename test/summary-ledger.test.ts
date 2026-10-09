@@ -73,7 +73,7 @@ test("a partially priced window shows its priced share and a partial delta", () 
   const half = harness([session("repo-a", days("2026-09-01", "2026-09-14").map((d) => bucket(d, 10, 0.5)))]);
   half.render();
   assert.equal(half.lookup("spendCoverage").textContent.trim(), "50% priced");
-  assert.equal(half.deltas["#metric-spend-delta"], null, "Below 90% priced the change is not shown");
+  assert.equal(half.deltas["#metric-spend-delta"], null, "Below 75% priced the change is not shown");
 });
 
 test("a quiet window shows $0.00 while a scope with no activity ledger shows a dash", () => {

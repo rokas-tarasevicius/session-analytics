@@ -20,6 +20,12 @@ All notable changes to this project are documented here. The format follows [Kee
 - Phones (390 px): no view scrolls sideways; KPIs sit two per row; cost bars get full-width rows; touch targets are at least 40 px and keyboard hints are hidden on touch screens. Line charts are drawn at the container's pixel width, so axis labels stay readable on narrow screens.
 - The view title appears once, in the top bar, with a one-line description under the scope line (Summary included); repeated panel kickers, the KPI accent stripe and the heavy pricing-card stripe are gone.
 - Theme and density sit together under Display in the sidebar footer, with a spacing icon for density. Compact money labels (sidebar, daily chart axis) show whole dollars from $10 ("$76", not "$76.2") and one decimal from $1,000 ("$1.9K").
+- Velocity groups by Provider by default; agent charts show the five largest agents plus "Other (N)". The lead card "Average price" is now "Avg per day".
+- Chart colours: every model or agent visible in a chart gets its own shade of the provider that ran it (four per provider, the first being the brand colour), chosen by model family and version rather than value, so Opus 5 and Opus 4.8, Sonnet 5 and Fable 5.1, or GPT-5.5 and GPT-5.6 Terra no longer share a colour. All shades, Codex's darker greys and the Other/unknown grey are at least 3:1 against the chart track in both themes. A fifth model of one provider repeats a shade with a texture (bars, areas) or point markers (lines); dashes now mean only the 7-day average.
+- Velocity chart: a floating tooltip at the crosshair lists the non-zero series by value with colour keys, and the selected-day readout is a label/value list. Axes step in whole dollars and even day steps ending on the latest day, with the year when the range spans years; the Summary daily chart uses the same date format and money steps.
+- Velocity's comparison cards, Today / 14-day median and month-end scenario show their figure with a **partial** tag and name the cause ("1 model with unpriced tokens: gpt-5.3-codex-spark") when 75–100% of tokens are priced, instead of a dash; below 75% they say which models and what share. The today/median card states the requirement it is missing instead of "Needs a 14-day baseline" beside "14/14 days covered", and the scenario card says why there is no projection instead of "More complete history needed". The comparison floor moves from 90% to 75% priced (the Summary usage-value delta uses the same rule).
+- Velocity's Top movers lists the largest changes, increases and decreases, by absolute dollars; percentages are hidden when the prior week's value is under $1 ("New" for a new group), and each row's evidence moves into its tooltip.
+- Costs: provider bars label segments over 8% of the scale, link to their "Cost by model" row on hover (both ways) and have a key; shares below 0.1% read "<0.1%".
 
 ### Fixed
 
@@ -38,6 +44,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - One calendar: session counts, tokens, tools, the Activity heatmap and every scope line use the snapshot timezone, like the ledger (session starts were filtered by UTC date).
 - Session breakdowns add up: mixed top-level and sub-agent sessions are counted once ("· N mixed") in the Sessions KPI and the fleet table.
 - Velocity's week card names its weekdays ("Week to date (Mon–Thu) vs same days last week"), so it is not confused with the Summary's last-7-days delta.
+- Costs and Velocity coloured a Cursor, Gemini CLI or OpenCode row of a Claude model in Claude coral (and any provider's GPT row in Codex grey); rows now use the colours of the provider that ran them.
+- Velocity's 7-day average disappeared for the whole window when one model was unpriced, while its key still said it was shown. It now averages the observed value, fades the points whose week is partly priced, and the key says when and why the average is unavailable.
 
 ## [0.7.0] - 2026-10-09
 

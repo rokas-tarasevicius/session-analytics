@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { providerColors, providerIds } from "../src/public/providers.js";
-import { brandPalette, categoryColor, categorySlotCount, componentColor, modelColor, modelProvider, modelTier, providerColor, providerKey } from "../src/public/chart-colors.js";
+import { allocateSlots, brandPalette, categoryColor, categorySlotCount, componentColor, modelColor, modelFamily, modelProvider, modelSlots, modelTier, providerColor, providerKey, separateAdjacent, slotColor } from "../src/public/chart-colors.js";
 
 test("provider aliases share the brand colour, including unknown and unsupported", () => {
   for (const provider of providerIds) assert.equal(providerColors[provider], providerColor(provider));
@@ -32,9 +32,62 @@ test("model identity overrides a fallback provider and uses deterministic family
   assert.notEqual(modelTier("gpt-6-sol"), modelTier("gpt-6-terra"));
   assert.ok([1, 2].includes(modelTier("unfamiliar-family")));
   assert.equal(modelTier("unfamiliar-family"), modelTier("unfamiliar-family"));
-  assert.equal(modelColor("codex", "claude-opus-4.6"), "var(--provider-claude-0)");
-  assert.equal(modelColor("claude", "gpt-5-mini"), "var(--provider-codex-3)");
+  // Rows are coloured by the provider that ran the model; the model's vendor only fills in for an unknown provider.
+  assert.equal(modelColor("codex", "claude-opus-4.6"), "var(--provider-codex-0)");
+  assert.equal(modelColor("cursor", "claude-opus-5"), "var(--provider-cursor-0)");
+  assert.equal(modelColor("claude", "gpt-5-mini"), "var(--provider-claude-3)");
+  assert.equal(modelColor("missing", "gpt-5-mini"), "var(--provider-codex-3)");
   assert.equal(modelColor("missing", "<unknown>"), "var(--provider-unknown-1)");
+  assert.equal(modelFamily("opencode", "claude-sonnet-5"), "opencode"); assert.equal(modelFamily(undefined, "claude-sonnet-5"), "claude");
+  assert.equal(slotColor("gemini", 5), "var(--provider-gemini-1)");
+});
+
+test("every visible model gets its own shade within its provider, including the family-tier collisions", () => {
+  const visible = (models: Array<[string, string]>) => models.map(([provider, model]) => ({ id: `${provider}:${model}`, provider, model }));
+  // The pairs modelTier alone gives the same slot: opus-5/opus-4-8, sonnet-5/fable-5-1, gpt-5.5/gpt-5.6-terra.
+  assert.equal(modelTier("claude-opus-5"), modelTier("claude-opus-4-8"));
+  assert.equal(modelTier("claude-sonnet-5"), modelTier("claude-fable-5-1"));
+  assert.equal(modelTier("gpt-5.5"), modelTier("gpt-5.6-terra"));
+  const demo = visible([
+    ["claude", "claude-opus-5"], ["claude", "claude-sonnet-5"], ["codex", "gpt-5.6-sol"], ["codex", "gpt-5.5"], ["claude", "claude-opus-4-8"],
+    ["claude", "claude-fable-5-1"], ["codex", "gpt-5.6-terra"], ["cursor", "claude-opus-5"], ["gemini", "claude-sonnet-5"], ["opencode", "claude-sonnet-5"],
+  ]);
+  const slots = modelSlots(demo);
+  const colours = demo.map(({ id }) => slotColor(slots.get(id)!.provider, slots.get(id)!.slot));
+  assert.equal(new Set(colours).size, demo.length, "no two visible models share a shade");
+  assert.ok(demo.every(({ id }) => !slots.get(id)!.overflow));
+  for (const [first, second] of [["claude:claude-opus-5", "claude:claude-opus-4-8"], ["claude:claude-sonnet-5", "claude:claude-fable-5-1"], ["codex:gpt-5.5", "codex:gpt-5.6-terra"]] as const) {
+    assert.notEqual(slots.get(first)!.slot, slots.get(second)!.slot, `${first} and ${second} must differ`);
+  }
+  assert.equal(slots.get("claude:claude-opus-5")!.slot, 0, "the newest flagship keeps the brand shade");
+  // Cursor, Gemini and OpenCode rows of Claude models stay in their own provider's family, never Claude coral.
+  for (const provider of ["cursor", "gemini", "opencode"]) assert.equal(slots.get(demo.find((item) => item.provider === provider)!.id)!.provider, provider);
+  // Stable per id: the same visible set in any order gets the same slots (values and rank play no part).
+  const shuffled = modelSlots([...demo].reverse());
+  for (const { id } of demo) assert.deepEqual(shuffled.get(id), slots.get(id));
+  // Removing a model no survivor collided with leaves the survivors' shades alone.
+  const without = modelSlots(demo.filter(({ id }) => id !== "codex:gpt-5.6-sol"));
+  for (const id of ["claude:claude-opus-5", "claude:claude-sonnet-5", "claude:claude-opus-4-8", "claude:claude-fable-5-1"]) assert.deepEqual(without.get(id), slots.get(id));
+});
+
+test("a provider with more models than shades repeats one with an overflow flag, and stacks never put equal shades side by side", () => {
+  const claude = ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-fable-5-1", "claude-haiku-4-5", "claude-sonnet-4-6"].map((model) => ({ id: model, provider: "claude", model }));
+  const slots = modelSlots(claude);
+  const regular = claude.filter(({ id }) => !slots.get(id)!.overflow);
+  assert.equal(regular.length, 4); assert.equal(new Set(regular.map(({ id }) => slots.get(id)!.slot)).size, 4);
+  assert.equal(claude.filter(({ id }) => slots.get(id)!.overflow).length, 2);
+  // Any display order: overflow segments are re-picked so neighbours differ; regular segments keep their shade.
+  for (const order of [claude, [...claude].reverse(), [claude[4]!, claude[5]!, claude[0]!, claude[1]!, claude[2]!, claude[3]!]]) {
+    const row = separateAdjacent(order.map(({ id }) => ({ id, ...slots.get(id)! })));
+    for (let index = 1; index < row.length; index += 1) assert.notEqual(row[index]!.slot, row[index - 1]!.slot, `${row[index - 1]!.id} and ${row[index]!.id}`);
+    for (const item of row) if (!item.overflow) assert.equal(item.slot, slots.get(item.id)!.slot);
+  }
+  const generic = allocateSlots([{ id: "a", provider: "codex", preferred: 0 }, { id: "b", provider: "codex", preferred: 2 }, { id: "c", provider: "codex", preferred: 2, order: 1 }, { id: "d", provider: "codex", preferred: 2, order: 2 }]);
+  assert.deepEqual(["a", "b", "c", "d"].map((id) => generic.get(id)!.slot), [0, 2, 3, 1], "a lost preference probes +1, then -1");
+  // A provider's most-preferred visible model takes the brand shade, so a lone Sonnet on Gemini CLI is Gemini's own colour.
+  assert.equal(modelSlots([{ id: "gemini:claude-sonnet-5", provider: "gemini", model: "claude-sonnet-5" }]).get("gemini:claude-sonnet-5")!.slot, 0);
+  const shifted = allocateSlots([{ id: "x", provider: "claude", preferred: 1 }, { id: "y", provider: "claude", preferred: 3 }]);
+  assert.deepEqual([shifted.get("x")!.slot, shifted.get("y")!.slot], [0, 2], "preferences keep their spacing below the brand shade");
 });
 
 test("cost components retain the base hue, lightness encoding and reported stripes", () => {
@@ -69,6 +122,39 @@ test("the categorical ramp is separable and cannot be mistaken for a provider br
       for (const other of ramp.slice(index + 1)) assert.ok(deltaE(hex, other) >= 15, `${theme}: ${hex} and ${other} are too similar`);
       for (const [name, brand] of brands) assert.ok(deltaE(hex, brand) >= 15, `${theme}: ${hex} is too close to ${name}`);
     }
+  }
+});
+
+/** WCAG 2 contrast ratio between two sRGB hex colours. */
+function contrast(first: string, second: string): number {
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a) as [number, number];
+  return (high + 0.05) / (low + 0.05);
+}
+
+test("model shades and the Other grey clear 3:1 against the bar track and stay apart within a provider", async () => {
+  const css = await readFile(new URL("../src/public/styles.css", import.meta.url), "utf8");
+  for (const [theme, palette] of Object.entries(brandPalette)) {
+    const selector = theme === "light" ? ":root {" : ':root[data-theme="dark"] {';
+    const body = css.slice(css.indexOf(selector) + selector.length).split("}")[0]!;
+    const token = (name: string) => body.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6});`))![1]!;
+    const track = token("--surface-3"), surface = token("--surface");
+    for (const provider of ["codex", "claude", "cursor", "copilot", "opencode", "gemini", "unknown"]) {
+      const ramp = [0, 1, 2, 3].map((slot) => palette[`--provider-${provider}-${slot}`]!);
+      assert.equal(ramp[0], palette[`--provider-${provider}`], `${theme}: ${provider} slot 0 is the brand colour`);
+      for (const hex of ramp) {
+        assert.match(hex, /^#[0-9a-f]{6}$/);
+        assert.ok(contrast(hex, track) >= 3, `${theme}: ${provider} ${hex} is ${contrast(hex, track).toFixed(2)}:1 against the track ${track}`);
+        assert.ok(contrast(hex, surface) >= 3, `${theme}: ${provider} ${hex} against the surface`);
+      }
+      if (provider === "unknown") continue;
+      for (const [index, hex] of ramp.entries()) for (const other of ramp.slice(index + 1)) assert.ok(deltaE(hex, other) >= 8, `${theme}: ${provider} ${hex} and ${other} are too similar (${deltaE(hex, other).toFixed(1)})`);
+    }
+    const other = palette["--provider-unknown"]!;
+    for (let slot = 0; slot < 4; slot += 1) assert.ok(deltaE(other, palette[`--provider-codex-${slot}`]!) >= 10, `${theme}: Other grey vs Codex slot ${slot}`);
   }
 });
 

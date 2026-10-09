@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 
 import {
   clampWindow, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
-  ledgerMoney, matchesQuery, previousPeriod, pricedPercent, pricedShare, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, summarize, tickScale, windowStartFor,
+  ledgerMoney, matchesQuery, previousPeriod, pricedPercent, pricedShare, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, summarize, windowStartFor,
 } from "../src/public/view-model.js";
 import { buildVelocity } from "../src/public/velocity-data.js";
 
@@ -141,9 +141,6 @@ test("window math: days, preset starts, ticks, heat levels, and money labels", (
   assert.equal(windowStartFor("7", "2026-08-05", "2026-10-02"), "2026-09-26");
   assert.equal(windowStartFor("90", "2026-08-05", "2026-10-02"), "2026-08-05");
   assert.equal(windowStartFor("all", "2026-08-05", "2026-10-02"), "2026-08-05");
-  assert.deepEqual(tickScale(36), { axisMaximum: 36, tick: 9 });
-  const floor = tickScale(0);
-  assert.ok(Math.abs(floor.tick - 0.0003) < 1e-12 && Math.abs(floor.axisMaximum - 0.0012) < 1e-12, "an empty window still gets a positive, finite axis");
   assert.equal(heatLevel(0, 10), 0);
   assert.equal(heatLevel(10, 10), 7);
   assert.equal(heatLevel(1, 10), 3);
