@@ -1,4 +1,4 @@
-/** Provider/model identity is independent of chart rank, filters and values. */
+/** Shared chart colours; provider/model identity is independent of rank, filters and values. */
 export const brandPalette = {
   "light": {
     "--provider-codex": "#5c5c59",
@@ -36,7 +36,12 @@ export const brandPalette = {
     "--provider-unknown-1": "var(--provider-unknown)",
     "--provider-unknown-2": "color-mix(in oklab, var(--provider-unknown) 72%, #fff)",
     "--provider-unknown-3": "color-mix(in oklab, var(--provider-unknown) 50%, #fff)",
-    "--chart-neutral": "#006855"
+    "--chart-neutral": "#006855",
+    // Non-brand series: greens and orchids, the hue families no provider uses.
+    "--category-0": "#008719",
+    "--category-1": "#dc6bc4",
+    "--category-2": "#9ac32b",
+    "--category-3": "#8a0e82"
   },
   "dark": {
     "--provider-codex": "#9a9a96",
@@ -74,9 +79,21 @@ export const brandPalette = {
     "--provider-unknown-1": "var(--provider-unknown)",
     "--provider-unknown-2": "color-mix(in oklab, var(--provider-unknown) 72%, #000)",
     "--provider-unknown-3": "color-mix(in oklab, var(--provider-unknown) 52%, #000)",
-    "--chart-neutral": "#68bea8"
+    "--chart-neutral": "#68bea8",
+    // Stepped for the dark surface, not flipped from the light ramp.
+    "--category-0": "#357101",
+    "--category-1": "#df58aa",
+    "--category-2": "#56aa14",
+    "--category-3": "#9a4680"
   }
 };
+
+// Non-brand categorical ramp (repositories, execution kind, effort). Every pair is
+// at least 15 OKLab ΔE apart and from each provider hue in both themes; slots past
+// the ramp repeat it with texture/dashes, so identity is never colour alone.
+export const categorySlotCount = 4;
+/** @param {number} slot Nonnegative integer identity slot. */
+export function categoryColor(slot) { return `var(--category-${slot % categorySlotCount})`; }
 
 /** @param {string | null | undefined} provider */
 export function providerKey(provider) {
