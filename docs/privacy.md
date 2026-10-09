@@ -66,10 +66,15 @@ The following is the complete disk field manifest. Index source keys and integri
 | `evidence.ledger.unownedFingerprints[]` | Numeric total/last fingerprints with no event timestamp, used to connect ownership dependencies | P0 |
 | `evidence.ledger.models`, `.lastLocalActivityTimestamp`, `.bytes`, `.newlineTerminated`, `.unownedCounters` | Model IDs, continuation timestamp/byte offset, and boolean checkpoint guards | P0 |
 | `evidence.ledger.prefixHash` | Keyed digest of the complete old prefix; no transcript bytes | P1 |
+| `claude_ownership.source_key`, `.fingerprint` | Keyed absolute-path identity and the same file fingerprint as `evidence` | P1/P0 |
+| `claude_ownership.observations` | Per Claude transcript file, in file order: a 128-bit keyed hash of each assistant message ID and its numeric output/total/reasoning/cache-TTL/input/cache-read/cache-write counters; compressed, no raw IDs or content | P1/P0 |
+| `conductor_records.session_key`, `.signature` | Keyed Conductor session identity and keyed digest of the session's row-count, rowid and byte-length change evidence | P1 |
+| `conductor_records.payload` | Per Conductor session, the allowlisted result-receipt and assistant-message projection: 128-bit keyed hashes in place of every record, response, provider session, tool-call and query identity; token counters, reported costs, durations, turn and denial counts, normalized timestamps, enum terminal reasons, model IDs and bounded tool names; compressed, no content | P1/P0 |
+| `observations_mac` | Keyed payload integrity digest for `claude_ownership` | P1 |
 | `sessions.owned_counters` | Attributed numeric counter fingerprints, timestamps, and fallback model IDs, for deleted-owner reservations | P0 |
 | `retired_counters.counter_key` | Keyed counter-membership reservations kept after pruning, without usage values or timestamps, solely to prevent rebilling | P1 |
 | `metadata` | Keyed parser/rate revision, domain-separated key-verification MAC, and the UTC retention floor; no source configuration in plaintext | P0/P1 |
-| `metadata.audit:sessions:<scope>`, `.audit:ledgers:<scope>` | Keyed scope and last selected keyed session/source identity in the rotating verification sample; committed only with a successful ingest | P1 |
+| `metadata.audit:sessions:<scope>`, `.audit:ledgers:<scope>`, `.audit:ownership:<scope>`, `.audit:conductor:<scope>` | Keyed scope and last selected keyed session/source identity in the rotating verification sample; committed only with a successful ingest | P1 |
 | `scans` | Keyed source scope, completion time, and counters/timing from the status manifest below | P0/P1 |
 | `index.key` | Private random HMAC key, never part of output | Private key |
 | SQLite metadata / `writer.sqlite` | Schema version, transaction metadata, and local writer coordination; no transcript data | P0 |

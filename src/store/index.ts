@@ -5,7 +5,10 @@ import { join, resolve } from "node:path";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import type { PricingCatalog } from "../pricing/catalog.ts";
 import type { AnalyzeOptions, RateCard, SessionAnalytics, SessionDatabaseRow } from "../types.ts";
-import { openIndexDatabase, type IndexConnection, type IndexScanStats } from "./database.ts";
+import type { ClaudeOwnershipCache } from "../providers/claude-ownership.ts";
+import type { ConductorRecordCache } from "../providers/conductor.ts";
+import { INDEX_INTEGRITY, openIndexDatabase, type IndexConnection, type IndexScanStats } from "./database.ts";
+import { projectConductorRecords, projectOwnershipObservations } from "./provider-evidence.ts";
 import { fingerprint, keyedHash, stillMatches, type FileFingerprint } from "./fingerprint.ts";
 import { readCodexLedger, type CodexLedgerEvidence } from "./codex-ledger.ts";
 import { mapConcurrent } from "../concurrency.ts";
@@ -71,9 +74,14 @@ export class IndexScan {
   private pruneBefore: string;
   private auditSessions: Set<string>;
   private auditLedgers: Set<string>;
-  readonly stats: IndexScanStats = {
+  private auditOwnership: Set<string>;
+  private auditConductor: Set<string>;
+  private ownershipSeen = new Set<string>();
+  private conductorSeen = new Set<string>();
+  readonly stats: Required<IndexScanStats> = {
     fingerprintedFiles: 0, parsedSessions: 0, reusedSessions: 0, retainedSessions: 0, deferredSessions: 0,
-    ledgerReads: 0, ledgerHits: 0, ledgerAppends: 0, auditedSessions: 0, auditedLedgers: 0, elapsedMilliseconds: 0,
+    ledgerReads: 0, ledgerHits: 0, ledgerAppends: 0, auditedSessions: 0, auditedLedgers: 0,
+    ownershipHits: 0, ownershipReads: 0, conductorHits: 0, conductorReads: 0, auditedOwnership: 0, auditedConductor: 0, elapsedMilliseconds: 0,
   };
 
   private constructor(connection: IndexConnection, scope: string, revision: string) {
@@ -81,7 +89,7 @@ export class IndexScan {
     connection.database.exec("BEGIN IMMEDIATE");
     const revisionKey = `parser:${scope}`;
     if (connection.database.prepare("SELECT value FROM metadata WHERE key=?").get(revisionKey)?.["value"] !== revision) {
-      connection.database.prepare("DELETE FROM evidence WHERE scope=?").run(scope);
+      for (const table of ["evidence", "claude_ownership", "conductor_records"]) connection.database.prepare(`DELETE FROM ${table} WHERE scope=?`).run(scope);
       connection.database.prepare("INSERT OR REPLACE INTO metadata(key,value) VALUES (?,?)").run(revisionKey, revision);
     }
     this.pruneBefore = String(connection.database.prepare("SELECT value FROM metadata WHERE key='prune_before'").get()?.["value"] ?? "");
@@ -104,6 +112,9 @@ export class IndexScan {
     this.auditSessions = new Set(rotatingSample(nativeIdentities, cursor("sessions"), 4));
     const ledgers = connection.database.prepare("SELECT source_key FROM evidence WHERE scope=? AND ledger IS NOT NULL").all(scope).map((row) => String(row["source_key"]));
     this.auditLedgers = new Set(rotatingSample(ledgers, cursor("ledgers"), 1));
+    const stored = (table: string, column: string) => connection.database.prepare(`SELECT ${column} AS key FROM ${table} WHERE scope=?`).all(scope).map((row) => String(row["key"]));
+    this.auditOwnership = new Set(rotatingSample(stored("claude_ownership", "source_key"), cursor("ownership"), 1));
+    this.auditConductor = new Set(rotatingSample(stored("conductor_records", "session_key"), cursor("conductor"), 1));
   }
 
   static async open(options: AnalyzeOptions, rateCard: RateCard, includeHidden: boolean): Promise<IndexScan | null> {
@@ -145,7 +156,12 @@ export class IndexScan {
     } catch (error) { connection.close(); throw error; }
   }
 
-  hash(value: string): string { return keyedHash(this.connection.secret, value); }
+  hash(value: string | Uint8Array): string { return keyedHash(this.connection.secret, value); }
+  /** Index-side failures are consistency failures (full rescan), never provider evidence failures. */
+  private indexed<T>(operation: () => T): T {
+    try { return operation(); }
+    catch (error) { throw error instanceof IndexParityError || (error instanceof Error && error.message === INDEX_INTEGRITY) ? error : new IndexParityError(); }
+  }
   sourceKey(path: string): string {
     let key = this.sourceKeys.get(path);
     if (key === undefined) { key = this.hash(`source:${resolve(path)}`); this.sourceKeys.set(path, key); }
@@ -156,7 +172,7 @@ export class IndexScan {
 
   /** Fingerprint upcoming sources concurrently. Commit still re-checks every value it saves. */
   async prefetch(paths: string[]): Promise<void> {
-    const pending = [...new Set(paths)].filter((path) => !this.fingerprints.has(this.sourceKey(path)));
+    const pending = [...new Set(paths)].filter((path) => !this.fingerprints.has(this.sourceKey(path)) && !this.prefetched.has(this.sourceKey(path)));
     await mapConcurrent(pending, FINGERPRINT_CONCURRENCY, async (path) => {
       // A failed prefetch is retried, and reported, by the session that needs the file.
       try { this.prefetched.set(this.sourceKey(path), await fingerprint(path, this.connection.secret)); } catch { /* retried */ }
@@ -207,6 +223,107 @@ export class IndexScan {
     this.ledgerPaths.add(path);
     return evidence;
   }
+
+  /** A private identifier's keyed hash, truncated to 128 bits: compared for equality only. */
+  privateKey(kind: string, value: string): string { return this.hash(`${kind}:${value}`).slice(0, 32); }
+
+  /** A current fingerprint shared with the session pass, without fixing it for the commit-time stability check. */
+  private async peek(path: string): Promise<FileFingerprint> {
+    const key = this.sourceKey(path);
+    const fixed = this.fingerprints.get(key)?.value ?? this.prefetched.get(key);
+    if (fixed && await stillMatches(path, fixed)) return fixed;
+    const value = await fingerprint(path, this.connection.secret);
+    if (!this.fingerprints.has(key)) this.prefetched.set(key, value);
+    return value;
+  }
+
+  /** The Claude ownership pre-pass for one file: replayed while its fingerprint is unchanged. */
+  readonly ownership: ClaudeOwnershipCache = {
+    key: (id) => this.privateKey("claude-message", id),
+    prefetch: (paths) => this.prefetch(paths),
+    observations: async (path, read) => {
+      let current: FileFingerprint;
+      try { current = await this.peek(path); } catch { return read(); } // The pass records an unreadable file as not visited.
+      const sourceKey = this.sourceKey(path), signature = JSON.stringify(current);
+      this.ownershipSeen.add(sourceKey);
+      const cached = this.indexed(() => {
+        const row = this.connection.database.prepare("SELECT fingerprint,observations,observations_mac FROM claude_ownership WHERE scope=? AND source_key=?")
+          .get(this.scope, sourceKey) as { fingerprint: string; observations: Uint8Array; observations_mac: string } | undefined;
+        if (!row || row.fingerprint !== signature) return null;
+        if (this.hash(row.observations) !== row.observations_mac) throw new Error(INDEX_INTEGRITY);
+        return projectOwnershipObservations(JSON.parse(inflateRawSync(row.observations).toString("utf8")));
+      });
+      if (cached) {
+        this.stats.ownershipHits += 1;
+        if (this.auditOwnership.has(sourceKey)) {
+          const fresh = await read();
+          // A file changing during the audit is a later generation, not cache corruption.
+          if (fresh.complete && await stillMatches(path, current)) {
+            this.indexed(() => assertIndexParity(cached, projectOwnershipObservations(JSON.parse(JSON.stringify(fresh.observations)))));
+            this.stats.auditedOwnership += 1;
+          }
+        }
+        return { observations: cached, complete: true };
+      }
+      const fresh = await read();
+      this.stats.ownershipReads += 1;
+      // Only a complete read of an unchanged file describes this fingerprint.
+      if (!fresh.complete || !await stillMatches(path, current)) return fresh;
+      // Cold and warm scans replay the same allowlisted projection.
+      return { complete: true, observations: this.indexed(() => {
+        const observations = projectOwnershipObservations(JSON.parse(JSON.stringify(fresh.observations)));
+        const payload = deflateRawSync(JSON.stringify(observations), { level: 1 });
+        this.connection.database.prepare(`INSERT INTO claude_ownership(scope,source_key,fingerprint,observations,observations_mac) VALUES (?,?,?,?,?)
+          ON CONFLICT(scope,source_key) DO UPDATE SET fingerprint=excluded.fingerprint,observations=excluded.observations,observations_mac=excluded.observations_mac`)
+          .run(this.scope, sourceKey, signature, payload, this.hash(payload));
+        return observations;
+      }) };
+    },
+  };
+
+  /** One Conductor session's projected records: replayed while its change signature is unchanged. */
+  readonly conductor: ConductorRecordCache = {
+    key: (value) => this.privateKey("conductor-id", value),
+    records: (conductorSessionId, signature, read) => {
+      const sessionKey = this.hash(`conductor-session:${conductorSessionId}`);
+      const sign = (): string => this.hash(JSON.stringify([this.revision, signature()]));
+      const before = sign();
+      this.conductorSeen.add(sessionKey);
+      const cached = this.indexed(() => {
+        const row = this.connection.database.prepare("SELECT signature,payload,payload_mac FROM conductor_records WHERE scope=? AND session_key=?")
+          .get(this.scope, sessionKey) as { signature: string; payload: Uint8Array; payload_mac: string } | undefined;
+        if (!row || row.signature !== before) return null;
+        if (this.hash(row.payload) !== row.payload_mac) throw new Error(INDEX_INTEGRITY);
+        return projectConductorRecords(JSON.parse(inflateRawSync(row.payload).toString("utf8")));
+      });
+      if (cached) {
+        this.stats.conductorHits += 1;
+        if (this.auditConductor.has(sessionKey)) {
+          const fresh = JSON.stringify(read());
+          // Rows written during the audit are a later generation, not cache corruption.
+          if (sign() === before) {
+            this.indexed(() => assertIndexParity(cached, projectConductorRecords(JSON.parse(fresh))));
+            this.stats.auditedConductor += 1;
+          }
+        }
+        return cached;
+      }
+      const fresh = JSON.stringify(read());
+      this.stats.conductorReads += 1;
+      const stable = sign() === before;
+      // Cold and warm scans replay the same allowlisted projection.
+      return this.indexed(() => {
+        const records = projectConductorRecords(JSON.parse(fresh));
+        if (stable) {
+          const payload = deflateRawSync(JSON.stringify(records), { level: 1 });
+          this.connection.database.prepare(`INSERT INTO conductor_records(scope,session_key,signature,payload,payload_mac) VALUES (?,?,?,?,?)
+            ON CONFLICT(scope,session_key) DO UPDATE SET signature=excluded.signature,payload=excluded.payload,payload_mac=excluded.payload_mac`)
+            .run(this.scope, sessionKey, before, payload, this.hash(payload));
+        }
+        return records;
+      });
+    },
+  };
 
   /** Owners retained from deleted sessions remain reserved, so live broadcast receivers cannot charge them again. */
   retainedCounterOwners(liveIds: Set<string>, livePaths: string[]): Map<string, CounterOwner> {
@@ -487,7 +604,15 @@ export class IndexScan {
     }
     const reserve = this.connection.database.prepare("INSERT OR IGNORE INTO retired_counters(scope,counter_key) VALUES (?,?)");
     for (const counters of this.pendingRetirements.values()) for (const counter of counters) reserve.run(this.scope, this.hash(counter));
-    for (const [kind, sample] of [["sessions", this.auditSessions], ["ledgers", this.auditLedgers]] as const) {
+    // Pre-pass evidence for sources this scan no longer saw is dropped once the pass ran.
+    for (const [table, column, seen] of [["claude_ownership", "source_key", this.ownershipSeen], ["conductor_records", "session_key", this.conductorSeen]] as const) {
+      if (!seen.size) continue;
+      const remove = this.connection.database.prepare(`DELETE FROM ${table} WHERE scope=? AND ${column}=?`);
+      for (const row of this.connection.database.prepare(`SELECT ${column} AS key FROM ${table} WHERE scope=?`).all(this.scope)) {
+        if (!seen.has(String(row["key"]))) remove.run(this.scope, String(row["key"]));
+      }
+    }
+    for (const [kind, sample] of [["sessions", this.auditSessions], ["ledgers", this.auditLedgers], ["ownership", this.auditOwnership], ["conductor", this.auditConductor]] as const) {
       const last = [...sample].at(-1);
       if (last) this.connection.database.prepare("INSERT OR REPLACE INTO metadata(key,value) VALUES (?,?)").run(`audit:${kind}:${this.scope}`, last);
     }

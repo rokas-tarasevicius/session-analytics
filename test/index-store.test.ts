@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
+import { inflateRawSync } from "node:zlib";
 import { analyzeMachineSessions, analyzeRepositorySessions } from "../src/analyzer.ts";
 import { analyzeOptionsFrom } from "../src/options.ts";
 import { dataDirectory, indexPath, indexStatus, migrate, openIndexDatabase, pruneIndex, resetIndex, SCHEMA_VERSION, validatePruneDate } from "../src/store/database.ts";
@@ -101,7 +102,7 @@ test("review: legacy retention dates stay conservative until sources are revalid
   await withFixture(async (fixture) => {
     const opts = options(fixture); const initial = await analyzeMachineSessions(opts);
     const db = new DatabaseSync(indexPath(opts));
-    db.exec("ALTER TABLE sessions DROP COLUMN retention_verified; DROP TABLE exclusions; DELETE FROM metadata WHERE key='key_verifier'; PRAGMA user_version=2;"); db.close();
+    db.exec("ALTER TABLE sessions DROP COLUMN retention_verified; DROP TABLE exclusions; DROP TABLE claude_ownership; DROP TABLE conductor_records; DELETE FROM metadata WHERE key='key_verifier'; PRAGMA user_version=2;"); db.close();
     await rm(fixture.claudeRoot, { recursive: true });
     assert.equal(pruneIndex("2027-01-01", opts), 0);
     const after = await analyzeMachineSessions(opts);
@@ -117,7 +118,7 @@ test("review: legacy key binding authenticates existing payloads before bootstra
   await withFixture(async (fixture) => {
     const opts = options(fixture); await analyzeMachineSessions(opts);
     const db = new DatabaseSync(indexPath(opts));
-    db.exec("ALTER TABLE sessions DROP COLUMN retention_verified; DROP TABLE exclusions; DELETE FROM metadata WHERE key='key_verifier'; PRAGMA user_version=2;"); db.close();
+    db.exec("ALTER TABLE sessions DROP COLUMN retention_verified; DROP TABLE exclusions; DROP TABLE claude_ownership; DROP TABLE conductor_records; DELETE FROM metadata WHERE key='key_verifier'; PRAGMA user_version=2;"); db.close();
     const path = join(fixture.dataDir, "index.key"), original = await readFile(path);
     const changed = Buffer.from(original); changed[0] = changed[0]! ^ 1; await writeFile(path, changed);
     await assert.rejects(analyzeMachineSessions(opts), /integrity check/);
@@ -338,6 +339,7 @@ test("the disk allowlist, warm results, and management status contain no fixture
       const payloads = JSON.stringify({
         sessions: connection.database.prepare("SELECT * FROM sessions").all(),
         evidence: connection.database.prepare("SELECT * FROM evidence").all(), cold, warm, status: indexStatus(opts),
+        ownership: connection.database.prepare("SELECT * FROM claude_ownership").all().map((row) => ({ ...row, observations: inflateRawSync(row["observations"] as Uint8Array).toString("utf8") })),
       });
       assert.doesNotMatch(payloads, forbidden);
       assert.equal(payloads.includes(root), false);
@@ -604,6 +606,7 @@ test("schema migrations retain facts and reject future schemas without modifying
     migrate(db); migrate(db);
     assert.equal(db.prepare("PRAGMA user_version").get()?.["user_version"], SCHEMA_VERSION);
     assert.equal(db.prepare("SELECT source_deleted FROM sessions").get()?.["source_deleted"], 0);
+    for (const table of ["claude_ownership", "conductor_records"]) assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.["n"], 0);
     db.exec("PRAGMA user_version=999");
     assert.throws(() => migrate(db), /newer version/);
     assert.equal(db.prepare("PRAGMA user_version").get()?.["user_version"], 999);

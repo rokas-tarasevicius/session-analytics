@@ -30,6 +30,7 @@ import { sourceHealth } from "./mcp/source-health.ts";
 
 import { IndexScan } from "./store/index.ts";
 import { IndexParityError } from "./store/parity.ts";
+import { INDEX_INTEGRITY } from "./store/database.ts";
 import { codexCounterFingerprint, readCodexLedger } from "./store/codex-ledger.ts";
 import { codexIntervalKey, codexIntervalCovered } from "./metrics/codex-counter-intervals.ts";
 
@@ -2278,7 +2279,7 @@ async function analyzeSelectedRepositories(
       transcriptCandidates(codexIndex.paths, "codex"),
       transcriptCandidates(claudeIndex.paths, "claude"),
     ]);
-    const claudeUsageOwners = await buildClaudeUsageOwners(claudeCandidates, claudeEvidencePaths, visitJsonLines);
+    const claudeUsageOwners = await buildClaudeUsageOwners(claudeCandidates, claudeEvidencePaths, visitJsonLines, index?.ownership);
     const codexCounterLedger = await buildCodexCounterLedger(
       codexCandidates.flatMap(({ path, paths }) => paths ?? [path]), index,
       index?.retainedCounterOwners(new Set(codexCandidates.map(({ id }) => index!.identity("codex", id))), [...codexIndex.paths.values()].flat()),
@@ -2418,14 +2419,18 @@ async function analyzeSelectedRepositories(
     try {
       for (const session of conductorFallback(database, eligibleRows, canonicalIdentities, pricing,
         explicitRepositoryFilter ? undefined : (session) => { pairedRecovery.push({ sessionKey: session.sessionKey, cost: { totalUsd: session.cost.totalUsd },
-          conductor: { reconciliation: { receiptFloorApplied: session.conductor?.reconciliation?.receiptFloorApplied === true } } }); })) {
+          conductor: { reconciliation: { receiptFloorApplied: session.conductor?.reconciliation?.receiptFloorApplied === true } } }); }, index?.conductor)) {
         allSessions.push(session);
         if (!repositoryById.has(session.repositoryId)) {
           const root = `unassigned:${session.repositoryId}`;
           discovered.set(root, { id: session.repositoryId, name: session.repositoryName, root_path: root, remote_url: null, default_branch: "" });
         }
       }
-    } catch { additional.warnings.push("A provider evidence fallback could not be read; canonical sessions were retained."); }
+    } catch (error) {
+      // Index failures rerun the whole scan unindexed; only source failures are tolerated here.
+      if (error instanceof IndexParityError || (error instanceof Error && error.message === INDEX_INTEGRITY)) throw error;
+      additional.warnings.push("A provider evidence fallback could not be read; canonical sessions were retained.");
+    }
     // Keep additional mutable stores fresh while retaining their entire public evidence on disk.
     for (const session of allSessions.filter((s) => s.evidence || s.provider === "unsupported")) {
       const repository = [...availableRepositories, ...discovered.values()].find((r) => r.id === session.repositoryId);

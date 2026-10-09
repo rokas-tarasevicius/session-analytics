@@ -18,7 +18,9 @@ import { record as asRecord, text as stringValue, finite, modelName, name as saf
 export interface ClaudeCandidate {
   cwd: string; id: string; path: string; provider: "claude" | "codex"; timestamp: string | null;
 }
-interface ClaudeContext { mainPaths?: string[]; usageOwners?: ReadonlyMap<string, string>; row: SessionDatabaseRow; rateCard: PricingCatalog; warnings: string[]; profileKey?: string | null }
+/** Shared message IDs resolve to one owning main path; see claude-ownership.ts. */
+interface ClaudeMessageOwners { ownerOf(id: string): string | undefined }
+interface ClaudeContext { mainPaths?: string[]; usageOwners?: ClaudeMessageOwners; row: SessionDatabaseRow; rateCard: PricingCatalog; warnings: string[]; profileKey?: string | null }
 interface ClaudeRuntime {
   discoverRoots(environment: ProviderEnvironment): Promise<string[]>;
   identify(root: string): Promise<ClaudeCandidate[]>;
@@ -142,7 +144,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     mainPath: string,
     rateCard: PricingCatalog,
     inheritedWarnings: string[],
-    usageOwners?: ReadonlyMap<string, string>,
+    usageOwners?: ClaudeMessageOwners,
     mainPaths: string[] = [mainPath],
     profileKey: string | null = null,
   ): Promise<SessionAnalytics> {
@@ -363,7 +365,7 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
     }
     state.effort = effort.current?.value ?? null;
     if (subagentTypes.size) state.agentIdentity.claudeSubagentType = subagentTypes.size > 1 ? "mixed" : [...subagentTypes][0];
-    const ownedUsage = [...assistantUsage].filter(([id]) => !usageOwners?.has(id) || usageOwners.get(id) === mainPath).map(([, value]) => value);
+    const ownedUsage = [...assistantUsage].filter(([id]) => { const owner = usageOwners?.ownerOf(id); return owner === undefined || owner === mainPath; }).map(([, value]) => value);
     let reasoningMissing = false;
     const incompleteBilling = ownedUsage.some((snapshot) => snapshot.billing?.incomplete);
     if (incompleteBilling) state.warnings.push("Iteration billing is incomplete; uncertain attempts were omitted or left unpriced.");

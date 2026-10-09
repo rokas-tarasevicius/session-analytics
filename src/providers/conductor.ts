@@ -1,20 +1,21 @@
-import { conductorRecords } from "./conductor-records.ts";
+import { conductorRecords, conductorSignature } from "./conductor-records.ts";
+import { IndexParityError } from "../store/parity.ts";
 import { applyConductorReceiptFloor, conductorMessage, recoverConductorMessages, type ConductorMessage } from "./conductor-messages.ts";
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import type { ConductorResultMetrics, ConductorTerminalReason, ModelUsage, SessionAnalytics, SessionDatabaseRow, SessionProvider, TokenUsage } from "../types.ts";
 import type { ProviderContext } from "./adapter.ts";
 import { count, emptySession, finite, finish, hash, hasCounters, modelName, parse, record, reportedModel, statusName, sum, text, timestamp, tokens, zeroTokens } from "./common.ts";
 
 const reasons = new Set<ConductorTerminalReason>(["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries", "completed", "cancelled", "interrupted"]);
-interface Receipt {
+export interface Receipt {
   id: string; providerId: string | null; at: string; epoch: string | null; version: "old" | "restored" | null;
   cost: number | null; marginalCost: number | null; usage: TokenUsage; usageObserved: boolean; localUsage: TokenUsage | null; models: ModelUsage[];
   turns: number | null; duration: number | null; apiDuration: number | null; denials: number | null;
   error: boolean; reason: ConductorTerminalReason;
 }
-interface Group { provider: SessionProvider; rows: Map<string, SessionDatabaseRow>; receipts: Map<string, Receipt>; messages: Buffer[] }
+interface Group { provider: SessionProvider; identity: string | null; rows: Map<string, SessionDatabaseRow>; receipts: Map<string, Receipt>; messages: Buffer[] }
 function versionScope(value: unknown): Receipt["version"] {
   const match = typeof value === "string" ? /^(\d+)\.(\d+)\.(\d+)$/.exec(value) : null;
   if (!match) return null;
@@ -57,13 +58,13 @@ function dominates(a: Receipt, b: Receipt): boolean {
   return (Object.keys(b.usage) as Array<keyof TokenUsage>).every((key) => a.usage[key] >= b.usage[key]);
 }
 /** A result UUID is a receipt, not an accounting interval. Never infer resets from decreases. */
-function selectSnapshots(receipts: Receipt[]): { snapshots: Receipt[]; complete: boolean } {
+function selectSnapshots(receipts: Receipt[], order: (id: string) => string): { snapshots: Receipt[]; complete: boolean } {
   const valid = receipts.filter((r) => !zeroCrash(r));
   if (!valid.length) return { snapshots: [], complete: false };
   // SDK init is emitted on each query, so it cannot identify disjoint processes.
   let complete = valid.length === receipts.length && receipts.length === 1;
   const snapshots: Receipt[] = [];
-  const ordered = valid.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  const ordered = valid.sort((a, b) => a.at.localeCompare(b.at) || (a.id === b.id ? 0 : order(a.id).localeCompare(order(b.id))));
   const last = ordered.at(-1)!;
   if (ordered.every((r) => dominates(last, r))) snapshots.push(last);
   else {
@@ -74,54 +75,105 @@ function selectSnapshots(receipts: Receipt[]): { snapshots: Receipt[]; complete:
   return { snapshots, complete };
 }
 
+/** One Conductor session's projected records. With a private index, every identifier is a keyed hash. */
+export interface ConductorRowRecords { receipts: Receipt[]; messages: ConductorMessage[]; resets: Array<[string, string]> }
+/** The private index replays unchanged Conductor sessions' projections instead of re-extracting them. */
+export interface ConductorRecordCache {
+  key(value: string): string;
+  records(conductorSessionId: string, signature: () => unknown, read: () => ConductorRowRecords): ConductorRowRecords;
+}
+
+function readConductorRow(statement: StatementSync, row: SessionDatabaseRow): ConductorRowRecords {
+  const receipts: Receipt[] = [], messages: ConductorMessage[] = [], resets: Array<[string, string]> = [], seenInit = new Set<string>();
+  let epoch: string | null = null, version: Receipt["version"] = null, queryStart = 0;
+  const queryReceipts = new Set<string>();
+  for (const item of statement.iterate(row.conductor_session_id)) {
+    const data = parse(item["data"]); if (!data) continue;
+    const id = text(data["uuid"]) ?? `message:${String(item["id"])}`;
+    if (data["type"] === "system" && data["subtype"] === "init" && !seenInit.has(id)) {
+      seenInit.add(id); epoch = id; version = versionScope(data["claude_code_version"]); continue;
+    }
+    if (data["type"] === "conversation_reset") {
+      const before = text(data["session_id"]), after = text(data["new_conversation_id"]);
+      if (before && after) resets.push([before, after]);
+      continue;
+    }
+    if (data["type"] === "assistant") {
+      // A bare object with usage counters is not a verified SDK envelope.
+      if (text(data["session_id"]) || text(record(data["message"])?.["id"]) || text(data["uuid"]) || text(item["sdk_message_id"])) messages.push(conductorMessage(data, item));
+      continue;
+    }
+    if (data["type"] !== "result") continue;
+    const receipt = project(data, id, timestamp(item["created_at"]) ?? timestamp(row.created_at) ?? "", epoch, version);
+    if (receipt) {
+      receipts.push(receipt);
+      if (!queryReceipts.has(id)) {
+        for (let i = queryStart; i < messages.length; i++) messages[i]!.queryId = id;
+        queryStart = messages.length; queryReceipts.add(id);
+      }
+    }
+  }
+  return { receipts, messages, resets };
+}
+
+/** Identifiers are only compared for equality, so a keyed hash preserves every relation. */
+function privateRecords(records: ConductorRowRecords, key: (value: string) => string): ConductorRowRecords {
+  const known = new Map<string, string>();
+  const k = (value: string): string => { let hashed = known.get(value); if (hashed === undefined) { hashed = key(value); known.set(value, hashed); } return hashed; };
+  const nullable = (value: string | null): string | null => value === null ? null : k(value);
+  return {
+    receipts: records.receipts.map((receipt) => ({ ...receipt, id: k(receipt.id), providerId: nullable(receipt.providerId), epoch: nullable(receipt.epoch) })),
+    messages: records.messages.map((message) => ({ ...message, ...(message.queryId === undefined ? {} : { queryId: k(message.queryId) }),
+      id: k(message.id), recordId: k(message.recordId), inputKey: k(message.inputKey), providerId: nullable(message.providerId),
+      tools: message.tools.map((tool) => ({ id: k(tool.id), name: tool.name })) })),
+    resets: records.resets.map(([before, after]) => [k(before), k(after)]),
+  };
+}
+
 /** Collect all eligible rows before grouping. Canonical identities are read-only native precedence. */
-export function conductorFallback(database: DatabaseSync | null, rows: SessionDatabaseRow[], canonicalIdentities: ReadonlySet<string>, pricing: Pick<ProviderContext, "rateCard" | "resolveRate" | "price">, onPaired?: (session: SessionAnalytics) => void): SessionAnalytics[] {
+export function conductorFallback(database: DatabaseSync | null, rows: SessionDatabaseRow[], canonicalIdentities: ReadonlySet<string>, pricing: Pick<ProviderContext, "rateCard" | "resolveRate" | "price">, onPaired?: (session: SessionAnalytics) => void, cache?: ConductorRecordCache | null): SessionAnalytics[] {
   if (!database) return [];
   const statement = conductorRecords(database);
   if (!statement) return [];
+  const signature = cache ? conductorSignature(database) : null;
+  const key = cache ? (value: string) => cache.key(value) : (value: string) => value;
+  // Raw identities order groups and break receipt-time ties. Keyed values resolve
+  // only to raw ones already present in memory; nothing raw is read from the index.
+  const raw = new Map<string, string>();
+  const learn = (value: string | null | undefined): void => { if (cache && value != null) raw.set(key(value), value); };
+  const resolve = (value: string): string | undefined => cache ? raw.get(value) : value;
+  const live = (row: SessionDatabaseRow): ConductorRowRecords => {
+    const records = readConductorRow(statement, row);
+    if (!cache) return records;
+    for (const receipt of records.receipts) { learn(receipt.id); learn(receipt.providerId); }
+    for (const message of records.messages) learn(message.providerId);
+    for (const [before, after] of records.resets) { learn(before); learn(after); }
+    return privateRecords(records, key);
+  };
+  let canonicalKeys = canonicalIdentities;
+  if (cache) {
+    for (const row of rows) learn(row.provider_session_id);
+    for (const identity of canonicalIdentities) if (identity.startsWith("claude:")) learn(identity.slice(7));
+    canonicalKeys = new Set([...canonicalIdentities].map((identity) => identity.startsWith("claude:") ? `claude:${key(identity.slice(7))}` : identity));
+  }
   const groups = new Map<string, Group>();
   for (const row of rows) {
     // The verified SDK result accounting contract is Claude's; other SDK envelopes are not interchangeable.
     if (row.agent_type !== "claude") continue;
-    const receipts: Receipt[] = [], messages: ConductorMessage[] = [], resets: Array<[string, string]> = [], seenInit = new Set<string>();
-    let epoch: string | null = null, version: Receipt["version"] = null, queryStart = 0;
-    const queryReceipts = new Set<string>();
-    for (const item of statement.iterate(row.conductor_session_id)) {
-      const data = parse(item["data"]); if (!data) continue;
-      const id = text(data["uuid"]) ?? `message:${String(item["id"])}`;
-      if (data["type"] === "system" && data["subtype"] === "init" && !seenInit.has(id)) {
-        seenInit.add(id); epoch = id; version = versionScope(data["claude_code_version"]); continue;
-      }
-      if (data["type"] === "conversation_reset") {
-        const before = text(data["session_id"]), after = text(data["new_conversation_id"]);
-        if (before && after) resets.push([before, after]);
-        continue;
-      }
-      if (data["type"] === "assistant") {
-        // A bare object with usage counters is not a verified SDK envelope.
-        if (text(data["session_id"]) || text(record(data["message"])?.["id"]) || text(data["uuid"]) || text(item["sdk_message_id"])) messages.push(conductorMessage(data, item));
-        continue;
-      }
-      if (data["type"] !== "result") continue;
-      const receipt = project(data, id, timestamp(item["created_at"]) ?? timestamp(row.created_at) ?? "", epoch, version);
-      if (receipt) {
-        receipts.push(receipt);
-        if (!queryReceipts.has(id)) {
-          for (let i = queryStart; i < messages.length; i++) messages[i]!.queryId = id;
-          queryStart = messages.length; queryReceipts.add(id);
-        }
-      }
-    }
-    const accepted = new Set(row.provider_session_id ? [row.provider_session_id] : []);
+    const { receipts, messages, resets } = cache && signature
+      ? cache.records(row.conductor_session_id, () => [signature(row.conductor_session_id), row.created_at], () => live(row))
+      : live(row);
+    const own = row.provider_session_id == null ? null : key(row.provider_session_id);
+    const accepted = new Set(row.provider_session_id ? [own!] : []);
     // Explicit reset links can connect receipts before/after the currently registered identity.
     for (let i = 0; i < resets.length; i++) for (const [a, b] of resets) if (accepted.has(a) || accepted.has(b)) { accepted.add(a); accepted.add(b); }
     const messageGroups = new Map<string, ConductorMessage[]>();
     for (const receipt of [...receipts, ...messages]) {
       if (receipt.providerId && row.provider_session_id && !accepted.has(receipt.providerId)) continue;
-      const identity = receipt.providerId ?? row.provider_session_id;
+      const identity = receipt.providerId ?? own;
       const key = `claude:${identity ?? `row:${row.conductor_session_id}`}`;
-      if (canonicalIdentities.has(key) && !onPaired) continue;
-      const group: Group = groups.get(key) ?? { provider: "claude", rows: new Map(), receipts: new Map(), messages: [] };
+      if (canonicalKeys.has(key) && !onPaired) continue;
+      const group: Group = groups.get(key) ?? { provider: "claude", identity, rows: new Map(), receipts: new Map(), messages: [] };
       group.rows.set(row.conductor_session_id, row);
       if ("usageObserved" in receipt && "identityKnown" in receipt) {
         const chunk = messageGroups.get(key) ?? [];
@@ -137,16 +189,36 @@ export function conductorFallback(database: DatabaseSync | null, rows: SessionDa
     // worker heap before the first recovered group can be emitted.
     for (const [key, chunk] of messageGroups) groups.get(key)!.messages.push(deflateRawSync(JSON.stringify(chunk), { level: 1 }));
   }
+  // A cached identity this scan has not seen raw, or a receipt-time tie, needs raw
+  // values only the source holds. Re-reading those sessions restores them exactly.
+  const unresolved = (group: Group): boolean => {
+    if (group.identity !== null && resolve(group.identity) === undefined) return true;
+    const times = new Map<string, string>();
+    for (const receipt of group.receipts.values()) {
+      const tied = times.get(receipt.at);
+      if (tied !== undefined && (resolve(tied) === undefined || resolve(receipt.id) === undefined)) return true;
+      times.set(receipt.at, receipt.id);
+    }
+    return false;
+  };
+  if (cache) {
+    const reread = new Set([...groups.values()].filter(unresolved).flatMap((group) => [...group.rows.keys()]));
+    for (const row of rows) if (reread.has(row.conductor_session_id)) live(row);
+    if (reread.size && [...groups.values()].some(unresolved)) throw new IndexParityError();
+  }
+  const order = (id: string): string => resolve(id)!;
+  const keys = [...groups].map(([internal, group]) => [group.identity === null ? internal : `claude:${resolve(group.identity)!}`, internal] as const)
+    .sort(([a], [b]) => a.localeCompare(b));
   const sessions: SessionAnalytics[] = [];
-  for (const key of [...groups.keys()].sort((a, b) => a.localeCompare(b))) {
-    const group = groups.get(key)!;
-    groups.delete(key);
+  for (const [key, internal] of keys) {
+    const group = groups.get(internal)!;
+    groups.delete(internal);
     const rows = [...group.rows.values()].sort((a, b) => a.updated_at.localeCompare(b.updated_at) || a.conductor_session_id.localeCompare(b.conductor_session_id));
     const row = rows.at(-1)!, createdAt = rows.map((r) => timestamp(r.created_at)).filter((v): v is string => !!v).sort()[0], updatedAt = rows.map((r) => timestamp(r.updated_at)).filter((v): v is string => !!v).sort().at(-1);
     if (!createdAt || !updatedAt) continue;
     const conflict = new Set(rows.map((r) => r.repository_id)).size > 1;
     const repository = conflict ? { id: `discovered-${createHash("sha256").update(key).digest("hex").slice(0, 20)}`, name: "Conductor · unassigned" } : { id: row.repository_id, name: row.repository_name };
-    const receipts = [...group.receipts.values()], { snapshots, complete } = selectSnapshots(receipts);
+    const receipts = [...group.receipts.values()], { snapshots, complete } = selectSnapshots(receipts, order);
     const session = emptySession({ id: key, path: "", cwd: null, createdAt, updatedAt }, group.provider, { repository, ...pricing }, {
       source: "conductor-result", fidelity: "summary", tokens: "unavailable", tools: "unavailable", turns: "unavailable", timing: "provider", usageUnit: "session", accounting: complete ? "complete" : "partial",
     });

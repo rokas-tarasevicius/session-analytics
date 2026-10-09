@@ -8,7 +8,7 @@ import type { AnalyzeOptions } from "../types.ts";
 import { keyedHash } from "./fingerprint.ts";
 import { acquireWriterGate, COORDINATION_ERROR } from "./writer-gate.ts";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const INDEX_UNAVAILABLE = "The local index is unavailable; use --no-index or run index rebuild.";
 export const INDEX_BUSY = "The local index is busy; another ingest or maintenance command is running.";
 export const INDEX_INTEGRITY = "The local index failed an integrity check; run index rebuild.";
@@ -144,6 +144,17 @@ export function migrate(database: DatabaseSync): void {
         source_keys TEXT NOT NULL, PRIMARY KEY(scope,identity_key)
       ) STRICT;
     `);
+    // Derived pre-pass evidence: keyed hashes and counters only, each payload authenticated.
+    if (version < 4) database.exec(`
+      CREATE TABLE claude_ownership (
+        scope TEXT NOT NULL, source_key TEXT NOT NULL, fingerprint TEXT NOT NULL,
+        observations BLOB NOT NULL, observations_mac TEXT NOT NULL, PRIMARY KEY(scope,source_key)
+      ) STRICT;
+      CREATE TABLE conductor_records (
+        scope TEXT NOT NULL, session_key TEXT NOT NULL, signature TEXT NOT NULL,
+        payload BLOB NOT NULL, payload_mac TEXT NOT NULL, PRIMARY KEY(scope,session_key)
+      ) STRICT;
+    `);
     database.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT;`);
   } catch (error) { database.exec("ROLLBACK"); throw error; }
 }
@@ -171,7 +182,7 @@ function verifyKey(database: DatabaseSync, secret: Buffer, bootstrap = false): v
   }
   // A pruned legacy store with only keyed membership cannot prove which key created it.
   const tables = new Set(database.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map((row) => row["name"]));
-  if (!authenticated && ["sessions", "evidence", "retired_counters", "exclusions", "metadata"].filter((table) => tables.has(table)).some((table) =>
+  if (!authenticated && ["sessions", "evidence", "retired_counters", "exclusions", "metadata", "claude_ownership", "conductor_records"].filter((table) => tables.has(table)).some((table) =>
     Number(database.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.["n"]) > 0)) throw new Error(INDEX_INTEGRITY);
   if (bootstrap) database.prepare("INSERT INTO metadata(key,value) VALUES ('key_verifier',?)").run(expected);
 }
@@ -220,6 +231,13 @@ export interface IndexScanStats {
   ledgerAppends: number;
   auditedSessions: number;
   auditedLedgers: number;
+  /** Optional in scans recorded before schema 4. */
+  ownershipHits?: number;
+  ownershipReads?: number;
+  conductorHits?: number;
+  conductorReads?: number;
+  auditedOwnership?: number;
+  auditedConductor?: number;
   elapsedMilliseconds: number;
 }
 
@@ -302,7 +320,7 @@ export function pruneIndex(before: string, options: Pick<AnalyzeOptions, "dataDi
     const result = db.prepare("DELETE FROM sessions WHERE retention_verified=1 AND last_event_at <> '' AND last_event_at < ?").run(cutoff);
     // Persist a monotonic retention floor so surviving provider files cannot resurrect pruned history.
     db.prepare("INSERT INTO metadata(key,value) VALUES ('prune_before',?) ON CONFLICT(key) DO UPDATE SET value=max(value,excluded.value)").run(cutoff);
-    db.exec("DELETE FROM evidence; DELETE FROM scans; COMMIT; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
+    db.exec("DELETE FROM evidence; DELETE FROM claude_ownership; DELETE FROM conductor_records; DELETE FROM scans; COMMIT; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
     return Number(result.changes);
   } finally { connection.close(); }
 }
@@ -321,7 +339,7 @@ export function resetIndex(options: Pick<AnalyzeOptions, "dataDir"> = {}): void 
         if (version > SCHEMA_VERSION) throw new Error("The local index was created by a newer version; upgrade or use --no-index.");
         migrate(healthy);
         if (healthy.prepare("PRAGMA quick_check").get()?.["quick_check"] === "ok") {
-          healthy.exec("BEGIN IMMEDIATE; DELETE FROM sessions; DELETE FROM evidence; DELETE FROM exclusions; DELETE FROM scans; DELETE FROM metadata; DELETE FROM retired_counters; COMMIT; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
+          healthy.exec("BEGIN IMMEDIATE; DELETE FROM sessions; DELETE FROM evidence; DELETE FROM exclusions; DELETE FROM scans; DELETE FROM metadata; DELETE FROM retired_counters; DELETE FROM claude_ownership; DELETE FROM conductor_records; COMMIT; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;");
           const key = join(writer.directory, "index.key");
           secureFile(key);
           if (!existsSync(key) || readFileSync(key).length !== 32) writeFileSync(key, randomBytes(32), { mode: 0o600 });
