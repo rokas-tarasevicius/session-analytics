@@ -560,6 +560,15 @@ td:not(:first-child):not(.align-left) > small { white-space: nowrap; }
 .cost-stack i:last-child { box-shadow: none; border-radius: 0 3px 3px 0; }
 
 .cost-stack-list > .empty-state, .cost-model-list > .empty-state { grid-column: 1 / -1; }
+/* The provider total closes the list; the reconciliation line under the KPIs explains how the totals relate. */
+.cost-stack-row.cost-stack-total { padding-top: calc(10px * var(--density)); border-top: 1px solid var(--line); }
+.cost-stack-total > strong { color: var(--text); font-weight: 600; }
+#cost-reconciliation { margin: 0; max-width: 110ch; font-variant-numeric: tabular-nums; }
+/* Values line up whether or not a "% priced" badge follows them: on wide layouts the badge has its own slot. */
+@media (min-width: 761px) {
+  .cost-stack-row > strong:last-child, .cost-model-row > strong { display: grid; grid-template-columns: auto 7rem; align-items: center; justify-items: end; column-gap: 6px; }
+  :is(.cost-stack-row > strong:last-child, .cost-model-row > strong) > .coverage { justify-self: start; margin-left: 0; }
+}
 
 /* Shared columns keep equal percentages equal in pixels, even when value labels differ. */
 .cost-model-list { display: grid; grid-template-columns: minmax(150px, 240px) minmax(0, 1fr) minmax(76px, max-content) 60px; column-gap: 12px; }
