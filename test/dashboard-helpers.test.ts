@@ -147,8 +147,14 @@ test("window math: days, preset starts, ticks, heat levels, and money labels", (
   assert.equal(heatLevel(0, 10), 0);
   assert.equal(heatLevel(10, 10), 7);
   assert.equal(heatLevel(1, 10), 3);
+  assert.equal(shortMoney(0), "$0");
+  assert.equal(shortMoney(7.5), "$7.50");
+  assert.equal(shortMoney(76.2), "$76");
+  assert.equal(shortMoney(999.6), "$1K");
+  assert.equal(shortMoney(1900), "$1.9K");
+  assert.equal(shortMoney(12345), "$12.3K");
   assert.equal(shortMoney(36), "$36");
-  assert.equal(shortMoney(12.34), "$12.3");
+  assert.equal(shortMoney(12.34), "$12");
   assert.equal(shortMoney(917.26), "$917");
   assert.equal(shortMoney(1234), "$1.2K");
   assert.equal(shortMoney(0.5), "$0.50");

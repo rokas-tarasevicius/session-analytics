@@ -12,9 +12,9 @@ const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation
 
 export function shortMoney(value) {
   const amount = value || 0;
-  if (amount >= 1000) return `$${compact.format(amount)}`;
-  if (amount >= 100) return `$${amount.toFixed(0)}`;
-  return `$${amount.toFixed(amount >= 10 ? 1 : 2).replace(/\.0$/, "")}`;
+  if (amount === 0) return "$0";
+  if (Math.round(amount) >= 1000) return `$${compact.format(Math.max(1000, amount))}`;
+  return `$${amount.toFixed(amount >= 10 ? 0 : 2)}`;
 }
 
 export function percent(value) {
