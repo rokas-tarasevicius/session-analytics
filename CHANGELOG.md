@@ -37,6 +37,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- MCP tools report "Session analysis exceeded its 1024 MB worker heap limit." when the analysis worker runs out of heap, instead of the generic "Local metrics are unavailable" message. Raw worker output still never reaches the client.
 - The Summary provider donut now draws Copilot, OpenCode, Gemini and unsupported segments (they were listed in its legend but missing from the ring), and its legend no longer truncates names.
 - Costs provider rows were each stretched to full width, so a $191 provider looked as long as a $576 one; rows now share the panel's maximum. Cost by model also shares one scale across providers.
 - The Summary daily usage chart drew lines only for Claude, Codex and Cursor; every provider now gets its line.
