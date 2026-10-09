@@ -35,3 +35,23 @@ export function conductorRecords(database: DatabaseSync): StatementSync | null {
     WHERE json_extract(d, '$.type') IN ('assistant', 'result', 'system', 'conversation_reset')
     ORDER BY created_at, id, representation`);
 }
+
+/** Change evidence for one session's cached projection, without parsing message JSON.
+ * Conductor inserts one row per SDK message and later updates rows in place: it fills
+ * `full_message` and `sdk_message_id`, and sets `sent_at`/`cancelled_at`, which the
+ * projection never reads. Membership (count, rowid sum and maximum) catches inserts and
+ * deletes; rowid-weighted byte lengths of every projected column catch in-place fills and
+ * edits that change a value's size. Lengths come from SQLite record headers, so message
+ * content is never parsed. Returns null when the table cannot be signed (no rowid). */
+export function conductorSignature(database: DatabaseSync): ((sessionId: string) => unknown) | null {
+  const columns = new Set((database.prepare("PRAGMA table_info(session_messages)").all() as Array<{ name: string }>).map((row) => row.name));
+  if (!["session_id", "id", "content"].every((key) => columns.has(key))) return null;
+  const lengths = ["id", "content", "full_message", "created_at", "sdk_message_id"].filter((key) => columns.has(key))
+    .map((key) => `count(${key}), sum(octet_length(${key})), total(rowid * octet_length(${key}))`);
+  const times = columns.has("created_at") ? ", min(created_at), max(created_at)" : "";
+  let statement: StatementSync;
+  try { statement = database.prepare(`SELECT count(*), max(rowid), sum(rowid), ${lengths.join(", ")}${times} FROM session_messages WHERE session_id = ?`); }
+  catch { return null; }
+  const shape = [...columns].sort();
+  return (sessionId) => [shape, Object.values(statement.get(sessionId) ?? {})];
+}
