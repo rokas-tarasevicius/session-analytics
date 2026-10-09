@@ -6,15 +6,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
-import { setImmediate as tick } from "node:timers/promises";
+import { setTimeout as delay, setImmediate as tick } from "node:timers/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
+import { AnalysisHeapLimitError, analysisHeapLimitMegabytes } from "../src/analysis-process.ts";
 import { MAX_MESSAGE_BYTES, PROTOCOL_VERSION, serveMcp } from "../src/mcp/server.ts";
+import { loadSnapshot, SNAPSHOT_DEADLINE_MS } from "../src/mcp/snapshot.ts";
 import type { McpPayload, McpSnapshot } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 
 const bin = fileURLToPath(new URL("../bin/session-analytics.ts", import.meta.url));
+const RESPONSIVE_MS = 30_000;
 const modernMeta = { "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION, "io.modelcontextprotocol/clientCapabilities": {} };
 interface Response {
   id?: string | number | null;
@@ -63,18 +66,41 @@ function client(args: string[], cwd: string, settings: NodeJS.ProcessEnv = {}, e
     for (const waiter of waiters.values()) { clearTimeout(waiter.timer); waiter.reject(new Error("Server exited before replying.")); }
     waiters.clear();
   });
-  function wait(id: string | number | null): Promise<Response> {
+  // The stdio loop must answer within this budget even while a scan runs.
+  function wait(id: string | number | null, timeoutMs = RESPONSIVE_MS): Promise<Response> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { waiters.delete(id); reject(new Error("MCP response timeout.")); }, 30_000);
+      const timer = setTimeout(() => { waiters.delete(id); reject(new Error("MCP response timeout.")); }, timeoutMs);
       waiters.set(id, { resolve, reject, timer });
     });
   }
   function send(message: object): void { processChild.stdin.write(JSON.stringify(message) + "\n"); }
-  function request(method: string, params?: object): Promise<Response> {
+  function request(method: string, params?: object, timeoutMs?: number): Promise<Response> {
     const id = nextId++;
-    const result = wait(id); send({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) }); return result;
+    const result = wait(id, timeoutMs); send({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) }); return result;
   }
-  return { processChild, responses, request, send, wait, stderr: () => stderr, invalid: () => invalid,
+  /** Resolves once stderr matches; rejects if the process exits first. */
+  function stderrMatch(pattern: RegExp): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const check = (): void => { if (pattern.test(stderr)) { processChild.stderr.off("data", check); processChild.off("exit", exited); resolve(); } };
+      const exited = (): void => { processChild.stderr.off("data", check); reject(new Error("Process exited before it was ready.")); };
+      processChild.stderr.on("data", check); processChild.once("exit", exited); check();
+    });
+  }
+  /**
+   * A cold scan is CPU-bound and slows with machine load, so it is bounded by the
+   * server's own snapshot deadline, not the responsiveness budget. Liveness is
+   * still checked: the server must keep answering pings while the scan runs.
+   */
+  async function scanRequest(method: string, params: object): Promise<Response> {
+    let settled = false;
+    const result = request(method, params, SNAPSHOT_DEADLINE_MS + RESPONSIVE_MS).finally(() => { settled = true; });
+    while (!settled) {
+      await Promise.race([result.catch(() => {}), delay(1000)]);
+      if (!settled) assert.deepEqual((await request("ping")).result, {}, "stdio stays responsive during the scan");
+    }
+    return await result;
+  }
+  return { processChild, responses, request, scanRequest, send, wait, stderrMatch, stderr: () => stderr, invalid: () => invalid,
     async initialize(protocolVersion = "2025-11-25") {
       const response = await request("initialize", { protocolVersion, capabilities: {}, clientInfo: { name: "fixture-client", version: "1" } });
       send({ jsonrpc: "2.0", method: "notifications/initialized" }); return response;
@@ -310,16 +336,22 @@ test("additive evidence remains content-free in report JSON and is not MCP-only 
   } finally { await rm(f.root, { force: true, recursive: true }); }
 });
 
-test("MCP demo serves only synthetic repositories and tool counts", async () => {
+test("MCP demo serves only synthetic repositories and tool counts", { timeout: SNAPSHOT_DEADLINE_MS + 4 * RESPONSIVE_MS }, async () => {
   const demo = fileURLToPath(new URL("../scripts/demo.ts", import.meta.url));
   const c = client([], process.cwd(), {}, demo);
   try {
+    // The demo generates its synthetic history before it starts the server; the
+    // server can only be held to the responsiveness budget once it exists.
+    await c.stderrMatch(/Generated \d+ synthetic top-level sessions/);
     await c.initialize();
     const call = async (name: string, args: object = {}) => {
       const result = await c.request("tools/call", { name, arguments: args });
       assert.equal(result.result?.isError, false); return result.result!.structuredContent!;
     };
-    const summary = await call("usage_summary", { scope: "machine", groupBy: "repository", window: "all" });
+    // The first call runs the cold demo scan; later calls are served from the cache.
+    const first = await c.scanRequest("tools/call", { name: "usage_summary", arguments: { scope: "machine", groupBy: "repository", window: "all" } });
+    assert.equal(first.result?.isError, false);
+    const summary = first.result!.structuredContent!;
     assert.ok("groups" in summary.data); assert.equal(summary.data.totalGroups, 6);
     const budget = await call("budget_status");
     assert.equal(budget.scope.kind, "repository"); assert.ok("today" in budget.data);
@@ -397,4 +429,23 @@ test("spawned MCP output overflow exits while stdin remains open and stdout unre
     const [code, signal] = await ended;
     assert.equal(killed, false); assert.equal(code, 0); assert.equal(signal, null);
   } finally { clearTimeout(watchdog); child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy(); if (child.exitCode === null && !child.signalCode) child.kill("SIGKILL"); }
+});
+
+test("an MCP worker heap exhaustion returns the named heap-limit error without raw child output", { timeout: 60_000 }, async () => {
+  const worker = { script: new URL("./mcp-heap-worker.ts", import.meta.url), heapLimitMegabytes: 32 };
+  const failure = await loadSnapshot({}, new AbortController().signal, worker).then(() => null, (error: unknown) => error);
+  assert.ok(failure instanceof AnalysisHeapLimitError);
+  assert.equal(failure.message, `Session analysis exceeded its ${analysisHeapLimitMegabytes} MB worker heap limit.`);
+  assert.doesNotMatch(String(failure), /SECRET_|heap out of memory/i);
+  // The client sees the same named message, never the child's stderr.
+  const input = new PassThrough(), output = new PassThrough();
+  const responses: Response[] = [];
+  createInterface({ input: output }).on("line", (line) => responses.push(JSON.parse(line) as Response));
+  const server = serveMcp({ analysis: {}, ttlSeconds: 60, input, output, load: (signal) => loadSnapshot({}, signal, worker) });
+  input.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "usage_summary", arguments: { window: "all" }, _meta: modernMeta } }) + "\n");
+  while (!responses.length) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(responses[0]!.result?.isError, true);
+  assert.equal(responses[0]!.result?.content?.[0]?.text, failure.message);
+  assert.doesNotMatch(JSON.stringify(responses), /SECRET_|heap out of memory|Error:| at /i);
+  input.end(); await server.closed; output.destroy();
 });
