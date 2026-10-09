@@ -54,6 +54,9 @@ export function dailySpendSeries(sessions: SessionLike[], days: string[]): numbe
 export function dailyCountSeries(sessions: SessionLike[], days: string[], accessor: (session: SessionLike) => number): number[];
 export function windowStartFor(preset: string, minDay: string, maxDay: string): string;
 export function clampWindow(range: { start: string; end: string; min: string; max: string }): { start: string; end: string };
+export function validDay(value: unknown): string | null;
+export type WindowAdjustment = "invalid-start" | "invalid-end" | "swapped" | "clamped";
+export function resolveCustomWindow(range: { start: string | null | undefined; end: string | null | undefined; previousStart?: string | null; previousEnd?: string | null; min: string; max: string }): { start: string; end: string; adjusted: WindowAdjustment[] };
 export function previousPeriod(range: { start: string; end: string; min: string }): Period | null;
 export function deltaDescription(current: number, previous: number | null | undefined, length: number): Delta | null;
 export function downsample(values: number[], maxPoints: number): { indexFor: (index: number) => number; values: number[] };
@@ -61,6 +64,12 @@ export function sparklineSummary(label: string, values: number[], days: string[]
 export function heatLevel(value: number, maximum: number): number;
 export function tickScale(maximum: number): { axisMaximum: number; tick: number };
 export function matchesQuery(item: PaletteItem, query: string): boolean;
+export function paletteScore(item: PaletteItem, query: string): { score: number; tier: number };
+export function rankPaletteItems<T extends PaletteItem>(items: T[], query: string): T[];
+export function isTextEntryTarget(target: unknown): boolean;
+export function presentProviders(sessions: Array<{ provider: string }>): string[];
+export function providerShortcutTarget(key: string, providers: readonly string[]): string | null;
+export function singleFlight<A extends unknown[], R>(task: (...args: A) => R | Promise<R>): (...args: A) => Promise<R>;
 export const tableAccessors: Record<string, (item: RepositoryRow) => number | string>;
 export function sortRepositories(repositories: RepositoryRow[], key: string, direction: "ascending" | "descending"): RepositoryRow[];
 export function repositoryKey(id: string): string;

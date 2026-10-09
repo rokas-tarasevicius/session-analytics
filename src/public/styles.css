@@ -465,8 +465,7 @@ td { padding: 9px 12px; border-top: 1px solid var(--line); vertical-align: top; 
 tbody tr:first-child td { border-top: 0; }
 td:not(:first-child) { text-align: right; font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 tbody tr { cursor: pointer; }
-tbody tr:hover td, tbody tr:focus-visible td { background: var(--surface-2); }
-tbody tr:focus-visible { outline: 2px solid var(--coral); outline-offset: -2px; }
+tbody tr:hover td { background: var(--surface-2); }
 tbody tr[aria-current="true"] td { background: var(--accent-soft); }
 tbody tr[aria-current="true"] td:first-child { box-shadow: inset 3px 0 var(--coral); }
 td > span, td > strong, td > small { display: block; }
@@ -801,3 +800,13 @@ footer { align-items: flex-start; }
 .analytics-view :is(button, select, input, summary):focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
 @media (max-width: 1120px) { .nav-section + .nav-section { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; } .coverage-button span { display: none; } .coverage-button { width: var(--control); padding: 0; justify-content: center; } }
 @media (max-width: 760px) { .filter-bar .provider-key { margin-left: 0; } }
+
+/* Interaction and accessibility hooks (dashboard interactions PR); visual polish is owned by the design pass. */
+.chart-legend-item[data-active="true"] { background: var(--surface-2); }
+tbody tr[data-row-link] { cursor: pointer; }
+.row-link { border: 0; background: none; padding: 0; font-weight: 500; font-family: var(--font-sans); font-size: 12.5px; text-align: left; color: inherit; cursor: pointer; }
+.row-link:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; border-radius: 4px; }
+.error-banner:not([hidden]) { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.date-range-note { color: var(--muted); font-size: 11.5px; white-space: nowrap; cursor: help; }
+.view-status .status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.view-status { margin-bottom: 14px; }

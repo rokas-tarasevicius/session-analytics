@@ -224,7 +224,7 @@ test("agent SVG encodings are unique, stable under filtering and reproduced in t
   }
 });
 
-test("Velocity provider and model groups use shared brand colours and reciprocal legend focus", async () => {
+test("Velocity provider and model groups use shared brand colours and reciprocal legend hover", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", { configurable: true, value: {
     createElement: (tag: string) => new Element(tag), createElementNS: (_namespace: string, tag: string) => new Element(tag),
@@ -248,9 +248,9 @@ test("Velocity provider and model groups use shared brand colours and reciprocal
         const [provider, model] = id.split(":");
         assert.equal(path.getAttribute("stroke"), group === "provider" ? providerColor(id) : modelColor(provider, model));
       }
-      const button = container.querySelector(".chart-legend-item")!;
-      button.listeners.get("focus")!();
-      assert.equal(svg.getAttribute("data-highlight"), button.dataset["series"]);
+      const item = container.querySelector('.chart-legend-item[role="listitem"]')!;
+      item.listeners.get("pointerenter")!();
+      assert.equal(svg.getAttribute("data-highlight"), item.dataset["series"]);
       const point = svg.querySelector("circle")!;
       assert.ok(point.dataset["series"], "single-bucket points link to the same legend");
       point.listeners.get("pointerenter")!();

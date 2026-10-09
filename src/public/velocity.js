@@ -195,7 +195,9 @@ export function renderVelocity(container, sessions, context) {
     const rollingLabel = el("label", null, "check"), rolling = el("input");
     rolling.type = "checkbox"; rolling.checked = true; rollingLabel.append(rolling, el("span", "7-day average"));
     const filters = el("div", null, "provider-key"); filters.setAttribute("role", "group"); filters.setAttribute("aria-label", "Providers");
+    // Chips list the providers present in the snapshot (context.providers), so the count reads "N of M" against them.
     const selectedProviders = new Set(providerIds);
+    let chipProviders = [];
     const controls = filterBar(group.wrapper, metric.wrapper, granularity.wrapper, mode.wrapper, rollingLabel, filters);
     const lead = el("div", null, "kpi-grid compact-metrics velocity-lead");
     const totals = el("div", null, "kpi-grid compact-metrics velocity-totals");
@@ -219,9 +221,10 @@ export function renderVelocity(container, sessions, context) {
       const data = buildVelocity(scoped, options);
       const valueData = options.metric === "value" && options.granularity === "day" ? data : buildVelocity(scoped, { ...options, metric: "value", granularity: "day", mode: "lines" });
       const price = averagePrice(valueData);
+      const shownProviders = chipProviders.filter((provider) => selectedProviders.has(provider)).length;
       lead.replaceChildren(
         kpi({ label: "Average price", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: `per active day · ${price.activeDays} of ${price.days} days active · ${formatMetric(price.perCalendarDay, "value")} per calendar day`, accent: true }),
-        kpi({ label: "Usage value", value: formatMetric(price.total, "value"), note: `${price.days} calendar days · API-equivalent${valueData.evidence.complete ? "" : " · partially observed"}${selectedProviders.size < providerIds.length ? ` · ${selectedProviders.size} of ${providerIds.length} providers` : ""}` }),
+        kpi({ label: "Usage value", value: formatMetric(price.total, "value"), note: `${price.days} calendar days · API-equivalent${valueData.evidence.complete ? "" : " · partially observed"}${shownProviders < chipProviders.length ? ` · ${shownProviders} of ${chipProviders.length} providers` : ""}` }),
       );
       const today = localDay(current.generatedAt, current.timeZone);
       const comparisonData = buildVelocity(scoped, { ...options, ...comparisonSpan(current.end, today), granularity: "day", mode: "lines" });
@@ -278,16 +281,23 @@ export function renderVelocity(container, sessions, context) {
       movers.article.append(evidence([movement.excludedGroups ? `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.` : "Groups need complete current and prior metric evidence to appear. A change in telemetry is not a measured change in workload."]));
     };
     controller.update = update;
-    for (const provider of providerIds) {
-      const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = true;
-      label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider)); input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
-      label.append(input, el("span", providerLabels[provider]));
-      input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); }); filters.append(label);
-    }
+    controller.syncChips = (providers) => {
+      if (providers.join() === chipProviders.join()) return;
+      chipProviders = providers;
+      filters.replaceChildren();
+      for (const provider of providers) {
+        const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = selectedProviders.has(provider);
+        label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider)); input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
+        label.append(input, el("span", providerLabels[provider]));
+        input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); }); filters.append(label);
+      }
+    };
     for (const input of [group.select, metric.select, granularity.select, mode.select, rolling]) input.addEventListener("change", update);
     controllers.set(container, controller);
   }
-  controller.sessions = sessions; controller.context = context; controller.update();
+  controller.sessions = sessions; controller.context = context;
+  controller.syncChips(context.providers ?? providerIds);
+  controller.update();
 }
 
 export function renderSummaryVelocity(container, sessions, context) {

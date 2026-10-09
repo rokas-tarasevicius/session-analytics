@@ -447,7 +447,9 @@ minimum-activity guards and unknown-data rules are in [metrics.md](metrics.md#ve
 
 ### Browser storage
 
-The dashboard stores the selected view (`session-analytics-view`), theme (`session-analytics-theme`), density (`session-analytics-density`), and shortcut preference (`session-analytics-shortcuts`). The time window and session data are not persisted in browser storage. The removed Insights view’s legacy decision key is no longer read or written.
+The dashboard stores the selected view (`session-analytics-view`), theme (`session-analytics-theme`), density (`session-analytics-density`), and shortcut preference (`session-analytics-shortcuts`). Theme and density are saved only when you change them; the system theme and one-visit `?theme=`/`?density=` URL values are not saved. The time window and session data are not persisted in browser storage. The removed Insights view’s legacy decision key is no longer read or written.
+
+The address bar records the current view, window preset, custom start and end dates, and the focused repository's opaque ID (`?view=`, `?window=`, `?start=`, `?end=`, `?repo=`), so reload and Back/Forward restore them; the browser's history keeps these loopback URLs like any other. Repository names and paths are never written to the URL (a name is still accepted when reading an older `?repo=` link).
 
 ### MCP fields
 
@@ -538,7 +540,7 @@ These fields also appear in the existing JSON/API session projection when suppor
 The MCP worker returns `{analytics}`, the allowlisted machine snapshot above, to its parent over an anonymous pipe. It reads no skill directories or MCP-server configuration.
 
 The MCP wrapper contains standard JSON-RPC `jsonrpc`, caller-chosen `id` (protocol correlation only), `result` or `error`; errors use fixed `code`/`message` and, for unsupported versions, `data.supported`/`requested` protocol dates. Tool results contain `isError`, `content[].type`/`.text` (a fixed-template summary and serialized `McpPayload`), and `structuredContent` (the same payload). Modern results add `resultType` and `_meta.io.modelcontextprotocol/serverInfo`. Discovery/initialization contain only static product/version identifiers, protocol versions, tool capability declarations, instructions and catalog cache hints (`ttlMs`, `cacheScope`). `tools/list` returns static names/descriptions, JSON input schemas and read-only/idempotent/closed-world annotations. These are P0 and carry no local-history identifiers; caller request IDs are echoed as required by JSON-RPC, never used to query history.
-The dashboard stores view, theme, density and shortcut preferences in browser `localStorage`. No session data or time window is persisted in the browser. The separate local SQLite index is described above.
+The dashboard stores view, theme, density and shortcut preferences in browser `localStorage`. No session data or time window is persisted in browser storage; the address bar carries the view, window and opaque repository ID for reload and Back/Forward. The separate local SQLite index is described above.
 
 ### Index management status (`IndexStatus`)
 

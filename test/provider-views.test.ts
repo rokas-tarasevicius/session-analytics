@@ -94,7 +94,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
     // Values stay bare; the eligible/selected share moves to the coverage badge beside the value.
     assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? "100" : "—");
     const selected = `${sessions.length} selected ${sessions.length === 1 ? "session" : "sessions"}`;
-    assert.equal(h.elements.get("#metric-input-coverage")!.textContent.trim(), sessions.includes(summary) ? sessions.length === 2 ? "1/2" : "" : `No token evidence in ${selected}`);
+    assert.equal(h.elements.get("#metric-input-coverage")!.textContent.trim(), sessions.includes(summary) ? sessions.length === 2 ? "1/2 1 of 2 selected sessions provide token evidence" : "" : `No token evidence in ${selected}`);
     // The headline is the activity-dated ledger shared with Velocity. A provider-reported summary has no
     // activity dates, so the headline is unavailable and its whole-session value is disclosed, not hidden.
     assert.equal(h.elements.get("#metric-spend")!.textContent, "—");
@@ -102,7 +102,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
     const note = h.elements.get("#metric-spend-note")!.textContent;
     if (sessions.includes(summary)) assert.match(note, /\$1\.00 in \d older-snapshot sessions? without activity dates/);
     assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? "0" : "—");
-    assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2" : "" : `No tool evidence in ${selected}`);
+    assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2 1 of 2 selected sessions provide tool evidence" : "" : `No tool evidence in ${selected}`);
     assert.equal(h.elements.get("#metric-compactions")!.textContent, "—");
     h.run('renderTools(view)');
     const renderedTools = h.elements.get("#tools-view")!;

@@ -3,11 +3,12 @@ import { renderLegend } from "./chart-legend.js";
 import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
-  clampWindow, costByModel, costTotals, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
-  groupByRepository, heatLevel, matchesQuery, mergeModels, namedTotals, percent, previousPeriod, providerLabels,
-  providerOrder, repositoryKey, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, spendDays, summarize, tickScale,
-  windowStartFor,
+  costByModel, costTotals, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
+  groupByRepository, heatLevel, isTextEntryTarget, mergeModels, namedTotals, percent, presentProviders, previousPeriod, providerLabels,
+  providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionsInRange, shortMoney, singleFlight,
+  sortRepositories, sparklineSummary, spendDays, summarize, tickScale, validDay, windowStartFor,
 } from "./view-model.js";
+import { parseUrlState, serializeUrlState } from "./url-state.js";
 import { providerMark, renderProviderEvidence, dailySpendByProvider, metricEligible, metricCoverage, coveredValue } from "./providers.js";
 
 import { renderPricingPanel } from "./pricing.js";
@@ -18,7 +19,7 @@ import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocit
 import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
 import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
-import { installExportMenu } from "./export-menu.js";
+import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { renderSharedSnapshot } from "./shared-view.js";
 import { DASH, coverageBadge, setValue, valueWithCoverage } from "./ui.js";
 
@@ -36,7 +37,7 @@ const elements = {
   coverageButton: $("#coverage-button"), coverageClose: $("#coverage-close"), coverageDialog: $("#coverage-dialog"), coverageDot: $("#coverage-dot"), coverageLabel: $("#coverage-label"), coverageSummary: $("#coverage-summary"),
   spendCoverage: $("#metric-spend-coverage"), inputCoverage: $("#metric-input-coverage"), outputCoverage: $("#metric-output-coverage"), toolsCoverage: $("#metric-tools-coverage"), compactionsCoverage: $("#metric-compactions-coverage"),
   dateRange: $("#date-range"), density: $("#density-switch"),
-  error: $("#error-banner"),
+  error: $("#error-banner"), errorMessage: $("#error-message"), errorRetry: $("#error-retry"),
   generated: $("#generated-at"), help: $("#help-overlay"), helpButton: $("#help-button"), helpClose: $("#help-close"),
   input: $("#metric-input"), live: $("#metric-live"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
@@ -57,8 +58,9 @@ const elements = {
   sync: $("#sync-context"), syncLabel: $("#sync-label"),
   theme: $("#theme-switch"), themeLabel: $("#theme-label"), toolCalls: $("#tool-calls"),
   toolsView: $("#tools-view"), toolsProviderFilters: $("#tools-provider-filters"),
-  tools: $("#metric-tools"), warning: $("#warning-banner"), warningList: $("#warning-list"),
-  windowEnd: $("#window-end"), windowSegment: $("#window-segment"), windowStart: $("#window-start"),
+  tools: $("#metric-tools"), viewStatus: $("#view-status"), warning: $("#warning-banner"), warningList: $("#warning-list"),
+  windowEnd: $("#window-end"), windowNote: $("#window-note"), windowSegment: $("#window-segment"), windowStart: $("#window-start"),
+  wordmark: $(".wordmark"),
 };
 const providerFilters = [...document.querySelectorAll("[data-provider-filter]")];
 for (const input of providerFilters) input.closest(".chip").style.setProperty("--chip-color", providerColor(input.dataset.providerFilter));
@@ -69,14 +71,32 @@ const sortButtons = [...document.querySelectorAll("th .sort[data-sort]")];
 
 const viewOrder = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", pricing: "Pricing", tools: "Tools", activity: "Activity" };
+// Retired view names that old links and saved preferences may still carry.
+const viewAliases = { models: "costs" };
 const viewChords = { s: "summary", v: "velocity", c: "costs", p: "pricing", t: "tools", a: "activity" };
-const providerScopedViews = ["activity", "tools"];
+const providerScopedViews = ["activity", "tools", "velocity"];
 const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
 const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", all: "All observed time", custom: "Custom range" };
 
 let snapshot = null;
 let sessionsByRepository = new Map();
+// Providers present in the snapshot: every provider chip row lists these, and `p 1`… counts through them.
+let providerCache = { source: null, providers: [] };
+function snapshotProviders() {
+  if (providerCache.source !== snapshot) providerCache = { source: snapshot, providers: Array.isArray(snapshot?.sessions) ? presentProviders(snapshot.sessions) : [] };
+  return providerCache.providers;
+}
+// The initial analysis failed and there is no snapshot to show.
+let loadFailed = false;
+// The selected window has no sessions and no dated activity, so the view shows an empty state instead.
+let windowEmpty = false;
+// The last custom range applied; an empty or half-typed date input falls back to it.
+let appliedWindow = { start: null, end: null };
+// URL state is written only after the first snapshot has applied the URL's own parameters, and not while
+// Back/Forward restores state from it.
+let urlReady = false;
+let restoringUrl = false;
 let toolsSelectedName = null;
 let toolsExpanded = false;
 let windowPreset = "30";
@@ -147,6 +167,7 @@ function emptyState(container, message, title = null) {
   if (title) box.append(node("strong", title));
   box.append(node("span", message));
   container.append(box);
+  return box;
 }
 
 /** Captures the focused control's key before a re-render and restores focus to its replacement afterwards. */
@@ -182,7 +203,8 @@ function repositoryAggregate(item, sessions) {
 }
 
 function activeProviders() {
-  return providerFilters.filter(({ checked }) => checked).map(({ dataset }) => dataset.providerFilter);
+  // Chips for providers absent from the snapshot are hidden; they never count as a selection.
+  return providerFilters.filter((input) => input.checked && !input.closest(".chip").hidden).map(({ dataset }) => dataset.providerFilter);
 }
 
 function sessionsForProviders(sessions, scope) {
@@ -211,7 +233,53 @@ function selectRepository(id, { scroll = true } = {}) {
   if (![...elements.repositoryFilter.options].some((option) => option.value === id)) return;
   elements.repositoryFilter.value = id;
   renderView();
+  syncUrl();
   if (scroll) elements.main.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+}
+
+/** A `?repo=` value names a repository by its opaque ID or, for older links, by its display name. */
+function repositoryFromParameter(value) {
+  if (!value || !snapshot?.repositories) return null;
+  return snapshot.repositories.find(({ repository }) => repository.id === value) ?? snapshot.repositories.find(({ repository }) => repository.name === value) ?? null;
+}
+
+// --------------------------------------------------------------------- URL state
+
+function currentUrlState() {
+  const repo = elements.repositoryFilter.value;
+  return { view: currentViewName(), window: windowPreset, start: elements.windowStart.value, end: elements.windowEnd.value, repo: repo && repo !== "all" ? repo : null };
+}
+
+/** Records the current view, window and repository in the address bar: a new history entry, or `replace`. */
+function syncUrl(mode = "push") {
+  if (!urlReady || restoringUrl || !mode || !window.history || !snapshot || snapshot.kind === "shared") return;
+  const search = serializeUrlState(currentUrlState(), window.location.search);
+  if (search === window.location.search) return;
+  const url = `${window.location.pathname}${search}${window.location.hash}`;
+  if (mode === "replace") window.history.replaceState(null, "", url);
+  else window.history.pushState(null, "", url);
+}
+
+/** Back and Forward restore the view, window and repository that the URL records, without adding history. */
+function restoreUrlState() {
+  if (!snapshot || snapshot.kind === "shared" || !urlReady) return;
+  const state = parseUrlState(window.location.search, { views: viewOrder, presets: windowPresets, aliases: viewAliases });
+  restoringUrl = true;
+  try {
+    elements.repositoryFilter.value = repositoryFromParameter(state.repo)?.repository.id ?? "all";
+    if (state.window === "custom") applyCustomRange(state.start, state.end, { render: false });
+    else applyWindowPreset(state.window ?? "30", { render: false });
+    switchView(state.view ?? "summary");
+  } finally {
+    restoringUrl = false;
+  }
+}
+
+/** Shows only the active view's panel, or none when there is no snapshot or the window is empty. */
+function showActivePanel() {
+  const name = currentViewName();
+  const blocked = (!snapshot && loadFailed) || (windowEmpty && name !== "pricing");
+  for (const panel of viewPanels) panel.hidden = blocked || panel.dataset.viewPanel !== name;
 }
 
 // --------------------------------------------------------------------- bars
@@ -226,7 +294,10 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
     if (onSelect) {
       row.type = "button";
       row.dataset.focusKey = `bar:${container.id}:${item.id ?? item.name}`;
-      row.setAttribute("aria-label", `Open metrics for ${item.name}`);
+      const valueText = item.coverage && item.coverage.eligible === 0 ? "not available" : formatter(item.value);
+      const coverageText = item.coverage && item.coverage.eligible < item.coverage.selected && item.coverage.selected > 0
+        ? `, ${item.coverage.eligible} of ${item.coverage.selected} selected sessions provide ${item.what || "evidence"}` : "";
+      row.setAttribute("aria-label", `${item.name}, ${valueText}${coverageText}. Focus this repository`);
       row.addEventListener("click", () => onSelect(item));
     }
     const label = node("div", null, "bar-label");
@@ -349,17 +420,21 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
 
 // --------------------------------------------------------------------- views
 
-function switchView(name) {
+function switchView(name, { history: mode = "push" } = {}) {
+  const changed = currentViewName() !== name;
   for (const button of viewButtons) {
     if (button.dataset.viewButton === name) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   }
-  for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== name;
+  showActivePanel();
   elements.activityTooltip.hidden = true;
   elements.pageTitle.textContent = viewLabels[name] || "Summary";
   document.title = `${viewLabels[name] || "Summary"} · Session Analytics`;
   writePreference("session-analytics-view", name);
+  // A new view starts at its top. The jump is instant, so it never animates (reduced motion included).
+  if (changed && snapshot) window.scrollTo?.({ top: 0, left: 0, behavior: "instant" });
   if (snapshot) renderView();
+  syncUrl(mode);
 }
 
 function currentViewName() {
@@ -373,8 +448,7 @@ function stepView(offset) {
 
 function renderViewProviderFilters(container, scope) {
   clear(container);
-  for (const provider of providerOrder) {
-    if (provider === "unsupported" && !snapshot.sessions.some((session) => session.provider === provider)) continue;
+  for (const provider of snapshotProviders()) {
     const label = node("label", null, "chip"); label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider));
     const input = node("input"); input.type = "checkbox"; input.checked = viewProviderFilters[scope].has(provider);
     input.dataset.focusKey = `filter:${scope}:${provider}`;
@@ -562,7 +636,7 @@ function renderActiveAnalyticsView(view) {
   resetExportMenu();
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
   if (name === "activity") renderActivity(view);
-  if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, velocityContext());
+  if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, { ...velocityContext(), providers: snapshotProviders() });
   if (name === "costs") renderCosts(view);
   if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.sessions);
   if (name === "tools") {
@@ -696,13 +770,15 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
-    row.tabIndex = 0; row.setAttribute("role", "link"); row.setAttribute("aria-label", `Open metrics for ${item.repository.name}`);
-    row.dataset.focusKey = `table:${item.repository.id}`;
-    if (item.repository.id === selectedId) row.setAttribute("aria-current", "true");
-    row.addEventListener("click", () => selectRepository(item.repository.id));
-    row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectRepository(item.repository.id); } });
+    row.dataset.rowLink = "true";
+    const repositoryButton = node("button", item.repository.name, "row-link"); repositoryButton.type = "button";
+    repositoryButton.dataset.focusKey = `table:${item.repository.id}`;
+    if (item.repository.id === selectedId) { row.setAttribute("aria-current", "true"); repositoryButton.setAttribute("aria-current", "true"); }
+    repositoryButton.addEventListener("click", () => selectRepository(item.repository.id));
+    row.addEventListener("click", (event) => { if (event.target.closest?.("button")) return; selectRepository(item.repository.id); });
+    const repositoryCell = node("td"); repositoryCell.append(repositoryButton, node("small", `ID ${repositoryKey(item.repository.id)}`));
     const covered = (value, coverage, format, what) => { const cell = node("td"); cell.append(valueWithCoverage(value, coverage, format, what, "span")); return cell; };
-    row.append(tableCell(item.repository.name, `ID ${repositoryKey(item.repository.id)}`), tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), covered(summary.estimatedSpendUsd, summary.coverage.cost, money, "priced value"), covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(summary.pricedTokenCoverage === null ? DASH : percent(summary.pricedTokenCoverage), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    row.append(repositoryCell, tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), covered(summary.estimatedSpendUsd, summary.coverage.cost, money, "priced value"), covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(summary.pricedTokenCoverage === null ? DASH : percent(summary.pricedTokenCoverage), `${summary.analyzedSessions}/${summary.sessions} parsed`));
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
@@ -716,7 +792,8 @@ function renderWarnings(warnings) {
   warnings.forEach((warning) => elements.warningList.append(node("li", warning)));
   elements.coverageLabel.textContent = warnings.length ? `Coverage · ${warnings.length}` : "Coverage";
   elements.coverageDot.hidden = !warnings.length;
-  elements.coverageButton.setAttribute("aria-label", warnings.length ? `Evidence and coverage: ${warnings.length} coverage note${warnings.length === 1 ? "" : "s"}` : "Evidence and coverage");
+  if (warnings.length) elements.coverageButton.setAttribute("aria-label", `Coverage · ${warnings.length} note${warnings.length === 1 ? "" : "s"}`);
+  else elements.coverageButton.removeAttribute("aria-label");
 }
 
 /** One sentence for the coverage dialog: what the current selection can establish. */
@@ -822,6 +899,7 @@ function renderSharedView(view) {
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${population}`;
   elements.scopeChip.hidden = !selected;
   elements.scopeChipLabel.textContent = selected ? selected.repository.name : "";
+  elements.scopeChip.setAttribute("aria-label", selected ? `${selected.repository.name}: clear repository focus` : "Clear repository focus");
   renderRepositoryNav();
 }
 
@@ -893,16 +971,58 @@ function renderSummary(view) {
   renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
 }
 
+/** True when nothing in the selection started or was active during the window. */
+function windowHasNoActivity(view) {
+  if (view.sessions.length) return false;
+  const { start, end } = velocityContext();
+  return !view.scopeSessions.some((session) => ledgerCells(session.velocity).some(([day]) => day >= start && day <= end));
+}
+
+function statusAction(label, run) {
+  const button = node("button", label, "button"); button.type = "button";
+  button.addEventListener("click", run);
+  return button;
+}
+
+/** The view-level status in place of the panels: no snapshot, or nothing in the selected window. */
+function renderViewStatus(view) {
+  const target = elements.viewStatus;
+  if (!target) return;
+  clear(target);
+  if (!snapshot && loadFailed) {
+    emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
+    target.hidden = false;
+    return;
+  }
+  if (!view || !windowEmpty) { target.hidden = true; return; }
+  const selected = selectedRepository();
+  const scope = selected ? ` for ${selected.repository.name}` : "";
+  const message = !snapshot.sessions.length ? "No local agent sessions were found in this snapshot."
+    : windowPreset === "all" ? `No sessions${scope} in the observed history.`
+      : `No sessions${scope} started or were active during ${windowCaption()}.`;
+  const box = emptyState(target, message, "Nothing in this window");
+  const actions = node("div", null, "status-actions");
+  if (windowPreset !== "all" && snapshot.sessions.length) actions.append(statusAction("Show all time", () => applyWindowPreset("all")));
+  if (selected) actions.append(statusAction("Clear repository focus", () => selectRepository("all", { scroll: false })));
+  if (actions.childElementCount) box.append(actions);
+  target.hidden = false;
+}
+
 function renderView() {
   const restoreFocus = rememberFocus();
   hoverListeners.clear();
   resetExportMenu();
   const view = activeView();
+  windowEmpty = windowHasNoActivity(view);
+  showActivePanel();
+  renderViewStatus(view);
   renderWarnings(view.warnings);
   renderSharedView(view);
   renderProviderEvidence($("#provider-evidence-rows"), view.sessions);
   renderCoverageSummary(view);
-  if (currentViewName() === "summary") {
+  if (windowEmpty && currentViewName() !== "pricing") {
+    clearInactiveAnalyticsViews(null);
+  } else if (currentViewName() === "summary") {
     clearInactiveAnalyticsViews("summary");
     renderSummary(view);
   } else {
@@ -917,6 +1037,38 @@ function setWindowPreset(preset) {
   windowPreset = windowPresets.includes(preset) ? preset : "30";
   for (const button of windowButtons) button.setAttribute("aria-pressed", String(button.dataset.windowPreset === windowPreset));
   elements.dateRange.hidden = windowPreset !== "custom";
+  if (windowPreset !== "custom") showWindowNote([]);
+}
+
+function setWindowInputs(start, end) {
+  elements.windowStart.value = start; elements.windowEnd.value = end;
+  appliedWindow = { start, end };
+}
+
+const windowNoteText = {
+  "invalid-start": "Start date was not a valid date, so the previous one is kept.",
+  "invalid-end": "End date was not a valid date, so the previous one is kept.",
+  swapped: "Start was after end, so the dates were swapped.",
+};
+
+/**
+ * Says inline how a custom range was adjusted: a short visible word beside the dates, with the full sentence in the
+ * tooltip and for screen readers. Hidden when nothing changed.
+ */
+function showWindowNote(adjusted) {
+  const target = elements.windowNote;
+  if (!target) return;
+  const notes = adjusted.map((reason) => reason === "clamped"
+    ? `Adjusted to the observed history, ${elements.windowStart.min} to ${elements.windowEnd.max}.`
+    : windowNoteText[reason]).filter(Boolean);
+  clear(target);
+  target.hidden = !notes.length;
+  if (!notes.length) { target.removeAttribute("title"); return; }
+  const sentence = notes.join(" ");
+  const label = node("span", adjusted.includes("swapped") && adjusted.length === 1 ? "Swapped" : adjusted.includes("swapped") ? "Swapped · adjusted" : "Adjusted");
+  label.setAttribute("aria-hidden", "true");
+  target.append(label, node("span", sentence, "sr-only"));
+  target.setAttribute("title", sentence);
 }
 
 function observedRange() {
@@ -934,81 +1086,114 @@ function configureWindow() {
   const { maximum, minimum } = observedRange();
   for (const input of [elements.windowStart, elements.windowEnd]) { input.min = minimum; input.max = maximum; }
   if (windowPreset === "custom") {
-    // A refreshed snapshot may cover a different range: keep the custom range inside it and ordered.
-    const clamped = clampWindow({ end: elements.windowEnd.value, max: maximum, min: minimum, start: elements.windowStart.value });
-    elements.windowStart.value = clamped.start; elements.windowEnd.value = clamped.end;
-    setWindowPreset("custom");
+    // A refreshed snapshot, or a URL range, may fall outside the observed history: keep it inside and ordered.
+    applyCustomRange(elements.windowStart.value, elements.windowEnd.value, { render: false });
     return;
   }
   applyWindowPreset(windowPreset, { render: false });
 }
 
-function applyWindowPreset(preset, { render = true } = {}) {
+function applyWindowPreset(preset, { render = true, history: mode = "push" } = {}) {
   setWindowPreset(preset);
   if (!snapshot) return;
   if (windowPreset !== "custom") {
-    elements.windowStart.value = windowStartFor(windowPreset, elements.windowStart.min, elements.windowEnd.max);
-    elements.windowEnd.value = elements.windowEnd.max;
-  } else if (!elements.windowStart.value || !elements.windowEnd.value) {
-    elements.windowStart.value = elements.windowStart.min; elements.windowEnd.value = elements.windowEnd.max;
+    setWindowInputs(windowStartFor(windowPreset, elements.windowStart.min, elements.windowEnd.max), elements.windowEnd.max);
+  } else if (!validDay(elements.windowStart.value) || !validDay(elements.windowEnd.value)) {
+    setWindowInputs(elements.windowStart.min, elements.windowEnd.max);
   }
-  if (render) renderView();
+  if (render) { renderView(); syncUrl(mode); }
 }
 
-function applyCustomWindow(changed) {
+/** Applies a custom range: invalid bounds keep their previous value, a reversed range swaps, and dates are clamped. */
+function applyCustomRange(start, end, { render = true } = {}) {
   setWindowPreset("custom");
   if (!snapshot) return;
-  if (elements.windowStart.value > elements.windowEnd.value) {
-    if (changed === "start") elements.windowEnd.value = elements.windowStart.value;
-    else elements.windowStart.value = elements.windowEnd.value;
-  }
-  renderView();
+  const resolved = resolveCustomWindow({ start, end, previousStart: appliedWindow.start, previousEnd: appliedWindow.end, min: elements.windowStart.min, max: elements.windowEnd.max });
+  setWindowInputs(resolved.start, resolved.end);
+  showWindowNote(resolved.adjusted);
+  if (render) { renderView(); syncUrl("replace"); }
+}
+
+/** A date input change. An emptied or half-typed date is left alone while it is edited and restored on blur. */
+function applyCustomWindow() {
+  setWindowPreset("custom");
+  if (!snapshot) return;
+  if (!validDay(elements.windowStart.value) || !validDay(elements.windowEnd.value)) return;
+  applyCustomRange(elements.windowStart.value, elements.windowEnd.value);
+}
+
+function restoreWindowInputs() {
+  if (!snapshot || windowPreset !== "custom") return;
+  if (validDay(elements.windowStart.value) && validDay(elements.windowEnd.value)) return;
+  applyCustomRange(elements.windowStart.value, elements.windowEnd.value);
 }
 
 // --------------------------------------------------------------------- appearance & preferences
 
-function setTheme(theme) {
+// Explicit choices are remembered; the system theme, the default density and one-visit `?theme=`/`?density=`
+// URL parameters are applied without being saved.
+function setTheme(theme, { persist = true } = {}) {
   document.documentElement.dataset.theme = theme;
   elements.themeLabel.textContent = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
   elements.theme.setAttribute("aria-label", theme === "dark" ? "Switch to light theme" : "Switch to dark theme");
-  writePreference("session-analytics-theme", theme);
+  if (persist) writePreference("session-analytics-theme", theme);
 }
 
-function toggleTheme() { setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); }
+function closeExportMenu() { if (typeof resetExportMenu === "function") resetExportMenu(); }
 
-function setDensity(density) {
+function toggleTheme() { closeExportMenu(); setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); }
+
+function setDensity(density, { persist = true } = {}) {
   const value = density === "comfortable" ? "comfortable" : "compact";
   document.documentElement.dataset.density = value;
   elements.density.setAttribute("aria-pressed", String(value === "comfortable"));
-  elements.density.setAttribute("aria-label", value === "comfortable" ? "Switch to compact density" : "Switch to comfortable density");
-  writePreference("session-analytics-density", value);
+  if (persist) writePreference("session-analytics-density", value);
 }
 
-function toggleDensity() { setDensity(document.documentElement.dataset.density === "comfortable" ? "compact" : "comfortable"); }
+function toggleDensity() { closeExportMenu(); setDensity(document.documentElement.dataset.density === "comfortable" ? "compact" : "comfortable"); }
 
 /** Single-character shortcuts can be switched off (WCAG 2.1.4); modifier shortcuts and buttons keep working. */
-function setShortcuts(enabled) {
+function setShortcuts(enabled, { persist = true } = {}) {
   shortcutsEnabled = Boolean(enabled);
   document.documentElement.dataset.shortcuts = shortcutsEnabled ? "on" : "off";
   elements.shortcutsToggle.checked = shortcutsEnabled;
-  writePreference("session-analytics-shortcuts", shortcutsEnabled ? "on" : "off");
+  // Tooltips only mention a key while that key works.
+  for (const control of document.querySelectorAll("[data-shortcut]")) {
+    const label = control.dataset.tooltip || control.getAttribute("title") || "";
+    control.dataset.tooltip = label;
+    control.setAttribute("title", shortcutsEnabled ? `${label} (${control.dataset.shortcut})` : label);
+  }
+  if (persist) writePreference("session-analytics-shortcuts", shortcutsEnabled ? "on" : "off");
 }
 
-/** Provider toggles are scoped: the daily chart on Summary, or the active view's own filter on Activity and Tools. */
+/** Provider toggles are scoped: the daily chart on Summary, or the active view's own chips on Velocity, Tools and Activity. */
 function providerScope() {
   const view = currentViewName();
   if (view === "summary") return "chart";
   return providerScopedViews.includes(view) ? view : null;
 }
 
+function velocityChip(provider) {
+  return document.querySelector(`#velocity-view .provider-key [data-provider="${provider}"] input`);
+}
+
+function providerShown(scope, provider) {
+  if (scope === "chart") return Boolean(providerFilters.find(({ dataset }) => dataset.providerFilter === provider)?.checked);
+  if (scope === "velocity") return Boolean(velocityChip(provider)?.checked);
+  return viewProviderFilters[scope].has(provider);
+}
+
 function toggleProvider(provider) {
-  if (!snapshot) return;
+  if (!snapshot || !snapshotProviders().includes(provider)) return;
   const scope = providerScope();
   if (scope === "chart") {
     const input = providerFilters.find(({ dataset }) => dataset.providerFilter === provider);
     if (!input) return;
     input.checked = !input.checked;
     renderLine(dailyProviderSpend(activeView().dailySessions));
+  } else if (scope === "velocity") {
+    // The Velocity chips own their selection; a click runs their own change handler.
+    velocityChip(provider)?.click();
   } else if (scope) {
     if (viewProviderFilters[scope].has(provider)) viewProviderFilters[scope].delete(provider);
     else viewProviderFilters[scope].add(provider);
@@ -1037,9 +1222,9 @@ function paletteItems() {
     const scope = providerScope();
     if (scope) {
       const where = scope === "chart" ? "in the daily chart" : `in ${viewLabels[scope]}`;
-      for (const provider of providerOrder) {
-        const on = scope === "chart" ? Boolean(providerFilters.find(({ dataset }) => dataset.providerFilter === provider)?.checked) : viewProviderFilters[scope].has(provider);
-        items.push({ group: "Providers", icon: "models", label: `${on ? "Hide" : "Show"} ${providerLabels[provider]} ${where}`, hint: shortcutsEnabled ? `p ${providerOrder.indexOf(provider) + 1}` : "", keywords: `provider toggle ${provider} filter`, state: on, run: () => toggleProvider(provider) });
+      for (const [index, provider] of snapshotProviders().entries()) {
+        const on = providerShown(scope, provider);
+        items.push({ group: "Providers", icon: "models", label: `${on ? "Hide" : "Show"} ${providerLabels[provider]} ${where}`, hint: shortcutsEnabled && index < 9 ? `p ${index + 1}` : "", keywords: `provider toggle ${provider} filter`, state: on, run: () => toggleProvider(provider) });
       }
     }
     for (const preset of ["7", "30", "90", "all"]) {
@@ -1055,6 +1240,7 @@ function paletteItems() {
   items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? "?" : "", keywords: "help keys shortcuts", run: openHelp });
   items.push({ group: "Snapshot", icon: "coverage", label: "Evidence & coverage", hint: shortcutsEnabled ? "e" : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
   items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? "r" : "", keywords: "reload rescan refresh", run: () => load(true) });
+  items.push({ group: "Snapshot", icon: "export", label: "Export view…", keywords: "export download save csv json snapshot", run: () => openExportMenu() });
   return items;
 }
 
@@ -1069,7 +1255,7 @@ function setPaletteActive(index) {
 
 function renderPalette(query) {
   clear(elements.commandList); paletteOptions = [];
-  paletteItemsShown = paletteItems().filter((item) => matchesQuery(item, query));
+  paletteItemsShown = rankPaletteItems(paletteItems(), query);
   let group = null, position = 0;
   for (const item of paletteItemsShown) {
     if (item.group !== group) { group = item.group; elements.commandList.append(node("div", group, "palette-group")); }
@@ -1149,8 +1335,8 @@ document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "k") { event.preventDefault(); togglePalette(); return; }
   if (elements.palette.open || elements.help.open || elements.coverageDialog.open) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  const target = event.target;
-  if (target instanceof HTMLElement && target.matches("input, select, textarea, [contenteditable]")) return;
+  // Only text entry swallows shortcuts; a focused checkbox, radio or button still lets them through.
+  if (isTextEntryTarget(event.target)) return;
   if (key === "Escape") {
     if (snapshot && elements.repositoryFilter.value !== "all") selectRepository("all", { scroll: false });
     return;
@@ -1159,7 +1345,10 @@ document.addEventListener("keydown", (event) => {
   if (pendingChord) {
     const chord = pendingChord; pendingChord = null; window.clearTimeout(chordTimer);
     if (chord === "g" && viewChords[key]) { event.preventDefault(); switchView(viewChords[key]); }
-    if (chord === "p" && ["1", "2", "3"].includes(key)) { event.preventDefault(); toggleProvider(providerOrder[Number(key) - 1]); }
+    if (chord === "p") {
+      const provider = providerScope() ? providerShortcutTarget(key, snapshotProviders()) : null;
+      if (provider) { event.preventDefault(); toggleProvider(provider); }
+    }
     return;
   }
   if (key === "g" || key === "p") { armChord(key); return; }
@@ -1170,7 +1359,7 @@ document.addEventListener("keydown", (event) => {
   if (key === "/") { event.preventDefault(); openPalette(); return; }
   if (key === "t") { toggleTheme(); return; }
   if (key === "d") { toggleDensity(); return; }
-  if (key === "r") { if (!elements.refresh.disabled) load(true); return; }
+  if (key === "r") { load(true); return; }
   if (key === "[") { stepView(-1); return; }
   if (key === "]") stepView(1);
 });
@@ -1179,51 +1368,116 @@ document.addEventListener("keydown", (event) => {
 
 const urlParameters = new URLSearchParams(window.location.search);
 
-function applyUrlAfterRender() {
-  const repo = urlParameters.get("repo");
-  if (repo) {
-    const match = snapshot.repositories.find(({ repository }) => repository.name === repo || repository.id === repo);
-    if (match) { elements.repositoryFilter.value = match.repository.id; renderView(); }
+function showError(message) {
+  elements.errorMessage.textContent = message;
+  elements.errorRetry.hidden = false;
+  elements.error.hidden = false;
+}
+
+function hideError() {
+  elements.error.hidden = true;
+  elements.errorMessage.textContent = "";
+}
+
+/** After a failed refresh the previous snapshot stays on screen, marked stale with its own generation time. */
+function markStale(stale) {
+  if (!snapshot || snapshot.kind === "shared") return;
+  elements.generated.textContent = stale ? `${dateTime(snapshot.generatedAt)} · stale` : dateTime(snapshot.generatedAt);
+  if (stale) {
+    elements.generated.dataset.stale = "true";
+    elements.generated.title = "The latest refresh failed; these figures come from this earlier snapshot.";
+  } else {
+    delete elements.generated.dataset.stale;
+    elements.generated.removeAttribute("title");
   }
-  const open = urlParameters.get("open");
-  if (open === "palette") openPalette();
-  if (open === "help") openHelp();
-  urlParameters.delete("repo"); urlParameters.delete("open");
+}
+
+/** Runs once, after the first snapshot has applied the URL's repository: from then on the URL follows the state. */
+function finishUrlStartup() {
+  if (urlReady) return;
+  urlReady = true;
+  syncUrl("replace");
+  if (initialUrl.open === "palette") openPalette();
+  if (initialUrl.open === "help") openHelp();
 }
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = data; renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = data; loadFailed = false; renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   $(".topbar-controls").hidden = false; $(".view-nav").hidden = false;
   $(".repo-nav").hidden = false;
   $(".skip-link").href = "#main";
-  for (const panel of viewPanels) panel.hidden = panel.dataset.viewPanel !== currentViewName();
-  for (const control of document.querySelectorAll("[data-unsupported-provider]")) control.hidden = !data.sessions.some((session) => session.provider === "unsupported");
-  snapshot = data; sessionsByRepository = groupByRepository(data.sessions);
-  elements.generated.textContent = dateTime(data.generatedAt); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
-  populateRepositories(); configureWindow(); renderRateCards(data.rateCard);
+  snapshot = data; loadFailed = false; sessionsByRepository = groupByRepository(data.sessions);
+  for (const input of providerFilters) input.closest(".chip").hidden = !snapshotProviders().includes(input.dataset.providerFilter);
+  markStale(false); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
+  populateRepositories();
+  if (!urlReady) {
+    const match = repositoryFromParameter(initialUrl.repo);
+    if (match) elements.repositoryFilter.value = match.repository.id;
+  }
+  configureWindow(); renderRateCards(data.rateCard);
   delete elements.main.dataset.state;
   renderView();
-  applyUrlAfterRender();
+  finishUrlStartup();
 }
 
-async function load(refresh = false) {
+async function loadSnapshot(refresh = false) {
   resetExportMenu();
-  elements.error.hidden = true; elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = refresh ? "Refreshing local snapshot" : "Mapping local sessions"; elements.refresh.disabled = true;
-  elements.main.dataset.state = snapshot ? "refreshing" : "loading";
-  if (!snapshot && !elements.repositoryList.childElementCount) for (let index = 0; index < 5; index += 1) elements.repositoryList.append(node("div", null, "repo-skeleton"));
-  try { const response = await fetch(`/api/analytics${refresh ? "?refresh=1" : ""}`); const body = await response.json(); if (!response.ok) throw new Error(body.error || `Analysis failed with ${response.status}.`); render(body); elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready"; }
-  catch (error) { elements.sync.dataset.state = "error"; elements.syncLabel.textContent = "Analysis failed"; elements.error.textContent = error instanceof Error ? error.message : "Unknown analysis failure."; elements.error.hidden = false; delete elements.main.dataset.state; if (!snapshot) clear(elements.repositoryList); }
-  finally { elements.refresh.disabled = false; }
+  const previous = snapshot;
+  hideError();
+  elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous ? "Refreshing local snapshot" : "Mapping local sessions"; elements.refresh.disabled = true;
+  elements.main.dataset.state = previous ? "refreshing" : "loading";
+  if (!previous) {
+    loadFailed = false; renderViewStatus(null); showActivePanel();
+    elements.generated.textContent = "Building snapshot…";
+    if (!elements.repositoryList.childElementCount) for (let index = 0; index < 5; index += 1) elements.repositoryList.append(node("div", null, "repo-skeleton"));
+  }
+  try {
+    const response = await fetch(`/api/analytics${refresh && previous ? "?refresh=1" : ""}`);
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `Analysis failed with ${response.status}.`);
+    render(body);
+    elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready";
+  } catch (error) {
+    const message = error instanceof Error && error.message ? error.message : "Unknown analysis failure.";
+    elements.sync.dataset.state = "error";
+    delete elements.main.dataset.state;
+    if (snapshot) {
+      // Keep the last good snapshot on screen and say how old it is.
+      elements.syncLabel.textContent = "Refresh failed";
+      markStale(true);
+      showError(`Refresh failed: ${message} Showing the snapshot from ${dateTime(snapshot.generatedAt)}.`);
+    } else {
+      elements.syncLabel.textContent = "Analysis failed";
+      loadFailed = true;
+      clear(elements.repositoryList);
+      elements.generated.textContent = "No snapshot";
+      showError(message);
+      showActivePanel(); renderViewStatus(null);
+    }
+  } finally {
+    elements.refresh.disabled = false;
+  }
 }
+
+/** One analysis request at a time: the refresh button, `r`, the palette and Retry share an in-flight load. */
+const load = singleFlight(loadSnapshot);
 
 elements.refresh.addEventListener("click", () => load(true));
-elements.repositoryFilter.addEventListener("change", () => { if (snapshot) renderView(); });
+elements.errorRetry.addEventListener("click", () => load(true));
+elements.repositoryFilter.addEventListener("change", () => { if (snapshot) { renderView(); syncUrl(); } });
 elements.scopeChip.addEventListener("click", () => selectRepository("all", { scroll: false }));
+elements.wordmark.addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  switchView("summary");
+});
 for (const button of windowButtons) button.addEventListener("click", () => { applyWindowPreset(button.dataset.windowPreset); if (button.dataset.windowPreset === "custom") elements.windowStart.focus(); });
-elements.windowStart.addEventListener("change", () => applyCustomWindow("start"));
-elements.windowEnd.addEventListener("change", () => applyCustomWindow("end"));
+for (const input of [elements.windowStart, elements.windowEnd]) {
+  input.addEventListener("change", applyCustomWindow);
+  input.addEventListener("blur", restoreWindowInputs);
+}
 for (const filter of providerFilters) filter.addEventListener("change", () => { if (snapshot) renderLine(dailyProviderSpend(activeView().dailySessions)); });
 for (const button of viewButtons) button.addEventListener("click", () => switchView(button.dataset.viewButton));
 for (const button of sortButtons) button.addEventListener("click", () => {
@@ -1234,12 +1488,13 @@ for (const button of sortButtons) button.addEventListener("click", () => {
 });
 elements.theme.addEventListener("click", toggleTheme);
 elements.density.addEventListener("click", toggleDensity);
+window.addEventListener("popstate", restoreUrlState);
 
 const macLike = /Mac|iPhone|iPad/.test(navigator.platform);
 for (const key of document.querySelectorAll(".key-command")) key.textContent = macLike ? "⌘" : "Ctrl ";
-const viewAlias = (view) => view === "models" ? "costs" : view;
-const urlView = viewAlias(urlParameters.get("view"));
-const storedView = urlView && viewOrder.includes(urlView) ? urlView : viewAlias(readPreference("session-analytics-view"));
+const initialUrl = parseUrlState(urlParameters.toString(), { views: viewOrder, presets: windowPresets, aliases: viewAliases });
+const storedPreference = readPreference("session-analytics-view");
+const storedView = initialUrl.view ?? viewAliases[storedPreference] ?? storedPreference;
 const resetExportMenu = installExportMenu(() => {
   if (elements.sync.dataset.state === "loading") return null;
   if (!snapshot || snapshot.kind === "shared") return snapshot;
@@ -1247,14 +1502,16 @@ const resetExportMenu = installExportMenu(() => {
   const { start, end } = selectedWindow();
   const providers = viewProviderFilters[view] ? [...viewProviderFilters[view]] : null;
   return filterSnapshot(snapshot, { repositoryId: selectedRepository()?.repository.id, start, end, providers });
+}, {
+  unavailableMessage: () => loadFailed && !snapshot ? "Nothing to export: the analysis failed. Use Retry in the banner." : "The snapshot is still loading.",
 });
-switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary");
-const urlTheme = urlParameters.get("theme");
+switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary", { history: false });
+// theme-boot.js already applied these before the first paint; app.js repeats the choice and owns the controls.
+// A URL value lasts for this visit only, and nothing is saved until the person changes it.
 const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-setTheme(["dark", "light"].includes(urlTheme) ? urlTheme : readPreference("session-analytics-theme") || systemTheme);
-const urlDensity = urlParameters.get("density");
-setDensity(["compact", "comfortable"].includes(urlDensity) ? urlDensity : readPreference("session-analytics-density") || "compact");
-setShortcuts((readPreference("session-analytics-shortcuts") || "on") !== "off");
-const urlWindow = urlParameters.get("window");
-setWindowPreset(windowPresets.includes(urlWindow) ? urlWindow : "30");
+setTheme(initialUrl.theme ?? (readPreference("session-analytics-theme") || systemTheme), { persist: false });
+setDensity(initialUrl.density ?? (readPreference("session-analytics-density") || "compact"), { persist: false });
+setShortcuts((readPreference("session-analytics-shortcuts") || "on") !== "off", { persist: false });
+setWindowPreset(initialUrl.window ?? "30");
+if (initialUrl.window === "custom") { elements.windowStart.value = initialUrl.start ?? ""; elements.windowEnd.value = initialUrl.end ?? ""; }
 void load(false);

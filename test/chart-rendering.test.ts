@@ -99,16 +99,33 @@ test("donut and daily lines draw every provider in legend order, using brand col
   assert.deepEqual(paths.map((path) => path.dataset["series"]), providers.toReversed());
   for (const path of paths) assert.equal(path.getAttribute("fill"), providerColor(path.dataset["series"]));
   const legend = document.querySelector("#provider-legend")!;
-  assert.deepEqual(legend.children.map((item) => item.dataset["series"]), providers.toReversed());
+  const entries = legend.querySelectorAll('[role="listitem"]');
+  assert.equal(legend.getAttribute("role"), "list");
+  assert.equal(entries.length, providers.length);
+  assert.deepEqual(entries.map((item) => item.dataset["series"]), providers.toReversed());
+  for (const entry of entries) {
+    assert.equal(entry.tagName, "div");
+    assert.equal(entry.getAttribute("tabindex"), null);
+    assert.equal(entry.listeners.has("focus"), false);
+    assert.equal(entry.listeners.has("blur"), false);
+  }
   assert.match(legend.textContent, /OpenCode/);
-  const first = legend.children[0]!; first.listeners.get("focus")!();
+  const first = entries[0]!; first.listeners.get("pointerenter")!();
   assert.equal(donut.getAttribute("data-highlight"), "unsupported");
   assert.equal(paths[0]!.getAttribute("data-series-active"), "true");
+  assert.equal(first.getAttribute("data-active"), "true");
+  assert.equal(first.getAttribute("aria-current"), null);
+  first.listeners.get("pointerleave")!();
+  assert.equal(donut.getAttribute("data-highlight"), null);
+  assert.equal(paths[0]!.getAttribute("data-series-active"), null);
+  assert.equal(first.getAttribute("data-active"), null);
   paths[1]!.listeners.get("pointerenter")!();
-  assert.equal(legend.children[1]!.getAttribute("aria-current"), "true");
+  assert.equal(entries[1]!.getAttribute("data-active"), "true");
+  assert.equal(paths[1]!.getAttribute("data-series-active"), "true");
   paths[1]!.listeners.get("pointerleave")!();
-  assert.equal(donut.getAttribute("data-highlight"), "unsupported", "pointer leave restores keyboard focus");
-  first.listeners.get("blur")!(); assert.equal(donut.getAttribute("data-highlight"), null);
+  assert.equal(donut.getAttribute("data-highlight"), null);
+  assert.equal(entries[1]!.getAttribute("data-active"), null);
+  assert.equal(paths[1]!.getAttribute("data-series-active"), null);
   const day = { name: "2026-10-01", ...Object.fromEntries(providers.map((provider, i) => [provider, i + 1])) };
   run(`renderLine(${JSON.stringify([day])})`);
   const chart = document.querySelector("#daily-spend")!;
@@ -118,7 +135,7 @@ test("donut and daily lines draw every provider in legend order, using brand col
     assert.equal(mark.getAttribute("style"), null);
     assert.equal(mark.style["--series-color"], providerColor(mark.dataset["series"]));
   }
-  assert.equal(chart.querySelectorAll(".chart-legend-item").length, 7);
+  assert.equal(chart.querySelectorAll('div.chart-legend-item[role="listitem"]').length, 7);
 });
 
 test("legend keeps safe wrapping text and order, drops only numeric zero and resets highlights", async () => {
@@ -132,8 +149,10 @@ test("legend keeps safe wrapping text and order, drops only numeric zero and res
     { id: "unknown", label: "No total", color: "grey", mark: "line" },
   ], { target });
   assert.equal(container.children.length, 2); assert.equal(container.querySelectorAll("img").length, 0);
-  assert.equal(container.children[0]!.getAttribute("aria-label"), `${label}: $2 (25.0%)`);
-  container.children[0]!.listeners.get("focus")!(); assert.equal(target.getAttribute("data-highlight"), "unsafe");
+  const entries = container.querySelectorAll('div[role="listitem"]');
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0]!.getAttribute("aria-label"), `${label}: $2 (25.0%)`);
+  entries[0]!.listeners.get("pointerenter")!(); assert.equal(target.getAttribute("data-highlight"), "unsafe");
   renderLegend(container, [], { target });
   assert.equal(target.getAttribute("data-highlight"), null); assert.equal(mark.getAttribute("data-series-active"), null);
 });
