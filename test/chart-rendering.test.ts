@@ -139,6 +139,14 @@ test("donut and daily lines draw every provider in legend order, using brand col
     assert.equal(mark.style["--series-color"], providerColor(mark.dataset["series"]));
   }
   assert.equal(chart.querySelectorAll('div.chart-legend-item[role="listitem"]').length, 7);
+  // Without a measured width the chart keeps its 900-unit fallback; at a phone's width it is drawn in CSS pixels with three date ticks.
+  assert.equal(chart.querySelector("svg")!.getAttribute("viewBox"), "0 0 900 272");
+  const days = ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"].map((name) => ({ ...day, name }));
+  Object.assign(chart, { clientWidth: 390 });
+  run(`renderLine(${JSON.stringify(days)})`);
+  const narrow = chart.querySelector("svg")!;
+  assert.equal(narrow.getAttribute("viewBox"), "0 0 390 220");
+  assert.deepEqual(narrow.querySelectorAll(".axis-label").filter((label) => label.getAttribute("y") === "208").map((label) => label.textContent), ["1 Oct", "4 Oct", "7 Oct"]);
 });
 
 test("legend keeps safe wrapping text and order, drops only numeric zero and resets highlights", async () => {

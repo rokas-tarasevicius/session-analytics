@@ -151,6 +151,8 @@ test("window math: days, preset starts, ticks, heat levels, and money labels", (
   assert.equal(shortMoney(7.5), "$7.50");
   assert.equal(shortMoney(76.2), "$76");
   assert.equal(shortMoney(999.6), "$1K");
+  assert.equal(shortMoney(9.994), "$9.99");
+  assert.equal(shortMoney(9.996), "$10");
   assert.equal(shortMoney(1900), "$1.9K");
   assert.equal(shortMoney(12345), "$12.3K");
   assert.equal(shortMoney(36), "$36");
@@ -236,4 +238,17 @@ test("chart sizing falls back in hidden views and redraws only meaningful width 
   const second = { clientWidth: 300 };
   immediate.redrawOnResize(second, () => latestDraws++);
   second.clientWidth = 332; callbacks[1]!(); assert.equal(latestDraws, 2, "works without requestAnimationFrame");
+
+  // A redraw replaces the focused chart; focus moves to the new chart's focus stop instead of falling to the page.
+  const page = { activeElement: null as unknown };
+  const focusing = runInNewContext(source.replaceAll("export ", "") + "\n({ redrawOnResize })", { ResizeObserver: observer, document: page });
+  const oldChart = {}, focusCalls: unknown[] = [];
+  const newChart = { focus: (options: unknown) => focusCalls.push(options) };
+  let current: unknown = oldChart;
+  const chart = { clientWidth: 400, contains: (node: unknown) => node === current, querySelector: (selector: string) => selector === '[tabindex="0"]' ? current : null };
+  focusing.redrawOnResize(chart, () => { current = newChart; });
+  page.activeElement = oldChart; chart.clientWidth = 440; callbacks[2]!();
+  assert.equal(JSON.stringify(focusCalls), JSON.stringify([{ preventScroll: true }]));
+  page.activeElement = null; chart.clientWidth = 480; callbacks[2]!();
+  assert.equal(focusCalls.length, 1, "focus elsewhere on the page is left alone");
 });

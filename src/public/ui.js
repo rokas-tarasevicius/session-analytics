@@ -13,7 +13,10 @@ export function chartWidth(container, fallback, min = 280) {
 
 const chartResizes = new WeakMap();
 
-/** Redraw after a width change of at least `step` pixels; one observer and the latest callback per container. */
+/**
+ * Redraw after a width change of at least `step` pixels; one observer and the latest callback per container.
+ * A redraw replaces the chart, so keyboard focus inside it moves to the new chart's focus stop.
+ */
 export function redrawOnResize(container, render, step = 32) {
   if (!container || typeof ResizeObserver !== "function") return;
   let state = chartResizes.get(container);
@@ -31,7 +34,9 @@ export function redrawOnResize(container, render, step = 32) {
       state.pending = false;
       if (!changed()) return;
       state.width = Math.floor(container.clientWidth);
+      const focused = typeof document !== "undefined" && container.contains?.(document.activeElement);
       state.render();
+      if (focused) container.querySelector?.('[tabindex="0"]')?.focus({ preventScroll: true });
     };
     state.pending = true;
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(redraw);

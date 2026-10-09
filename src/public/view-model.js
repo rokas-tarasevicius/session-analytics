@@ -14,7 +14,7 @@ export function shortMoney(value) {
   const amount = value || 0;
   if (amount === 0) return "$0";
   if (Math.round(amount) >= 1000) return `$${compact.format(Math.max(1000, amount))}`;
-  return `$${amount.toFixed(amount >= 10 ? 0 : 2)}`;
+  return `$${amount.toFixed(Math.round(amount * 100) >= 1000 ? 0 : 2)}`;
 }
 
 export function percent(value) {
