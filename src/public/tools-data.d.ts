@@ -4,12 +4,13 @@ import type { MetricCoverage } from "./providers.js";
 export type ToolChange = number | null | "new";
 export interface ToolRow {
   name: string; calls: number; share: number; sessions: number; repositories: number;
-  previousCalls: number | null; change: ToolChange;
+  providers: Array<{ provider: string; label: string; calls: number }>;
+  previousCalls: number | null; change: ToolChange; smallBaseline: boolean;
 }
 export interface ToolsView {
   coverage: MetricCoverage; totalCalls: number | null; eligibleSessions: number; distinctTools: number | null;
   callsPerSession: number | null; previousCoverage: MetricCoverage | null; previousCalls: number | null;
-  change: ToolChange; tools: ToolRow[];
+  change: ToolChange; smallBaseline: boolean; tools: ToolRow[];
 }
 export interface ToolProfile {
   name: string; coverage: MetricCoverage; calls: number | null; share: number | null; sessions: number | null;

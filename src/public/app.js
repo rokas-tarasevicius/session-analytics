@@ -3,8 +3,8 @@ import { renderLegend } from "./chart-legend.js";
 import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
-  coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
-  groupByRepository, heatLevel, isTextEntryTarget, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
+  activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
+  groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
   providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
   sortRepositories, sparklineSummary, summarize, tickScale, validDay, windowStartFor,
 } from "./view-model.js";
@@ -487,22 +487,38 @@ function renderActivity(view) {
   renderViewProviderFilters(elements.activityProviderFilters, "activity");
   elements.activityTooltip.hidden = true;
   const eligible = sessionsForProviders(view.sessions, "activity");
-  const sessions = eligible.filter((s) => s.transcript?.startTimeKnown !== false && s.evidence?.timing !== "file-mtime" && normalizeTimestamp(s.createdAt) !== null);
-  $("#activity-evidence").textContent = `${sessions.length}/${eligible.length} sessions have provider start timestamps. Unknown starts and file modification dates are excluded.`;
-  const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
-  // Weekday and hour in the snapshot timezone, the calendar every other view uses.
-  const clock = new Intl.DateTimeFormat("en-US", { timeZone: snapshotTimeZone(), weekday: "short", hour: "2-digit", hourCycle: "h23" });
-  const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  for (const session of sessions) {
-    const date = new Date(normalizeTimestamp(session.createdAt)); if (Number.isNaN(date.valueOf())) continue;
-    const parts = clock.formatToParts(date), weekday = weekdays.indexOf(parts.find(({ type }) => type === "weekday")?.value), hour = Number(parts.find(({ type }) => type === "hour")?.value);
-    if (weekday >= 0 && hour >= 0 && hour < 24) grid[weekday][hour] += 1;
+  const { grid, counted, maximum } = activityGrid(eligible, snapshotTimeZone());
+  $("#activity-evidence").textContent = `${counted}/${eligible.length} sessions have provider start timestamps. Unknown starts and file modification dates are excluded.`;
+  const status = document.querySelector?.("#activity-status");
+  const heatmapPanel = document.querySelector?.("#activity-heatmap-panel"), repositoriesPanel = document.querySelector?.("#activity-repositories-panel");
+  if (status) {
+    clear(status);
+    let empty = renderProviderEmptyState(status, "activity", eligible.length, view.sessions.length);
+    if (!empty && eligible.length && !counted) {
+      emptyState(status, `None of the ${integer.format(eligible.length)} selected sessions has a provider start timestamp; unknown starts and file modification times are not plotted.`, "No known session starts");
+      empty = true;
+    }
+    status.hidden = !empty;
+    if (heatmapPanel) heatmapPanel.hidden = empty;
+    if (repositoriesPanel) repositoriesPanel.hidden = empty;
+    if (empty) { clear(elements.activityHeatmap); clear(elements.activityRepositories); return; }
   }
-  const maximum = Math.max(1, ...grid.flat()); clear(elements.activityHeatmap);
+  const key = document.querySelector?.("#activity-heatmap-key");
+  if (key) {
+    clear(key);
+    key.append(node("span", "Session starts per hour", "heatmap-key-label"), node("span", "0"));
+    for (const { level, min, max } of heatLegend(maximum)) {
+      const swatch = node("i"); swatch.dataset.level = String(level);
+      swatch.setAttribute("title", min === max ? `${integer.format(min)} ${min === 1 ? "session" : "sessions"}` : `${integer.format(min)}–${integer.format(max)} sessions`);
+      swatch.setAttribute("aria-hidden", "true"); key.append(swatch);
+    }
+    key.append(node("span", integer.format(maximum)), node("span", `Colour scale from 0 to ${integer.format(maximum)} session starts per weekday-hour cell; darker means more.`, "sr-only"));
+  }
+  clear(elements.activityHeatmap);
   elements.activityHeatmap.setAttribute("role", "group");
-  elements.activityHeatmap.setAttribute("aria-label", `Session starts by local weekday and hour for ${integer.format(sessions.length)} selected sessions.`);
+  elements.activityHeatmap.setAttribute("aria-label", `Session starts by local weekday and hour for ${integer.format(counted)} selected sessions.`);
   elements.activityHeatmap.append(node("span", "", "heat-hour"));
-  for (let hour = 0; hour < 24; hour += 1) elements.activityHeatmap.append(node("span", hour % 4 === 0 ? String(hour).padStart(2, "0") : "", "heat-hour"));
+  for (let hour = 0; hour < 24; hour += 1) elements.activityHeatmap.append(node("span", String(hour).padStart(2, "0"), `heat-hour${hour % 4 ? " heat-hour-minor" : ""}`));
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   for (let day = 0; day < 7; day += 1) {
     elements.activityHeatmap.append(node("span", days[day].slice(0, 3), "heat-label"));
@@ -514,7 +530,7 @@ function renderActivity(view) {
       cell.dataset.hour = String(hour);
       cell.dataset.value = String(value);
       cell.dataset.focusKey = `heat:${day}:${hour}`;
-      cell.tabIndex = day === 0 && hour === 0 ? 0 : -1;
+      cell.setAttribute("tabindex", day === 0 && hour === 0 ? "0" : "-1");
       cell.setAttribute("role", "img");
       cell.setAttribute("aria-label", `${integer.format(value)} session${value === 1 ? "" : "s"}, ${days[day]}, ${hourLabel}`);
       const showTooltip = () => {
@@ -525,15 +541,16 @@ function renderActivity(view) {
         );
         elements.activityTooltip.hidden = false;
         elements.activityTooltip.dataset.side = "above";
-        const cellRect = cell.getBoundingClientRect(), tooltipRect = elements.activityTooltip.getBoundingClientRect();
+        const cellRect = cell.getBoundingClientRect?.(), tooltipRect = elements.activityTooltip.getBoundingClientRect?.();
+        if (!cellRect || !tooltipRect) return;
         let top = cellRect.top - tooltipRect.height - 10;
         if (top < 8) {
           top = cellRect.bottom + 10;
           elements.activityTooltip.dataset.side = "below";
         }
-        const left = Math.min(window.innerWidth - tooltipRect.width - 8, Math.max(8, cellRect.left + cellRect.width / 2 - tooltipRect.width / 2));
-        elements.activityTooltip.style.left = `${left}px`;
-        elements.activityTooltip.style.top = `${top}px`;
+        const left = Math.min((globalThis.innerWidth ?? globalThis.window?.innerWidth ?? 1440) - tooltipRect.width - 8, Math.max(8, cellRect.left + cellRect.width / 2 - tooltipRect.width / 2));
+        elements.activityTooltip.style.setProperty("left", `${left}px`);
+        elements.activityTooltip.style.setProperty("top", `${top}px`);
         elements.activityTooltip.style.setProperty("--tooltip-arrow-left", `${Math.min(tooltipRect.width - 10, Math.max(10, cellRect.left + cellRect.width / 2 - left))}px`);
       };
       const hideTooltip = () => { elements.activityTooltip.hidden = true; };
@@ -543,16 +560,20 @@ function renderActivity(view) {
       cell.addEventListener("blur", hideTooltip);
       cell.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && !elements.activityTooltip.hidden) { event.preventDefault(); event.stopPropagation(); hideTooltip(); return; }
-        const movement = { ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0] }[event.key];
+        const mobile = globalThis.matchMedia?.("(max-width: 760px)")?.matches;
+        const movement = (mobile
+          ? { ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1] }
+          : { ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0] })[event.key];
         if (!movement) return;
         const nextDay = day + movement[0], nextHour = hour + movement[1];
-        const target = elements.activityHeatmap.querySelector(`[data-day="${nextDay}"][data-hour="${nextHour}"]`);
+        const target = elements.activityHeatmap.querySelector?.(`[data-day="${nextDay}"][data-hour="${nextHour}"]`);
         if (!target) return;
-        event.preventDefault(); cell.tabIndex = -1; target.tabIndex = 0; target.focus();
+        event.preventDefault(); cell.setAttribute("tabindex", "-1"); target.setAttribute("tabindex", "0"); target.focus?.();
       });
       elements.activityHeatmap.append(cell);
     }
   }
+  const sessions = eligible.filter((s) => s.transcript?.startTimeKnown !== false && s.evidence?.timing !== "file-mtime" && normalizeTimestamp(s.createdAt) !== null);
   const repositories = view.repositories.map(({ repository }) => ({
     name: repository.name,
     value: sessions.filter(({ repositoryId }) => repositoryId === repository.id).length,
@@ -669,11 +690,14 @@ function renderCosts(view) {
 
 function renderTools(view) {
   const sessions = sessionsForProviders(view.sessions, "tools");
+  clear(elements.toolsView);
+  if (renderProviderEmptyState(elements.toolsView, "tools", sessions.length, view.sessions.length)) return;
   const previous = windowPreset === "all" ? null : previousPeriod({ end: elements.windowEnd.value, min: elements.windowStart.min, start: elements.windowStart.value });
   const previousSessions = previous ? sessionsForProviders(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay, snapshotTimeZone()), "tools") : null;
   const days = windowPreset === "all" ? toolsDays(sessions, snapshotTimeZone()) : windowDays();
   toolsSelectedName = renderToolsView(elements.toolsView, {
     sessions, previousSessions, days, timeZone: snapshotTimeZone(), selectedTool: toolsSelectedName, expanded: toolsExpanded, repositories: view.repositories,
+    announce: (text) => { elements.announcer.textContent = text; },
     onSelect: (name) => { toolsSelectedName = name; renderActiveAnalyticsView(view); },
     onToggle: () => { toolsExpanded = !toolsExpanded; renderActiveAnalyticsView(view); },
   });
@@ -702,7 +726,7 @@ function renderActiveAnalyticsView(view) {
   if (name === "activity") renderActivity(view);
   if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, { ...velocityContext(), providers: snapshotProviders() });
   if (name === "costs") renderCosts(view);
-  if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.scopeSessions, velocityContext());
+  if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.scopeSessions, velocityContext(), { onRefresh: () => load(true) });
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
     renderTools(view);
@@ -1070,6 +1094,28 @@ function statusAction(label, run) {
   const button = node("button", label, "button"); button.type = "button";
   button.addEventListener("click", run);
   return button;
+}
+
+/** Provider-filter emptiness is separate from the shared date-window status. */
+function renderProviderEmptyState(container, scope, eligibleCount, windowCount) {
+  const providers = snapshotProviders(), selected = providers.filter((provider) => viewProviderFilters[scope].has(provider));
+  if (selected.length && eligibleCount) return false;
+  const names = new Intl.ListFormat("en", { style: "long", type: "disjunction" }).format(selected.map((provider) => providerLabels[provider] ?? provider));
+  const message = !selected.length ? `Every provider is switched off for this view, so there are no ${scope === "tools" ? "tool calls" : "session starts"} to show.`
+    : `None of the ${integer.format(windowCount)} sessions in this window came from ${names}.`;
+  const box = emptyState(container, message, selected.length ? "No sessions from the selected providers" : "No providers selected");
+  if (!selected.length || selected.length < providers.length) {
+    const actions = node("div", null, "status-actions");
+    const button = statusAction("Select all providers", () => {
+      viewProviderFilters[scope] = new Set(snapshotProviders());
+      renderActiveAnalyticsView(activeView());
+      // The button is gone after the re-render: keep keyboard focus in the view, on its first provider chip.
+      document.querySelector?.(`[data-focus-key="filter:${scope}:${snapshotProviders()[0]}"]`)?.focus?.({ preventScroll: true });
+    });
+    button.dataset.focusKey = `${scope}:select-all-providers`;
+    actions.append(button); box.append(actions);
+  }
+  return true;
 }
 
 /** The view-level status in place of the panels: no snapshot, or nothing in the selected window. */

@@ -190,7 +190,7 @@
                 <div class="bar-list chart-slot" id="model-spend"></div>
               </article>
               <article class="panel span-4">
-                <header><div><h2>Tool families</h2></div></header>
+                <header><div><h2>Top tools</h2></div></header>
                 <div class="bar-list chart-slot" id="tool-calls"></div>
               </article>
               <article class="panel span-4">
@@ -217,8 +217,9 @@
 
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
             <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
-            <article class="panel activity-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
-            <article class="panel activity-repositories"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
+            <div id="activity-status" class="activity-status" hidden></div>
+            <article class="panel activity-panel" id="activity-heatmap-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key" id="activity-heatmap-key"></div></article>
+            <article class="panel activity-repositories" id="activity-repositories-panel"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">

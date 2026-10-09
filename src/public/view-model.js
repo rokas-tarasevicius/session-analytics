@@ -332,6 +332,35 @@ export function heatLevel(value, maximum) {
   return value === 0 ? 0 : Math.max(1, Math.ceil((Math.log1p(value) / Math.log1p(Math.max(1, maximum))) * 7));
 }
 
+/** Known provider starts by local weekday (Monday first) and hour; file times never count. */
+export function activityGrid(sessions, timeZone = "UTC") {
+  const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const clock = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "2-digit", hourCycle: "h23" });
+  const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  let counted = 0;
+  for (const session of sessions) {
+    if (session.transcript?.startTimeKnown === false || session.evidence?.timing === "file-mtime") continue;
+    const start = normalizeTimestamp(session.createdAt);
+    if (start === null) continue;
+    const parts = clock.formatToParts(new Date(start));
+    const day = weekdays.indexOf(parts.find(({ type }) => type === "weekday")?.value);
+    const hour = Number(parts.find(({ type }) => type === "hour")?.value);
+    if (day >= 0 && hour >= 0 && hour < 24) { grid[day][hour]++; counted++; }
+  }
+  return { grid, counted, maximum: Math.max(0, ...grid.flat()) };
+}
+
+/** Only colour levels reached by integer counts appear, with their inclusive count ranges. */
+export function heatLegend(maximum) {
+  const entries = [{ level: 0, min: 0, max: 0 }];
+  for (let value = 1; value <= maximum; value++) {
+    const level = heatLevel(value, maximum), last = entries.at(-1);
+    if (last.level === level) last.max = value;
+    else entries.push({ level, min: value, max: value });
+  }
+  return entries;
+}
+
 export function tickScale(maximum) {
   const roughTick = Math.max(0.001, maximum) / 4;
   const tickMagnitude = 10 ** Math.floor(Math.log10(roughTick));

@@ -1,11 +1,56 @@
 import { modelProvider, providerKey } from "./chart-colors.js";
 import { projectModelId } from "./model-id.js";
-import { providerIds } from "./providers.js";
+import { providerIds, providerLabels } from "./providers.js";
 import { calendarDays, ledgerCells } from "./velocity-data.js";
 import { ledgerMoney, pricedShare } from "./view-model.js";
 
 const latest = (entries) => [...entries].sort((a, b) => (b.snapshotDate ?? "").localeCompare(a.snapshotDate ?? ""))[0];
 const rank = (provider) => { const index = providerIds.indexOf(provider); return index < 0 ? providerIds.length : index; };
+
+/** Group counts consistently across pricing cards, KPIs and details. */
+export const integer = (value) => value.toLocaleString("en-GB");
+/** USD values keep two decimals; rates may show up to four. */
+export const money = (value, decimals = 2) => `$${value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: decimals })}`;
+/** Coverage arrives floored to 0.1%; remove float noise before displaying whole percentages. */
+export function sharePercent(share, digits = 1) {
+  const tenths = Math.round(share * 1000) / 10;
+  return digits ? `${tenths.toFixed(1)}%` : `${Math.floor(tenths)}%`;
+}
+
+/** Human snapshot age, rounded down; unavailable ages have no label. */
+export function ageLabel(days) {
+  if (days === null || !Number.isFinite(days)) return null;
+  if (days < 1 / 24) return "under an hour";
+  if (days < 1) {
+    const hours = Math.max(1, Math.floor(days * 24));
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  return days < 2 ? "1 day" : `${Math.floor(days)} days`;
+}
+
+/** Card copy and shares of the selected cards' totals; does not change accounting or coverage. */
+export function pricingCardView(card, data) {
+  const usage = card.usage, provider = providerLabels[card.provider] ?? "Unknown provider";
+  const prices = card.rate ? [`${money(card.rate.inputPerMillion, 4)} in`, `${money(card.rate.outputPerMillion, 4)} out / 1M`] : null;
+  const unpriced = usage && !usage.pricedTokens && !usage.valueUsd;
+  const value = usage ? unpriced ? "—" : money(usage.valueUsd) : null;
+  let share = null;
+  if (usage) {
+    const fraction = data.api > 0 ? usage.valueUsd / data.api : data.cardTokens > 0 ? usage.tokens / data.cardTokens : 0;
+    const value = Math.max(0, Math.min(1, fraction));
+    const text = value > 0 && value < 0.005 ? "<1%" : `${Math.round(value * 100)}%`;
+    const metric = data.api > 0 ? "API-equivalent value" : "observed tokens";
+    share = { value, text, label: `of ${metric}`, aria: `${text} of the ${metric} on these cards` };
+  }
+  return { prices, value,
+    caption: !usage ? "Not used in this selection" : unpriced ? "No usage value: unpriced" : "API-equivalent value · activity-dated",
+    detail: usage ? `${integer(usage.tokens)} tokens · ${integer(usage.calls)} calls` : null,
+    share,
+    badge: !usage ? null : usage.coverage !== null && usage.coverage < 1 ? `${sharePercent(usage.coverage, 0)} of tokens priced`
+      : !card.priced ? "Incomplete rates" : null,
+    ariaLabel: `${card.model}, ${provider}: ${!usage ? "Not used in this selection" : unpriced ? "no usage value (unpriced)" : `${value} API-equivalent value`}, ${card.rate
+      ? `input ${money(card.rate.inputPerMillion, 4)} / output ${money(card.rate.outputPerMillion, 4)} per 1M tokens` : "No matching rate"}. Show pricing details` };
+}
 
 /**
  * Rate evidence behind each `${provider}:${model}` with ledger activity in the window: the distinct
@@ -68,10 +113,9 @@ export function pricingModelCards(rateCard, sessions, { start, end } = {}) {
     return { id: `${provider}:${entry.model}`, model: entry.model, used: false, priced: true, provider, vendor: provider,
       rate: entry.rate ?? null, source: entry.source ?? null, current: entry.provenance ?? null, provenance: [], usage: null };
   }).sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
-  const maxValue = Math.max(0, ...used.map(({ usage }) => usage.valueUsd));
-  const maxTokens = Math.max(0, ...used.map(({ usage }) => usage.tokens));
+  const cardTokens = used.reduce((sum, { usage }) => sum + usage.tokens, 0);
   return { used, unused, tokens: all.evidence.eligible, pricedTokens: all.evidence.known, coverage: pricedShare(all.evidence),
-    total: all.total, api: ledger.total, reported: all.reported, maxValue, maxTokens };
+    total: all.total, api: ledger.total, reported: all.reported, cardTokens };
 }
 
 /** Rows of [label, USD per 1M or text] for a rate; omits classes the source does not publish. */

@@ -57,7 +57,7 @@ async function withDocument(run: (root: Node) => void | Promise<void>) {
 }
 
 const { renderPricingPanel, renderModelDetails } = await import(new URL("../src/public/pricing.js", import.meta.url).href);
-const { pricingModelCards } = await import(new URL("../src/public/pricing-data.js", import.meta.url).href);
+const { ageLabel, pricingCardView, pricingModelCards } = await import(new URL("../src/public/pricing-data.js", import.meta.url).href);
 const historical = { source: "models.dev", kind: "api", snapshotDate: "2026-01-01T00:00:00.000Z",
   rateModel: "gpt-fixture", match: "exact", temporal: "oldest", assumptions: [] as string[] };
 const rate = { provider: "openai", inputPerMillion: 5, cachedInputPerMillion: 0.075, outputPerMillion: 30,
@@ -105,20 +105,29 @@ test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selecti
     const panel = new Node("div"); root.append(panel);
     renderPricingPanel(panel, rateCard, sessions, window);
     const rendered = panel.text();
-    assert.match(rendered, /8\.5d/); assert.match(rendered, /75\.0%/); assert.match(rendered, /300 \/ 400 eligible tokens · activity-dated, as on Costs/);
+    assert.match(rendered, /8 days old/); assert.match(rendered, /75\.0%/); assert.match(rendered, /300 \/ 400 eligible tokens · activity-dated, as on Costs/);
     assert.match(rendered, /Cards add up to \$410\.57 API-equivalent value\. With \$0\.00 provider-reported value, which has no rate card, that is the \$410\.57 usage value/);
     assert.match(rendered, /API-equivalent value is not an invoice/);
-    assert.match(rendered, /Offline · cached prices · reviewed card effective 2026-01-01/);
+    assert.match(rendered, /Cached prices only; no public price requests · reviewed card effective 1 Jan 2026/);
     assert.match(rendered, /Cards are per provider and model, ordered by usage value for these dates, then observed tokens/);
     assert.match(rendered, /Provider-reported usage \(for example Cursor\) does not use a rate card and is not shown here/);
     assert.doesNotMatch(rendered, /cursor-excluded|private-session-id|\/private\/session.json|private transcript text/);
     assert.equal(panel.all((node) => node.attributes.role === "status").length, 1);
+    assert.deepEqual(byClass(panel, "kpi-label").map((node) => node.textContent), ["Pricing coverage", "models.dev prices", "Price updates"]);
+    assert.equal(byClass(panel, "kpi")[0]!.className, "kpi accent");
+    assert.match(byClass(panel, "kpi-note")[1]!.textContent, /20 models · stale or missing · fetched /);
+    const reconciliation = byClass(panel, "pricing-reconciliation")[0]!;
+    assert.equal(reconciliation.tag, "p"); assert.equal(reconciliation.className, "chart-note pricing-reconciliation");
+    assert.equal(reconciliation.textContent, "Cards add up to $410.57 API-equivalent value. With $0.00 provider-reported value, which has no rate card, that is the $410.57 usage value for these dates on Summary and Costs.");
+    const content = byClass(panel, "pricing-content")[0]!;
+    assert.equal(content.children[content.children.indexOf(byClass(panel, "kpi-grid")[0]!) + 1], reconciliation);
+    assert.doesNotMatch(byClass(panel, "evidence")[0]!.text(), /Cards add up to/);
     const link = panel.all((node) => node.tag === "a")[0]!;
     assert.equal(link.textContent, "Public price list ↗"); assert.equal(link.href, "https://models.dev/api.json");
     assert.equal(link.target, "_blank"); assert.equal(link.rel, "noreferrer");
     const [button, unknown] = modelButtons(panel);
     assert.ok(button); assert.ok(unknown);
-    assert.match(button.text(), /\$5\.00 in · \$30\.00 out \/ 1M/); assert.match(button.text(), /\$410\.57/);
+    assert.match(button.text().replace(/\s+/g, " "), /\$5\.00 in · \$30\.00 out \/ 1M/); assert.match(button.text(), /\$410\.57/);
     assert.match(button.text(), /300 tokens · 3 calls/);
     assert.match(button.attributes["aria-label"]!, /gpt-fixture, Codex: \$410\.57 API-equivalent value, input \$5\.00 \/ output \$30\.00 per 1M tokens\. Show pricing details/);
     assert.equal(button.attributes.type, "button"); assert.equal(button.attributes["aria-haspopup"], "dialog");
@@ -143,24 +152,26 @@ test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selecti
 test("pricingModelCards orders by usage value, then tokens, calls and model ID", () => {
   const data = pricingModelCards(rateCard, rankingSessions, window);
   assert.deepEqual(data.used.map((card: { model: string }) => card.model), ["gpt-z", "gpt-b", "gpt-a"]);
-  assert.equal(data.maxValue, 10); assert.equal(data.maxTokens, 500);
+  assert.equal(data.cardTokens, 800);
+  assert.equal("maxValue" in data, false); assert.equal("maxTokens" in data, false);
   const tied = pricingModelCards(rateCard, [ledgered({ ...rankingSessions[0]!, models: [
     usage("gpt-z", 10, 100, 1), usage("gpt-b", 10, 100, 2), usage("gpt-a", 10, 100, 2),
   ] })], window);
   assert.deepEqual(tied.used.map((card: { model: string }) => card.model), ["gpt-a", "gpt-b", "gpt-z"]);
 });
 
-test("Model cards retain usage ordering and scale bars by value, falling back to observed tokens", async () => {
+test("Model cards retain usage ordering and show shares of total value, falling back to total observed tokens", async () => {
   await withDocument((root) => {
     renderPricingPanel(root, rateCard, rankingSessions, window);
     assert.deepEqual(modelButtons(root).map((button) => button.dataset.focusKey), ["pricing:model:codex:gpt-z", "pricing:model:codex:gpt-b", "pricing:model:codex:gpt-a"]);
     let bars = byClass(root, "pricing-bar");
-    assert.deepEqual(bars.map((bar) => bar.children[0]!.properties.width), ["100%", "100%", "40%"]);
-    assert.equal(bars[2]!.attributes.role, "img"); assert.equal(bars[2]!.attributes["aria-label"], "40% of the top model's usage value");
+    assert.deepEqual(bars.map((bar) => bar.children[0]!.properties.width), [`${10 / 24 * 100}%`, `${10 / 24 * 100}%`, `${4 / 24 * 100}%`]);
+    assert.equal(bars[2]!.attributes.role, "img"); assert.equal(bars[2]!.attributes["aria-label"], "17% of the API-equivalent value on these cards");
+    assert.equal(byClass(root, "pricing-share-label")[2]!.text().replace(/\s+/g, " ").trim(), "17% of API-equivalent value");
     renderPricingPanel(root, rateCard, [ledgered({ ...rankingSessions[0]!, models: [usage("gpt-a", 0, 50), usage("gpt-b", 0, 100)] })], window);
     bars = byClass(root, "pricing-bar");
-    assert.deepEqual(bars.map((bar) => bar.children[0]!.properties.width), ["100%", "50%"]);
-    assert.equal(bars[1]!.attributes["aria-label"], "50% of the top model's observed tokens");
+    assert.deepEqual(bars.map((bar) => bar.children[0]!.properties.width), [`${100 / 150 * 100}%`, `${50 / 150 * 100}%`]);
+    assert.equal(bars[1]!.attributes["aria-label"], "33% of the observed tokens on these cards");
     renderPricingPanel(root, rateCard, [ledgered({ ...rankingSessions[0]!, models: [
       { ...usage("gpt-a", 0, 100), pricingCoverage: { eligibleTokens: 100, pricedTokens: 82 } },
     ] })], window);
@@ -227,6 +238,9 @@ test("Unused models stay expanded across renders and the fallback dialog restore
     assert.equal(toggle.textContent, "Hide unused models"); assert.equal(toggle.attributes["aria-expanded"], "true");
     const unused = byClass(root, "pricing-card-unused")[0]!;
     assert.match(unused.text(), /Not used in this selection/); assert.equal(byClass(unused, "pricing-bar").length, 0);
+    assert.deepEqual(unused.children.map((node) => node.className), ["pricing-provider", "pricing-model", "pricing-price", "pricing-caption"]);
+    assert.equal(unused.children[3]!.tag, "span");
+    assert.equal(byClass(root, "pricing-grid-unused")[0]!.attributes.role, "list");
     assert.equal(unused.properties["--card-accent"], "var(--provider-claude)");
     unused.dispatch("click");
     const dialog = root.all((node) => node.tag === "dialog")[0]!;
@@ -251,6 +265,131 @@ test("Unused models stay expanded across renders and the fallback dialog restore
     toggleButton(root).dispatch("click");
     assert.equal(toggleButton(root).textContent, "Show 2 unused models");
     assert.equal(root.all((node) => node.attributes.id === "pricing-unused-models")[0]!.hidden, true);
+  });
+});
+
+test("ageLabel rounds snapshot ages down at hour and day boundaries", () => {
+  for (const [days, label] of [
+    [null, null], [NaN, null], [Infinity, null], [-Infinity, null], [0, "under an hour"], [0.01, "under an hour"],
+    [1 / 24, "1 hour"], [0.05, "1 hour"], [0.5, "12 hours"], [0.99, "23 hours"],
+    [1, "1 day"], [1.99, "1 day"], [2, "2 days"], [8.5, "8 days"],
+  ]) assert.equal(ageLabel(days), label);
+});
+
+test("pricingCardView formats rates, values, counts and total shares without changing accessible names", () => {
+  const { used } = pricingModelCards(rateCard, sessions, window);
+  const card = { ...used[0], usage: { ...used[0].usage, valueUsd: 1234.56, tokens: 214282360, calls: 2435 } };
+  const view = pricingCardView(card, { api: 2469.12, cardTokens: 428564720 });
+  assert.deepEqual(view.prices, ["$5.00 in", "$30.00 out / 1M"]);
+  assert.equal(view.value, "$1,234.56"); assert.equal(view.caption, "API-equivalent value · activity-dated");
+  assert.equal(view.detail, "214,282,360 tokens · 2,435 calls");
+  assert.equal(view.badge, null);
+  assert.deepEqual(view.share, { value: 0.5, text: "50%", label: "of API-equivalent value", aria: "50% of the API-equivalent value on these cards" });
+  assert.equal(view.ariaLabel, "gpt-fixture, Codex: $1,234.56 API-equivalent value, input $5.00 / output $30.00 per 1M tokens. Show pricing details");
+  assert.deepEqual(pricingCardView(card, { api: 0, cardTokens: 428564720 }).share,
+    { value: 0.5, text: "50%", label: "of observed tokens", aria: "50% of the observed tokens on these cards" });
+  const tiny = { ...card, usage: { ...card.usage, valueUsd: 0.004, tokens: 1 } };
+  assert.equal(pricingCardView(tiny, { api: 1, cardTokens: 1 }).share.text, "<1%");
+  assert.equal(pricingCardView(tiny, { api: 0, cardTokens: 1000 }).share.text, "<1%");
+  assert.equal(pricingCardView({ ...tiny, usage: { ...tiny.usage, valueUsd: 0.005 } }, { api: 1, cardTokens: 1 }).share.text, "1%");
+  assert.deepEqual(pricingCardView(card, { api: 0, cardTokens: 0 }).share,
+    { value: 0, text: "0%", label: "of observed tokens", aria: "0% of the observed tokens on these cards" });
+  assert.equal(pricingCardView(card, { api: 1, cardTokens: 1 }).share.value, 1);
+  assert.equal(pricingCardView({ ...tiny, usage: { ...tiny.usage, valueUsd: -1 } }, { api: 1, cardTokens: 1 }).share.value, 0);
+  assert.deepEqual(pricingCardView({ ...card, rate: { ...rate, inputPerMillion: 0.1234 } }, { api: 1, cardTokens: 1 }).prices,
+    ["$0.1234 in", "$30.00 out / 1M"]);
+});
+
+test("pricingCardView preserves incomplete coverage, unavailable rates and unused states", () => {
+  const data = pricingModelCards(rateCard, sessions, window), card = data.used[0];
+  for (const [coverage, badge] of [[0.989, "98% of tokens priced"], [0.29, "29% of tokens priced"], [0, "0% of tokens priced"]]) {
+    assert.equal(pricingCardView({ ...card, usage: { ...card.usage, coverage } }, data).badge, badge);
+  }
+  for (const coverage of [1, null]) {
+    assert.equal(pricingCardView({ ...card, priced: false, usage: { ...card.usage, coverage } }, data).badge, "Incomplete rates");
+  }
+  const missing = pricingCardView(data.used[1], data);
+  assert.equal(missing.prices, null); assert.equal(missing.value, "—"); assert.equal(missing.caption, "No usage value: unpriced");
+  assert.equal(missing.ariaLabel, "unknown, Codex: no usage value (unpriced), No matching rate. Show pricing details");
+  const historicalOnly = pricingCardView({ ...card, rate: null }, data);
+  assert.equal(historicalOnly.prices, null); assert.equal(historicalOnly.value, "$410.57");
+  assert.equal(historicalOnly.caption, "API-equivalent value · activity-dated");
+  assert.equal(historicalOnly.ariaLabel, "gpt-fixture, Codex: $410.57 API-equivalent value, No matching rate. Show pricing details");
+  const zeroPriced = pricingCardView({ ...card, usage: { ...card.usage, valueUsd: 0 } }, data);
+  assert.equal(zeroPriced.value, "$0.00"); assert.equal(zeroPriced.caption, "API-equivalent value · activity-dated");
+  const unused = pricingCardView(data.unused[0], data);
+  assert.equal(unused.value, null); assert.equal(unused.share, null); assert.equal(unused.detail, null); assert.equal(unused.badge, null);
+  assert.equal(unused.caption, "Not used in this selection");
+  assert.equal(unused.ariaLabel, "claude-unused, Claude: Not used in this selection, input $5.00 / output $30.00 per 1M tokens. Show pricing details");
+});
+
+test("Every used card keeps eight aligned rows and an accessible share with a reserved badge slot", async () => {
+  await withDocument((root) => {
+    renderPricingPanel(root, rateCard, sessions, window);
+    for (const button of modelButtons(root)) {
+      assert.deepEqual(button.children.map((node) => node.className), ["pricing-provider", "pricing-model", "pricing-price",
+        "pricing-value", "pricing-caption", "pricing-detail", "pricing-share", "pricing-badge-slot"]);
+      assert.deepEqual(button.children.map((node) => node.tag), ["span", "span", "span", "strong", "span", "small", "span", "span"]);
+      assert.deepEqual(byClass(button, "pricing-share")[0]!.children.map((node) => node.className), ["pricing-share-label", "pricing-bar"]);
+    }
+    const [complete, missing] = modelButtons(root);
+    const empty = byClass(complete!, "pricing-badge-slot")[0]!;
+    assert.equal(empty.children.length, 0); assert.equal(empty.attributes["aria-hidden"], "true");
+    const badge = byClass(missing!, "pricing-badge-slot")[0]!;
+    assert.equal(badge.attributes["aria-hidden"], undefined); assert.equal(badge.children[0]!.className, "pricing-badge");
+    assert.equal(badge.children[0]!.tag, "small");
+    const price = byClass(complete!, "pricing-price")[0]!;
+    assert.deepEqual(price.children.map((node) => node.textContent), ["$5.00 in", "·", "$30.00 out / 1M"]);
+    assert.equal(price.children[1]!.className, "pricing-sep"); assert.equal(price.children[1]!.attributes["aria-hidden"], "true");
+    assert.deepEqual(byClass(missing!, "pricing-price")[0]!.children.map((node) => node.textContent), ["No matching rate"]);
+  });
+});
+
+test("Stale online pricing offers one refresh action; offline, pinned and warning-only notices do not", async () => {
+  await withDocument((root) => {
+    let refreshes = 0;
+    const options = { onRefresh: () => { refreshes++; } }, online = { ...rateCard, pricing: { ...rateCard.pricing, offline: false } };
+    renderPricingPanel(root, online, sessions, window, options);
+    const notice = byClass(root, "notice")[0]!;
+    assert.equal(notice.tag, "aside"); assert.equal(notice.attributes.role, "status");
+    assert.equal(root.all((node) => node.attributes.role === "status").length, 1);
+    assert.match(notice.text(), /Pricing evidence needs a refresh/);
+    assert.match(notice.text(), /prices fetched in the background since the dashboard started, or run session-analytics rates update/);
+    const buttons = notice.all((node) => node.tag === "button");
+    assert.equal(buttons.length, 1); assert.equal(buttons[0]!.textContent, "Refresh snapshot");
+    assert.ok(buttons[0]!.className.split(" ").includes("button")); assert.equal(buttons[0]!.attributes.type, "button");
+    assert.equal(buttons[0]!.dataset.focusKey, "pricing:refresh");
+    buttons[0]!.dispatch("click"); assert.equal(refreshes, 1);
+    assert.match(root.text(), /Automatic/); assert.match(root.text(), /Checked after the dashboard starts · reviewed card effective 1 Jan 2026/);
+    renderPricingPanel(root, online, sessions, window);
+    assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
+    renderPricingPanel(root, rateCard, sessions, window, options);
+    assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
+    assert.match(byClass(root, "notice")[0]!.text(), /Offline mode prevents public price requests\. Run session-analytics rates update with offline mode off, then refresh\./);
+    renderPricingPanel(root, { ...online, pricing: { ...online.pricing, policy: "reviewed-only" } }, sessions, window, options);
+    assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
+    assert.deepEqual(byClass(root, "kpi-label").map((node) => node.textContent), ["Pricing coverage", "Price updates"]);
+    assert.match(root.text(), /Pinned/); assert.match(root.text(), /Reviewed card only; public sources bypassed · reviewed card effective 1 Jan 2026/);
+    renderPricingPanel(root, { ...online, pricing: { ...online.pricing, stale: false, warnings: ["rejected-models"] } }, sessions, window, options);
+    assert.match(byClass(root, "notice")[0]!.text(), /Pricing evidence has warnings/);
+    assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
+    assert.equal(refreshes, 1);
+  });
+});
+
+test("Snapshot KPIs show human ages, absent snapshots and UTC reviewed dates", async () => {
+  await withDocument((root) => {
+    for (const [ageDays, label] of [[0.01, "Under an hour old"], [0.5, "12 hours old"], [1, "1 day old"], [2, "2 days old"], [null, "—"]]) {
+      renderPricingPanel(root, { ...rateCard, effectiveDate: "2026-10-02T00:00:00Z", pricing: { ...rateCard.pricing,
+        sources: [{ ...rateCard.pricing.sources[0], ageDays, fetchedAt: ageDays === null ? null : "2026-01-01T00:00:00Z" }] } }, sessions, window);
+      assert.equal(byClass(root, "pricing-freshness")[0]!.children[1]!.textContent, label);
+      assert.match(root.text(), /reviewed card effective 2 Oct 2026/);
+      const freshness = byClass(root, "pricing-freshness")[0]!.text();
+      if (ageDays === null) { assert.match(freshness, /No cached snapshot/); assert.match(freshness, /stale or missing · not cached/); assert.doesNotMatch(freshness, /fetched/); }
+      else assert.match(freshness, /· fetched \d/);
+    }
+    renderPricingPanel(root, { ...rateCard, effectiveDate: "undated" }, sessions, window);
+    assert.match(root.text(), /reviewed card effective undated/);
   });
 });
 

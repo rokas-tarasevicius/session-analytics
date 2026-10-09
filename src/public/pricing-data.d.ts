@@ -14,7 +14,17 @@ export interface PricingModelCard {
 }
 export function pricingModelCards(rateCard: RepositoryAnalytics["rateCard"], sessions: SessionAnalytics[], window?: { start?: string; end?: string }): {
   used: PricingModelCard[]; unused: PricingModelCard[]; tokens: number; pricedTokens: number; coverage: number | null;
-  total: number; api: number; reported: number; maxValue: number; maxTokens: number;
+  total: number; api: number; reported: number; cardTokens: number;
 };
+export interface PricingCardView {
+  prices: string[] | null; value: string | null; caption: string; detail: string | null;
+  share: { value: number; text: string; label: string; aria: string } | null;
+  badge: string | null; ariaLabel: string;
+}
+export function pricingCardView(card: PricingModelCard, data: { api: number; cardTokens: number }): PricingCardView;
+export function ageLabel(days: number | null): string | null;
+export function integer(value: number): string;
+export function money(value: number, decimals?: number): string;
+export function sharePercent(share: number, digits?: number): string;
 export function rateRows(rate: PublicModelRate | null): Array<[string, number]>;
 export function contextRows(rate: PublicModelRate | null): Array<[string, number, number]>;
