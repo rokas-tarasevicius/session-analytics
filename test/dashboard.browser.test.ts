@@ -430,6 +430,27 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
       assert.equal(await browser.evaluate(`document.querySelector('[data-view-panel="costs"]').hidden`), false);
     }
 
+    // Every view contains its overflow, including comfortable density and both themes.
+    for (const theme of ["light", "dark"]) for (const density of ["compact", "comfortable"]) {
+      await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.dataset.density = '${density}'`);
+      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) for (const width of [390, 1024]) {
+        await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width });
+        await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
+        await delay(150);
+        assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= innerWidth`), true, `${view} at ${width}px (${theme}, ${density})`);
+      }
+      await browser.evaluate(`document.querySelector('[data-window-preset="custom"]').click()`);
+      await delay(150);
+      assert.equal(await browser.evaluate(`(() => {
+        const dates = document.querySelector('#date-range').getBoundingClientRect();
+        const status = document.querySelector('#sync-context').getBoundingClientRect();
+        return dates.right <= status.left || dates.left >= status.right || dates.bottom <= status.top || dates.top >= status.bottom;
+      })()`), true, `Custom window and status do not overlap at 1024px (${theme}, ${density})`);
+      await browser.evaluate(`document.querySelector('[data-window-preset="all"]').click()`);
+    }
+    await browser.evaluate(`document.documentElement.dataset.theme = 'light'; document.documentElement.dataset.density = 'compact'`);
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
+
     // Icon rail keeps every view name in the accessibility tree and shows a hover label.
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 900 });
     await browser.until(`innerWidth`, 900);
