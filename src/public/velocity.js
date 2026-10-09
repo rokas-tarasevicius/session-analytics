@@ -169,13 +169,14 @@ function coverageText(data) {
   const values = data.totals;
   const ratio = (n, d, label) => `${label}: ${d > 0 ? `${number.format(n)} / ${number.format(d)} (${number.format(100 * n / d)}%)` : "N/A · no eligible tokens"}`;
   let detail = "";
-  if (data.metric === "value") detail = ratio(values[10], data.coverage.priceTokens, "API pricing coverage, Claude/Codex tokens");
-  if (data.metric === "reasoning") detail = ratio(values[11], data.coverage.reasoningOutput, "Separate reasoning coverage, Claude/Codex output");
-  if (data.metric === "cacheRead" || data.metric === "uncached") detail = ratio(values[12], data.coverage.cacheReadInput, "Cache-read split coverage, Claude/Codex input");
-  if (data.metric === "cacheWrite") detail = ratio(values[13], data.coverage.cacheWriteInput, "Cache-write coverage, Claude input; Codex/Cursor unavailable");
+  if (data.metric === "value") detail = ratio(values[10], data.coverage.priceTokens, "API pricing coverage, priced-source tokens");
+  if (data.metric === "reasoning") detail = ratio(values[11], data.coverage.reasoningOutput, "Separate reasoning coverage, output tokens");
+  if (data.metric === "cacheRead" || data.metric === "uncached") detail = ratio(values[12], data.coverage.cacheReadInput, "Cache-read split coverage, input tokens");
+  if (data.metric === "cacheWrite") detail = ratio(values[13], data.coverage.cacheWriteInput, "Cache-write coverage, Claude, OpenCode and Cursor SDK input; others unavailable");
   const included = formatMetric(values[metricDefinitions[data.metric].index], data.metric);
   const undated = formatMetric(data.undated[metricDefinitions[data.metric].index], data.metric);
-  return `${included} dated · ${number.format(data.contributingSessions)} sessions with dated evidence. ${detail ? `${detail}. ` : ""}${undated} undated across this repository/provider scope, excluded from date filters and charts.${data.unledgered.sessions > 0 ? ` Across all time, ${data.unledgered.sessions} session${data.unledgered.sessions === 1 ? "" : "s"} from sources without activity dates (${formatMetric(data.unledgered.value, "value")} whole-session value) are excluded.` : ""}${data.missingSessions ? ` ${data.missingSessions} session${data.missingSessions === 1 ? "" : "s"} need a refresh to collect activity buckets.` : ""}`;
+  const sessionDated = data.sessionDated[metricDefinitions[data.metric].index];
+  return `${included} dated · ${number.format(data.contributingSessions)} sessions with dated evidence.${sessionDated > 0 ? ` Includes ${formatMetric(sessionDated, data.metric)} session-dated from ${data.sessionDatedSessions} session${data.sessionDatedSessions === 1 ? "" : "s"} whose source records no request times (placed on the session's last activity).` : ""} ${detail ? `${detail}. ` : ""}${undated} undated across this repository/provider scope, excluded from date filters and charts.${data.unledgered.sessions > 0 ? ` Across all time, ${data.unledgered.sessions} session${data.unledgered.sessions === 1 ? "" : "s"} from older snapshots without activity dates (${formatMetric(data.unledgered.value, "value")} whole-session value) are excluded; refresh to include them.` : ""}${data.missingSessions ? ` ${data.missingSessions} session${data.missingSessions === 1 ? "" : "s"} need a refresh to collect activity buckets.` : ""}`;
 }
 const controllers = new WeakMap();
 function panelShell(kicker, title) {

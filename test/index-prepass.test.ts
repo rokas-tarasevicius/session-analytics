@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
+import { localClock } from "../src/metrics/velocity.ts";
 import { buildClaudeUsageOwners, type ClaudeObservationRead, type ClaudeOwnershipCache } from "../src/providers/claude-ownership.ts";
 import { indexPath, openIndexDatabase, type IndexScanStats } from "../src/store/database.ts";
 import { keyedHash } from "../src/store/fingerprint.ts";
@@ -274,5 +275,28 @@ test("a version 3 index migrates in place, keeps its facts and fills the pre-pas
     finally { check.close(); }
     assert.deepEqual(stable(await analyzeMachineSessions(opts)), full);
     assert.equal(lastStats(opts).ownershipReads, 0);
+  });
+});
+
+test("session-dated receipt value replays identically from the Conductor projection cache", async () => {
+  await withFixture(async (fixture) => {
+    const opts = options(fixture);
+    const db = conductorHistory(fixture);
+    try {
+      // A receipt-only session (no assistant records) keeps its cumulative value session-dated at the receipt time.
+      const receiptId = "99999999-9999-4999-8999-999999999999", receiptAt = "2026-07-28T10:30:00.000Z";
+      db.prepare("INSERT INTO sessions (id,status,agent_type,title,created_at,updated_at,claude_session_id,model,is_hidden,workspace_id) VALUES (?,?,?,?,?,?,?,?,0,?)")
+        .run("conductor-receipt", "idle", "claude", sentinel, "2026-07-28T10:00:00Z", "2026-07-29T11:00:00Z", receiptId, model, "workspace-claude");
+      db.prepare("INSERT INTO session_messages (id,session_id,role,content,created_at) VALUES (?,?,?,?,?)")
+        .run("conductor-row-receipt", "conductor-receipt", "assistant", JSON.stringify(result("receipt", receiptId, 0.75)), receiptAt);
+      await assertParity(opts);
+      const receipt = (await analyzeMachineSessions(opts)).sessions.find((session) => session.evidence?.source === "conductor-result" && session.cost.totalUsd === 0.75);
+      assert.ok(receipt, "receipt-only session");
+      const cells = receipt.velocity?.sessionDated ?? [];
+      assert.equal(cells.reduce((n, cell) => n + cell[3][0], 0), 0.75);
+      const clock = localClock(receiptAt)!;
+      assert.deepEqual(cells.map(([day, hour]) => [day, hour]), [[clock.day, clock.hour]]);
+      assert.equal(lastStats(opts).conductorReads, 0, "the warm scan replays the cached receipt projection");
+    } finally { db.close(); }
   });
 });

@@ -181,7 +181,7 @@ test("agent SVG encodings are unique, stable under filtering and reproduced in t
   try {
     const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
     const sessions = Object.keys(agentLabels).map((agent, i) => ({
-      provider: agent.startsWith("claude-") ? "claude" : agent.startsWith("codex-") ? "codex" : "cursor",
+      provider: agent.startsWith("claude-") ? "claude" : agent.startsWith("codex-") ? "codex" : agent,
       repositoryId: "synthetic", repositoryName: "Synthetic", velocity: {
         dimensions: [{ agent, model: "synthetic", executionKind: "top-level", effort: "high" }],
         buckets: [["2026-09-01", 12, 0, [i + 1, 100, 100, 0, 0, 20, 0, 4, 0, 1, 120, 20, 100, 100]], ["2026-09-02", 12, 0, [16 - i, 100, 100, 0, 0, 20, 0, 4, 0, 1, 120, 20, 100, 100]]], undated: [],
@@ -209,7 +209,7 @@ test("agent SVG encodings are unique, stable under filtering and reproduced in t
             const reference = path.getAttribute("fill")!;
             if (reference.startsWith("url(#")) assert.ok(nodes.some((node) => node.tagName === "pattern" && reference === `url(#${node.getAttribute("id")})`));
           } else assert.equal(path.getAttribute("stroke-dasharray"), swatch.dataset["pattern"] === "dashed" ? "6 3" : "none");
-          assert.match(path.getAttribute("stroke")!, /^var\(--provider-(claude|codex|cursor)-[0-3]\)$/);
+          assert.match(path.getAttribute("stroke")!, /^var\(--provider-(claude|codex|cursor|copilot|opencode|gemini)-[0-3]\)$/);
 
         }
         return new Map(paths.map((path, i) => [data.series[i]!.id, signature(path)]));

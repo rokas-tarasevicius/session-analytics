@@ -75,7 +75,7 @@ test("a quiet window shows $0.00 while a scope with no activity ledger shows a d
   const quiet = harness([session("repo-a", [bucket("2026-08-02", 5)]), gemini]);
   quiet.render();
   assert.equal(quiet.lookup("spend").textContent, "$0.00");
-  assert.match(quiet.lookup("spendNote").textContent, /across all time, \$0\.00 undated and \$2\.00 in 1 session without activity dates/);
+  assert.match(quiet.lookup("spendNote").textContent, /across all time, \$0\.00 undated and \$2\.00 in 1 older-snapshot session without activity dates \(refresh to include\)/);
   const none = harness([gemini]);
   none.render();
   assert.equal(none.lookup("spend").textContent, "—");
@@ -96,4 +96,15 @@ test("the sidebar totals match the Summary KPI, also when the window inputs are 
     assert.equal(navCache.rows.find(({ id }) => id === "repo-b")?.value, 15);
     assert.equal(navCache.rows[0]?.series.length, (h.context.windowDays as () => string[])().length);
   }
+});
+
+test("session-dated value counts in the Summary KPI and its note says how much", () => {
+  const receipt = { ...session("repo-a", []), velocity: { dimensions: [{ agent: "claude-sdk", model: "m", executionKind: "unknown", effort: "unknown" }], buckets: [], undated: [], sessionDated: [bucket("2026-09-12", 4)] } };
+  const h = harness([session("repo-a", days("2026-09-08", "2026-09-14").map((d) => bucket(d, 10))), receipt]);
+  h.render();
+  assert.equal(h.lookup("spend").textContent, "$74.00");
+  assert.match(h.lookup("spendNote").textContent, /includes \$4\.00 session-dated \(1 session without request times, dated by last activity\)/);
+  const plain = harness([session("repo-a", days("2026-09-08", "2026-09-14").map((d) => bucket(d, 10)))]);
+  plain.render();
+  assert.doesNotMatch(plain.lookup("spendNote").textContent, /session-dated/);
 });

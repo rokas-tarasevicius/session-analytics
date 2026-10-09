@@ -179,7 +179,7 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 
 Cumulative totals use the final valid snapshot per proven interval, not the sum of receipts. `system/init` UUIDs and `claude_code_version` establish supported process/version boundaries; explicit `conversation_reset` links admit changed identities. Older verified process intervals can be disjoint; restored resumes overlap earlier totals. Unknown or conflicting histories retain a partial observed snapshot. Zeroed crash results preserve earlier evidence. Counter decreases alone never prove a reset. The [official SDK scope guide](https://code.claude.com/docs/en/agent-sdk/cost-tracking#accumulate-costs-across-multiple-calls) documents version-dependent resume behavior.
 
-Only scalar counters, bounded model IDs, and fixed enums leave the parser. Turn-local `usage` is separate from cumulative `modelUsage`. SDK turn/duration/denial counters become null across multiple receipts because their scopes are not established. Receipt/error/terminal-reason counts remain independent of accounting. There is no inferred request count, tool count, daily spend, or task-success verdict. See [metric definitions](metrics.md#additional-provider-evidence).
+Only scalar counters, bounded model IDs, and fixed enums leave the parser. Turn-local `usage` is separate from cumulative `modelUsage`. SDK turn/duration/denial counters become null across multiple receipts because their scopes are not established. Receipt/error/terminal-reason counts remain independent of accounting. There is no inferred request count, tool count, per-request daily spend, or task-success verdict. The cumulative receipt value is **session-dated** at the selected receipt's time, so Summary and Velocity include it with that label. See [metric definitions](metrics.md#additional-provider-evidence).
 
 ## Cursor SDK through Conductor
 
@@ -192,13 +192,13 @@ Only scalar counters, bounded model IDs, and fixed enums leave the parser. Turn-
 | `runs.ndjson` | `agentId`, `runId` for correlation; `model.id`, `status`, `createdAt`, `updatedAt`, `startedAt`, `endedAt`; `usage.inputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `reasoningTokens` |
 | `run_events.ndjson` | `payload.type: sdk_message`, then `message.type: tool_call`, `agent_id`, `run_id`, `call_id`, `name`; no arguments/results |
 
-**Fidelity:** run-level **Reported** token counters; **Estimated** API-equivalent value for exact rate-card matches. Local checks confirmed total tokens equal input + cache read + cache write + output, with reasoning inside output. Tool lifecycle records count once per run/call ID. One started run counts as one observed run turn. Missing tool-event files preserve run summaries with tools labeled unavailable. Requests, assistant-message counts, per-request context sizes, and daily cost allocation are unavailable. Aggregate long-context uncertainty is carried in the upper estimate. No new model rates or aliases are guessed.
+**Fidelity:** run-level **Reported** token counters; **Estimated** API-equivalent value for exact rate-card matches. Activity dates are **run-level**: each run's value is dated by its own `startedAt` (else `endedAt`, else `createdAt`), tool calls by their event `createdAt` (else their run's time); a run without a time is **session-dated**. Local checks confirmed total tokens equal input + cache read + cache write + output, with reasoning inside output. Tool lifecycle records count once per run/call ID. One started run counts as one observed run turn. Missing tool-event files preserve run summaries with tools labeled unavailable. Requests, assistant-message counts, per-request context sizes, and per-request cost allocation are unavailable. Aggregate long-context uncertainty is carried in the upper estimate. No new model rates or aliases are guessed.
 
 ## Cursor agent transcripts
 
 **Where:** `~/.cursor/projects/*/agent-transcripts/**/*.jsonl`, or `--cursor-transcript-root` pointing at `projects`. Format verified locally: `role`, `message.content`, and structured `tool_use` blocks. Files are identified by the session UUID filename; no embedded ID is claimed.
 
-**Fidelity:** **activity-only**. Count user text turns, assistant records, and distinct tool-use IDs/names. Models, tokens, pricing, and compactions are **Unavailable**. File mtime supplies the displayed date with `evidence.timing: file-mtime`; it does not establish duration or session start. Activity heatmaps exclude these dates.
+**Fidelity:** **activity-only**. Count user text turns, assistant records, and distinct tool-use IDs/names. Models, tokens, pricing, and compactions are **Unavailable**. File mtime supplies the displayed date with `evidence.timing: file-mtime`; it does not establish duration or session start. Activity heatmaps exclude these dates, and the activity ledger keeps their tool calls **undated**; the records carry no times.
 
 Encoded project directory names are matched only against known repository/workspace paths. Ambiguous or unmatched names produce a pseudonymous unassigned group; paths are never reconstructed by guessing. For an identical Cursor session ID, composer database evidence wins over SDK evidence, which wins over activity-only transcripts. These sources are not added together.
 
@@ -208,7 +208,7 @@ Encoded project directory names are matched only against known repository/worksp
 
 **Verified schema:** the [SDK session event types](https://github.com/github/copilot-sdk/blob/19e9a4b9c620d1032110cb6739961c4c1a651278/nodejs/src/generated/session-events.ts) define the persisted envelope and `session.start` metadata. The recorded `data.sessionId` must match the containing directory; `data.context.cwd` and a valid start timestamp are required.
 
-**Fidelity:** **activity-only**. Deduplicate by event ID, assistant message ID, and tool call ID. Count `user.message`, `assistant.message`, `assistant.turn_start`/`turn_end`, `tool.execution_start`, and successful `session.compaction_complete` markers. Arguments, message bodies, summaries, errors, and branches are discarded. [GitHub's event reference](https://github.com/github/copilot-sdk/blob/19e9a4b9c620d1032110cb6739961c4c1a651278/docs/features/streaming-events.md) marks per-call `assistant.usage` as ephemeral. Tokens, model attribution, and USD value remain **Unavailable** in this adapter; premium requests, multipliers, and AI credits are not dollars.
+**Fidelity:** **activity-only**. Deduplicate by event ID, assistant message ID, and tool call ID. Count `user.message`, `assistant.message`, `assistant.turn_start`/`turn_end`, `tool.execution_start`, and successful `session.compaction_complete` markers. Arguments, message bodies, summaries, errors, and branches are discarded. [GitHub's event reference](https://github.com/github/copilot-sdk/blob/19e9a4b9c620d1032110cb6739961c4c1a651278/docs/features/streaming-events.md) marks per-call `assistant.usage` as ephemeral. Tokens, model attribution, and USD value remain **Unavailable** in this adapter; premium requests, multipliers, and AI credits are not dollars. Tool calls are **event-dated** in the activity ledger by each event's `timestamp`.
 
 **Planned:** calibrate persisted shutdown `modelMetrics` token semantics and resume boundaries against primary-source receipts before importing usage totals. This adapter intentionally does not price transient usage or assume every saved session has complete shutdown counters.
 
@@ -224,7 +224,7 @@ Encoded project directory names are matched only against known repository/worksp
 | `message` | `id`, `session_id`; JSON `data.role`, `modelID`, `time.created/completed`, `tokens.input/output/reasoning/cache.read/cache.write` |
 | `part` | `id`, `session_id`, `message_id`, `time_created`; JSON `data.type`, step `tokens`, tool `callID`/`tool` |
 
-**Fidelity:** reported request counters, API-equivalent pricing, observed user/assistant records and tools. Step-finish records preserve each request; assistant snapshots retain the last step and are used only when no step counters survive. [`getUsage`](https://github.com/anomalyco/opencode/blob/v1.2.24/packages/opencode/src/session/index.ts) normalizes disjoint input/cache classes. Reasoning stays inside output. No provider `cost` value is added to API estimates. `parent_id` identifies subagent execution. Unknown rates stay unpriced. SQL connections are read-only; malformed JSON is skipped without echoing it.
+**Fidelity:** reported request counters, API-equivalent pricing, observed user/assistant records and tools. Step-finish records preserve each request; assistant snapshots retain the last step and are used only when no step counters survive. [`getUsage`](https://github.com/anomalyco/opencode/blob/v1.2.24/packages/opencode/src/session/index.ts) normalizes disjoint input/cache classes. Reasoning stays inside output. No provider `cost` value is added to API estimates. Activity dates are **request-level**: step-finish `time_created`, else the message's `time.created`. `parent_id` identifies subagent execution. Unknown rates stay unpriced. SQL connections are read-only; malformed JSON is skipped without echoing it.
 
 **Planned:** older directory-based storage and later incompatible SQLite generations. Unsupported table layouts produce a fixed warning; the adapter does not infer schemas from arbitrary JSON keys.
 
@@ -236,7 +236,7 @@ Encoded project directory names are matched only against known repository/worksp
 
 Project assignment follows the [project registry and ownership markers](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/config/projectRegistry.ts): the sibling `projects.json` maps absolute roots to slugs, and `.project_root` records ownership. The provider project hash must match the proposed root. Known local repository roots can also resolve legacy hashed directories; unresolved projects remain pseudonymous and unassigned. The [storage implementation](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/config/storage.ts) establishes these locations.
 
-**Fidelity:** reported retained-message counters and observed tool/turn counts. Input includes cache reads; total output adds separately recorded thought tokens. `kind` distinguishes explicit main/subagent evidence. Removed history is not recoverable. The current rate card has no Gemini entries, so usage is visible but unpriced until a reviewed rate is supplied. Monolithic JSON larger than 32 MiB is skipped; JSONL is streamed. Compaction counts are unavailable.
+**Fidelity:** reported retained-message counters and observed tool/turn counts. Activity dates are **message-level** from each message's `timestamp`; a message without one is **session-dated**. Input includes cache reads; total output adds separately recorded thought tokens. `kind` distinguishes explicit main/subagent evidence. Removed history is not recoverable. The current rate card has no Gemini entries, so usage is visible but unpriced until a reviewed rate is supplied. Monolithic JSON larger than 32 MiB is skipped; JSONL is streamed. Compaction counts are unavailable.
 
 ## Source overrides and isolation
 
@@ -262,7 +262,9 @@ existing session totals. Claude entrypoint and fixed subagent attribution enums,
 Codex source/originator enums, provide finer agent groups without exporting custom names.
 Per-request model, effort and execution stay attached to their activity cells, including
 model/source changes inside a Codex rollout. Cursor provider value stays undated, while
-only bubbles with absolute start timestamps contribute dated tokens/tools. The full
+only bubbles with absolute start timestamps contribute dated tokens/tools. The additional
+sources date their cells as finely as they record time (request, message, event or run);
+value without its own time is session-dated, see [Session-dated value](metrics.md#session-dated-value). The full
 [velocity definition](metrics.md#velocity-snapshot-version-1) covers local timezone/DST
 behavior, unavailable cache/reasoning fields and the session-start denominator.
 ## MCP coverage refinements

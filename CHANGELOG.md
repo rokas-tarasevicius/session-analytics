@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Per-session `historyProfile` (native Claude sessions): the hashed Claude profile key and deduplicated request tokens per UTC day and model. It carries the machine-wide history coverage inputs that used to live in `limitsCache`. Indexed sessions written by earlier versions are migrated on load, so history coverage for source-deleted sessions is unchanged. The index reparses present sessions once after upgrading.
 
+### Fixed
+
+- Summary's "Priced usage value", its sparkline and delta, the sidebar and repository value bars, Summary's daily chart and Velocity no longer leave out OpenCode, Gemini CLI, Copilot CLI, Cursor SDK and Conductor-result sessions; totals for these sources move **up** from zero to their value. Each source is dated as finely as it records time: OpenCode per request, Gemini per message, Copilot tool calls per event, Cursor SDK per run, and Cursor transcripts stay undated (no times recorded). Value whose own request or run time is not recorded (Conductor result receipts, or a Gemini message or Cursor SDK run without a time) is **session-dated**: placed on the session's last evidenced activity time and stated separately in the Summary and Velocity notes. Summary and Velocity still agree for the same window and scope. Snapshots gain the optional `velocity.sessionDated` cells and the velocity agents `copilot`, `opencode` and `gemini`. Cursor SDK run value now also appears in `spendByDay` on its run's UTC date. Sessions from these sources in older snapshots are disclosed until the next refresh.
+
 ### Changed
 
 - Warm indexed scans no longer re-read every Claude transcript for the resumed-copy ownership pass or re-extract every Conductor session's messages: both are cached in the private index (schema version 4) and refreshed per file or per Conductor session when it changes. Output is unchanged. The index stores only keyed identifier hashes and counters for these passes; the first scan after upgrading reads everything once.

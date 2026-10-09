@@ -4,13 +4,13 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { normalizeTimestamp } from '../../src/public/timestamps.js';
 import { daysBetween, dailySpendSeries } from '../../src/public/view-model.js';
-import { localDay } from '../../src/public/velocity-data.js';
+import { ledgerCells, localDay } from '../../src/public/velocity-data.js';
 
 function observedRange(sessions: unknown[], snapshot: Record<string, unknown> = {}) {
  const source=fs.readFileSync(new URL('../../src/public/app.js',import.meta.url),'utf8');
  const begin=source.indexOf('function observedRange(');
  const end=source.indexOf('\nfunction ',begin+1);
- return vm.runInNewContext(`${source.slice(begin,end)}\nobservedRange()`,{snapshot:{sessions,...snapshot},normalizeTimestamp,localDay});
+ return vm.runInNewContext(`${source.slice(begin,end)}\nobservedRange()`,{snapshot:{sessions,...snapshot},normalizeTimestamp,localDay,ledgerCells});
 }
 
 test('time-range: unknown start placeholders cannot erase dated charts through the 3660-day cap',()=>{

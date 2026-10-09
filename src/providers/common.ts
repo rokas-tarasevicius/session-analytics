@@ -6,8 +6,9 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { CostBreakdown, ModelUsage, ProviderEvidence, SessionAnalytics, SessionProvider, TokenUsage } from "../types.ts";
+import type { CostBreakdown, ModelUsage, ProviderEvidence, SessionAnalytics, SessionProvider, TokenUsage, VelocityDimension } from "../types.ts";
 import type { ProviderContext, ProviderSession } from "./adapter.ts";
+import { usageVelocity, type VelocityAccumulator } from "../metrics/velocity.ts";
 
 export type RecordValue = Record<string, unknown>;
 export const record = (value: unknown): RecordValue | null => value !== null && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : null;
@@ -134,9 +135,28 @@ export function observeTime(session: SessionAnalytics, value: unknown): void {
   if (!session.lastEventAt || at > session.lastEventAt) session.lastEventAt = at;
 }
 
-export function addUsage(session: SessionAnalytics, context: ProviderContext, model: string, usage: TokenUsage, at: string | null, scope: "request" | "summary", calls = 1): void {
+/** Velocity placement for one priced usage observation. Value without its own valid time is
+ * session-dated (see docs/metrics.md#session-dated-value), never silently dropped from the ledger. */
+export interface UsageLedger {
+  velocity: VelocityAccumulator;
+  dimension: VelocityDimension;
+  coverage: { reasoning: boolean; cacheRead: boolean; cacheWrite: boolean };
+  /** Placement time when it differs from the pricing time (which may fall back to a session time). */
+  at?: string | null;
+}
+
+export function addUsage(session: SessionAnalytics, context: ProviderContext, model: string, usage: TokenUsage, at: string | null, scope: "request" | "summary", calls = 1, ledger?: UsageLedger): void {
   sum(session.tokens, usage);
   if (!usage.inputTokens && !usage.outputTokens) return;
+  const { value, pricedTokens } = priceObservation(session, context, model, usage, at, scope, calls);
+  if (!ledger) return;
+  const placed = ledger.at === undefined ? at : ledger.at;
+  // A summary with its own observed time (a run) is dated like a request; daily spend follows the ledger.
+  if (scope === "summary" && placed && value) increment(session.spendByDay, placed.slice(0, 10), value);
+  ledger.velocity.add(placed, ledger.dimension, usageVelocity(usage, value, pricedTokens, ledger.coverage, calls), "session");
+}
+
+function priceObservation(session: SessionAnalytics, context: ProviderContext, model: string, usage: TokenUsage, at: string | null, scope: "request" | "summary", calls: number): { value: number; pricedTokens: number } {
   const selected = context.resolveRate?.(model, at);
   const rate = context.resolveRate ? selected?.rate : Object.hasOwn(context.rateCard.models, model) ? context.rateCard.models[model] : undefined;
   let aggregate = session.models.find((item) => item.model === model);
@@ -152,9 +172,11 @@ export function addUsage(session: SessionAnalytics, context: ProviderContext, mo
     aggregate.pricingCoverage ??= { pricedTokens: 0, eligibleTokens: 0 };
     aggregate.pricingCoverage.eligibleTokens += usage.inputTokens + usage.outputTokens;
   }
-  if (!rate) { aggregate.priced = false; return; }
+  if (!rate) { aggregate.priced = false; return { value: 0, pricedTokens: 0 }; }
+  let pricedTokens = usage.inputTokens + usage.outputTokens;
   if (selected) {
     const projected = priceUsage(rate, usage, scope === "request" ? usage.inputTokens : 0);
+    pricedTokens = projected.pricedTokens;
     aggregate.pricingCoverage!.pricedTokens += projected.pricedTokens;
     aggregate.priced = aggregate.pricingCoverage!.pricedTokens === aggregate.pricingCoverage!.eligibleTokens;
     mergeProvenance(aggregate, [{ ...selected.provenance, assumptions: projected.assumptions }]);
@@ -193,6 +215,7 @@ export function addUsage(session: SessionAnalytics, context: ProviderContext, mo
   sum(aggregate as CostBreakdown, cost); sum(session.cost, cost);
   session.costBasis = "api-list-price-equivalent";
   if (scope === "request" && at) increment(session.spendByDay, at.slice(0, 10), cost.totalUsd);
+  return { value: cost.totalUsd, pricedTokens };
 }
 
 export function finish(session: SessionAnalytics): SessionAnalytics {

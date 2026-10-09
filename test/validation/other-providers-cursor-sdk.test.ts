@@ -62,7 +62,7 @@ test('CURSOR-04 SDK pricing retains the run timestamp independently of daily all
   {version:1,source:'models.dev',sourceUrl:'https://models.dev/api.json',fetchedAt:'2026-09-02T00:00:00Z',payloadSha256:'c'.repeat(64),models:{'grok-4.6':newRate},rejectedModels:0}
  ],{pricingPolicy:'api-first',pricingSources:['models.dev']},new Date('2026-09-03T00:00:00Z'));
  c.resolveRate=(model,time)=>resolveRate(catalog,model,time);const s=await analyze(root,c);
- assert.equal(s.cost.totalUsd,.0004);assert.equal(s.models[0]?.pricing?.[0]?.temporal,'at-or-before');assert.deepEqual(s.spendByDay,{});
+ assert.equal(s.cost.totalUsd,.0004);assert.equal(s.models[0]?.pricing?.[0]?.temporal,'at-or-before');assert.deepEqual(s.spendByDay,{'2026-09-01':.0004});
 }));
 test('CURSOR-05 SDK usage events recover a terminal run with no summary counters',async()=>fixture(async root=>{
  await writeStore(root,root,{usage:false,eventUsage:true});const s=await analyze(root);

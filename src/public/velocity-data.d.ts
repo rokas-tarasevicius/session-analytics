@@ -8,6 +8,8 @@ export interface VelocityData {
   keys: string[]; series: Series[]; allSeries: Series[];
   daily: Array<{ day: string; values: number[]; total: number; evidence: Evidence }>;
   rolling: Array<number | null>; totals: number[]; undated: number[];
+  /** In-window totals of session-dated cells (already included in `totals`), and the sessions session-dating some of the selected metric. */
+  sessionDated: number[]; sessionDatedSessions: number;
   coverage: { priceTokens: number; cacheReadInput: number; cacheWriteInput: number; reasoningOutput: number };
   evidence: Evidence;
   earliest: string | null; missingSessions: number; unledgered: { sessions: number; value: number }; contributingSessions: number;
@@ -28,6 +30,7 @@ export function averagePrice(data: VelocityData): { total: number; days: number;
 export function guardedDelta(current: number, previous: number, metric: Metric, previousCalls?: number): number | null;
 export const comparisonEvidenceFloor: number;
 export const ledgerlessSources: Set<string>;
+export function ledgerCells(velocity: SessionAnalytics["velocity"]): Array<[day: string, hour: number, dimension: number, values: number[], sessionDated: boolean]>;
 export function periodFromVelocity(data: VelocityData): Period;
 export function comparisonSpan(end: string, today: string | null): { start: string; end: string };
 export function comparePeriods(current: Period, previous: Period, metric: Metric, options?: { missingSessions?: number }): Comparison;

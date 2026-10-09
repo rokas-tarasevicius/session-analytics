@@ -407,7 +407,7 @@ the browser's daily, period and group evidence guards.
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `dimensions[]` | Per-session dictionary of observed dimension combinations | P0 |
-| `dimensions[].agent` | Fixed enum: `claude-cli`, `claude-sdk`, `claude-desktop`, `claude-unknown`, `claude-general-purpose`, `claude-explore`, `claude-plan`, `claude-subagent`, `codex-cli`, `codex-exec`, `codex-vscode`, `codex-desktop`, `codex-subagent`, `codex-review`, `codex-unknown`, `cursor` | P0 |
+| `dimensions[].agent` | Fixed enum: `claude-cli`, `claude-sdk`, `claude-desktop`, `claude-unknown`, `claude-general-purpose`, `claude-explore`, `claude-plan`, `claude-subagent`, `codex-cli`, `codex-exec`, `codex-vscode`, `codex-desktop`, `codex-subagent`, `codex-review`, `codex-unknown`, `cursor`, `copilot`, `opencode`, `gemini` | P0 |
 | `dimensions[].model` | Bounded model ID matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`, otherwise `<unknown>`; never inferred from text | P0 |
 | `dimensions[].executionKind` | `top-level`, `subagent`, or `unknown`; no mixed cells | P0 |
 | `dimensions[].effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, or `unknown` | P0 |
@@ -417,6 +417,10 @@ the browser's daily, period and group evidence guards.
 | `buckets[][3]` | Fixed tuple of counters, defined below | P0 |
 | `undated[][0]` | Dimension index for activity without an absolute timestamp | P0 |
 | `undated[][1]` | Same counter tuple, excluded from dated charts | P0 |
+| `sessionDated[][0]` | Optional. Local `YYYY-MM-DD` date of the session's last evidenced activity, for value the source records without its own request/run time | P0 |
+| `sessionDated[][1]` | Local clock hour of that activity, integer 0–23 | P0 |
+| `sessionDated[][2]` | Index into `dimensions` | P0 |
+| `sessionDated[][3]` | Same counter tuple, included in dated totals and labeled session-dated | P0 |
 | `values[0]` | Priced value in USD | P0 |
 | `values[1]` | Processed input tokens | P0 |
 | `values[2]` | Uncached input tokens (legacy Cursor unsplit allocation; coverage remains unavailable) | P0 |
@@ -432,7 +436,7 @@ the browser's daily, period and group evidence guards.
 | `values[12]` | Input with cache reads exposed by the charged usage; a cumulative difference requires both endpoints; coverage numerator | P0 |
 | `values[13]` | Input tokens with a cache-write counter; coverage numerator | P0 |
 
-`values` means the tuple in `buckets[][3]` or `undated[][1]`; it is not another JSON key.
+`values` means the tuple in `buckets[][3]`, `sessionDated[][3]` or `undated[][1]`; it is not another JSON key.
 Week/month/hour series, rolling means, changes, movers and projection bands are computed
 in the browser from these cells and are not additional exported fields. Definitions,
 minimum-activity guards and unknown-data rules are in [metrics.md](metrics.md#velocity-snapshot-version-1).

@@ -117,6 +117,10 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
     // Receipt totals are authoritative; model allocations can cover a different retained interval.
     if (!receipt) for (const key of costKeys) if (!close(session.cost[key], sum(session.models.map((model) => model[key])))) fail();
     if (!close(session.cost.totalUsd, sum(Object.values(session.costByExecution)))) fail();
+    // Every ledger, including session-dated cells, conserves the session's value.
+    const ledger = session.velocity ? [...session.velocity.buckets.map(([, , , values]) => values), ...session.velocity.undated.map(([, values]) => values),
+      ...(session.velocity.sessionDated ?? []).map(([, , , values]) => values)] : null;
+    if (ledger && (receipt || summaryUsage) && !close(session.cost.totalUsd, sum(ledger.map((values) => values[0])))) fail();
     if (session.metrics.toolCalls !== sum(Object.values(session.tools)) || session.metrics.transportToolCalls !== sum(Object.values(session.transportTools))) fail();
     if (cursor || receipt) {
       if (session.pricedTokenCoverage !== null || Object.keys(session.spendByDay).length) fail();
@@ -130,15 +134,16 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
     } else {
       for (const key of tokenKeys) if (session.tokens[key] !== sum(session.models.map((model) => model[key]))) fail();
       if (session.metrics.modelCalls !== sum(session.models.map((model) => model.calls))) fail();
-      if (summaryUsage) {
+      if (summaryUsage && !session.velocity) {
         if (Object.keys(session.spendByDay).length) fail();
       } else if (session.history) {
         if (!close(session.cost.totalUsd, sum(Object.values(session.spendByDay)) + (session.history.undatedValueUsd ?? 0))) fail();
       } else if (!session.velocity) {
         if (!close(session.cost.totalUsd, sum(Object.values(session.spendByDay)))) fail();
       } else {
+        // Daily spend records activity-dated value only; session-dated value is outside it.
         const dated = session.velocity.buckets.map(([, , , values]) => values);
-        const undated = session.velocity.undated.map(([, values]) => values);
+        const undated = [...session.velocity.undated.map(([, values]) => values), ...(session.velocity.sessionDated ?? []).map(([, , , values]) => values)];
         const cells = [...dated, ...undated], datedSpend = sum(Object.values(session.spendByDay));
         if (!close(datedSpend, sum(dated.map(values => values[0]))) ||
             !close(session.cost.totalUsd, datedSpend + sum(undated.map(values => values[0]))) ||

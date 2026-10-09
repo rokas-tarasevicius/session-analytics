@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
+import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter } from "./adapter.ts";
 import { emptySession, files, finish, increment, jsonLines, name, record, text } from "./common.ts";
 
@@ -30,6 +31,8 @@ export function cursorTranscriptAdapter(knownPaths: string[] = []): ProviderAdap
       const parts = identity.path.split("/");
       if (parts.at(-4) === "agent-transcripts" && parts.at(-2) === "subagents" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(parts.at(-3) ?? "")) session.executionKind = "subagent";
       const seen = new Set<string>();
+      // Records carry no times and file mtime is not activity evidence: tools and the session stay undated.
+      const velocity = new VelocityAccumulator(), dimension = velocityDimension("cursor", {}, session.executionKind, "<unknown>", null);
       for await (const row of jsonLines(identity.path)) {
         if (!row) { session.transcript.warnings.push("Malformed Cursor transcript records were skipped."); continue; }
         const message = record(row["message"]), content = message?.["content"];
@@ -44,9 +47,11 @@ export function cursorTranscriptAdapter(knownPaths: string[] = []): ProviderAdap
           if (!tool || (id && seen.has(id))) continue;
           if (id) seen.add(id);
           increment(session.tools, tool);
+          velocity.tool(null, dimension);
         }
       }
       if (!session.metrics.userTurns && !session.metrics.assistantMessages) return null;
+      session.velocity = velocity.finish(null, dimension);
       session.transcript.warnings.push("Activity-only Cursor transcript: tokens, model, cost, and event times are unavailable. The displayed date is the file modification time, not session start; duration is unavailable.");
       return finish(session);
     },

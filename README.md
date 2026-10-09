@@ -103,7 +103,7 @@ session-analytics --port 4180     # use another loopback port
 
 The server binds to `127.0.0.1` only and answers read-only `GET` requests. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`. The dashboard starts with the last 30 days of observed history; `?window=7`, `?window=30`, `?window=90`, or `?window=all` overrides this for the visit. The window is not saved in browser storage. Sessions with an unknown start time only count under **All**, and **Export view** downloads cover the selected window, so choose **All** for a whole-history export.
 
-Velocity follows **activity dates**, even when the session began before the selected window. Other totals select sessions by start date. The analysis timezone is shown in the view; set `TZ` before launching to choose a different one. Cursor value and other activity without timestamps stay undated. Projection bands are workload scenarios, not confidence intervals or invoices. See the [velocity definitions](docs/metrics.md#velocity-snapshot-version-1) for denominators and attribution rules.
+Velocity follows **activity dates**, even when the session began before the selected window. Other totals select sessions by start date. The analysis timezone is shown in the view; set `TZ` before launching to choose a different one. Cursor's provider-reported value and other activity without timestamps stay undated. Value from sources that record no request times (Conductor result receipts, or a Gemini message or Cursor SDK run without its own time) is **session-dated**: placed on the session's last activity and stated in the Summary and Velocity notes. Projection bands are workload scenarios, not confidence intervals or invoices. See the [velocity definitions](docs/metrics.md#velocity-snapshot-version-1) for denominators and attribution rules.
 
 Missing or timezone-free session starts are counted as undated and excluded from dated totals. Velocity comparisons show current/prior evidence beside each percentage; gaps in pricing or token detail make changes, burn and projections unavailable. Agent colors and patterns stay attached to the same identity as filters change.
 
@@ -251,7 +251,18 @@ What the original native stores support (additional sources have their own fidel
 
 Per-source details, matching rules, and known gaps are in [docs/providers.md](docs/providers.md). Metric definitions are in [docs/metrics.md](docs/metrics.md).
 
-Cursor SDK runs are priced only for exact model IDs in the reviewed rate card. Conductor result summaries retain reported USD separately and never supplement an existing canonical session. Copilot and Cursor activity-only transcripts have no token or cost evidence. OpenCode uses retained step counters, with assistant snapshots as a fallback. Gemini counters include thinking in output; unknown models remain unpriced. Aggregate run summaries have no daily cost allocation, and file dates do not establish session starts or durations.
+Cursor SDK runs are priced only for exact model IDs in the reviewed rate card. Conductor result summaries retain reported USD separately and never supplement an existing canonical session. Copilot and Cursor activity-only transcripts have no token or cost evidence. OpenCode uses retained step counters, with assistant snapshots as a fallback. Gemini counters include thinking in output; unknown models remain unpriced. File dates do not establish session starts or durations.
+
+How finely each additional source dates its usage value and tool calls for Summary and Velocity:
+
+| Source | Activity dates |
+| --- | --- |
+| OpenCode | Per request (step or message time) |
+| Gemini CLI | Per message; a message without a time is session-dated |
+| Copilot CLI | Tool calls per event; no usage value is recorded |
+| Cursor SDK through Conductor | Per run (one turn); a run without a time is session-dated |
+| Conductor result receipts | Session-dated at the selected receipt's time; the total is cumulative |
+| Cursor agent transcripts | Undated; no usage value is recorded |
 
 ## Privacy model
 
