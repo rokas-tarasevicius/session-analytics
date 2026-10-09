@@ -21,7 +21,7 @@ import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { renderSharedSnapshot } from "./shared-view.js";
-import { DASH, coverageBadge, setValue, valueWithCoverage } from "./ui.js";
+import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -37,7 +37,7 @@ const elements = {
   coverageButton: $("#coverage-button"), coverageClose: $("#coverage-close"), coverageDialog: $("#coverage-dialog"), coverageDot: $("#coverage-dot"), coverageLabel: $("#coverage-label"), coverageSummary: $("#coverage-summary"),
   spendCoverage: $("#metric-spend-coverage"), inputCoverage: $("#metric-input-coverage"), outputCoverage: $("#metric-output-coverage"), toolsCoverage: $("#metric-tools-coverage"), compactionsCoverage: $("#metric-compactions-coverage"),
   dateRange: $("#date-range"), density: $("#density-switch"),
-  error: $("#error-banner"), errorMessage: $("#error-message"), errorRetry: $("#error-retry"),
+  error: $("#error-banner"), errorMessage: $("#error-message"), errorRetry: $("#error-retry"), errorTitle: $("#error-title"),
   generated: $("#generated-at"), help: $("#help-overlay"), helpButton: $("#help-button"), helpClose: $("#help-close"),
   input: $("#metric-input"), live: $("#metric-live"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
@@ -724,6 +724,7 @@ function dailyProviderSpend(sessions) {
 }
 
 function renderLine(items) {
+  redrawOnResize(elements.dailySpend, () => renderLine(items));
   clear(elements.dailySpend);
   const selectedProviders = activeProviders();
   const totals = Object.fromEntries(selectedProviders.map((provider) => [provider, items.reduce((sum, item) => sum + item[provider], 0)]));
@@ -736,7 +737,7 @@ function renderLine(items) {
         : "No daily priced activity in this view.";
     emptyState(elements.dailySpend, message, "Nothing to plot"); syncHover(null); return;
   }
-  const width = 900, height = 272, left = 52, right = 14, top = 14, bottom = 34;
+  const width = chartWidth(elements.dailySpend, 900), height = width < 560 ? 220 : 272, left = 52, right = 14, top = 14, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
   const { axisMaximum } = tickScale(maximum);
@@ -748,7 +749,7 @@ function renderLine(items) {
     addSvgText(svg, shortMoney(value), left - 10, y + 4, "end");
   }
   const xAt = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
-  const tickIndexes = [...new Set([0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
+  const tickIndexes = [...new Set(width < 560 ? [0, Math.round((items.length - 1) / 2), items.length - 1] : [0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
   for (const index of tickIndexes) addSvgText(svg, shortDate(items[index].name), xAt(index), height - 12, index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
   const xs = items.map((_, index) => xAt(index));
   const baseline = top + plotHeight;
@@ -1321,12 +1322,12 @@ function paletteItems() {
     items.push({ group: "Time window", icon: "activity", label: "Custom range", keywords: "window custom dates", state: windowPreset === "custom", run: () => { applyWindowPreset("custom"); elements.windowStart.focus(); } });
   }
   const dark = document.documentElement.dataset.theme === "dark";
-  items.push({ group: "Appearance", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: shortcutsEnabled ? "t" : "", keywords: "theme dark light mode appearance", run: toggleTheme });
+  items.push({ group: "Display", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: shortcutsEnabled ? "t" : "", keywords: "theme dark light mode appearance", run: toggleTheme });
   const comfortable = document.documentElement.dataset.density === "comfortable";
-  items.push({ group: "Appearance", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? "d" : "", keywords: "density spacing compact comfortable", run: toggleDensity });
+  items.push({ group: "Display", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? "d" : "", keywords: "density spacing compact comfortable", run: toggleDensity });
   items.push({ group: "Keyboard", icon: "help", label: `${shortcutsEnabled ? "Disable" : "Enable"} single-key shortcuts`, keywords: "keyboard shortcuts keys toggle character", state: shortcutsEnabled, run: () => setShortcuts(!shortcutsEnabled) });
   items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? "?" : "", keywords: "help keys shortcuts", run: openHelp });
-  items.push({ group: "Snapshot", icon: "coverage", label: "Evidence & coverage", hint: shortcutsEnabled ? "e" : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
+  items.push({ group: "Snapshot", icon: "coverage", label: "Data coverage", hint: shortcutsEnabled ? "e" : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
   items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? "r" : "", keywords: "reload rescan refresh", run: () => load(true) });
   items.push({ group: "Snapshot", icon: "export", label: "Export view…", keywords: "export download save csv json snapshot", run: () => openExportMenu() });
   return items;
@@ -1456,7 +1457,8 @@ document.addEventListener("keydown", (event) => {
 
 const urlParameters = new URLSearchParams(window.location.search);
 
-function showError(message) {
+function showError(message, title = "Analysis failed") {
+  elements.errorTitle.textContent = title;
   elements.errorMessage.textContent = message;
   elements.errorRetry.hidden = false;
   elements.error.hidden = false;
@@ -1535,7 +1537,7 @@ async function loadSnapshot(refresh = false) {
       // Keep the last good snapshot on screen and say how old it is.
       elements.syncLabel.textContent = "Refresh failed";
       markStale(true);
-      showError(`Refresh failed: ${message} Showing the snapshot from ${dateTime(snapshot.generatedAt)}.`);
+      showError(`${message} Showing the snapshot from ${dateTime(snapshot.generatedAt)}.`, "Refresh failed");
     } else {
       elements.syncLabel.textContent = "Analysis failed";
       loadFailed = true;

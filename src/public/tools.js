@@ -18,7 +18,8 @@ function panel(kicker, title, id) {
   const result = el("article", null, "panel"), header = el("header"), heading = el("div");
   const name = el("h3", title);
   name.setAttribute("id", id); result.setAttribute("aria-labelledby", id);
-  heading.append(el("p", kicker, "kicker"), name); header.append(heading); result.append(header);
+  if (kicker) heading.append(el("p", kicker, "kicker"));
+  heading.append(name); header.append(heading); result.append(header);
   return { result, header };
 }
 
@@ -100,7 +101,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   );
   container.append(cards);
 
-  const ranking = panel("All tools", "Tool ranking", "tools-ranking-title");
+  const ranking = panel(null, "Tool ranking", "tools-ranking-title");
   const badge = coverageBadge(data.coverage, "tool evidence");
   if (badge) ranking.header.append(badge);
   const rows = (expanded ? data.tools : data.tools.slice(0, 12)).map((tool) => {

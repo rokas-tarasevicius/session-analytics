@@ -1,45 +1,47 @@
 /* Pricing panel: shared KPI cards, panels and tables from styles.css. */
-#pricing-panel { display: grid; gap: var(--gap); padding-top: 2px; }
-#pricing-panel .pricing-content { display: grid; gap: var(--gap); min-width: 0; }
+#pricing-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); padding-top: 2px; }
+#pricing-panel .pricing-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); min-width: 0; }
 #pricing-panel .kpi-grid { margin: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
-#pricing-panel .kpi a { display: inline-block; margin-top: 6px; color: var(--text-2); font-size: 11.5px; text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+#pricing-panel .kpi a { display: inline-block; margin-top: 6px; color: var(--text-2); font-size: var(--fs-xs); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
 #pricing-panel .kpi a:hover { color: var(--text); border-color: var(--text); }
 #pricing-panel .detail-panel { margin-top: 0; }
 #pricing-panel .evidence { margin-top: 0; }
 
 #pricing-panel .pricing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr)); gap: var(--gap); padding: 0; margin: 0; list-style: none; }
 #pricing-panel .pricing-grid > li { min-width: 0; }
-#pricing-panel .pricing-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; height: 100%; padding: 16px; border: 1px solid var(--line); border-top: 3px solid var(--card-accent); border-radius: var(--radius); background: var(--surface); color: var(--text); text-align: left; font-variant-numeric: tabular-nums; }
-#pricing-panel .pricing-card:hover { border-color: var(--line-strong); border-top-color: var(--card-accent); }
-#pricing-panel :is(.pricing-card, .pricing-toggle):focus-visible, .pricing-dialog :is(button, a):focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
-#pricing-panel .pricing-provider, .pricing-dialog .pricing-provider { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11.5px; }
+#pricing-panel .pricing-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; height: 100%; padding: 16px; border: 1px solid var(--line); border-top: 1px solid var(--line); box-shadow: inset 0 2px 0 color-mix(in srgb, var(--card-accent) 55%, transparent); border-radius: var(--radius); background: var(--surface); color: var(--text); text-align: left; font-variant-numeric: tabular-nums; }
+#pricing-panel .pricing-card:hover { border-color: var(--line-strong); }
+#pricing-panel :is(.pricing-card, .pricing-toggle):focus-visible, .pricing-dialog :is(button, a):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+#pricing-panel .pricing-provider, .pricing-dialog .pricing-provider { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: var(--fs-xs); }
 #pricing-panel .pricing-provider img, .pricing-dialog .pricing-provider img { width: 16px; height: 16px; object-fit: contain; }
 #pricing-panel .pricing-provider .mark, .pricing-dialog .pricing-provider .mark { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 2px; font-size: 9px; }
-#pricing-panel .pricing-model, .pricing-dialog .pricing-model { min-width: 0; overflow-wrap: anywhere; font: 500 13px var(--font-mono); }
-#pricing-panel .pricing-price { color: var(--text-2); font: 11.5px var(--font-mono); overflow-wrap: anywhere; }
-#pricing-panel .pricing-value { margin-top: 8px; font: 500 25px var(--font-mono); }
-#pricing-panel .pricing-caption { color: var(--muted); font-size: 11.5px; }
+#pricing-panel .pricing-model, .pricing-dialog .pricing-model { min-width: 0; overflow-wrap: anywhere; font: 500 var(--fs-sm) var(--font-mono); }
+#pricing-panel .pricing-price { color: var(--text-2); font: var(--fs-xs) var(--font-mono); overflow-wrap: anywhere; }
+#pricing-panel .pricing-value { margin-top: 8px; font: 500 var(--fs-figure) var(--font-mono); }
+#pricing-panel .pricing-caption { color: var(--muted); font-size: var(--fs-xs); }
 #pricing-panel .pricing-value + .pricing-caption { margin-top: -6px; }
 #pricing-panel .pricing-bar { display: block; width: 100%; height: 4px; margin-top: auto; background: var(--surface-3); border-radius: var(--radius); overflow: hidden; }
 #pricing-panel .pricing-bar > span { display: block; height: 100%; background: var(--card-accent); }
-#pricing-panel .pricing-badge { padding: 2px 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); font-size: 10.5px; }
+#pricing-panel .pricing-badge { padding: 2px 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--fs-xs); }
 #pricing-panel .pricing-card-unused { color: var(--text-2); }
 #pricing-panel .pricing-toggle { margin-top: 16px; }
 #pricing-panel .pricing-unused:not([hidden]) { margin-top: 12px; }
 
 .pricing-dialog { width: min(720px, calc(100vw - 32px)); max-height: 80vh; overflow: hidden; color: var(--text); font-variant-numeric: tabular-nums; }
 .pricing-dialog[open] { display: flex; flex-direction: column; }
-.pricing-dialog > header { flex-shrink: 0; gap: 16px; border-top: 3px solid var(--card-accent); }
+.pricing-dialog > header { flex-shrink: 0; gap: 16px; border-top: 1px solid var(--line); box-shadow: inset 0 2px 0 color-mix(in srgb, var(--card-accent) 55%, transparent); }
 .pricing-dialog > header > div { display: grid; gap: 8px; min-width: 0; }
 .pricing-dialog > header > button { flex-shrink: 0; }
-.pricing-dialog .pricing-model { font-size: 15px; }
+.pricing-dialog .pricing-model { font-size: var(--fs-md); }
 .pricing-dialog .pricing-dialog-body { display: grid; gap: 24px; padding: 20px; overflow-y: auto; min-height: 0; }
 .pricing-dialog .pricing-dialog-body > section { min-width: 0; }
 .pricing-dialog dl > div { align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 5px 0; border-bottom: 1px solid var(--line); }
-.pricing-dialog dd { max-width: 100%; margin-left: auto; font: 12px var(--font-mono); overflow-wrap: anywhere; }
+.pricing-dialog dd { max-width: 100%; margin-left: auto; font: var(--fs-sm) var(--font-mono); overflow-wrap: anywhere; }
 .pricing-dialog a { display: inline-block; margin-top: 12px; color: var(--text-2); }
 .pricing-dialog a:hover { color: var(--text); }
 .pricing-dialog .chart-note { margin: 8px 0 0; }
 .pricing-dialog th, .pricing-dialog td { white-space: normal; overflow-wrap: anywhere; }
 .pricing-dialog .table-wrap { max-height: none; }
 .pricing-dialog .table-wrap td.align-left { text-align: left; }
+
+@media (max-width: 520px) { #pricing-panel .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

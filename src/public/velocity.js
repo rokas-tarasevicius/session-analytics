@@ -1,7 +1,7 @@
 import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
-import { DASH, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
+import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
 import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
@@ -65,6 +65,8 @@ const categorySlots = new Map([
 ]);
 const neutralCategories = new Set(["other", "unknown", "<unknown>", "not recorded", "unknown execution"]);
 let chartSequence = 0;
+/** The bucket last inspected in each chart container, so a resize redraw keeps the reader's place. */
+const inspectedKeys = new WeakMap();
 function seriesEncoding(series, index, group) {
   if (group === "provider") return { color: providerColor(series.id), pattern: "solid", dash: "none" };
   if (group === "model") {
@@ -85,20 +87,30 @@ function seriesEncoding(series, index, group) {
 const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : granularity === "week" ? `Week of ${key}` : key;
 
 /** One focus stop, arrow-key inspection, and a text equivalent for every plotted bucket. */
-export function renderVelocityChart(container, data, { rolling = false, compactView = false } = {}) {
+export function renderVelocityChart(container, data, { rolling = false, compactView = false, keepInspected = false } = {}) {
+  redrawOnResize(container, () => renderVelocityChart(container, data, { rolling, compactView, keepInspected: true }));
   container.replaceChildren(); container.classList.add("velocity-chart");
   if (!data.series.length) {
     container.append(element("p", data.missingSessions ? "Velocity is unavailable in this snapshot. Refresh to collect activity buckets." : "No observed activity for this metric in the selected dates and providers.", "empty-state"));
     return;
   }
-  const width = 1040, height = compactView ? 290 : 330, left = 86, right = 18, top = 22, bottom = 40;
-  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const width = chartWidth(container, 1040), height = compactView ? (width < 560 ? 240 : 290) : (width < 560 ? 260 : 330), right = 18, top = 22, bottom = 40;
+  const plotHeight = height - top - bottom;
   const stacked = data.mode === "stacked";
   const overlay = rolling && data.granularity === "day" && data.mode !== "cumulative";
   const totals = data.keys.map((_, i) => data.series.reduce((value, series) => value + series.values[i], 0));
   const maximum = [...(stacked ? [totals] : data.series.map((series) => series.values)), ...(overlay ? [data.rolling] : [])].reduce((largest, values) => values.reduce((max, value) => Math.max(max, value ?? 0), largest), 0.001);
   const magnitude = 10 ** Math.floor(Math.log10(maximum / 4));
   const axisMaximum = Math.ceil(maximum / 4 / magnitude) * magnitude * 4;
+  // Axis text is drawn at CSS-pixel size (about 7 px per mono character), so narrow charts size the gutter and the number of
+  // date ticks from the labels themselves rather than letting them clip or collide.
+  const labelWidth = (text) => text.length * 7;
+  const yLabels = [0, 1, 2, 3, 4].map((tick) => formatMetric(axisMaximum * tick / 4, data.metric, true));
+  const left = width < 560 ? Math.max(64, Math.ceil(Math.max(...yLabels.map(labelWidth))) + 16) : 86;
+  const plotWidth = width - left - right;
+  const tickRoom = (captionOf) => Math.floor((plotWidth + 24) / (Math.max(...data.keys.map((key) => labelWidth(captionOf(key)))) + 24));
+  const tickCaption = tickRoom((key) => caption(key, data.granularity)) >= 2 ? (key) => caption(key, data.granularity) : (key) => data.granularity === "hour" ? `${key}:00` : key;
+  const room = tickRoom(tickCaption);
   const x = (index) => left + (data.keys.length === 1 ? plotWidth / 2 : index / (data.keys.length - 1) * plotWidth);
   const y = (value) => top + (1 - value / axisMaximum) * plotHeight;
   const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, tabindex: 0, role: "group", "aria-label": `${metricDefinitions[data.metric].label}, ${data.granularity}, ${data.mode}. Use Left and Right arrows, Home and End to inspect each bucket.` });
@@ -119,10 +131,11 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   for (let tick = 0; tick <= 4; tick += 1) {
     const value = axisMaximum * tick / 4;
     svg.append(svgElement("line", { x1: left, x2: width - right, y1: y(value), y2: y(value), class: "grid-line" }));
-    svg.append(svgElement("text", { x: left - 12, y: y(value) + 4, "text-anchor": "end", class: "axis-label" }, formatMetric(value, data.metric, true)));
+    svg.append(svgElement("text", { x: left - 12, y: y(value) + 4, "text-anchor": "end", class: "axis-label" }, yLabels[tick]));
   }
-  const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((fraction) => Math.round(fraction * (data.keys.length - 1))))];
-  for (const index of ticks) svg.append(svgElement("text", { x: x(index), y: height - 12, "text-anchor": index === 0 ? "start" : index === data.keys.length - 1 ? "end" : "middle", class: "axis-label" }, caption(data.keys[index], data.granularity)));
+  const fractions = room >= 5 ? [0, 0.25, 0.5, 0.75, 1] : room >= 3 ? [0, 0.5, 1] : room >= 2 ? [0, 1] : [1];
+  const ticks = [...new Set(fractions.map((fraction) => Math.round(fraction * (data.keys.length - 1))))];
+  for (const index of ticks) svg.append(svgElement("text", { x: x(index), y: height - 12, "text-anchor": index === 0 ? "start" : index === data.keys.length - 1 ? "end" : "middle", class: "axis-label" }, tickCaption(data.keys[index])));
   let floor = data.keys.map(() => 0);
   data.series.forEach((series, seriesIndex) => {
     const encoding = encodings[seriesIndex];
@@ -149,9 +162,11 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   if (overlay) legend.append(element("span", "Dashed: total · rolling 7-day average", "velocity-average-key"));
   const inspection = element("div", undefined, "velocity-inspection");
   inspection.setAttribute("aria-live", "polite"); inspection.setAttribute("aria-atomic", "true");
-  let selected = data.keys.length - 1;
+  const remembered = keepInspected ? data.keys.indexOf(inspectedKeys.get(container)) : -1;
+  let selected = remembered >= 0 ? remembered : data.keys.length - 1;
   const inspect = (index) => {
     selected = Math.max(0, Math.min(data.keys.length - 1, index));
+    inspectedKeys.set(container, data.keys[selected]);
     marker.setAttribute("x1", String(x(selected))); marker.setAttribute("x2", String(x(selected))); marker.setAttribute("visibility", "visible");
     inspection.replaceChildren(element("strong", `${caption(data.keys[selected], data.granularity)} · ${data.mode === "cumulative" ? "cumulative " : ""}${formatMetric(totals[selected], data.metric)}`));
     for (const series of data.series) inspection.append(element("span", `${series.label}: ${formatMetric(series.values[selected], data.metric)}`));
@@ -191,8 +206,9 @@ function coverageText(data) {
 const controllers = new WeakMap();
 function panelShell(kicker, title) {
   const article = el("article", null, "panel"), header = el("header"), block = el("div");
-  const kickerNode = el("p", kicker, "kicker"), heading = el("h3", title);
-  block.append(kickerNode, heading); header.append(block); article.append(header);
+  const heading = el("h3", title);
+  if (kicker) block.append(el("p", kicker, "kicker"));
+  block.append(heading); header.append(block); article.append(header);
   return { article, heading, header };
 }
 export function renderVelocity(container, sessions, context) {
@@ -212,12 +228,12 @@ export function renderVelocity(container, sessions, context) {
     const lead = el("div", null, "kpi-grid compact-metrics velocity-lead");
     const totals = el("div", null, "kpi-grid compact-metrics velocity-totals");
     const comparisons = evidence([], { title: "How the comparisons are built" });
-    const main = panelShell("Observed", "Usage over time");
+    const main = panelShell(null, "Usage over time");
     const subtitle = el("span", null, "panel-meta"); main.header.append(subtitle);
     const chart = el("div"), coverage = evidence([], { title: "Evidence & limits" });
     main.article.append(chart, coverage);
     const projection = panelShell("End-of-month scenario", "Projection");
-    const movers = panelShell("Largest increases", "Top movers");
+    const movers = panelShell(null, "Top movers");
     container.append(lead, controls, main.article, totals, comparisons, projection.article, movers.article);
     controller = { sessions, context, update: null, selectedProviders };
     const update = () => {

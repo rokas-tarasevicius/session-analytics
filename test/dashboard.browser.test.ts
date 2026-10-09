@@ -384,7 +384,8 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     await browser.evaluate(`document.querySelector('#refresh-button').click()`);
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "error");
     assert.equal(await browser.evaluate(`document.querySelector('#error-banner').hidden`), false);
-    assert.match(await browser.evaluate<string>(`document.querySelector('#error-message').textContent`), /^Refresh failed: .* Showing the snapshot from /);
+    assert.equal(await browser.evaluate(`document.querySelector('#error-title').textContent`), 'Refresh failed');
+    assert.match(await browser.evaluate<string>(`document.querySelector('#error-message').textContent`), / Showing the snapshot from /);
     assert.match(await browser.evaluate<string>(`document.querySelector('#generated-at').textContent`), /· stale$/);
     assert.equal(await browser.evaluate(`document.querySelector('#metric-spend').textContent`), headline);
     assert.equal(await browser.evaluate(`document.querySelector('#error-retry').hidden`), false);
@@ -429,6 +430,69 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
       await browser.open(`${origin}/${query}`);
       assert.equal(await browser.evaluate(`document.querySelector('[data-view-panel="costs"]').hidden`), false);
     }
+
+    // Every view contains its overflow at phone, tablet and desktop widths, in both themes and densities, and its line chart
+    // is drawn at the container's pixel width. clientWidth excludes a classic scrollbar, so no overflow hides behind one.
+    const setWidth = async (width: number) => {
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width });
+      await browser.until(`innerWidth`, width);
+    };
+    const chartAtContainerWidth = `(() => {
+      const svg = document.querySelector('[data-view-panel]:not([hidden]) :is(#daily-spend, .velocity-chart) > svg');
+      return !svg || Math.abs(svg.viewBox.baseVal.width - Math.max(280, svg.parentElement.clientWidth)) <= 1;
+    })()`;
+    for (const theme of ["light", "dark"]) for (const density of ["compact", "comfortable"]) {
+      await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.dataset.density = '${density}'`);
+      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) for (const width of [390, 1024, 1440]) {
+        await setWidth(width);
+        await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
+        await delay(150);
+        assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, `${view} at ${width}px (${theme}, ${density})`);
+        await browser.until(chartAtContainerWidth, true);
+      }
+      await setWidth(1024);
+      await browser.evaluate(`document.querySelector('[data-window-preset="custom"]').click()`);
+      await delay(150);
+      assert.equal(await browser.evaluate(`(() => {
+        const dates = document.querySelector('#date-range').getBoundingClientRect();
+        const status = document.querySelector('#sync-context').getBoundingClientRect();
+        return dates.right <= status.left || dates.left >= status.right || dates.bottom <= status.top || dates.top >= status.bottom;
+      })()`), true, `Custom window and status do not overlap at 1024px (${theme}, ${density})`);
+      await browser.evaluate(`document.querySelector('[data-window-preset="all"]').click()`);
+    }
+    await browser.evaluate(`document.documentElement.dataset.theme = 'light'; document.documentElement.dataset.density = 'compact'`);
+
+    // Resizing redraws the chart at the new width without a view switch, and keyboard focus stays on the chart.
+    await setWidth(1440);
+    await browser.evaluate(`document.querySelector('[data-view-button="summary"]').click()`);
+    await browser.until(chartAtContainerWidth, true);
+    await browser.evaluate(`document.querySelector('#daily-spend svg').focus()`);
+    await setWidth(1024);
+    await browser.until(`document.querySelector('#daily-spend svg').viewBox.baseVal.width < 900`, true);
+    await browser.until(chartAtContainerWidth, true);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#daily-spend svg')`), true);
+    await browser.evaluate(`document.activeElement.blur()`);
+
+    // The coverage dialog opens on its title (no focus ring on Close), keeps its table scrolling inside it on a phone,
+    // and Escape returns focus to the button that opened it.
+    await setWidth(390);
+    await browser.evaluate(`document.querySelector('#coverage-button').focus(); document.querySelector('#coverage-button').click()`);
+    await browser.until(`document.querySelector('#coverage-dialog').open`, true);
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "coverage-title");
+    assert.equal(await browser.evaluate(`(() => { const d = document.querySelector('#coverage-dialog'); return d.scrollWidth <= d.clientWidth && d.getBoundingClientRect().right <= innerWidth; })()`), true);
+    assert.equal(await browser.evaluate(`(() => { const w = document.querySelector('#coverage-dialog .table-wrap'); return w.scrollWidth > w.clientWidth; })()`), true);
+    await browser.key("Escape");
+    await browser.until(`document.querySelector('#coverage-dialog').open`, false);
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "coverage-button");
+
+    // On a touch screen the controls grow to finger size, key hints disappear, and the page still fits.
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await browser.until(`matchMedia('(pointer: coarse)').matches`, true);
+    assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-segment button, #refresh-button, #theme-switch, #density-switch')].every((control) => control.getBoundingClientRect().height >= 40)`), true);
+    assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.palette-trigger kbd')).display`), "none");
+    assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true);
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await setWidth(1440);
 
     // Icon rail keeps every view name in the accessibility tree and shows a hover label.
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 900 });

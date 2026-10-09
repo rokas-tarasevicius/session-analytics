@@ -84,7 +84,7 @@ test("coverage and repository scope names retain their visible labels as state c
     run(`renderWarnings(${JSON.stringify(Array(count).fill("Coverage note"))})`);
     assert.equal(coverage.getAttribute("aria-label"), count ? `Coverage · ${count} note${count === 1 ? "" : "s"}` : null);
     assert.equal(document.querySelector("#coverage-label")!.textContent, count ? `Coverage · ${count}` : "Coverage");
-    assert.equal(coverage.getAttribute("title"), "Evidence and coverage");
+    assert.equal(coverage.getAttribute("title"), "Data coverage");
   }
   const scope = document.querySelector("#scope-chip")!;
   run('elements.repositoryFilter.value = "synthetic"; renderSharedView(activeView())');

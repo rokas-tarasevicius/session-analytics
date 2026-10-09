@@ -5,6 +5,47 @@
 
 export const DASH = "—";
 
+/** CSS-pixel width for an SVG chart, with a fallback for hidden views and test DOMs. */
+export function chartWidth(container, fallback, min = 280) {
+  const width = Math.floor(container?.clientWidth || 0);
+  return width > 0 ? Math.max(min, width) : fallback;
+}
+
+const chartResizes = new WeakMap();
+
+/**
+ * Redraw after a width change of at least `step` pixels; one observer and the latest callback per container.
+ * A redraw replaces the chart, so keyboard focus inside it moves to the new chart's focus stop.
+ */
+export function redrawOnResize(container, render, step = 32) {
+  if (!container || typeof ResizeObserver !== "function") return;
+  let state = chartResizes.get(container);
+  if (state) {
+    state.render = render;
+    state.step = step;
+    state.width = Math.floor(container.clientWidth || 0);
+    return;
+  }
+  state = { render, step, width: Math.floor(container.clientWidth || 0), pending: false };
+  const changed = () => container.clientWidth > 0 && Math.abs(Math.floor(container.clientWidth) - state.width) >= state.step;
+  const observer = new ResizeObserver(() => {
+    if (state.pending || !changed()) return;
+    const redraw = () => {
+      state.pending = false;
+      if (!changed()) return;
+      state.width = Math.floor(container.clientWidth);
+      const focused = typeof document !== "undefined" && container.contains?.(document.activeElement);
+      state.render();
+      if (focused) container.querySelector?.('[tabindex="0"]')?.focus({ preventScroll: true });
+    };
+    state.pending = true;
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(redraw);
+    else redraw();
+  });
+  chartResizes.set(container, state);
+  observer.observe(container);
+}
+
 /** Adds a class by rewriting className (some test DOM stubs do not model the class list API). */
 export function addClass(element, name) {
   element.className = element.className ? `${element.className} ${name}` : name;

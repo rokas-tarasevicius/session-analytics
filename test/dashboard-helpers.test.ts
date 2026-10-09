@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 
 import {
   clampWindow, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
@@ -145,8 +147,16 @@ test("window math: days, preset starts, ticks, heat levels, and money labels", (
   assert.equal(heatLevel(0, 10), 0);
   assert.equal(heatLevel(10, 10), 7);
   assert.equal(heatLevel(1, 10), 3);
+  assert.equal(shortMoney(0), "$0");
+  assert.equal(shortMoney(7.5), "$7.50");
+  assert.equal(shortMoney(76.2), "$76");
+  assert.equal(shortMoney(999.6), "$1K");
+  assert.equal(shortMoney(9.994), "$9.99");
+  assert.equal(shortMoney(9.996), "$10");
+  assert.equal(shortMoney(1900), "$1.9K");
+  assert.equal(shortMoney(12345), "$12.3K");
   assert.equal(shortMoney(36), "$36");
-  assert.equal(shortMoney(12.34), "$12.3");
+  assert.equal(shortMoney(12.34), "$12");
   assert.equal(shortMoney(917.26), "$917");
   assert.equal(shortMoney(1234), "$1.2K");
   assert.equal(shortMoney(0.5), "$0.50");
@@ -186,4 +196,59 @@ test("sortRepositories orders by any column in both directions with a stable nam
   assert.deepEqual(sortRepositories(rows, "value", "descending").map((row) => row.repository.name), ["alpha", "beta", "gamma"]);
   assert.deepEqual(sortRepositories(rows, "value", "ascending").map((row) => row.repository.name), ["beta", "gamma", "alpha"]);
   assert.deepEqual(sortRepositories(rows, "name", "ascending").map((row) => row.repository.name), ["alpha", "beta", "gamma"]);
+});
+
+
+test("chart sizing falls back in hidden views and redraws only meaningful width changes with the latest data", async () => {
+  const source = await readFile(new URL("../src/public/ui.js", import.meta.url), "utf8");
+  const callbacks: Array<() => void> = [], frames: Array<() => void> = [], observed: unknown[] = [];
+  const observer = class {
+    constructor(callback: () => void) { callbacks.push(callback); }
+    observe(container: unknown) { observed.push(container); }
+  };
+  const helpers = runInNewContext(source.replaceAll("export ", "") + "\n({ chartWidth, redrawOnResize })", {
+    ResizeObserver: observer, requestAnimationFrame: (callback: () => void) => frames.push(callback),
+  });
+  assert.equal(helpers.chartWidth({}, 900), 900);
+  assert.equal(helpers.chartWidth(null, 1040), 1040);
+  assert.equal(helpers.chartWidth({ clientWidth: 0 }, 1040), 1040);
+  assert.equal(helpers.chartWidth({ clientWidth: 240 }, 900), 280);
+  assert.equal(helpers.chartWidth({ clientWidth: 391.8 }, 900), 391);
+  assert.equal(helpers.chartWidth({ clientWidth: 240 }, 900, 200), 240);
+  const container = { clientWidth: 400 };
+  let oldDraws = 0, latestDraws = 0;
+  helpers.redrawOnResize(container, () => oldDraws++);
+  callbacks[0]!(); assert.equal(frames.length, 0, "initial notification does not redraw");
+  container.clientWidth = 416; callbacks[0]!(); assert.equal(frames.length, 0);
+  container.clientWidth = 432; callbacks[0]!();
+  container.clientWidth = 464; callbacks[0]!();
+  assert.equal(frames.length, 1, "multiple notifications coalesce into one frame");
+  frames.shift()!(); assert.equal(oldDraws, 1);
+  helpers.redrawOnResize(container, () => latestDraws++);
+  assert.equal(observed.length, 1, "registration updates the callback without adding observers");
+  container.clientWidth = 496; callbacks[0]!(); frames.shift()!();
+  assert.equal(oldDraws, 1); assert.equal(latestDraws, 1);
+  container.clientWidth = 0; callbacks[0]!(); assert.equal(frames.length, 0, "hidden views do not redraw");
+  container.clientWidth = 600; callbacks[0]!();
+  helpers.redrawOnResize(container, () => latestDraws++);
+  frames.shift()!(); assert.equal(latestDraws, 1, "an intervening data render cancels a redundant queued redraw");
+  const fallback = runInNewContext(source.replaceAll("export ", "") + "\n({ redrawOnResize })", {});
+  assert.doesNotThrow(() => fallback.redrawOnResize({}, () => assert.fail("no observer in test DOM")));
+  const immediate = runInNewContext(source.replaceAll("export ", "") + "\n({ redrawOnResize })", { ResizeObserver: observer });
+  const second = { clientWidth: 300 };
+  immediate.redrawOnResize(second, () => latestDraws++);
+  second.clientWidth = 332; callbacks[1]!(); assert.equal(latestDraws, 2, "works without requestAnimationFrame");
+
+  // A redraw replaces the focused chart; focus moves to the new chart's focus stop instead of falling to the page.
+  const page = { activeElement: null as unknown };
+  const focusing = runInNewContext(source.replaceAll("export ", "") + "\n({ redrawOnResize })", { ResizeObserver: observer, document: page });
+  const oldChart = {}, focusCalls: unknown[] = [];
+  const newChart = { focus: (options: unknown) => focusCalls.push(options) };
+  let current: unknown = oldChart;
+  const chart = { clientWidth: 400, contains: (node: unknown) => node === current, querySelector: (selector: string) => selector === '[tabindex="0"]' ? current : null };
+  focusing.redrawOnResize(chart, () => { current = newChart; });
+  page.activeElement = oldChart; chart.clientWidth = 440; callbacks[2]!();
+  assert.equal(JSON.stringify(focusCalls), JSON.stringify([{ preventScroll: true }]));
+  page.activeElement = null; chart.clientWidth = 480; callbacks[2]!();
+  assert.equal(focusCalls.length, 1, "focus elsewhere on the page is left alone");
 });
