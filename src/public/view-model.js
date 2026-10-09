@@ -199,13 +199,38 @@ export function windowStartFor(preset, minDay, maxDay) {
 
 /** Clamps a custom range to the observed range and keeps start <= end. */
 export function clampWindow({ start, end, min, max }) {
-  const clamp = (value, fallback) => {
-    const day = value || fallback;
-    return day < min ? min : day > max ? max : day;
-  };
-  let clampedStart = clamp(start, min), clampedEnd = clamp(end, max);
-  if (clampedStart > clampedEnd) clampedEnd = clampedStart;
+  const { start: clampedStart, end: clampedEnd } = resolveCustomWindow({ start, end, min, max });
   return { start: clampedStart, end: clampedEnd };
+}
+
+/** A calendar day `YYYY-MM-DD` that exists, or null. */
+export function validDay(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value ? value : null;
+}
+
+/**
+ * Resolves a custom date range edit. An empty or invalid bound keeps its previous value (clearing one date never
+ * wipes the other), a reversed range swaps, and both bounds are clamped to the observed history. `adjusted` lists
+ * what changed so the interface can say so.
+ */
+export function resolveCustomWindow({ start, end, previousStart = null, previousEnd = null, min, max }) {
+  const adjusted = [];
+  let from = validDay(start), to = validDay(end);
+  if (!from) {
+    from = validDay(previousStart) ?? min;
+    if (start) adjusted.push("invalid-start");
+  }
+  if (!to) {
+    to = validDay(previousEnd) ?? max;
+    if (end) adjusted.push("invalid-end");
+  }
+  if (from > to) { [from, to] = [to, from]; adjusted.push("swapped"); }
+  const clamp = (day) => (day < min ? min : day > max ? max : day);
+  if (clamp(from) !== from || clamp(to) !== to) adjusted.push("clamped");
+  from = clamp(from); to = clamp(to);
+  return { adjusted, end: to, start: from };
 }
 
 /** The equal-length period before [start, end], only when it lies wholly inside the observed history. */
@@ -263,21 +288,111 @@ export function tickScale(maximum) {
   return { axisMaximum: tick * 4, tick };
 }
 
-/** Palette matching: every term must be a substring or an ordered subsequence of the item text. */
+// Match tiers, best first. A label match outranks the same tier in keywords or the group name.
+const matchTiers = { exact: 5, prefix: 4, wordStart: 3, substring: 2, subsequence: 1, none: 0 };
+
+function isSubsequence(term, text) {
+  let position = 0;
+  for (const character of term) {
+    position = text.indexOf(character, position);
+    if (position < 0) return false;
+    position += 1;
+  }
+  return true;
+}
+
+function termTier(term, text) {
+  if (!text) return matchTiers.none;
+  if (text === term) return matchTiers.exact;
+  if (text.startsWith(term)) return matchTiers.prefix;
+  if (text.split(/[^a-z0-9]+/).some((word) => word.startsWith(term))) return matchTiers.wordStart;
+  if (text.includes(term)) return matchTiers.substring;
+  return isSubsequence(term, text) ? matchTiers.subsequence : matchTiers.none;
+}
+
+/**
+ * Scores a palette item for a query: 0 when any term is missing, otherwise higher for exact, then prefix,
+ * word-start, substring and finally subsequence matches, with label matches ahead of keyword matches.
+ * `tier` is the weakest term's match tier.
+ */
+export function paletteScore(item, query) {
+  const terms = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return { score: 1, tier: matchTiers.exact };
+  const label = String(item.label || "").toLowerCase();
+  const other = `${item.keywords || ""} ${item.group || ""}`.toLowerCase();
+  const whole = query.trim().toLowerCase();
+  let score = 0, tier = matchTiers.exact;
+  for (const term of terms) {
+    const inLabel = termTier(term, label), inOther = termTier(term, other);
+    const best = Math.max(inLabel, inOther);
+    if (best === matchTiers.none) return { score: 0, tier: matchTiers.none };
+    tier = Math.min(tier, best);
+    score += best * 2 + (inLabel >= inOther ? 1 : 0);
+  }
+  if (label === whole) score += 100;
+  return { score, tier };
+}
+
+/** Palette matching: every term must at least be an ordered subsequence of the item text. */
 export function matchesQuery(item, query) {
-  if (!query) return true;
-  const haystack = `${item.label} ${item.keywords || ""} ${item.group}`.toLowerCase();
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return terms.every((term) => {
-    if (haystack.includes(term)) return true;
-    let position = 0;
-    for (const character of term) {
-      position = haystack.indexOf(character, position);
-      if (position < 0) return false;
-      position += 1;
-    }
-    return true;
-  });
+  return paletteScore(item, query).score > 0;
+}
+
+/**
+ * Filters and orders palette items for a query. Subsequence-only matches are dropped when any item matches every
+ * term as a substring or better. Items stay clustered by group; groups are ordered by their best item, and items
+ * within a group by score, with the original order breaking ties.
+ */
+export function rankPaletteItems(items, query) {
+  if (!String(query || "").trim()) return items.slice();
+  const scored = items.map((item, index) => ({ index, item, ...paletteScore(item, query) })).filter(({ score }) => score > 0);
+  const strong = scored.some(({ tier }) => tier > matchTiers.subsequence);
+  const kept = strong ? scored.filter(({ tier }) => tier > matchTiers.subsequence) : scored;
+  const groupBest = new Map(), groupFirst = new Map();
+  for (const entry of kept) {
+    groupBest.set(entry.item.group, Math.max(groupBest.get(entry.item.group) ?? 0, entry.score));
+    if (!groupFirst.has(entry.item.group)) groupFirst.set(entry.item.group, entry.index);
+  }
+  return kept.sort((left, right) => {
+    const leftGroup = left.item.group, rightGroup = right.item.group;
+    if (leftGroup !== rightGroup) return groupBest.get(rightGroup) - groupBest.get(leftGroup) || groupFirst.get(leftGroup) - groupFirst.get(rightGroup);
+    return right.score - left.score || left.index - right.index;
+  }).map(({ item }) => item);
+}
+
+// Typing into these must never trigger single-key shortcuts. Checkboxes, radios, buttons and ranges do not take text.
+const textInputTypes = new Set(["", "date", "datetime-local", "email", "month", "number", "password", "search", "tel", "text", "time", "url", "week"]);
+
+/** True when a key press on `target` is text entry (text-like inputs, textareas, selects, editable content). */
+export function isTextEntryTarget(target) {
+  if (!target || typeof target !== "object") return false;
+  if (target.isContentEditable === true) return true;
+  const tag = String(target.tagName || "").toLowerCase();
+  if (tag === "textarea" || tag === "select") return true;
+  if (tag !== "input") return false;
+  return textInputTypes.has(String(target.type ?? "").toLowerCase());
+}
+
+/** Providers that appear in the sessions, in the fixed provider order. */
+export function presentProviders(sessions) {
+  const seen = new Set();
+  for (const session of sessions) seen.add(session.provider);
+  return providerOrder.filter((provider) => seen.has(provider));
+}
+
+/** The provider a `p` then digit chord toggles: the nth visible chip, or null. */
+export function providerShortcutTarget(key, providers) {
+  if (!/^[1-9]$/.test(String(key))) return null;
+  return providers[Number(key) - 1] ?? null;
+}
+
+/** Runs one `task` at a time: calls made while it is pending share its promise instead of starting another. */
+export function singleFlight(task) {
+  let pending = null;
+  return (...args) => {
+    if (!pending) pending = (async () => task(...args))().finally(() => { pending = null; });
+    return pending;
+  };
 }
 
 export const tableAccessors = {

@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- The dashboard URL follows the view, window (`?window=`, custom `?start=`/`?end=`) and repository focus (`?repo=` with the opaque repository ID, never a name or path). View, preset and repository changes add a browser history entry and Back/Forward restores them; reload and bookmarks reopen the same place. `?open=`, `?theme=` and `?density=` apply once and are then removed from the URL; a URL theme or density is no longer saved as your preference, and the system theme is no longer saved on first visit.
+- Switching views starts the new view at the top of the page.
+- Command palette results are ranked: exact, then prefix, word-start, substring and fuzzy matches, and fuzzy-only matches are dropped when a closer match exists (`help` finds Keyboard shortcuts first). The palette gains an **Export view…** entry.
+- Provider chips on Summary, Velocity, Tools and Activity list only the providers present in the snapshot (no empty Unsupported chip), and Velocity's "N of M providers" counts against them. `p 1`–`p 7` toggle the chips in that order on every one of these views, including Velocity.
+- A custom range with a cleared or half-typed date keeps the previous date until you leave the field, a reversed range swaps, and dates outside the observed history are clamped, with an inline note. A window with no sessions or activity shows an empty state with **Show all time** and **Clear repository focus** instead of a page of zeros.
+- A failed first load shows a "No snapshot" state with **Retry**; a failed refresh keeps the last snapshot on screen, marks its time as stale and offers **Retry**. The export menu says when there is nothing to export because the analysis failed.
+- Accessibility: legend entries are list items instead of focusable buttons that did nothing; the Summary repository table's first cell is a real button instead of a focusable row; coverage badges such as `87/116` carry their sentence for screen readers; repository bars, the Coverage button and the repository scope chip have accessible names that include their visible text and values; the density control is a named toggle; the wordmark goes to Summary. Tooltips name a shortcut key only while single-key shortcuts are on, key caps are lowercase everywhere, and `/` is listed in the shortcut help.
+
+### Fixed
+
+- The theme no longer flashes light before a saved dark theme applies: a same-origin script in `<head>` sets theme and density before the first paint.
+- Escape in the export menu closes only the menu instead of also clearing the repository focus; the menu also closes on a press outside it, when focus moves away, and when the theme or density changes.
+- Single-key shortcuts work while a checkbox or button has focus; only text entry suppresses them.
+- `p 4` to `p 7` did nothing; only the first three providers could be toggled from the keyboard.
+- Refresh from the button, `r` and the palette now shares one in-flight request instead of starting overlapping scans.
+- Clearing the end date of a custom range wiped the start date too, and a custom range could extend past the observed history.
+
 ## [0.7.0] - 2026-10-09
 
 ### Removed

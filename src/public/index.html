@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="dark light" />
     <title>Session Analytics</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/interop.css" />
     <link rel="stylesheet" href="/pricing.css" />
@@ -40,7 +41,7 @@
 
     <div class="shell">
       <aside class="sidebar" aria-label="Navigation">
-        <a class="wordmark" href="#main" aria-label="Session Analytics home">
+        <a class="wordmark" href="?view=summary" aria-label="Session Analytics, Summary">
           <svg class="logo" viewBox="0 0 128 128" width="28" height="28" aria-hidden="true" focusable="false">
             <rect x="4" y="4" width="120" height="120" rx="28" fill="#181a16"/>
             <path d="M30 46v36a8 8 0 0 0 8 8h14M30 56a8 8 0 0 0 8 8" fill="none" stroke="#62665c" stroke-width="4" stroke-linecap="round"/>
@@ -60,18 +61,18 @@
         <nav class="view-nav" aria-label="Analytics views">
           <div class="nav-section" role="group" aria-label="Overview">
             <p class="nav-heading">Overview</p>
-            <button type="button" data-view-button="summary" data-label="Summary" aria-current="page"><svg aria-hidden="true"><use href="#i-summary"/></svg><span>Summary</span><kbd aria-hidden="true">G S</kbd></button>
-            <button type="button" data-view-button="velocity" data-label="Velocity"><svg aria-hidden="true"><use href="#i-velocity"/></svg><span>Velocity</span><kbd aria-hidden="true">G V</kbd></button>
+            <button type="button" data-view-button="summary" data-label="Summary" aria-current="page"><svg aria-hidden="true"><use href="#i-summary"/></svg><span>Summary</span><kbd aria-hidden="true">g s</kbd></button>
+            <button type="button" data-view-button="velocity" data-label="Velocity"><svg aria-hidden="true"><use href="#i-velocity"/></svg><span>Velocity</span><kbd aria-hidden="true">g v</kbd></button>
           </div>
           <div class="nav-section" role="group" aria-label="Economics">
             <p class="nav-heading">Economics</p>
-            <button type="button" data-view-button="costs" data-label="Costs"><svg aria-hidden="true"><use href="#i-costs"/></svg><span>Costs</span><kbd aria-hidden="true">G C</kbd></button>
-            <button type="button" data-view-button="pricing" data-label="Pricing"><svg aria-hidden="true"><use href="#i-pricing"/></svg><span>Pricing</span><kbd aria-hidden="true">G P</kbd></button>
+            <button type="button" data-view-button="costs" data-label="Costs"><svg aria-hidden="true"><use href="#i-costs"/></svg><span>Costs</span><kbd aria-hidden="true">g c</kbd></button>
+            <button type="button" data-view-button="pricing" data-label="Pricing"><svg aria-hidden="true"><use href="#i-pricing"/></svg><span>Pricing</span><kbd aria-hidden="true">g p</kbd></button>
           </div>
           <div class="nav-section" role="group" aria-label="Usage">
             <p class="nav-heading">Usage</p>
-            <button type="button" data-view-button="tools" data-label="Tools"><svg aria-hidden="true"><use href="#i-tools"/></svg><span>Tools</span><kbd aria-hidden="true">G T</kbd></button>
-            <button type="button" data-view-button="activity" data-label="Activity"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span><kbd aria-hidden="true">G A</kbd></button>
+            <button type="button" data-view-button="tools" data-label="Tools"><svg aria-hidden="true"><use href="#i-tools"/></svg><span>Tools</span><kbd aria-hidden="true">g t</kbd></button>
+            <button type="button" data-view-button="activity" data-label="Activity"><svg aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span><kbd aria-hidden="true">g a</kbd></button>
           </div>
         </nav>
 
@@ -81,8 +82,8 @@
         </section>
 
         <div class="sidebar-footer">
-          <button class="icon-button" id="help-button" type="button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="help-overlay" title="Keyboard shortcuts (?)"><svg aria-hidden="true"><use href="#i-help"/></svg></button>
-          <button class="icon-button" id="density-switch" type="button" aria-label="Switch to comfortable density" aria-pressed="false" title="Density"><svg aria-hidden="true"><use href="#i-density"/></svg></button>
+          <button class="icon-button" id="help-button" type="button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="help-overlay" title="Keyboard shortcuts" data-shortcut="?"><svg aria-hidden="true"><use href="#i-help"/></svg></button>
+          <button class="icon-button" id="density-switch" type="button" aria-label="Comfortable density" aria-pressed="false" title="Density" data-shortcut="d"><svg aria-hidden="true"><use href="#i-density"/></svg></button>
         </div>
       </aside>
 
@@ -105,12 +106,13 @@
               <input id="window-start" type="date" aria-label="Analysis start date" />
               <span aria-hidden="true">→</span>
               <input id="window-end" type="date" aria-label="Analysis end date" />
+              <span class="date-range-note" id="window-note" role="status" hidden></span>
             </div>
           </div>
           <div class="topbar-actions">
             <span class="status" id="sync-context" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
-            <button class="coverage-button" id="coverage-button" type="button" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Evidence and coverage"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
-            <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot (R)"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
+            <button class="coverage-button" id="coverage-button" type="button" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Evidence and coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
+            <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
               <summary class="icon-button" title="Export view" aria-label="Export view"><svg aria-hidden="true"><use href="#i-export"/></svg></summary>
               <div class="export-options">
@@ -123,15 +125,16 @@
                 <button class="button" type="button" data-export="shared" hidden>Shared aggregates CSV</button>
               </div>
             </details>
-            <button class="icon-button" id="theme-switch" type="button" aria-label="Switch theme" title="Switch theme (T)"><svg class="icon-sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon-moon" aria-hidden="true"><use href="#i-moon"/></svg><span id="theme-label" class="sr-only">Light</span></button>
+            <button class="icon-button" id="theme-switch" type="button" aria-label="Switch theme" title="Switch theme" data-shortcut="t"><svg class="icon-sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon-moon" aria-hidden="true"><use href="#i-moon"/></svg><span id="theme-label" class="sr-only">Light</span></button>
           </div>
         </header>
 
         <main id="main" data-state="loading">
           <p id="export-status" class="muted" role="status" aria-live="polite"></p>
           <section id="shared-snapshot" class="panel" aria-label="Shared snapshot" hidden></section>
-          <p class="error-banner" id="error-banner" role="alert" hidden></p>
+          <div class="error-banner" id="error-banner" role="alert" hidden><span id="error-message"></span><button type="button" class="button error-retry" id="error-retry">Retry</button></div>
           <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></span></p>
+          <section class="view-status" id="view-status" aria-label="View status" hidden></section>
 
           <div class="analytics-view" data-view-panel="summary">
             <section class="kpi-grid" aria-label="Machine totals">
@@ -295,9 +298,9 @@
           <div><dt>Previous / next view</dt><dd><kbd>[</kbd><kbd>]</kbd></dd></div>
         </dl></section>
         <section><h3>Control</h3><dl>
-          <div><dt>Command palette</dt><dd><kbd><span class="key-command">⌘</span>K</kbd></dd></div>
+          <div><dt>Command palette</dt><dd><kbd><span class="key-command">⌘</span>K</kbd> or <kbd>/</kbd></dd></div>
           <div><dt>Last 7 · 30 · 90 days · all</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
-          <div><dt>Toggle providers 1–7 in the current chart or view</dt><dd><kbd>p</kbd> <kbd>1</kbd>–<kbd>7</kbd></dd></div>
+          <div><dt>Toggle provider chips in order (Summary chart, Velocity, Tools, Activity)</dt><dd><kbd>p</kbd> <kbd>1</kbd>–<kbd>7</kbd></dd></div>
           <div><dt>Evidence &amp; coverage</dt><dd><kbd>e</kbd></dd></div>
           <div><dt>Clear repository focus</dt><dd><kbd>esc</kbd></dd></div>
           <div><dt>Switch theme</dt><dd><kbd>t</kbd></dd></div>
