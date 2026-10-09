@@ -57,6 +57,11 @@
   --provider-unknown-2: color-mix(in oklab, var(--provider-unknown) 72%, #fff);
   --provider-unknown-3: color-mix(in oklab, var(--provider-unknown) 50%, #fff);
   --chart-neutral: #006855;
+  /* non-brand categorical ramp (chart-colors.js); repeats add texture/dashes */
+  --category-0: #008719;
+  --category-1: #dc6bc4;
+  --category-2: #9ac32b;
+  --category-3: #8a0e82;
 
   /* surfaces (clean white / warm zinc) */
   --bg: #f4f4f1;
@@ -178,6 +183,10 @@
   --provider-unknown-2: color-mix(in oklab, var(--provider-unknown) 72%, #000);
   --provider-unknown-3: color-mix(in oklab, var(--provider-unknown) 52%, #000);
   --chart-neutral: #68bea8;
+  --category-0: #357101;
+  --category-1: #df58aa;
+  --category-2: #56aa14;
+  --category-3: #9a4680;
 
   --bg: #0e0f0d;
   --surface: #151613;

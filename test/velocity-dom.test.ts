@@ -1,12 +1,126 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { agentLabels, buildVelocity } from "../src/public/velocity-data.js";
-import type { SessionAnalytics } from "../src/types.ts";
+import type { SessionAnalytics, VelocityEffort } from "../src/types.ts";
 
 import { Element, documentFromHtml } from "./release-dom.ts";
 
 const descendants = (node: Element): Element[] => node.children.flatMap((child) => [child, ...descendants(child)]);
 const hasClass = (node: Element, name: string) => `${node.className} ${node.getAttribute("class") ?? ""}`.split(" ").includes(name);
+
+function categorySessions(group: string, ids: string[]): SessionAnalytics[] {
+  return ids.map((id, i) => ({
+    provider: "claude", repositoryId: id, repositoryName: id, velocity: {
+      dimensions: [{ agent: "claude-cli", model: "synthetic", executionKind: group === "execution" ? id : "top-level", effort: group === "effort" ? id : "unknown" }],
+      buckets: [
+        ["2026-09-01", 12, 0, [i + 1, 100, 100, 0, 0, 20, 0, 4, 0, 1, 120, 20, 100, 100]],
+        ["2026-09-02", 12, 0, [ids.length - i, 100, 100, 0, 0, 20, 0, 4, 0, 1, 120, 20, 100, 100]],
+      ], undated: [],
+    },
+  })) as unknown as SessionAnalytics[];
+}
+
+function assertCategoryEncodings(container: Element, mode: string, slots: Map<string, number | null>) {
+  const nodes = descendants(container);
+  const paths = container.querySelectorAll(mode === "stacked" ? ".velocity-area" : ".velocity-line");
+  const legend = container.querySelector(".velocity-legend")!;
+  assert.equal(paths.length, slots.size);
+  const signatures = new Map<string, string>();
+  for (const path of paths) {
+    const id = path.dataset["series"]!;
+    assert.ok(slots.has(id), `expected series ${id}`);
+    const slot = slots.get(id)!;
+    const color = slot === null ? "var(--provider-unknown)" : `var(--category-${slot % 4})`;
+    const repeated = slot !== null && slot >= 4;
+    assert.equal(path.getAttribute("stroke"), color, id);
+    assert.equal(path.dataset["pattern"], repeated ? "diagonal" : "solid", id);
+    const swatch = legend.children.find((item) => item.dataset["series"] === id)!.querySelector(".chart-legend-swatch")!;
+    assert.equal(swatch.style["--series-color"], color);
+    assert.equal(swatch.dataset["mark"], mode === "stacked" ? "rect" : "line");
+    assert.equal(swatch.dataset["pattern"], repeated ? mode === "stacked" ? "diagonal" : "dashed" : "solid");
+    if (mode === "stacked") {
+      if (repeated) {
+        const pattern = nodes.find((node) => node.tagName === "pattern" && path.getAttribute("fill") === `url(#${node.id})`);
+        assert.ok(pattern, `${id}: stacked fill must reference a real texture`);
+        assert.equal(pattern.querySelector("rect")!.getAttribute("fill"), color);
+      } else assert.equal(path.getAttribute("fill"), color);
+    } else assert.equal(path.getAttribute("stroke-dasharray"), repeated ? "6 3" : "none");
+    const point = nodes.find((node) => node.tagName === "circle" && node.dataset["series"] === id)!;
+    assert.equal(point.getAttribute("stroke"), color);
+    assert.equal(point.getAttribute("fill"), mode === "stacked" ? path.getAttribute("fill") : repeated ? "var(--surface)" : color);
+    signatures.set(id, [color, path.getAttribute("stroke-dasharray"), path.dataset["pattern"]].join("|"));
+  }
+  for (const node of nodes) assert.doesNotMatch(JSON.stringify([node.attributes, node.style]), /--velocity-/);
+  return signatures;
+}
+
+test("Velocity repositories use four solid categorical slots, textured repeats and a grey Other", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const sessions = categorySessions("repository", Array.from({ length: 9 }, (_, i) => `repo-${i}`));
+    for (const mode of ["stacked", "lines", "cumulative"]) {
+      const data = buildVelocity(sessions, { start: "2026-09-01", end: "2026-09-01", mode, group: "repository" });
+      assert.equal(data.series.length, 8);
+      assert.equal(data.series.at(-1)!.label, "Other (2)");
+      const container = new Element(); renderVelocityChart(container, data);
+      const signatures = assertCategoryEncodings(container, mode, new Map(data.series.map((series, i) => [series.id, series.id === "other" ? null : i])));
+      assert.equal(new Set(signatures.values()).size, 8, "all seven repositories and Other have distinct encodings");
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("Velocity execution and effort identities keep their categorical colour and texture across ranks and filters", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const effortSlots = { low: 0, medium: 1, high: 2, xhigh: 3, minimal: 4, none: 5, max: 6, ultra: 7, unknown: null } satisfies Record<VelocityEffort, number | null>;
+    for (const [group, mapping] of Object.entries({ execution: { "top-level": 0, subagent: 1, unknown: null }, effort: effortSlots })) {
+      const slots = new Map<string, number | null>(Object.entries(mapping));
+      const sessions = categorySessions(group, [...slots.keys()]);
+      for (const mode of ["stacked", "lines", "cumulative"]) {
+        const render = (selected: SessionAnalytics[], day: string) => {
+          const data = buildVelocity(selected, { start: day, end: day, mode, group });
+          const container = new Element(); renderVelocityChart(container, data);
+          return assertCategoryEncodings(container, mode, new Map(data.series.map((series) => [series.id, slots.get(series.id)!])));
+        };
+        const all = render(sessions, "2026-09-01");
+        assert.equal(new Set(all.values()).size, slots.size);
+        const reordered = render(sessions, "2026-09-02");
+        assert.notDeepEqual([...reordered.keys()], [...all.keys()], "fixture must change spend rank");
+        const filtered = render(sessions.filter((_, i) => i % 2 === 0), "2026-09-02");
+        for (const result of [reordered, filtered]) for (const [id, encoding] of result) assert.equal(encoding, all.get(id), `${group}: ${id} retains its encoding`);
+      }
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("Velocity reserves grey for unknown categories and uses the ramp for future non-brand groups", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const neutral = ["Other", "unknown", "<unknown>", "not recorded", "Unknown execution"];
+    const sessions = categorySessions("repository", [...neutral, "recorded"]);
+    for (const group of ["repository", "future-group"]) for (const mode of ["stacked", "lines", "cumulative"]) {
+      const data = buildVelocity(sessions, { start: "2026-09-01", end: "2026-09-01", mode, group: "repository" });
+      data.group = group;
+      const container = new Element(); renderVelocityChart(container, data);
+      assertCategoryEncodings(container, mode, new Map(data.series.map((series, i) => [series.id, neutral.includes(series.id) ? null : i])));
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
 
 test("Velocity leads with value cards before filters and keeps them independent of the plotted metric", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");

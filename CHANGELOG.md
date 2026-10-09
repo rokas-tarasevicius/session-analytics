@@ -22,6 +22,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 
 - Warm indexed scans no longer re-read every Claude transcript for the resumed-copy ownership pass or re-extract every Conductor session's messages: both are cached in the private index (schema version 4) and refreshed per file or per Conductor session when it changes. Output is unchanged. The index stores only keyed identifier hashes and counters for these passes; the first scan after upgrading reads everything once.
+- Velocity repository, execution and effort series use a shared non-brand categorical ramp (greens and orchids) instead of the old palette whose coral read as Claude orange. Execution kinds and effort levels keep fixed colours across date and provider filters, repeated colours add texture or dashes, and Other/unknown series are grey.
 - The Pricing view shows a grid of model cards instead of the rates table. Each card carries its provider's brand accent and mark, input and output price per 1M tokens, the selected window's usage value with a usage bar, tokens and calls, and a badge when rates are incomplete. Cards are ordered by API-equivalent usage value in the selection, then tokens; rate-card models unused in the selection sit behind a "Show N unused models" toggle. Selecting a card (click, Enter or Space) opens a details dialog with the full rate breakdown (input, cached input or cache read, 5-minute and 1-hour cache writes, output, long-context tiers), the current source, effective date, reviewed override and assumptions, selection coverage and token mix, and the historical rate evidence the usage applied. Source freshness, coverage, policy and refresh guidance stay above the grid. Snapshots gain `rateCard.models[].rate`, a numeric-only projection of each current rate.
 - Velocity opens with Average price per active day and Usage value for the selected window and providers, followed by filters and the usage chart.
 - Costs shows cost by provider and by model on shared zero-based scales, including value with no model evidence.
@@ -37,6 +38,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- MCP tools report "Session analysis exceeded its 1024 MB worker heap limit." when the analysis worker runs out of heap, instead of the generic "Local metrics are unavailable" message. Raw worker output still never reaches the client.
 - The Summary provider donut now draws Copilot, OpenCode, Gemini and unsupported segments (they were listed in its legend but missing from the ring), and its legend no longer truncates names.
 - Costs provider rows were each stretched to full width, so a $191 provider looked as long as a $576 one; rows now share the panel's maximum. Cost by model also shares one scale across providers.
 - The Summary daily usage chart drew lines only for Claude, Codex and Cursor; every provider now gets its line.
