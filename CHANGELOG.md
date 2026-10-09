@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-09
+
 ### Removed
 
 - The Costs repository and visible token-type breakdowns and the Models view (`G M`). Model details now appear in Costs; token-type dollars remain in row tooltips.
