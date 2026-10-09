@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
 
 import {
-  clampWindow, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
+  activityGrid, heatLegend, clampWindow, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
   ledgerMoney, matchesQuery, previousPeriod, pricedPercent, pricedShare, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, summarize, tickScale, windowStartFor,
 } from "../src/public/view-model.js";
 import { buildVelocity } from "../src/public/velocity-data.js";
@@ -251,4 +251,29 @@ test("chart sizing falls back in hidden views and redraws only meaningful width 
   assert.equal(JSON.stringify(focusCalls), JSON.stringify([{ preventScroll: true }]));
   page.activeElement = null; chart.clientWidth = 480; callbacks[2]!();
   assert.equal(focusCalls.length, 1, "focus elsewhere on the page is left alone");
+});
+
+test("heatLegend covers every count with only populated colour levels", () => {
+  assert.deepEqual(heatLegend(0), [{ level: 0, min: 0, max: 0 }]);
+  assert.deepEqual(heatLegend(1), [{ level: 0, min: 0, max: 0 }, { level: 7, min: 1, max: 1 }]);
+  assert.deepEqual(heatLegend(3), [{ level: 0, min: 0, max: 0 }, { level: 4, min: 1, max: 1 }, { level: 6, min: 2, max: 2 }, { level: 7, min: 3, max: 3 }]);
+  const entries = heatLegend(42), counts: number[] = [];
+  for (const entry of entries) for (let value = entry.min; value <= entry.max; value++) {
+    counts.push(value); assert.equal(entry.level, heatLevel(value, 42));
+  }
+  assert.deepEqual(counts, Array.from({ length: 43 }, (_, i) => i));
+  assert.deepEqual(entries.map(row => row.level), [...new Set(entries.map(row => row.level))].sort((a, b) => a - b));
+});
+
+test("activityGrid excludes unknown, file and invalid starts and buckets in the snapshot timezone", () => {
+  const late = { createdAt: "2026-09-20T23:30:00Z" };
+  const sessions = [late, { ...late, transcript: { startTimeKnown: false } }, { ...late, evidence: { timing: "file-mtime" } }, { createdAt: "invalid" }, { createdAt: null }];
+  const utc = activityGrid(sessions, "UTC"), local = activityGrid(sessions, "Europe/London");
+  assert.equal(utc.grid[6]![23], 1); assert.equal(local.grid[0]![0], 1);
+  for (const result of [utc, local]) {
+    assert.equal(result.counted, 1); assert.equal(result.maximum, 1);
+    assert.equal(result.grid.length, 7); assert.ok(result.grid.every(row => row.length === 24));
+    assert.equal(result.grid.flat().reduce((sum, count) => sum + count, 0), result.counted);
+  }
+  assert.equal(activityGrid([]).maximum, 0);
 });

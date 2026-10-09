@@ -8,7 +8,7 @@ import type { ProviderEvidence, SessionAnalytics } from "../src/types.ts";
 class Element {
   tag: string; children: Element[] = []; attributes: Record<string, string> = {}; dataset: Record<string, string> = {};
   style: Record<string, unknown> = { setProperty(name: string, value: string) { this[name] = value; } }; className = ""; value = ""; namespaceURI = "svg"; text = "";
-  listeners: Record<string, () => void> = {};
+  listeners: Record<string, (event?: any) => void> = {};
   constructor(tag = "div") { this.tag = tag; }
   set textContent(value: string) { this.text = String(value); this.children = []; }
   get textContent(): string { return this.text + this.children.map((c) => c.textContent).join(" "); }
@@ -18,7 +18,7 @@ class Element {
   viewBox = { baseVal: { width: 680, height: 230 } };
   removeAttribute(key: string) { delete this.attributes[key]; }
   setAttribute(key: string, value: string) { this.attributes[key] = value; }
-  addEventListener(name: string, listener: () => void) { this.listeners[name] = listener; }
+  addEventListener(name: string, listener: (event?: any) => void) { this.listeners[name] = listener; }
   removeEventListener() {}
   querySelectorAll() { return []; }
   querySelector() { return new Element(); }
@@ -132,7 +132,7 @@ test("Tools ranking selects and retains a profile, expands, and resets when the 
   native.tools = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`tool_${i}`, 15 - i]));
   native.metrics.toolCalls = 120;
   h.context["sessions"] = [native];
-  h.run('windowPreset="all"; view={sessions,repositories:[]}; renderActiveAnalyticsView=renderTools; renderTools(view)');
+  h.run('snapshot={sessions}; windowPreset="all"; view={sessions,repositories:[]}; renderActiveAnalyticsView=renderTools; renderTools(view)');
   const container = h.elements.get("#tools-view")!;
   const buttons = () => descend(container).filter((node) => node.className === "tools-select");
   assert.equal(buttons().length, 12); assert.equal(h.run("toolsSelectedName"), "tool_0");
@@ -143,6 +143,7 @@ test("Tools ranking selects and retains a profile, expands, and resets when the 
   assert.equal(buttons()[0]!.attributes["aria-pressed"], "true");
   buttons()[1]!.listeners["click"]!();
   assert.equal(h.run("toolsSelectedName"), "tool_1");
+  assert.equal(h.elements.get("#chart-announcer")!.textContent, "Showing profile for tool_1: 14 calls, 11.7% of calls");
   assert.equal(buttons()[1]!.attributes["aria-pressed"], "true");
   assert.equal(buttons()[1]!.dataset["focusKey"], "tools:tool:tool_1");
   descend(container).find((node) => node.dataset["focusKey"] === "tools:toggle")!.listeners["click"]!();
@@ -168,7 +169,7 @@ test("Tools compares the same provider selection and combines excess repositorie
   const previous = sample(undefined); previous.tools = { Read: 50 }; previous.createdAt = "2026-07-19T09:00:00Z";
   const excluded = sample(undefined); excluded.provider = "codex"; excluded.tools = { Read: 1000 }; excluded.createdAt = previous.createdAt;
   h.context["sessions"] = sessions; h.context["scopeSessions"] = [...sessions, previous, excluded];
-  h.run('elements.windowStart.value="2026-07-20"; elements.windowStart.min="2026-07-01"; elements.windowEnd.value="2026-07-20"; viewProviderFilters.tools=new Set(["claude"]); view={sessions,scopeSessions,repositories:[]}; renderTools(view)');
+  h.run('elements.windowStart.value="2026-07-20"; elements.windowStart.min="2026-07-01"; elements.windowEnd.value="2026-07-20"; viewProviderFilters.tools=new Set(["claude"]); snapshot={sessions:scopeSessions}; view={sessions,scopeSessions,repositories:[]}; renderTools(view)');
   const container = h.elements.get("#tools-view")!;
   assert.match(container.textContent, /\+10% vs previous window/);
   assert.match(container.textContent, /Other 3/);
@@ -185,16 +186,126 @@ test("Tools daily columns start at zero and unavailable days never present zero 
   first.tools = { Read: 2 }; last.tools = { Read: 8 };
   first.createdAt = "2026-07-20T09:00:00Z"; missing.createdAt = "2026-07-21T09:00:00Z"; last.createdAt = "2026-07-22T09:00:00Z";
   h.context["sessions"] = [first, missing, last];
-  h.run('windowPreset="all"; view={sessions,repositories:[]}; renderTools(view)');
+  h.run('snapshot={sessions}; windowPreset="all"; view={sessions,repositories:[]}; renderTools(view)');
   const container = h.elements.get("#tools-view")!;
   const columns = descend(container).filter((node) => node.className === "tools-column");
   assert.deepEqual(columns.map((column) => column.children[0]!.style["height"]), ["25%", "0%", "100%"]);
-  assert.match(columns[1]!.attributes["title"]!, /— no tool evidence/);
-  assert.doesNotMatch(columns[1]!.attributes["title"]!, /0 calls/);
+  assert.match(columns[1]!.attributes["aria-label"]!, /— no tool evidence/);
+  assert.doesNotMatch(columns[1]!.attributes["aria-label"]!, /0 calls/);
   first.transcript.startTimeKnown = false; last.transcript.startTimeKnown = false;
   h.run("renderTools(view)");
   const trend = descend(container).find((node) => node.className === "tools-trend")!;
   assert.match(trend.textContent, /— No tool evidence/);
   assert.match(trend.textContent, /10 calls have no known session-start day/);
   assert.doesNotMatch(trend.textContent, /0 calls plotted/);
+});
+
+test("Tools labels providers, explains guarded changes and announces the selected profile", async () => {
+  const h = await harness(), native = sample(undefined), before = sample(undefined);
+  native.tools = { Read: 10 }; before.tools = { Read: 3 };
+  const container = new Element(); h.context["target"] = container; h.context["sessions"] = [native]; h.context["previous"] = [before];
+  h.run('announcements=[]; renderToolsView(target,{sessions,previousSessions:previous,days:["2026-07-20"],announce:text=>announcements.push(text)})');
+  assert.match(container.textContent, /Top tools/); assert.doesNotMatch(container.textContent, /Ranked by calls|Tool ranking/);
+  assert.ok(descend(container).some(n => n.tag === "th" && n.textContent === "Provider"));
+  const providers = descend(container).find(n => n.dataset["label"] === "Provider")!;
+  assert.match(providers.textContent, /Claude/); assert.equal(providers.attributes["title"], "Claude 10 calls");
+  const change = descend(container).find(n => n.dataset["label"] === "Change")!;
+  assert.equal(change.textContent, "— small baseline");
+  assert.equal(change.attributes["title"], "Previous window: 3 calls, below the 5-call minimum for a percentage");
+  assert.match(container.textContent, /Previous window too small to compare \(3 calls\)/);
+  assert.match(container.textContent, /All 10 calls came from Claude\./);
+  assert.match(container.textContent, /100% of calls · Claude/);
+  const button = descend(container).find(n => n.className === "tools-select")!;
+  assert.equal(button.attributes["aria-label"], "Show tool profile for Read (Claude)");
+  button.listeners["click"]!();
+  assert.equal(h.run('announcements[0]'), "Showing profile for Read: 10 calls, 100% of calls");
+  const second = sample(undefined), third = sample(undefined); second.provider = "opencode"; third.provider = "codex";
+  second.tools = { Read: 2 }; third.tools = { Read: 1 }; h.context["sessions"] = [native, second, third];
+  h.run('renderToolsView(target,{sessions,days:["2026-07-20"]})');
+  const multi = descend(container).find(n => n.dataset["label"] === "Provider")!;
+  assert.match(multi.children[0]!.textContent, /3 providers/);
+  assert.doesNotMatch(multi.children[0]!.textContent, /Claude|OpenCode|Codex/);
+  assert.equal(multi.attributes["title"], "Claude 10 calls, OpenCode 2 calls, Codex 1 call");
+  assert.equal(multi.children[1]!.className, "sr-only");
+  assert.equal(multi.children[1]!.textContent, multi.attributes["title"]);
+  assert.equal(descend(container).find(n => n.className === "tools-select")!.attributes["aria-label"], "Show tool profile for Read (Claude, OpenCode, Codex)");
+  assert.doesNotMatch(container.textContent, /All 13 calls came from/);
+});
+
+test("Tools trend uses named columns, roving focus and dismissible evidence tooltips", async () => {
+  const h = await harness(), first = sample(undefined), missing = sample(evidence());
+  first.tools = { Read: 8 }; missing.createdAt = "2026-07-21T09:00:00Z";
+  const container = new Element(); h.context["target"] = container; h.context["sessions"] = [first, missing];
+  h.run('renderToolsView(target,{sessions,days:["2026-07-20","2026-07-21","2026-07-22"]})');
+  const chart = descend(container).find(n => n.className === "tools-columns")!;
+  assert.equal(chart.attributes["role"], "group");
+  const columns = chart.children;
+  assert.ok(columns.every(n => n.attributes["role"] === "img" && !n.attributes["title"]));
+  assert.deepEqual(columns.map(n => n.attributes["tabindex"]), ["-1", "-1", "0"]);
+  assert.equal(columns[1]!.attributes["aria-label"], "2026-07-21: — no tool evidence (0/1 sessions carry tool evidence)");
+  const tooltip = descend(container).find(n => n.className === "tools-tooltip")!;
+  for (const column of columns) (column as any).focus = () => column.listeners["focus"]!();
+  const key = (column: Element, key: string) => column.listeners["keydown"]!({ key, preventDefault() {}, stopPropagation() {} });
+  key(columns[2]!, "ArrowLeft");
+  assert.equal(columns[1]!.attributes["tabindex"], "0");
+  assert.match(tooltip.textContent, /Tue,? 21 Jul 2026 — no tool evidence 0 of 1 sessions carry tool evidence/);
+  key(columns[1]!, "Home"); assert.equal(columns[0]!.attributes["tabindex"], "0");
+  assert.match(tooltip.textContent, /8 calls 1 of 1 sessions carry tool evidence/);
+  key(columns[0]!, "End"); assert.match(tooltip.textContent, /0 calls No session starts/);
+  key(columns[2]!, "Escape"); assert.equal((tooltip as any).hidden, true);
+  columns[0]!.listeners["pointerenter"]!(); assert.equal((tooltip as any).hidden, false);
+  columns[0]!.listeners["pointerleave"]!(); assert.equal((tooltip as any).hidden, true);
+  columns[0]!.listeners["focus"]!(); columns[0]!.listeners["blur"]!(); assert.equal((tooltip as any).hidden, true);
+  const trend = descend(container).find(n => n.className === "tools-trend")!;
+  (trend as any).getBoundingClientRect = () => ({ top: 100, left: 100, width: 300 });
+  (tooltip as any).getBoundingClientRect = () => ({ width: 120, height: 60 });
+  (columns[0] as any).getBoundingClientRect = () => ({ top: 200, bottom: 340, left: 100, width: 10 });
+  columns[0]!.listeners["pointerenter"]!();
+  assert.equal(tooltip.dataset["side"], "above"); assert.equal(tooltip.style["left"], "0px"); assert.equal(tooltip.style["top"], "30px");
+  (columns[2] as any).getBoundingClientRect = () => ({ top: 10, bottom: 150, left: 390, width: 10 });
+  columns[2]!.listeners["pointerenter"]!();
+  assert.equal(tooltip.dataset["side"], "below"); assert.equal(tooltip.style["left"], "180px"); assert.equal(tooltip.style["top"], "60px");
+});
+
+test("Tools provider empty states preserve the profile selection and can restore every provider", async () => {
+  const h = await harness(), first = sample(undefined), other = sample(undefined); first.tools = { Read: 8 }; other.provider = "cursor";
+  h.context["sessions"] = [first]; h.context["allSessions"] = [first, other];
+  h.run('snapshot={sessions:allSessions}; windowPreset="all"; toolsSelectedName="Read"; view={sessions,repositories:[]}; activeView=()=>view; renderActiveAnalyticsView=renderTools; viewProviderFilters.tools=new Set(); renderTools(view)');
+  const container = h.elements.get("#tools-view")!;
+  assert.match(container.textContent, /No providers selected/);
+  assert.match(container.textContent, /Every provider is switched off for this view, so there are no tool calls to show/);
+  assert.equal(h.run("toolsSelectedName"), "Read");
+  descend(container).find(n => n.dataset["focusKey"] === "tools:select-all-providers")!.listeners["click"]!();
+  assert.equal(h.run("viewProviderFilters.tools.size"), 2);
+  assert.match(container.textContent, /All 8 calls came from Claude/);
+  h.run('viewProviderFilters.tools=new Set(["cursor"]); renderTools(view)');
+  assert.match(container.textContent, /No sessions from the selected providers/);
+  assert.match(container.textContent, /None of the 1 sessions in this window came from Cursor/);
+  assert.ok(descend(container).some(n => n.textContent === "Select all providers"));
+});
+
+test("Tools reveals the replacement profile after selection and respects reduced motion", async () => {
+  const h = await harness(), native = sample(undefined); native.tools = { Read: 10 };
+  const container = new Element(); h.context["target"] = container; h.context["sessions"] = [native];
+  const browser = globalThis as any, previousHeight = browser.innerHeight, previousMedia = browser.matchMedia;
+  let reduced = false, top = 900, selections = 0;
+  const scrolls: Array<{ block: string; behavior: string }> = [];
+  const replacement = { getBoundingClientRect: () => ({ top }), scrollIntoView: (options: { block: string; behavior: string }) => scrolls.push(options) };
+  const document = browser.document;
+  browser.innerHeight = 1000; browser.matchMedia = () => ({ matches: reduced });
+  document.getElementById = (id: string) => { assert.equal(id, "tools-profile"); assert.ok(selections > 0); return replacement; };
+  h.context["select"] = () => { selections++; };
+  try {
+    h.run('renderToolsView(target,{sessions,days:["2026-07-20"],onSelect:select})');
+    const button = descend(container).find(n => n.className === "tools-select")!;
+    button.listeners["click"]!(); assert.deepEqual(scrolls.pop(), { block: "start", behavior: "smooth" });
+    reduced = true; top = 20;
+    button.listeners["click"]!(); assert.deepEqual(scrolls.pop(), { block: "start", behavior: "auto" });
+    top = 300; button.listeners["click"]!(); assert.equal(scrolls.length, 0);
+    assert.equal(selections, 3);
+  } finally {
+    if (previousHeight === undefined) delete browser.innerHeight; else browser.innerHeight = previousHeight;
+    if (previousMedia === undefined) delete browser.matchMedia; else browser.matchMedia = previousMedia;
+    delete document.getElementById;
+  }
 });

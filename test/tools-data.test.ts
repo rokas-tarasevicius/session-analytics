@@ -131,3 +131,33 @@ test("all-time day range keeps exactly 366 days and clips the 367th", () => {
   const undated = session({ Read: 1 }); undated.transcript.startTimeKnown = false;
   assert.deepEqual(toolsDays([undated]), []);
 });
+
+test("ranking providers are ordered by calls then provider order, with labels and conserved totals", () => {
+  const result = buildToolsView([
+    session({ Read: 4 }), session({ Read: 2 }), session({ Read: 6 }, { provider: "codex" }),
+    session({ Read: 9 }, { provider: "opencode" }), session({ Read: 1 }, { provider: "future" as SessionAnalytics["provider"] }),
+  ]);
+  assert.deepEqual(result.tools[0]!.providers, [
+    { provider: "opencode", label: "OpenCode", calls: 9 }, { provider: "codex", label: "Codex", calls: 6 },
+    { provider: "claude", label: "Claude", calls: 6 }, { provider: "future", label: "future", calls: 1 },
+  ]);
+  assert.equal(result.tools[0]!.providers.reduce((sum, row) => sum + row.calls, 0), result.tools[0]!.calls);
+});
+
+test("row and total comparisons guard small baselines without hiding new or unavailable windows", () => {
+  for (const [previousCalls, change, smallBaseline] of [[3, null, true], [5, 1, false], [0, "new", false], [null, null, false]] as const) {
+    const result = buildToolsView([session({ Read: 10 })], { previousSessions: previousCalls === null ? null : [session({ Read: previousCalls })] });
+    for (const comparison of [result, result.tools[0]!]) {
+      assert.equal(comparison.previousCalls, previousCalls);
+      assert.equal(comparison.change, change);
+      assert.equal(comparison.smallBaseline, smallBaseline);
+    }
+  }
+  const zero = buildToolsView([session({})], { previousSessions: [session({})] });
+  assert.equal(zero.change, 0); assert.equal(zero.smallBaseline, false);
+  const missing = buildToolsView([unavailable()], { previousSessions: [session({ Read: 3 })] });
+  assert.equal(missing.change, null); assert.equal(missing.smallBaseline, false);
+  const mixed = buildToolsView([session({ Read: 10, Edit: 10 })], { previousSessions: [session({ Read: 3, Edit: 5 })] });
+  assert.equal(mixed.change, 1.5); assert.equal(mixed.smallBaseline, false);
+  assert.equal(mixed.tools.find(row => row.name === "Read")!.smallBaseline, true);
+});
