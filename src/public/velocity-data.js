@@ -3,7 +3,7 @@ import { normalizeTimestamp } from "./timestamps.js";
 // Pure calendar, aggregation and comparison functions shared by the two charts.
 // All arithmetic on calendar dates uses UTC *as a calendar*, never as the bucket timezone.
 export const metricDefinitions = {
-  value: { index: 0, label: "Priced usage value", unit: "USD", minimum: 0.01 },
+  value: { index: 0, label: "Usage value", unit: "USD", minimum: 0.01 },
   input: { index: 1, label: "Input tokens", unit: "tokens", minimum: 100 },
   uncached: { index: 2, label: "Uncached input", unit: "tokens", minimum: 100 },
   cacheRead: { index: 3, label: "Cache-read input", unit: "tokens", minimum: 100 },
@@ -124,7 +124,9 @@ export function ledgerCells(velocity) {
   return [...velocity.buckets.map((cell) => [...cell, false]), ...(velocity.sessionDated ?? []).map((cell) => [...cell, true])];
 }
 
-/** Sum occupied hourly cells; never use session creation as the activity date. */
+/** Sum occupied hourly cells; never use session creation as the activity date. Every series also carries `sums`, the
+ * group's in-window total of all 14 counters, and `sessions`, the sessions contributing a cell to it (the "Other"
+ * remainder adds its members' counts). */
 export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7 } = {}) {
   const index = metricDefinitions[metric].index;
   const dates = calendarDays(start, end);
@@ -137,6 +139,8 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   const coverage = { priceTokens: 0, cacheReadInput: 0, cacheWriteInput: 0, reasoningOutput: 0 };
   let earliest = null, missingSessions = 0, contributingSessions = 0, sessionDatedSessions = 0;
   const unledgered = { sessions: 0, value: 0 };
+  // The last session that added to each series, so `series.sessions` counts each contributing session once.
+  const lastSession = new Map();
   for (const session of sessions) {
     if (!session.velocity) {
       if (ledgerlessSources.has(session.evidence?.source)) { unledgered.sessions += 1; unledgered.value += session.cost?.totalUsd || 0; } else missingSessions += 1;
@@ -165,8 +169,9 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
       if (recordsCacheWrites(session)) coverage.cacheWriteInput += values[1];
       const [id, label] = groupIdentity(session, dimension, group);
       let series = groups.get(id);
-      if (!series) { series = { id, label, total: 0, values: keys.map(() => 0), calls: 0, evidence: blankEvidence() }; groups.set(id, series); }
-      series.calls += values[7]; addEvidence(series.evidence, observedEvidence);
+      if (!series) { series = { id, label, total: 0, values: keys.map(() => 0), calls: 0, evidence: blankEvidence(), sums: blank(), sessions: 0 }; groups.set(id, series); }
+      series.calls += values[7]; addEvidence(series.evidence, observedEvidence); add(series.sums, values);
+      if (lastSession.get(series) !== session) { lastSession.set(series, session); series.sessions += 1; }
       const key = granularity === "hour" ? String(hour).padStart(2, "0") : periodKey(day, granularity);
       const position = keyIndexes.get(key);
       if (position !== undefined) { series.values[position] += values[index]; series.total += values[index]; }
@@ -180,7 +185,7 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   let series = allSeries.filter(({ total }) => total > 0);
   if ((group === "repository" || group === "model") && series.length > limit) {
     const remainder = series.slice(limit);
-    const other = { id: "other", label: `Other (${remainder.length})`, total: sum(remainder.map((item) => item.total)), values: keys.map((_, i) => sum(remainder.map((item) => item.values[i]))), calls: sum(remainder.map((item) => item.calls)), evidence: remainder.reduce((total, item) => addEvidence(total, item.evidence), blankEvidence()) };
+    const other = { id: "other", label: `Other (${remainder.length})`, total: sum(remainder.map((item) => item.total)), values: keys.map((_, i) => sum(remainder.map((item) => item.values[i]))), calls: sum(remainder.map((item) => item.calls)), evidence: remainder.reduce((total, item) => addEvidence(total, item.evidence), blankEvidence()), sums: remainder.reduce((total, item) => add(total, item.sums), blank()), sessions: sum(remainder.map((item) => item.sessions)) };
     series = [...series.slice(0, limit), other];
   }
   const daily = [...dailyMap.values()];

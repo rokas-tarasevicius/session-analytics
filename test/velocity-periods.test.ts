@@ -182,8 +182,10 @@ test("card text covers every comparison status and labels rolled-back and past p
   assert.equal(span({ start: "2026-09-28", end: "2026-10-04" }), "Sep 28–Oct 4");
   assert.equal(span({ start: "2026-10-05", end: "2026-10-05" }), "Oct 5");
   const session = ledger(every("2026-07-01", "2026-10-08", () => 10));
-  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-08"), "2026-10-08"), { week: "This week vs last", month: "Month to date vs prior" });
+  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-08"), "2026-10-08"), { week: "Week to date (Mon–Wed) vs same days last week", month: "Month to date vs prior" });
   assert.deepEqual(comparisonLabels(indicators([session], "2026-10-05"), "2026-10-05"), { week: "Last week vs week before", month: "Month to date vs prior" });
-  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-01"), "2026-10-01"), { week: "This week vs last", month: "Last month vs month before" });
-  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-08", "2026-10-05"), "2026-10-08"), { week: "Week through Oct 5 vs prior", month: "Month through Oct 5 vs prior" });
+  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-01"), "2026-10-01"), { week: "Week to date (Mon–Wed) vs same days last week", month: "Last month vs month before" });
+  assert.deepEqual(comparisonLabels(indicators([session], "2026-10-08", "2026-10-05"), "2026-10-08"), { week: "Week through Oct 5 (Mon) vs same days prior week", month: "Month through Oct 5 vs prior" });
+  // A Sunday names the whole week; the label never reads like a rolling "last 7 days" comparison.
+  assert.match(comparisonLabels(indicators([session], "2026-10-08", "2026-10-04"), "2026-10-08").week, /^Week through Oct 4 \(Mon–Sun\) vs same days prior week$/);
 });

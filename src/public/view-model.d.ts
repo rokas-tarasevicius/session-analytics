@@ -19,39 +19,47 @@ export interface Summary {
   topLevelSpendUsd: number;
   totalInputTokens: number;
   unpricedSessions: number;
+  /** Mixed sessions also count in topLevelSessions and subagentSessions. */
+  mixedSessions: number;
+  unknownExecutionSessions: number;
 }
 export interface NamedMetric { name: string; value: number }
 export interface Delta { direction: "up" | "down" | "flat"; label: string; text: string }
 export interface Period { endDay: string; length: number; startDay: string }
 export interface PaletteItem { group: string; keywords?: string; label: string }
-export interface RepositoryRow { repository: { id: string; name: string }; summary: Summary }
+export interface RepositoryRow { repository: { id: string; name: string }; summary: Summary; usage?: { value: number; evidence: LedgerEvidence; available?: boolean } }
 
 export const providerOrder: readonly string[];
 export const providerLabels: Record<string, string>;
 export function shortMoney(value: number): string;
 export function percent(value: number | null | undefined): string;
 export function summarize(sessions: SessionLike[]): Summary;
-export function mergeModels(sessions: SessionLike[]): Array<Record<string, any>>;
 export function namedTotals(sessions: SessionLike[], field: string): NamedMetric[];
-export function spendDays(sessions: SessionLike[]): NamedMetric[];
 export function coverageWarnings(sessions: SessionLike[]): string[];
-export function costTotals(sessions: SessionLike[]): { cached: number; input: number; output: number; reported: number; total: number; upper: number; write: number };
-export interface ModelCost {
-  provider: string; model: string; value: number; share: number; sessions: number; calls: number; inputTokens: number; outputTokens: number;
-  components: { input: number; cached: number; write: number; output: number };
-  priced: boolean; eligible: number; selected: number;
-  /** Sessions whose call and token counters are evidenced for this model. */
-  evidence: { calls: number; tokens: number };
+export interface LedgerEvidence { known: number; eligible: number; unsupported: number; complete: boolean }
+/** One (provider, model) of the window's activity ledger; `sums` holds the 14 ledger counters. */
+export interface LedgerModel {
+  id: string; provider: string; model: string; label: string; value: number; api: number; reported: number; upper: number;
+  share: number; sessions: number; calls: number; sums: number[]; evidence: LedgerEvidence;
 }
-export function costByModel(sessions: SessionLike[]): {
-  total: number; models: ModelCost[];
-  providers: Array<{ provider: string; total: number; api: number; reported: number; unattributed: number; coverage: import("./providers.js").MetricCoverage; models: ModelCost[] }>;
-};
+export interface LedgerProvider {
+  provider: string; total: number; api: number; reported: number; upper: number; unattributed: number; evidence: LedgerEvidence; models: LedgerModel[];
+}
+export interface LedgerMoney {
+  start: string; end: string; total: number; api: number; reported: number; upper: number; evidence: LedgerEvidence;
+  providers: LedgerProvider[]; models: LedgerModel[]; undated: number; unledgered: { sessions: number; value: number };
+  missingSessions: number; sessionDated: number; sessionDatedSessions: number; contributingSessions: number;
+}
+export function mergeEvidence(target: LedgerEvidence, source: LedgerEvidence): LedgerEvidence;
+export function pricedShare(evidence: LedgerEvidence | null | undefined): number | null;
+export function pricedPercent(evidence: LedgerEvidence | null | undefined): string;
+export function ledgerMoney(sessions: SessionLike[], window: { start: string; end: string }): LedgerMoney;
 export function groupByRepository(sessions: SessionLike[]): Map<string, SessionLike[]>;
-export function sessionsInRange(sessions: SessionLike[], startDay: string | null, endDay: string | null): SessionLike[];
+export function sessionStartDay(session: SessionLike, timeZone?: string): string | null;
+export function sessionsInRange(sessions: SessionLike[], startDay: string | null, endDay: string | null, timeZone?: string): SessionLike[];
 export function daysBetween(startDay: string, endDay: string, cap?: number): string[];
 export function dailySpendSeries(sessions: SessionLike[], days: string[]): number[];
-export function dailyCountSeries(sessions: SessionLike[], days: string[], accessor: (session: SessionLike) => number): number[];
+export function dailyCountSeries(sessions: SessionLike[], days: string[], accessor: (session: SessionLike) => number, timeZone?: string): number[];
 export function windowStartFor(preset: string, minDay: string, maxDay: string): string;
 export function clampWindow(range: { start: string; end: string; min: string; max: string }): { start: string; end: string };
 export function validDay(value: unknown): string | null;

@@ -178,7 +178,7 @@ A provenance item has `source` (`models.dev`, `litellm`, `reviewed`), `kind` (`a
 
 `rateCard.pricing` reports offline mode, policy, refresh threshold in days, enabled sources, newest API observation (`newestSnapshotAt`), its age in days (`ageDays`), overall staleness, retained API snapshot count, and bounded warnings. Missing observations have null timestamps/ages/hashes and zero available-model counts. Each source also reports its own age, staleness, accepted model count and rejected-model count; an absent/stale source makes the overall catalog stale. `reviewed-only` bypasses API history and is never stale for automatic refresh purposes. Warnings are fixed codes: `cache-unavailable`, `invalid-snapshot`, `large-price-change`, `rejected-models`.
 
-`rates status` coverage counts distinct locally observed Claude/Codex model IDs (aliases remain distinct observed IDs). `modelsPriced / modelsSeen` uses the current merged card, with `ratio: null` when none are seen; `bySource[].models` partitions priced IDs by the selected source, and `unpricedModels` names unmatched bounded IDs. Absent or rejected model values collapse to one `<unknown>` bucket without dropping their eligible tokens; paths, URLs, controls and recognizable raw identifiers never become public model labels. This differs from historical token-weighted `pricedTokenCoverage`. Cursor reported values are excluded. The Pricing tab shows token coverage with its actual numerator/denominator for selected sessions; an empty selection is N/A. Its model cards cover API-priced sessions only and are ordered by API-equivalent usage value in the selection, then observed (eligible) tokens, then calls, then model ID; current rate-card models with no usage in the selection sit behind a "Show N unused models" toggle. A card's details show the current rate, its source and any reviewed override, and the historical rate evidence (`ModelUsage.pricing[]`) its usage actually applied. These are completeness measures, not quality or value measures.
+`rates status` coverage counts distinct locally observed Claude/Codex model IDs (aliases remain distinct observed IDs). `modelsPriced / modelsSeen` uses the current merged card, with `ratio: null` when none are seen; `bySource[].models` partitions priced IDs by the selected source, and `unpricedModels` names unmatched bounded IDs. Absent or rejected model values collapse to one `<unknown>` bucket without dropping their eligible tokens; paths, URLs, controls and recognizable raw identifiers never become public model labels. This differs from historical token-weighted `pricedTokenCoverage`. Cursor reported values are excluded. The Pricing tab's **Pricing coverage** is the Costs figure: priced over eligible activity-ledger tokens for the selected dates, with its numerator and denominator, rounded down to 0.1%; no eligible tokens is N/A. Its model cards are one per session provider and model (a model used through two providers has two cards), read the same activity ledger for the selected dates, and cover every session whose value is not provider-reported, so they add up to Costs' API-equivalent value; a reconciliation line adds the provider-reported value to reach the window's usage value. A model with neither value nor tokens in the selected dates has no card. Cards are ordered by usage value, then eligible tokens, then calls, then model ID and provider; current rate-card models with no usage in the selection sit behind a "Show N unused models" toggle. A card's details show the current rate, its source and any reviewed override, and the historical rate evidence (`ModelUsage.pricing[]`) its usage actually applied. These are completeness measures, not quality or value measures.
 
 `rates show --json` returns USD/million base, cache and context rates with provenance. `contextTiers[].aboveInputTokens` is a strict per-request input boundary; equality uses the lower tier, and the highest exceeded boundary wins. Its input/output/cache prices are absolute USD/million rates. Existing `longContext` multipliers remain supported for reviewed cards. `assumptions` labels rules actually used by a request. `contextTiers[].assumptions` carries the optional `anthropic-cache-1h-2x` convention for that tier, so an explicit tier rate can replace a derived base rate without retaining a false assumption.
 
@@ -196,30 +196,59 @@ Costs retain these estimates, and the Pricing view shows their assumptions besid
 
 `rates diff` emits source comparisons (previous/latest timestamps, null if unavailable) and changed model rates (`before`/`after`, null for additions/removals). `large` flags changes greater than 50%, removed prices and changed tier structure; a first snapshot has no comparable changes. `rates update` returns a fixed result status, per-source result/model/rejection counts and the same changes. Partial/failed updates preserve previously valid cache evidence. Neither command interprets a price change as an invoice change.
 
+## One money ledger
+
+The Velocity tab and Summary share the same deduplicated activity ledger. **Usage value has one
+dashboard definition:** the API list-price equivalent of recorded usage, provider-reported values included,
+not an invoice, counted **by activity date** in the declared timezone, including
+[session-dated value](#session-dated-value), which the Summary, Costs and Velocity notes state separately. Every
+money figure for a window sums this ledger (`buildVelocity` over the scope's sessions and the selected dates): the
+Summary "Usage value" KPI, its sparkline and delta, the sidebar repository values, the "Usage value by repository"
+bars, the fleet table's Usage value and Priced columns (its rows add up to the KPI, and it sorts by that value), the
+"Usage-value mix" (one row per model and provider, the remainder past eight rows as one "Other" row, so it adds up
+to the KPI), the explicit sub-agent value (ledger cells whose execution kind is sub-agent), Summary's daily chart,
+Costs, the Pricing cards, Velocity's "Usage value" card and the dashboard's daily CSV export. They agree to the cent
+for the same window, repository focus and providers (Velocity's provider chips state "N of M providers" when some are
+off; Summary's KPI always uses all, its daily-chart chips filter only that chart and the export). A session started
+before the window counts the value it used inside the window, and a session still running after the window's end
+counts only the value up to it.
+Undated value (including Cursor's provider-reported value) and sessions from older snapshots written before their source had a ledger
+are disclosed beside the KPI and on Costs as **all-time** amounts for the scope, never added to a dated window;
+stale sessions that need a refresh are counted there too and mark the KPI partial. A repository whose sessions have
+no ledger at all shows an unavailable value (—), not $0. The Summary delta
+uses the same guarded comparison as Velocity's cards (observed prior window, at least 90% pricing
+evidence, minimum baseline). The window's latest selectable date is capped at the snapshot's local
+date, so a session start "tomorrow" in UTC cannot add an empty future day.
+
+Counts are not money: session, token, tool and compaction KPIs, the fleet table's other columns, Tools and Activity
+cover the sessions **started** in the window. Start dates use the same declared timezone as the ledger, so every view
+states one calendar; unknown starts and file-modification fallbacks are excluded from a bounded window and kept by
+"All observed time". The terminal report keeps its whole-session totals. Dashboard JSON, sessions, models and tools
+exports are whole sessions started in the window; only the daily CSV is ledger-dated (see
+[interchange](#interchange-metrics-schema-version-1)).
+
 ## Costs
 
-Provider and model rows use whole-session values for sessions started in the selected window (UTC).
-Provider totals combine API-equivalent and provider-reported value. Model rows include only eligible
-priced value; **No model evidence** is provider value not attributed to any model. Each panel shares
-one zero-based scale across its rows. Token-type dollar detail is available in model row tooltips.
+Costs reads the same activity ledger as the Summary KPI and Velocity, over the same selected dates, repository
+focus and timezone (see [one money ledger](#one-money-ledger)). **Usage value** is the window total; it splits into
+**API-equivalent value** (every session whose value is not provider-reported) and **Provider-reported value**
+(Cursor database and Conductor result sessions), and a reconciliation line under the cards states
+`usage value = API-equivalent + provider-reported` with the dates, the timezone, the session-dated part and the
+all-time amounts no window can hold (undated value, older-snapshot sessions without a ledger). Provider rows run
+from the highest value down and end with a total line equal to the usage value. Model rows are one per provider and
+model; **No model evidence** is ledger value whose cells carry no model (`<unknown>`). Each panel shares one
+zero-based scale across its rows. Model row tooltips give the API-equivalent/provider-reported split and the
+ledger's token classes for the window. **Pricing coverage** is priced over eligible ledger tokens for the window,
+rounded down to 0.1% so it reads 100.0% only when every eligible token has a rate; the Pricing view shows the same
+figure.
+
+The **upper estimate** (cache-write assumption) is recorded per whole session. For the window it is the API
+ledger value with each cell scaled by its own session's upper/ordinary ratio: a session whose dated value lies inside
+the window keeps its exact upper estimate, and a session straddling a window boundary contributes in proportion to its
+dated value. It is shown in the API-equivalent card's note, not as a separate total.
 
 ## Velocity (snapshot version 1)
 
-The Velocity tab and Summary share the same deduplicated activity ledger. **Usage value has one
-dashboard definition:** dated value by activity date in the declared timezone, including
-[session-dated value](#session-dated-value), which the Summary and Velocity notes state separately. The
-Summary "Priced usage value" KPI, its sparkline and delta, the sidebar repository values, the
-"Usage value by repository" bars, Summary's daily chart and Velocity's "Usage value" card all sum this
-ledger over the same selected dates, so they agree for the same window, repository focus and providers
-(Velocity's provider chips state "N of M providers" when some are off; Summary always uses all).
-Undated value (including Cursor's provider-reported value) and sessions from older snapshots written before their source had a ledger
-are disclosed beside the KPI as **all-time** amounts for the scope, never added to a dated window;
-stale sessions that need a refresh are counted there too and mark the KPI partial. The Summary delta
-uses the same guarded comparison as Velocity's cards (observed prior window, at least 90% pricing
-evidence, minimum baseline). The window's latest selectable date is capped at the snapshot's local
-date, so a UTC session start "tomorrow" cannot add an empty future day. Session-start cohort views (session,
-token, tool and compaction KPIs, the fleet table, model mix, Costs and the CLI report) keep whole-session
-values of sessions started in the window (UTC); their value can differ for that reason alone.
 `MachineAnalytics.velocity` (also present on the single-repository result) declares
 `version: 1` and the analysis process's IANA `timeZone`. Each session optionally carries
 `agentIdentity` and `velocity`. Old snapshots without these additions remain readable;
@@ -304,9 +333,10 @@ total without inventing a daily distribution: a cumulative receipt only proves t
 by that time, and an even spread would put value on idle days of a session resumed days later. The
 cost is that a session spanning several days shows all of its session-dated value on its last day.
 
-Session-dated cells count in every dated total (Summary, sidebar, repository bars, Summary's daily
-chart, Velocity and its comparisons), so those views still agree. The Summary note and Velocity's
-coverage line state how much of the window's value is session-dated and from how many sessions.
+Session-dated cells count in every dated total (Summary, sidebar, repository bars, the fleet table, model
+mix, Summary's daily chart, Costs, Pricing, the daily CSV export, Velocity and its comparisons), so those
+views still agree. The Summary note, the Costs reconciliation line and Velocity's coverage line state how
+much of the window's value is session-dated and from how many sessions.
 `spendByDay` (UTC) excludes session-dated value; it records only value with its own request or run
 time. Hour-of-day profiles place session-dated value at the hour of the session's last activity.
 
@@ -390,14 +420,16 @@ Agent colors and patterns do not change when date/provider filters change spend 
 “Today” is the snapshot date in the declared timezone. Historical windows use their end
 date as the comparison anchor. Today is partial and excluded, so comparisons run through the
 last completed date. Week comparisons use the Monday-start week containing that date: Monday
-through the last completed date versus the same weekdays one week earlier. Month comparisons use
+through the last completed date versus the same weekdays one week earlier. The card names those weekdays,
+“Week to date (Mon–Thu) vs same days last week”, so it cannot be read as the Summary's rolling “last 7 days
+vs the previous 7” delta, which compares two whole 7-day windows. Month comparisons use
 its month: the first N completed dates versus the first N dates of the previous month; when the
 prior month is shorter, **both** sides are clipped to its length. On a Monday, or on the 1st,
 the last completed date belongs to the period that just finished, so the cards compare that
 whole week/month with the one before and are relabeled “Last week vs week before” / “Last month
 vs month before”. A rolled-back month keeps the clipping rule (on April 1, March 1–28 versus
 February 1–28) so both sides cover the same number of days. A historical window's end date is
-complete and is included; its cards read “Week through <date> vs prior” / “Month through <date>
+complete and is included; its cards read “Week through <date> (Mon–<weekday>) vs same days prior week” / “Month through <date>
 vs prior”, so a past window ending on a Monday or the 1st compares one day with the same day a
 week or month earlier. No projection is shown for a month with no remaining days. The calendar indicators (week, month, burn and projection) read the ledger from
 two whole months before the anchor month, independent of the selected window's start, so a
@@ -466,7 +498,7 @@ Claude's `maxInputTokensPerCall` reflects deduplicated requests, including unpri
 
 Full machine and repository snapshots now include `schemaVersion: 1`. This is a format discriminator, not a provider parser version or package version. The [snapshot schema](../schemas/snapshot.v1.schema.json) describes the existing fields; their accounting semantics above are unchanged. CSV columns retain those field names and units. CSV/NDJSON structural fields and OTLP metadata are defined in [interop.md](interop.md).
 
-CSV `contributingSessions` counts sessions that contributed an entry to the particular repository/provider/day, repository/provider/cost-basis/model, or repository/provider/tool row. It is not the number of successful tasks, people, or model calls. Daily rows reflect actual cost-event dates; no daily Cursor value or model-level Cursor tokens are inferred. NDJSON `kind` discriminates the snapshot header, repository rollups, and session records; each row carries the schema version. Exported JSON recomputes every rollup after repository, provider, and session-start date filtering. It includes the whole selected session, even if that session's usage extends beyond the selected dates.
+CSV `contributingSessions` counts sessions that contributed an entry to the particular repository/provider/day, repository/provider/cost-basis/model, or repository/provider/tool row. It is not the number of successful tasks, people, or model calls. `daily.csv` is the activity ledger: dated and [session-dated](#session-dated-value) usage value by repository, provider and calendar day in the snapshot's declared timezone (`velocity.timeZone`), with `apiEquivalentSpendUsd` for every session whose value is not provider-reported and `providerReportedSpendUsd` for provider-reported sessions (Conductor result receipts, which are session-dated). Undated value (Cursor's database value) and sessions without a ledger have no daily rows; no daily Cursor database value or model-level Cursor tokens are inferred. From the dashboard it covers the sessions in the repository and provider scope, whatever their start date, over the selected dates, so it adds up to the dashboard's usage value for the window. NDJSON `kind` discriminates the snapshot header, repository rollups, and session records; each row carries the schema version. Exported JSON and the sessions, models and tools CSVs recompute every rollup after repository, provider, and session-start date filtering. They include the whole selected session, even if that session's usage extends beyond the selected dates.
 
 The shared format contains only additive counters from successfully analyzed sessions in repository buckets with at least `minimumSessions` distinct provider/session keys (default 5; minimum 2). Explicit aliases may join roots before thresholding. `repositories[].repository` is a keyed pseudonym or explicit alias. `sources[]` contains domain-separated keyed installation identities so merges can reject repeated sources. There are no raw/local session keys or time windows in this format.
 
@@ -487,7 +519,7 @@ The OTLP mapping uses `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`,
 
 ### Interchange correctness and evidence limits
 
-Provider timestamps are normalized to UTC with milliseconds; timestamps without an offset, including SQLite-style timestamps, mean UTC. Dashboard summaries and exports share numeric session-start selection with an exclusive next-day UTC bound. Local DST does not move a session between selected UTC dates.
+Provider timestamps are normalized to UTC with milliseconds; timestamps without an offset, including SQLite-style timestamps, mean UTC. Dashboard views and exports select sessions by their start date in the snapshot's declared timezone, the calendar of the activity ledger, so one window means the same dates for value and counts. Programmatic `filterSnapshot` callers can still select by numeric start instants with an exclusive end.
 
 Unknown Conductor agents use `provider: "unsupported"`, `transcript.status: "unsupported"`, and `costBasis: "unavailable"`. These retained rows count in the session denominator but not analyzed sessions or sharing eligibility. Source status text is normalized to fixed labels; unknown labels become `unknown`. Tool names use the bounded canonical identifier grammar; model IDs also allow one registry namespace segment. Malformed names become `unknown` / `<unknown>` without releasing source text. Tool counts are retained.
 

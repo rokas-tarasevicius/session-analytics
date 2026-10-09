@@ -32,11 +32,21 @@ export function span({ start, end }) {
   if (start === end) return first;
   return `${first}–${start.slice(0, 7) === end.slice(0, 7) ? Number(end.slice(-2)) : periodDate.format(new Date(`${end}T12:00:00Z`))}`;
 }
-/** Card labels: the period that just finished (Monday, the 1st), a past window's end, or to date. */
+const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/** "Mon–Thu": Monday through the weekday of `day` (a calendar date). */
+const weekdaysThrough = (day) => {
+  const last = (new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7;
+  return last === 0 ? weekdays[0] : `${weekdays[0]}–${weekdays[last]}`;
+};
+/**
+ * Card labels: the period that just finished (Monday, the 1st), a past window's end, or to date. The week card names
+ * its weekdays so it cannot be read as the Summary's "last 7 days" comparison.
+ */
 export function comparisonLabels(indicators, today) {
   const through = indicators.end < today ? ` through ${span({ start: indicators.completeThrough, end: indicators.completeThrough })}` : "";
+  const days = weekdaysThrough(indicators.completeThrough);
   return {
-    week: indicators.week.rolledBack ? "Last week vs week before" : through ? `Week${through} vs prior` : "This week vs last",
+    week: indicators.week.rolledBack ? "Last week vs week before" : through ? `Week${through} (${days}) vs same days prior week` : `Week to date (${days}) vs same days last week`,
     month: indicators.month.rolledBack ? "Last month vs month before" : through ? `Month${through} vs prior` : "Month to date vs prior",
   };
 }
@@ -209,7 +219,7 @@ export function renderVelocity(container, sessions, context) {
     const projection = panelShell("End-of-month scenario", "Projection");
     const movers = panelShell("Largest increases", "Top movers");
     container.append(lead, controls, main.article, totals, comparisons, projection.article, movers.article);
-    controller = { sessions, context, update: null };
+    controller = { sessions, context, update: null, selectedProviders };
     const update = () => {
       const current = controller.context;
       const scoped = controller.sessions.filter((session) => selectedProviders.has(session.provider));
@@ -224,7 +234,7 @@ export function renderVelocity(container, sessions, context) {
       const shownProviders = chipProviders.filter((provider) => selectedProviders.has(provider)).length;
       lead.replaceChildren(
         kpi({ label: "Average price", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: `per active day · ${price.activeDays} of ${price.days} days active · ${formatMetric(price.perCalendarDay, "value")} per calendar day`, accent: true }),
-        kpi({ label: "Usage value", value: formatMetric(price.total, "value"), note: `${price.days} calendar days · API-equivalent${valueData.evidence.complete ? "" : " · partially observed"}${shownProviders < chipProviders.length ? ` · ${shownProviders} of ${chipProviders.length} providers` : ""}` }),
+        kpi({ label: "Usage value", value: formatMetric(price.total, "value"), note: `${price.days} calendar days · API-equivalent and provider-reported${valueData.evidence.complete ? "" : " · partially observed"}${shownProviders < chipProviders.length ? ` · ${shownProviders} of ${chipProviders.length} providers` : ""}` }),
       );
       const today = localDay(current.generatedAt, current.timeZone);
       const comparisonData = buildVelocity(scoped, { ...options, ...comparisonSpan(current.end, today), granularity: "day", mode: "lines" });
@@ -298,6 +308,12 @@ export function renderVelocity(container, sessions, context) {
   controller.sessions = sessions; controller.context = context;
   controller.syncChips(context.providers ?? providerIds);
   controller.update();
+}
+
+/** The provider chips selected on a rendered Velocity view (exports honour them), or null before it first renders. */
+export function velocityProviders(container) {
+  const controller = controllers.get(container);
+  return controller ? providerIds.filter((provider) => controller.selectedProviders.has(provider)) : null;
 }
 
 export function renderSummaryVelocity(container, sessions, context) {

@@ -2,13 +2,12 @@
 // sparkline downsampling, sorting, and palette matching. No DOM access, so the
 // same module is exercised by test/dashboard-helpers.test.ts under node:test.
 
-import { timestampMilliseconds, utcDayBounds } from "./timestamps.js";
+import { normalizeTimestamp } from "./timestamps.js";
 import { providerIds, providerLabels, metricEligible, metricCoverage } from "./providers.js";
+import { buildVelocity, calendarDays, ledgerCells, localDay } from "./velocity-data.js";
 export const providerOrder = providerIds;
 export { providerLabels };
 
-const tokenFields = ["cacheWrite1hInputTokens", "cacheWrite5mInputTokens", "cacheWriteInputTokens", "cachedInputTokens", "inputTokens", "nonReasoningOutputTokens", "outputTokens", "reasoningOutputTokens", "uncachedInputTokens"];
-const costFields = ["cacheWriteUsd", "cachedInputUsd", "inputUsd", "outputUsd", "totalUsd", "upperEstimateUsd"];
 const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
 
 export function shortMoney(value) {
@@ -25,7 +24,7 @@ export function percent(value) {
 export function summarize(sessions) {
   const totals = { inputTokens: 0, outputTokens: 0, uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0 };
   let pricedTokens = 0, observedTokens = 0;
-  const summary = { coverage: Object.fromEntries(["tokens", "tools", "compactions", "cost", "apiCost", "reportedCost"].map((metric) => [metric, metricCoverage(sessions, metric)])), analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: null, compactions: 0, estimatedSpendUsd: 0, estimatedUpperSpendUsd: 0, missingTranscripts: 0, outputTokens: 0, pricedTokenCoverage: null, providerReportedSpendUsd: 0, sessions: sessions.length, subagentSessions: 0, subagentSpendUsd: 0, toolCalls: 0, topLevelSessions: 0, topLevelSpendUsd: 0, totalInputTokens: 0, unpricedSessions: 0 };
+  const summary = { coverage: Object.fromEntries(["tokens", "tools", "compactions", "cost", "apiCost", "reportedCost"].map((metric) => [metric, metricCoverage(sessions, metric)])), analyzedSessions: 0, apiEquivalentSpendUsd: 0, cacheReadRatio: null, compactions: 0, estimatedSpendUsd: 0, estimatedUpperSpendUsd: 0, missingTranscripts: 0, mixedSessions: 0, outputTokens: 0, pricedTokenCoverage: null, providerReportedSpendUsd: 0, sessions: sessions.length, subagentSessions: 0, unknownExecutionSessions: 0, subagentSpendUsd: 0, toolCalls: 0, topLevelSessions: 0, topLevelSpendUsd: 0, totalInputTokens: 0, unpricedSessions: 0 };
   for (const session of sessions) {
     summary.analyzedSessions += session.transcript.status === "ok" ? 1 : 0;
     summary.missingTranscripts += session.transcript.status === "missing" ? 1 : 0;
@@ -36,6 +35,9 @@ export function summarize(sessions) {
     summary.providerReportedSpendUsd += metricEligible(session, "reportedCost") ? session.cost.totalUsd : 0;
     summary.subagentSessions += session.executionKind === "subagent" || session.executionKind === "mixed" ? 1 : 0;
     summary.topLevelSessions += session.executionKind === "top-level" || session.executionKind === "mixed" ? 1 : 0;
+    // Mixed sessions count in both counters above; these let a breakdown add up to `sessions`.
+    summary.mixedSessions += session.executionKind === "mixed" ? 1 : 0;
+    summary.unknownExecutionSessions += session.executionKind !== "mixed" && session.executionKind !== "top-level" && session.executionKind !== "subagent" ? 1 : 0;
     summary.subagentSpendUsd += session.costByExecution?.subagentUsd || 0;
     summary.topLevelSpendUsd += session.costByExecution?.topLevelUsd || 0;
     if (metricEligible(session, "tokens")) { summary.totalInputTokens += session.tokens.inputTokens; summary.outputTokens += session.tokens.outputTokens; }
@@ -52,31 +54,10 @@ export function summarize(sessions) {
   return summary;
 }
 
-export function mergeModels(sessions) {
-  const models = new Map();
-  for (const session of sessions) for (const source of session.models) {
-    const key = `${session.provider}:${source.model}`;
-    const target = models.get(key) || { model: source.model, provider: session.provider, calls: 0, priced: true, selected: 0, eligible: { calls: 0, input: 0, output: 0, value: 0 } };
-    target.selected++;
-    for (const [metric, eligibility] of Object.entries({ calls: "calls", input: "tokens", output: "tokens", value: "cost" })) if (metricEligible(session, eligibility)) target.eligible[metric]++;
-    for (const key of [...tokenFields, ...costFields, "calls"]) {
-      const metric = key === "calls" ? "calls" : tokenFields.includes(key) ? "tokens" : "cost";
-      if (metricEligible(session, metric)) target[key] = (target[key] || 0) + (source[key] || 0);
-      else target[key] ||= 0;
-    }
-    target.priced = target.priced && source.priced; models.set(key, target);
-  }
-  return [...models.values()].sort((left, right) => right.totalUsd - left.totalUsd);
-}
-
 export function namedTotals(sessions, field) {
   const totals = new Map();
   for (const session of sessions.filter((s) => field !== "tools" || metricEligible(s, field))) for (const [name, value] of Object.entries(session[field])) totals.set(name, (totals.get(name) || 0) + value);
   return [...totals].map(([name, value]) => ({ name, value })).sort((left, right) => right.value - left.value);
-}
-
-export function spendDays(sessions) {
-  return namedTotals(sessions, "spendByDay").sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function coverageWarnings(sessions) {
@@ -99,38 +80,107 @@ export function coverageWarnings(sessions) {
   return warnings;
 }
 
-export function costTotals(sessions) {
-  const result = { cached: 0, input: 0, output: 0, reported: 0, total: 0, upper: 0, write: 0 };
-  for (const session of sessions) {
-    if (!metricEligible(session, "cost")) continue;
-    if (session.costBasis === "provider-reported") result.reported += session.cost.totalUsd;
-    if (session.costBasis !== "api-list-price-equivalent") continue;
-    result.cached += session.cost.cachedInputUsd; result.input += session.cost.inputUsd;
-    result.output += session.cost.outputUsd; result.write += session.cost.cacheWriteUsd;
-    result.total += session.cost.totalUsd; result.upper += session.cost.upperEstimateUsd;
-  }
-  return result;
+const blankCounters = () => Array(14).fill(0);
+const addCounters = (target, source) => { for (let index = 0; index < 14; index += 1) target[index] += source[index] || 0; return target; };
+const blankEvidence = () => ({ known: 0, eligible: 0, unsupported: 0, complete: true });
+export function mergeEvidence(target, source) {
+  target.known += source.known; target.eligible += source.eligible; target.unsupported += source.unsupported;
+  target.complete = target.known === target.eligible && target.unsupported === 0;
+  return target;
 }
 
-/** Whole-session provider value, with model evidence kept separate from unattributed value. */
-export function costByModel(sessions) {
-  const models = mergeModels(sessions).map((model) => ({
-    provider: model.provider, model: model.model, value: model.totalUsd, share: 0,
-    sessions: model.selected, calls: model.calls, inputTokens: model.inputTokens, outputTokens: model.outputTokens,
-    components: { input: model.inputUsd, cached: model.cachedInputUsd, write: model.cacheWriteUsd, output: model.outputUsd },
-    priced: model.priced, eligible: model.eligible.value, selected: model.selected,
-    evidence: { calls: model.eligible.calls, tokens: model.eligible.input },
-  })).sort((left, right) => right.value - left.value || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
-  const providers = providerOrder.map((provider) => {
-    const selected = sessions.filter((session) => session.provider === provider), cost = costTotals(selected);
-    const providerModels = models.filter((model) => model.provider === provider), total = cost.total + cost.reported;
-    return { provider, total, api: cost.total, reported: cost.reported,
-      unattributed: Math.max(0, total - providerModels.reduce((sum, model) => sum + model.value, 0)),
-      coverage: metricCoverage(selected, "cost"), models: providerModels };
-  }).filter(({ total, models }) => total > 0 || models.length);
-  const total = providers.reduce((sum, provider) => sum + provider.total, 0);
-  for (const model of models) model.share = total > 0 ? model.value / total : 0;
-  return { total, providers, models };
+/**
+ * Priced share of eligible tokens, rounded **down** to 0.1%: 1 only when every eligible token is priced, so a nearly
+ * complete ledger never reads "100.0%". Null when no token is eligible (N/A, not 0%).
+ */
+export function pricedShare(evidence) {
+  if (!evidence || !(evidence.eligible > 0)) return null;
+  if (evidence.known >= evidence.eligible) return 1;
+  return Math.min(999, Math.max(0, Math.floor((1000 * evidence.known) / evidence.eligible))) / 1000;
+}
+
+export function pricedPercent(evidence) {
+  const share = pricedShare(evidence);
+  return share === null ? "N/A" : `${(share * 100).toFixed(1)}%`;
+}
+
+/**
+ * Cache-write upper-estimate premium per `${provider}:${model}` over the window's ledger cells. The upper estimate is
+ * recorded per whole session, so each in-window cell's value is scaled by its session's own upper/ordinary ratio: a
+ * session whose dated value lies inside the window keeps its exact upper estimate, and one straddling the window
+ * boundary contributes in proportion to its dated value. Cells are those buildVelocity sums (`ledgerCells`, in-window
+ * days, a known dimension).
+ */
+function upperPremiums(apiSessions, start, end) {
+  const days = new Set(calendarDays(start, end)), premiums = new Map();
+  if (!days.size) return premiums;
+  for (const session of apiSessions) {
+    const { cost, velocity } = session;
+    if (!velocity || !cost || !(cost.totalUsd > 0) || !(cost.upperEstimateUsd > cost.totalUsd)) continue;
+    const ratio = cost.upperEstimateUsd / cost.totalUsd - 1;
+    for (const [day, , dimensionId, values] of ledgerCells(velocity)) {
+      const dimension = velocity.dimensions[dimensionId];
+      if (!dimension || !values[0] || !days.has(day)) continue;
+      const key = `${session.provider}:${dimension.model}`;
+      premiums.set(key, (premiums.get(key) ?? 0) + values[0] * ratio);
+    }
+  }
+  return premiums;
+}
+
+/**
+ * One window of the activity ledger for the money views (Costs, Pricing, model mix). Every figure is a buildVelocity
+ * total over the same sessions and calendar dates as the Summary KPI and Velocity, so they agree. Sessions whose value
+ * is provider-reported form one partition and every other session the API-equivalent one, so `api + reported` is the
+ * window total. Undated value, older-snapshot sessions without a ledger and sessions needing a refresh are reported
+ * (all time for the scope) and never added to the window.
+ */
+export function ledgerMoney(sessions, { start, end }) {
+  const reportedSessions = [], apiSessions = [];
+  for (const session of sessions) (session.costBasis === "provider-reported" ? reportedSessions : apiSessions).push(session);
+  const options = { start, end, group: "model", metric: "value", limit: Infinity };
+  const parts = [["api", buildVelocity(apiSessions, options)], ["reported", buildVelocity(reportedSessions, options)]];
+  const models = new Map();
+  for (const [basis, data] of parts) for (const series of data.allSeries) {
+    const split = series.id.indexOf(":");
+    const row = models.get(series.id) ?? { id: series.id, provider: series.id.slice(0, split), model: series.id.slice(split + 1), label: series.label,
+      value: 0, api: 0, reported: 0, upper: 0, share: 0, sessions: 0, calls: 0, sums: blankCounters(), evidence: blankEvidence() };
+    row.value += series.total; row[basis] += series.total; row.sessions += series.sessions; row.calls += series.calls;
+    addCounters(row.sums, series.sums); mergeEvidence(row.evidence, series.evidence);
+    models.set(series.id, row);
+  }
+  const [api, reported] = parts.map(([, data]) => data);
+  const total = api.totals[0] + reported.totals[0];
+  // `upper` is the API-equivalent value with the cache-write upper estimate; provider-reported value has none.
+  const premiums = upperPremiums(apiSessions, start, end);
+  let upperPremium = 0;
+  for (const row of models.values()) { const premium = premiums.get(row.id) ?? 0; row.upper = row.api + premium; upperPremium += premium; }
+  const providers = new Map();
+  for (const row of models.values()) {
+    const group = providers.get(row.provider) ?? { provider: row.provider, total: 0, api: 0, reported: 0, upper: 0, unattributed: 0, evidence: blankEvidence(), models: [] };
+    group.total += row.value; group.api += row.api; group.reported += row.reported; group.upper += row.upper; mergeEvidence(group.evidence, row.evidence);
+    if (row.model === "<unknown>") group.unattributed += row.value; else group.models.push(row);
+    providers.set(row.provider, group);
+  }
+  const rank = (provider) => { const index = providerIds.indexOf(provider); return index < 0 ? providerIds.length : index; };
+  const visible = (row) => row.value > 0 || row.evidence.eligible > 0;
+  // Rows include the `<unknown>` model (value without model evidence); provider rows keep it apart as `unattributed`.
+  const rows = [...models.values()].filter(visible);
+  for (const row of rows) row.share = total > 0 ? row.value / total : 0;
+  rows.sort((left, right) => right.value - left.value || rank(left.provider) - rank(right.provider) || left.model.localeCompare(right.model));
+  const providerRows = [...providers.values()].filter((group) => group.total > 0 || group.evidence.eligible > 0).map((group) => ({
+    ...group, models: group.models.filter(visible).sort((left, right) => right.value - left.value || left.model.localeCompare(right.model)),
+  })).sort((left, right) => right.total - left.total || rank(left.provider) - rank(right.provider));
+  return {
+    start, end, total, api: api.totals[0], reported: reported.totals[0], upper: api.totals[0] + upperPremium,
+    evidence: mergeEvidence(mergeEvidence(blankEvidence(), api.evidence), reported.evidence),
+    providers: providerRows, models: rows,
+    undated: api.undated[0] + reported.undated[0],
+    unledgered: { sessions: api.unledgered.sessions + reported.unledgered.sessions, value: api.unledgered.value + reported.unledgered.value },
+    missingSessions: api.missingSessions + reported.missingSessions,
+    sessionDated: api.sessionDated[0] + reported.sessionDated[0], sessionDatedSessions: api.sessionDatedSessions + reported.sessionDatedSessions,
+    contributingSessions: api.contributingSessions + reported.contributingSessions,
+  };
 }
 
 /** Groups sessions by repository ID once per snapshot so views never rescan the full list per repository. */
@@ -143,14 +193,18 @@ export function groupByRepository(sessions) {
   return groups;
 }
 
-export function sessionsInRange(sessions, startDay, endDay) {
+/** The calendar day a session started in `timeZone`, or null for unknown, file-mtime or invalid starts. */
+export function sessionStartDay(session, timeZone = "UTC") {
+  if (session.transcript?.startTimeKnown === false || session.evidence?.timing === "file-mtime") return null;
+  return localDay(normalizeTimestamp(session.createdAt), timeZone);
+}
+
+/** Sessions started on `startDay` through `endDay` (inclusive) in the snapshot timezone, the dates Velocity uses. */
+export function sessionsInRange(sessions, startDay, endDay, timeZone = "UTC") {
   if (!startDay && !endDay) return sessions.slice();
-  const bounds = utcDayBounds(startDay || null, endDay || null);
-  const start = bounds.start ? timestampMilliseconds(bounds.start) : -Infinity;
-  const end = bounds.end ? timestampMilliseconds(bounds.end) : Infinity;
   return sessions.filter((session) => {
-    const at = timestampMilliseconds(session.createdAt);
-    return session.transcript?.startTimeKnown !== false && session.evidence?.timing !== "file-mtime" && Number.isFinite(at) && at >= start && at < end;
+    const day = sessionStartDay(session, timeZone);
+    return day !== null && (!startDay || day >= startDay) && (!endDay || day <= endDay);
   });
 }
 
@@ -175,14 +229,11 @@ export function dailySpendSeries(sessions, days) {
   return values;
 }
 
-export function dailyCountSeries(sessions, days, accessor) {
+export function dailyCountSeries(sessions, days, accessor, timeZone = "UTC") {
   const index = new Map(days.map((day, position) => [day, position]));
   const values = days.map(() => 0);
   for (const session of sessions) {
-    if (session.transcript?.startTimeKnown === false || session.evidence?.timing === "file-mtime") continue;
-    const at = timestampMilliseconds(session.createdAt);
-    if (!Number.isFinite(at)) continue;
-    const position = index.get(new Date(at).toISOString().slice(0, 10));
+    const position = index.get(sessionStartDay(session, timeZone));
     if (position !== undefined) values[position] += accessor(session);
   }
   return values;
@@ -395,15 +446,16 @@ export function singleFlight(task) {
   };
 }
 
+// The fleet table's value and priced columns read the activity ledger (`item.usage`), like the Summary KPI.
 export const tableAccessors = {
   cache: (item) => item.summary.cacheReadRatio ?? -1,
-  coverage: (item) => item.summary.pricedTokenCoverage ?? -1,
+  coverage: (item) => pricedShare(item.usage?.evidence) ?? -1,
   input: (item) => item.summary.totalInputTokens,
   name: (item) => item.repository.name.toLowerCase(),
   output: (item) => item.summary.outputTokens,
   sessions: (item) => item.summary.sessions,
   tools: (item) => item.summary.toolCalls,
-  value: (item) => item.summary.estimatedSpendUsd,
+  value: (item) => item.usage?.available === false ? -1 : item.usage?.value ?? 0,
 };
 
 export function sortRepositories(repositories, key, direction) {

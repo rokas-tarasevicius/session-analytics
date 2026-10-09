@@ -2,11 +2,12 @@
 /** @typedef {import("../types.ts").SessionAnalytics} SessionAnalytics */
 /** @typedef {import("../types.ts").MachineAnalytics} MachineAnalytics */
 /** @typedef {import("../types.ts").ModelUsage} ModelUsage */
-/** @typedef {{repositoryId?: string | null, start?: string | null, end?: string | null, providers?: string[] | null, repositoryIds?: string[] | null}} SessionFilters */
+/** @typedef {{repositoryId?: string | null, start?: string | null, end?: string | null, startDay?: string | null, endDay?: string | null, timeZone?: string | null, providers?: string[] | null, repositoryIds?: string[] | null}} SessionFilters */
 /** @typedef {{schemaVersion: number, repositoryId: string, repositoryName: string, provider: string}} CsvBase */
 // Pure interchange helpers shared by the browser and Node; no transcript access.
 import { coverageWarnings, filteredWarning, scanWarnings } from "./evidence.js";
-import { timestampMilliseconds } from "./timestamps.js";
+import { normalizeTimestamp, timestampMilliseconds } from "./timestamps.js";
+import { calendarDays, ledgerCells, localDay } from "./velocity-data.js";
 /** @type {Array<keyof import("../types.ts").TokenUsage>} */
 const tokenFields = ["inputTokens", "uncachedInputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "outputTokens", "reasoningOutputTokens", "nonReasoningOutputTokens"];
 /** @type {Array<keyof import("../types.ts").CostBreakdown>} */
@@ -27,8 +28,17 @@ export function csv(rows, columns) {
   return `${[columns.map(cell).join(","), ...rows.map((row) => columns.map((column) => cell(/** @type {Record<string, unknown>} */ (row)[column])).join(","))].join("\r\n")}\r\n`;
 }
 
-/** @param {MachineAnalytics} snapshot @returns {Record<string, string>} */
-export function csvTables(snapshot) {
+/**
+ * `daily.csv` is the activity ledger: dated and session-dated usage value, the cells behind the dashboard's usage value,
+ * by repository, provider and calendar day in the snapshot timezone (`velocity.timeZone`). `ledger` narrows it to a
+ * dashboard selection: the sessions in scope (whatever their start date) and the selected dates, so the file adds up
+ * to the dashboard total. Undated value (Cursor's provider-reported database value) and sessions without a ledger have
+ * no daily rows. The other tables cover the whole sessions in `snapshot`.
+ * @param {MachineAnalytics} snapshot
+ * @param {{ ledger?: { sessions: SessionAnalytics[], start: string, end: string } | null }} [options]
+ * @returns {Record<string, string>}
+ */
+export function csvTables(snapshot, { ledger = null } = {}) {
   const sessions = snapshot.sessions.map((s) => ({
     schemaVersion: 1, sessionKey: s.sessionKey, repositoryId: s.repositoryId, repositoryName: s.repositoryName,
     provider: s.provider, createdAt: s.createdAt, updatedAt: s.updatedAt, firstEventAt: s.firstEventAt, lastEventAt: s.lastEventAt,
@@ -45,16 +55,25 @@ export function csvTables(snapshot) {
   const models = new Map();
   /** @type {Map<string, CsvBase & {tool: string, contributingSessions: number, calls: number}>} */
   const tools = new Map();
-  for (const s of snapshot.sessions) {
+  const window = ledger ? new Set(calendarDays(ledger.start, ledger.end)) : null;
+  for (const s of ledger ? ledger.sessions : snapshot.sessions) {
+    if (!s.velocity) continue;
     const base = { schemaVersion: 1, repositoryId: s.repositoryId, repositoryName: s.repositoryName, provider: s.provider };
-    for (const [day, amount] of Object.entries(s.spendByDay)) {
+    /** @type {Set<string>} */
+    const counted = new Set();
+    for (const [day, , dimension, values] of ledgerCells(s.velocity)) {
+      if (!values[0] || !s.velocity.dimensions[dimension] || (window && !window.has(day))) continue;
       const key = JSON.stringify([s.repositoryId, s.provider, day]);
       const row = days.get(key) || { ...base, day, contributingSessions: 0, apiEquivalentSpendUsd: 0, providerReportedSpendUsd: 0 };
-      row.contributingSessions++;
-      if (s.costBasis === "api-list-price-equivalent") row.apiEquivalentSpendUsd += amount;
-      if (s.costBasis === "provider-reported") row.providerReportedSpendUsd += amount;
+      if (!counted.has(key)) { counted.add(key); row.contributingSessions++; }
+      // The same cost-basis partition as the dashboard: provider-reported sessions, then every other session.
+      if (s.costBasis === "provider-reported") row.providerReportedSpendUsd += values[0];
+      else row.apiEquivalentSpendUsd += values[0];
       days.set(key, row);
     }
+  }
+  for (const s of snapshot.sessions) {
+    const base = { schemaVersion: 1, repositoryId: s.repositoryId, repositoryName: s.repositoryName, provider: s.provider };
     for (const m of s.models) {
       const key = JSON.stringify([s.repositoryId, s.provider, s.costBasis, m.model]);
       const row = models.get(key) || { ...base, costBasis: s.costBasis, model: m.model, contributingSessions: 0, calls: 0, priced: true, ...zeroFields([...tokenFields, ...costFields]) };
@@ -136,15 +155,22 @@ export function aggregateSessions(sessions) {
   return { summary, spendByDay: named(days).sort((a, b) => a.name.localeCompare(b.name)), spendByModel: [...models.values()].sort((a, b) => b.totalUsd - a.totalUsd), topTools: named(tools).sort((a, b) => b.value - a.value), warnings: coverageWarnings(sessions) };
 }
 
-/** Whole sessions selected by numeric start instant; end is EXCLUSIVE.
+/** Whole sessions selected by start: either a numeric start instant (`start`/`end`, end EXCLUSIVE) or, as the dashboard
+ * does, a start calendar date in `timeZone` (`startDay`/`endDay`, both INCLUSIVE). Bounded selections exclude unknown starts.
  * @param {SessionAnalytics[]} sessions @param {SessionFilters} filters */
-export function selectSessions(sessions, { repositoryId = null, start = null, end = null, providers = null, repositoryIds = null } = {}) {
+export function selectSessions(sessions, { repositoryId = null, start = null, end = null, startDay = null, endDay = null, timeZone = null, providers = null, repositoryIds = null } = {}) {
   const first = start === null ? -Infinity : timestampMilliseconds(start);
   const last = end === null ? Infinity : timestampMilliseconds(end);
   if (Number.isNaN(first) || Number.isNaN(last)) throw new Error("Invalid selection timestamp.");
+  const byDay = Boolean(startDay || endDay);
   return sessions.filter((s) => {
+    const known = s.transcript?.startTimeKnown !== false && s.evidence?.timing !== "file-mtime";
+    if (byDay) {
+      const day = known ? localDay(normalizeTimestamp(s.createdAt), timeZone || "UTC") : null;
+      if (day === null || (startDay && day < startDay) || (endDay && day > endDay)) return false;
+    }
     const time = timestampMilliseconds(s.createdAt);
-    return (!(start || end) || s.transcript?.startTimeKnown !== false && s.evidence?.timing !== "file-mtime") && (!repositoryId || s.repositoryId === repositoryId) && time >= first && time < last && (!providers || providers.includes(s.provider)) && (!repositoryIds || repositoryIds.includes(s.repositoryId));
+    return (!(start || end) || known) && (!repositoryId || s.repositoryId === repositoryId) && time >= first && time < last && (!providers || providers.includes(s.provider)) && (!repositoryIds || repositoryIds.includes(s.repositoryId));
   });
 }
 

@@ -32,7 +32,7 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
   windowStart.value = start; windowStart.min = min; windowEnd.value = end; windowEnd.max = max;
   const deltas: Record<string, unknown> = {};
   const repositories = [...new Set((sessions as Array<{ repositoryId: string }>).map(({ repositoryId }) => repositoryId))].map((id) => ({ repository: { id, name: id } }));
-  const context = productionFunctions(["renderSummary", "spendDelta", "renderRepositoryNav", "windowDays", "velocityContext"], {
+  const context = productionFunctions(["renderSummary", "spendDelta", "renderRepositoryNav", "windowDays", "velocityContext", "snapshotTimeZone", "pricedBadge", "executionBreakdown", "subagentValue"], {
     ...ui, ...viewModel, ...velocityData, elements, $: lookup, windowPreset: preset, Map, Set, Intl,
     snapshot: { generatedAt: "2026-09-15T09:00:00Z", velocity: { timeZone: "UTC" }, sessions, repositories },
     wideLayout: { matches: true, addEventListener() {} }, navCache: { key: null }, navHoverListeners: new Set(), navDirty: false,
@@ -42,8 +42,14 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
     renderHistoryCoverage() {}, renderMetricValue() {}, renderSparkline() {}, renderLine() {}, dailyProviderSpend() {}, renderDonut() {}, renderBars() {}, renderRepositoryTable() {}, renderWarnings() {}, selectRepository() {},
     renderDelta: (e: Element, delta: unknown) => { deltas[Object.entries(elementMap).find(([, v]) => v === e)![0]] = delta; },
   });
-  const view = { summary: { coverage: { cost: {}, apiCost: {}, reportedCost: {}, tokens: {}, tools: { eligible: 1 }, compactions: {} } }, sessions, scopeSessions: sessions, dailySessions: sessions, repositories: [], spendByModel: [], topTools: [], warnings: [] };
-  return { context, elements, lookup, deltas, render: () => (context.renderSummary as (v: unknown) => void)(view) };
+  const render = () => {
+    // activeView's ledger pass: grouped by repository over the scope for the window.
+    const window = (context.velocityContext as () => { start: string; end: string })();
+    const activity = (velocityData.buildVelocity as (s: unknown[], o: unknown) => unknown)(sessions, { start: window.start, end: window.end, group: "repository", metric: "value" });
+    const view = { activity, summary: { topLevelSessions: 0, subagentSessions: 0, coverage: { cost: {}, apiCost: {}, reportedCost: {}, tokens: {}, tools: { eligible: 1 }, compactions: {} } }, sessions, scopeSessions: sessions, dailySessions: sessions, repositories: [], topTools: [], warnings: [] };
+    (context.renderSummary as (v: unknown) => void)(view);
+  };
+  return { context, elements, lookup, deltas, render };
 }
 
 test("the Summary delta compares activity-dated value with the preceding window, including earlier starts", () => {

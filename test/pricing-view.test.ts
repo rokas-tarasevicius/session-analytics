@@ -68,30 +68,48 @@ const rateCard = { effectiveDate: "2026-01-01", pricing: { policy: "reviewed-fir
   { model: "gpt-fixture", rate, source: "https://models.dev/api.json", provenance: historical },
   { model: "claude-unused", rate: { ...rate, provider: "anthropic" }, source: null, provenance: { ...historical, source: "reviewed", kind: "fallback" } },
 ] };
-const sessions = [{ provider: "codex", costBasis: "api-list-price-equivalent", id: "private-session-id", path: "/private/session.json",
+// Cards read the activity ledger for the selected dates: every fixture session carries the cells its model usage implies.
+const window = { start: "2026-01-02", end: "2026-01-02" };
+type Usage = { model: string; totalUsd?: number; upperEstimateUsd?: number; inputTokens?: number; outputTokens?: number; cachedInputTokens?: number;
+  cacheWriteInputTokens?: number; calls?: number; priced?: boolean; pricing?: unknown[]; pricingCoverage?: { eligibleTokens: number; pricedTokens: number } };
+function ledgered<T extends { models: Usage[] }>(session: T, day = window.start) {
+  const cells = session.models.map((usage, index) => {
+    const input = usage.inputTokens ?? 0, output = usage.outputTokens ?? 0, cached = usage.cachedInputTokens ?? 0, write = usage.cacheWriteInputTokens ?? 0;
+    const priced = usage.pricingCoverage?.pricedTokens ?? (usage.priced ? input + output : 0);
+    return [day, 12, index, [usage.totalUsd ?? 0, input, input - cached - write, cached, write, output, 0, usage.calls ?? 0, 0, 0, priced, 0, input, 0]];
+  });
+  const total = session.models.reduce((sum, usage) => sum + (usage.totalUsd ?? 0), 0);
+  const upper = session.models.reduce((sum, usage) => sum + (usage.upperEstimateUsd ?? usage.totalUsd ?? 0), 0);
+  return { ...session, sessionKey: `session-${day}-${session.models.map(({ model }) => model).join("-")}`, cost: { totalUsd: total, upperEstimateUsd: upper },
+    velocity: { dimensions: session.models.map(({ model }) => ({ agent: "codex-cli", model, executionKind: "top-level", effort: "unknown" })), buckets: cells, undated: [] } };
+}
+const sessions = [ledgered({ provider: "codex", costBasis: "api-list-price-equivalent", id: "private-session-id", path: "/private/session.json",
   text: "private transcript text", models: [
     { model: "gpt-fixture", inputTokens: 200, outputTokens: 100, cachedInputTokens: 80, cacheWriteInputTokens: 20,
       totalUsd: 410.57, upperEstimateUsd: 450, calls: 3, priced: true, pricing: [historical] },
     { model: "unknown", inputTokens: 100, outputTokens: 0, totalUsd: 0, calls: 1, priced: false, pricing: [] },
-  ] }, { provider: "cursor", costBasis: "provider-reported", models: [{ model: "cursor-excluded", inputTokens: 900 }] }];
+  ] }), { provider: "cursor", costBasis: "provider-reported", models: [{ model: "cursor-excluded", inputTokens: 900 }], cost: { totalUsd: 5, upperEstimateUsd: 5 },
+  // Cursor's database value has no request time: it is undated and never a card.
+  velocity: { dimensions: [{ agent: "cursor", model: "<unknown>", executionKind: "top-level", effort: "unknown" }], buckets: [], undated: [[0, [5, 900, 900, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } }];
 const modelButtons = (root: Node) => root.all((node) => node.tag === "button" && node.dataset.focusKey?.startsWith("pricing:model:") === true);
 const toggleButton = (root: Node) => root.all((node) => node.dataset.focusKey === "pricing:unused")[0]!;
 const byClass = (root: Node, name: string) => root.all((node) => node.className.split(" ").includes(name));
 const usage = (model: string, value: number, tokens: number, calls = 1) => ({ model, totalUsd: value,
   inputTokens: tokens, outputTokens: 0, priced: true, pricing: [historical], calls });
-const rankingSessions = [{ provider: "codex", costBasis: "api-list-price-equivalent", models: [
+const rankingSessions = [ledgered({ provider: "codex", costBasis: "api-list-price-equivalent", models: [
   usage("gpt-a", 4, 500), usage("gpt-b", 10, 100), usage("gpt-z", 10, 200),
-] }];
+] })];
 
 test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selection evidence", async () => {
   await withDocument((root) => {
     const panel = new Node("div"); root.append(panel);
-    renderPricingPanel(panel, rateCard, sessions);
+    renderPricingPanel(panel, rateCard, sessions, window);
     const rendered = panel.text();
-    assert.match(rendered, /8\.5d/); assert.match(rendered, /75\.0%/); assert.match(rendered, /300 \/ 400 observed tokens/);
+    assert.match(rendered, /8\.5d/); assert.match(rendered, /75\.0%/); assert.match(rendered, /300 \/ 400 eligible tokens · activity-dated, as on Costs/);
+    assert.match(rendered, /Cards add up to \$410\.57 API-equivalent value\. With \$0\.00 provider-reported value, which has no rate card, that is the \$410\.57 usage value/);
     assert.match(rendered, /API-equivalent value is not an invoice/);
     assert.match(rendered, /Offline · cached prices · reviewed card effective 2026-01-01/);
-    assert.match(rendered, /Cards are ordered by API-equivalent usage value in the selection, then observed tokens/);
+    assert.match(rendered, /Cards are per provider and model, ordered by usage value for these dates, then observed tokens/);
     assert.match(rendered, /Provider-reported usage \(for example Cursor\) does not use a rate card and is not shown here/);
     assert.doesNotMatch(rendered, /cursor-excluded|private-session-id|\/private\/session.json|private transcript text/);
     assert.equal(panel.all((node) => node.attributes.role === "status").length, 1);
@@ -102,10 +120,10 @@ test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selecti
     assert.ok(button); assert.ok(unknown);
     assert.match(button.text(), /\$5\.00 in · \$30\.00 out \/ 1M/); assert.match(button.text(), /\$410\.57/);
     assert.match(button.text(), /300 tokens · 3 calls/);
-    assert.match(button.attributes["aria-label"]!, /gpt-fixture, Codex: \$410\.57 usage value, input \$5\.00 \/ output \$30\.00 per 1M tokens\. Show pricing details/);
+    assert.match(button.attributes["aria-label"]!, /gpt-fixture, Codex: \$410\.57 API-equivalent value, input \$5\.00 \/ output \$30\.00 per 1M tokens\. Show pricing details/);
     assert.equal(button.attributes.type, "button"); assert.equal(button.attributes["aria-haspopup"], "dialog");
     assert.equal(button.attributes["aria-controls"], "pricing-model-dialog");
-    assert.equal(button.dataset.focusKey, "pricing:model:gpt-fixture");
+    assert.equal(button.dataset.focusKey, "pricing:model:codex:gpt-fixture");
     assert.equal(button.properties["--card-accent"], "var(--provider-codex)");
     assert.match(unknown.text(), /No matching rate/); assert.match(unknown.text(), /0% of tokens priced/); assert.match(unknown.text(), /No usage value: unpriced/); assert.match(unknown.attributes["aria-label"]!, /no usage value \(unpriced\)/);
     assert.equal(toggleButton(panel).textContent, "Show 1 unused models");
@@ -114,7 +132,7 @@ test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selecti
     assert.equal(panel.all((node) => node.tag === "table").length, 0);
 
     renderPricingPanel(panel, rateCard, []);
-    assert.match(panel.text(), /—/); assert.match(panel.text(), /No API-priced tokens in this selection/);
+    assert.match(panel.text(), /—/); assert.match(panel.text(), /No eligible tokens in this selection/);
     assert.match(panel.text(), /No API-priced model usage in this selection\. Provider-reported values do not use a rate card\./);
     assert.doesNotMatch(panel.text(), /gpt-fixture/); assert.equal(toggleButton(panel).textContent, "Show 2 unused models");
     renderPricingPanel(panel, {}, []);
@@ -123,38 +141,43 @@ test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selecti
 });
 
 test("pricingModelCards orders by usage value, then tokens, calls and model ID", () => {
-  const data = pricingModelCards(rateCard, rankingSessions);
+  const data = pricingModelCards(rateCard, rankingSessions, window);
   assert.deepEqual(data.used.map((card: { model: string }) => card.model), ["gpt-z", "gpt-b", "gpt-a"]);
   assert.equal(data.maxValue, 10); assert.equal(data.maxTokens, 500);
-  const tied = pricingModelCards(rateCard, [{ ...rankingSessions[0], models: [
+  const tied = pricingModelCards(rateCard, [ledgered({ ...rankingSessions[0]!, models: [
     usage("gpt-z", 10, 100, 1), usage("gpt-b", 10, 100, 2), usage("gpt-a", 10, 100, 2),
-  ] }]);
+  ] })], window);
   assert.deepEqual(tied.used.map((card: { model: string }) => card.model), ["gpt-a", "gpt-b", "gpt-z"]);
 });
 
 test("Model cards retain usage ordering and scale bars by value, falling back to observed tokens", async () => {
   await withDocument((root) => {
-    renderPricingPanel(root, rateCard, rankingSessions);
-    assert.deepEqual(modelButtons(root).map((button) => button.dataset.focusKey), ["pricing:model:gpt-z", "pricing:model:gpt-b", "pricing:model:gpt-a"]);
+    renderPricingPanel(root, rateCard, rankingSessions, window);
+    assert.deepEqual(modelButtons(root).map((button) => button.dataset.focusKey), ["pricing:model:codex:gpt-z", "pricing:model:codex:gpt-b", "pricing:model:codex:gpt-a"]);
     let bars = byClass(root, "pricing-bar");
     assert.deepEqual(bars.map((bar) => bar.children[0]!.properties.width), ["100%", "100%", "40%"]);
     assert.equal(bars[2]!.attributes.role, "img"); assert.equal(bars[2]!.attributes["aria-label"], "40% of the top model's usage value");
-    renderPricingPanel(root, rateCard, [{ ...rankingSessions[0], models: [usage("gpt-a", 0, 50), usage("gpt-b", 0, 100)] }]);
+    renderPricingPanel(root, rateCard, [ledgered({ ...rankingSessions[0]!, models: [usage("gpt-a", 0, 50), usage("gpt-b", 0, 100)] })], window);
     bars = byClass(root, "pricing-bar");
     assert.deepEqual(bars.map((bar) => bar.children[0]!.properties.width), ["100%", "50%"]);
     assert.equal(bars[1]!.attributes["aria-label"], "50% of the top model's observed tokens");
-    renderPricingPanel(root, rateCard, [{ ...rankingSessions[0], models: [
+    renderPricingPanel(root, rateCard, [ledgered({ ...rankingSessions[0]!, models: [
       { ...usage("gpt-a", 0, 100), pricingCoverage: { eligibleTokens: 100, pricedTokens: 82 } },
-    ] }]);
+    ] })], window);
     assert.match(modelButtons(root)[0]!.text(), /82% of tokens priced/);
-    renderPricingPanel(root, rateCard, [{ ...rankingSessions[0], models: [usage("gpt-a", 0, 0)] }]);
-    assert.equal(byClass(root, "pricing-bar")[0]!.children[0]!.properties.width, "0%");
+    renderPricingPanel(root, rateCard, [ledgered({ ...rankingSessions[0]!, models: [usage("gpt-a", 0, 0), usage("gpt-b", 0, 10)] })], window);
+    assert.equal(byClass(root, "pricing-bar")[0]!.children[0]!.properties.width, "100%");
+    // No value and no tokens in the selected dates (a tool-only cell, say): no card for that model.
+    assert.deepEqual(modelButtons(root).map((button) => button.dataset.focusKey), ["pricing:model:codex:gpt-b"]);
+    // Another day's usage is outside the window: the card disappears rather than showing whole-session value.
+    renderPricingPanel(root, rateCard, [ledgered({ ...rankingSessions[0]!, models: [usage("gpt-a", 4, 500)] }, "2026-01-01")], window);
+    assert.equal(modelButtons(root).length, 0);
   });
 });
 
 test("Model details show precise current prices, long-context rates and historical provenance", async () => {
   await withDocument((root) => {
-    const { used, unused } = pricingModelCards(rateCard, sessions);
+    const { used, unused } = pricingModelCards(rateCard, sessions, window);
     renderModelDetails(root, used[0], rateCard);
     assert.match(root.text(), /Cached input \$0\.075/); assert.match(root.text(), /Output \$30\.00/);
     assert.match(root.text(), /Long-context pricing/); assert.match(root.text(), /Above 200,000 input tokens \$10\.00 \$45\.00/);
@@ -196,7 +219,7 @@ test("Model details show precise current prices, long-context rates and historic
 
 test("Unused models stay expanded across renders and the fallback dialog restores replacement-card focus", async () => {
   await withDocument((root) => {
-    renderPricingPanel(root, rateCard, sessions);
+    renderPricingPanel(root, rateCard, sessions, window);
     const toggle = toggleButton(root);
     assert.equal(toggle.attributes["aria-expanded"], "false");
     assert.equal(toggle.attributes["aria-controls"], "pricing-unused-models");
@@ -213,7 +236,7 @@ test("Unused models stay expanded across renders and the fallback dialog restore
     assert.match(dialog.text(), /claude-unused/);
     assert.equal(dialog.dispatch("keydown", dialog, "Escape").stopped, true);
     dialog.dispatch("click", dialog.children[0]); assert.equal(dialog.open, true);
-    renderPricingPanel(root, rateCard, sessions);
+    renderPricingPanel(root, rateCard, sessions, window);
     assert.equal(toggleButton(root).attributes["aria-expanded"], "true");
     assert.equal(root.all((node) => node.tag === "dialog").length, 1); assert.equal(dialog.open, true);
     const replacement = byClass(root, "pricing-card-unused")[0]!;
@@ -235,11 +258,11 @@ test("Pricing reuses the dialog supplied by index.html", async () => {
   await withDocument((root) => {
     const panel = new Node("div"), dialog = new Node("dialog");
     dialog.setAttribute("id", "pricing-model-dialog"); root.append(panel, dialog);
-    renderPricingPanel(panel, rateCard, sessions);
+    renderPricingPanel(panel, rateCard, sessions, window);
     modelButtons(panel)[0]!.dispatch("click");
     assert.equal(root.all((node) => node.tag === "dialog").length, 1); assert.equal(dialog.open, true);
     const previous = modelButtons(panel)[0];
-    renderPricingPanel(panel, rateCard, sessions);
+    renderPricingPanel(panel, rateCard, sessions, window);
     assert.notEqual(modelButtons(panel)[0], previous);
     dialog.close(); assert.equal(Node.active, modelButtons(panel)[0]);
     assert.equal(dialog.listeners.close!.length, 1);

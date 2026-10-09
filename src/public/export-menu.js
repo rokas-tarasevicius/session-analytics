@@ -13,8 +13,17 @@ let openMenu = () => {};
 export function openExportMenu() { openMenu(); }
 
 /**
- * Wires the export menu. `getSelection` returns the snapshot to export, or null when none is available;
- * `unavailableMessage` explains a null selection (still loading, or no snapshot because the analysis failed).
+ * A full selection is a snapshot or `{ snapshot, ledger, basis }`: the snapshot plus the activity-ledger window that
+ * daily.csv covers (the sessions in scope and the selected dates) and a sentence stating each file's value basis.
+ */
+function unwrap(selection) {
+  if (selection && selection.kind !== "shared" && "snapshot" in selection) return selection;
+  return { snapshot: selection, ledger: null, basis: null };
+}
+
+/**
+ * Wires the export menu. `getSelection` returns the snapshot (or ledger-backed selection) to export, or null when none
+ * is available; `unavailableMessage` explains a null selection (still loading, or no snapshot because the analysis failed).
  */
 export function installExportMenu(getSelection, { unavailableMessage = () => "The snapshot is still loading." } = {}) {
   const menu = document.querySelector("#export-menu");
@@ -43,18 +52,19 @@ export function installExportMenu(getSelection, { unavailableMessage = () => "Th
       for (const button of buttons) button.disabled = true;
       return;
     }
-    const selection = getSelection(); preview = selection;
-    if (!selection) {
+    const selection = unwrap(getSelection()); preview = selection.snapshot ? selection : null;
+    const data = selection.snapshot;
+    if (!data) {
       description.textContent = unavailableMessage();
       for (const button of buttons) button.disabled = true;
       if (focusFirst) summary.focus();
       focusFirst = false;
       return;
     }
-    const shared = selection.kind === "shared";
+    const shared = data.kind === "shared";
     description.textContent = shared
-      ? `Shared aggregates only · ${selection.summary.sessions} sessions · minimum ${selection.minimumSessions} per repository. No upload.`
-      : `${selection.sessions.length} sessions in the current repository, date, and view filters. Downloads include repository names and session keys. For sharing, use report --share.`;
+      ? `Shared aggregates only · ${data.summary.sessions} sessions · minimum ${data.minimumSessions} per repository. No upload.`
+      : `${data.sessions.length} sessions in the current repository, date, and view filters.${selection.basis ? ` ${selection.basis}` : ""} Downloads include repository names and session keys. For sharing, use report --share.`;
     for (const button of buttons) {
       button.disabled = shared ? !["json", "shared"].includes(button.dataset.export) : button.dataset.export === "shared";
       button.hidden = !shared && button.dataset.export === "shared";
@@ -67,13 +77,13 @@ export function installExportMenu(getSelection, { unavailableMessage = () => "Th
     // renders invalidate it before any data/filter change can be downloaded.
     const selection = preview;
     if (!menu.open || !selection) return;
-    const kind = button.dataset.export;
-    if (!(selection.kind === "shared" ? ["json", "shared"] : ["json", "sessions", "daily", "models", "tools"]).includes(kind)) return;
-    if (kind === "json") downloadFile(selection.kind === "shared" ? "shared.json" : "snapshot.json", `${JSON.stringify(selection, null, 2)}\n`, "application/json");
+    const data = selection.snapshot, kind = button.dataset.export;
+    if (!(data.kind === "shared" ? ["json", "shared"] : ["json", "sessions", "daily", "models", "tools"]).includes(kind)) return;
+    if (kind === "json") downloadFile(data.kind === "shared" ? "shared.json" : "snapshot.json", `${JSON.stringify(data, null, 2)}\n`, "application/json");
     else if (kind === "shared") {
-      const columns = ["schemaVersion", "repository", ...Object.keys(selection.summary)];
-      downloadFile("shared.csv", csv(selection.repositories.map((row) => ({ schemaVersion: selection.schemaVersion, ...row })), columns), "text/csv;charset=utf-8");
-    } else downloadFile(`${kind}.csv`, csvTables(selection)[`${kind}.csv`], "text/csv;charset=utf-8");
+      const columns = ["schemaVersion", "repository", ...Object.keys(data.summary)];
+      downloadFile("shared.csv", csv(data.repositories.map((row) => ({ schemaVersion: data.schemaVersion, ...row })), columns), "text/csv;charset=utf-8");
+    } else downloadFile(`${kind}.csv`, csvTables(data, { ledger: selection.ledger })[`${kind}.csv`], "text/csv;charset=utf-8");
     reset(); status.textContent = "Download prepared locally. No data was uploaded.";
   });
   // Escape closes the menu and stops there: the capture phase runs before the dashboard's own Escape shortcut

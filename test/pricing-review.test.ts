@@ -46,10 +46,14 @@ async function rendered(snapshot: MachineAnalytics): Promise<string> {
   try {
     const { renderPricingPanel, renderModelDetails } = await import(new URL("../src/public/pricing.js", import.meta.url).href);
     const { pricingModelCards } = await import(new URL("../src/public/pricing-data.js", import.meta.url).href);
+    const { ledgerCells } = await import(new URL("../src/public/velocity-data.js", import.meta.url).href);
+    // The whole observed ledger: cards read activity-dated usage for the selected dates.
+    const days = snapshot.sessions.flatMap((session) => ledgerCells(session.velocity).map(([day]: [string]) => day)).sort();
+    const window = { start: days[0], end: days.at(-1) };
     const panel = new Element();
-    renderPricingPanel(panel, snapshot.rateCard, snapshot.sessions);
+    renderPricingPanel(panel, snapshot.rateCard, snapshot.sessions, window);
     // Card details (rates applied, assumptions) live in the dialog; render every used card's details too.
-    const details = pricingModelCards(snapshot.rateCard, snapshot.sessions).used.map((card: unknown) => {
+    const details = pricingModelCards(snapshot.rateCard, snapshot.sessions, window).used.map((card: unknown) => {
       const dialog = new Element(); renderModelDetails(dialog, card, snapshot.rateCard); return dialog.text();
     });
     return [panel.text(), ...details].join(" ");
