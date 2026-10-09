@@ -35,7 +35,9 @@
         <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
         <symbol id="i-repo" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.75"/><circle cx="4.5" cy="12.5" r="1.75"/><circle cx="11.5" cy="5.5" r="1.75"/><path d="M4.5 5.25v5.5M11.5 7.25c0 2.5-7 1.5-7 3.5"/></symbol>
         <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M8 3v10M4 9l4 4 4-4"/></symbol>
-        <symbol id="i-density" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></symbol>
+        <symbol id="i-density" viewBox="0 0 16 16"><path d="M2.5 2.5h11M2.5 13.5h11"/><path d="M8 5.5v5M6 7l2-2 2 2M6 9l2 2 2-2"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 1.5 15 14H1zM8 5.5v4"/><circle cx="8" cy="11.5" r=".6" class="fill"/></symbol>
+        <symbol id="i-error" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5v4"/><circle cx="8" cy="11" r=".6" class="fill"/></symbol>
       </defs>
     </svg>
 
@@ -43,7 +45,7 @@
       <aside class="sidebar" aria-label="Navigation">
         <a class="wordmark" href="?view=summary" aria-label="Session Analytics, Summary">
           <svg class="logo" viewBox="0 0 128 128" width="28" height="28" aria-hidden="true" focusable="false">
-            <rect x="4" y="4" width="120" height="120" rx="28" fill="#181a16"/>
+            <rect class="logo-tile" x="4" y="4" width="120" height="120" rx="28" fill="#181a16"/>
             <path d="M30 46v36a8 8 0 0 0 8 8h14M30 56a8 8 0 0 0 8 8" fill="none" stroke="#62665c" stroke-width="4" stroke-linecap="round"/>
             <rect x="22" y="30" width="84" height="16" rx="8" fill="#d66b55"/>
             <rect x="44" y="56" width="46" height="16" rx="8" fill="#7eb7a7"/>
@@ -83,7 +85,10 @@
 
         <div class="sidebar-footer">
           <button class="icon-button" id="help-button" type="button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="help-overlay" title="Keyboard shortcuts" data-shortcut="?"><svg aria-hidden="true"><use href="#i-help"/></svg></button>
-          <button class="icon-button" id="density-switch" type="button" aria-label="Comfortable density" aria-pressed="false" title="Density" data-shortcut="d"><svg aria-hidden="true"><use href="#i-density"/></svg></button>
+          <div class="display-controls" role="group" aria-label="Display">
+            <button class="icon-button" id="density-switch" type="button" aria-label="Comfortable density" aria-pressed="false" title="Density" data-shortcut="d"><svg aria-hidden="true"><use href="#i-density"/></svg></button>
+            <button class="icon-button" id="theme-switch" type="button" aria-label="Switch theme" title="Switch theme" data-shortcut="t"><svg class="icon-sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon-moon" aria-hidden="true"><use href="#i-moon"/></svg><span id="theme-label" class="sr-only">Light</span></button>
+          </div>
         </div>
       </aside>
 
@@ -125,18 +130,22 @@
                 <button class="button" type="button" data-export="shared" hidden>Shared aggregates CSV</button>
               </div>
             </details>
-            <button class="icon-button" id="theme-switch" type="button" aria-label="Switch theme" title="Switch theme" data-shortcut="t"><svg class="icon-sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="icon-moon" aria-hidden="true"><use href="#i-moon"/></svg><span id="theme-label" class="sr-only">Light</span></button>
           </div>
         </header>
 
         <main id="main" data-state="loading">
           <p id="export-status" class="muted" role="status" aria-live="polite"></p>
           <section id="shared-snapshot" class="panel" aria-label="Shared snapshot" hidden></section>
-          <div class="error-banner" id="error-banner" role="alert" hidden><span id="error-message"></span><button type="button" class="button error-retry" id="error-retry">Retry</button></div>
+          <div class="error-banner status-banner" data-tone="danger" id="error-banner" role="alert" hidden>
+            <svg class="status-banner-icon" aria-hidden="true"><use href="#i-error"/></svg>
+            <div class="status-banner-body"><strong class="status-banner-title" id="error-title">Analysis failed</strong><span id="error-message"></span></div>
+            <button type="button" class="button error-retry" id="error-retry">Retry</button>
+          </div>
           <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></span></p>
           <section class="view-status" id="view-status" aria-label="View status" hidden></section>
 
-          <div class="analytics-view" data-view-panel="summary">
+          <div class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
+            <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
             <section class="kpi-grid" aria-label="Machine totals">
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Usage value, not an invoice</small></article>
               <article class="kpi"><span class="kpi-label">Repositories</span><strong id="metric-repositories">—</strong><small class="kpi-note" id="metric-repository-note">With local evidence</small></article>
@@ -148,11 +157,11 @@
               <article class="kpi"><span class="kpi-label">Live snapshots</span><strong id="metric-live">—</strong><small class="kpi-note" id="metric-live-note">Present sources; totals may still move</small></article>
             </section>
 
-            <section class="panel comparison-section" id="history-coverage" aria-label="History coverage" hidden></section>
+            <section class="panel comparison-section" id="history-coverage" aria-label="History coverage"></section>
 
             <section class="dashboard-grid" aria-label="Machine analytics">
               <article class="panel span-8">
-                <header><div><p class="kicker">Usage velocity</p><h2>Daily usage value</h2></div><div class="provider-key" role="group" aria-label="Filter daily usage by provider">
+                <header><div><h2>Daily usage value</h2></div><div class="provider-key" role="group" aria-label="Filter daily usage by provider">
                   <label class="chip" data-provider="codex"><input type="checkbox" data-provider-filter="codex" checked aria-label="Codex daily usage" /><img src="/brands/codex.svg" alt="" /><span>Codex</span></label>
                   <label class="chip" data-provider="claude"><input type="checkbox" data-provider-filter="claude" checked aria-label="Claude daily usage" /><img src="/brands/claude.svg" alt="" /><span>Claude</span></label>
                   <label class="chip" data-provider="cursor"><input type="checkbox" data-provider-filter="cursor" checked aria-label="Cursor daily usage" /><img src="/brands/cursor.svg" alt="" /><span>Cursor</span></label>
@@ -169,11 +178,11 @@
                 <div class="donut-layout chart-slot"><div class="donut" id="provider-donut"></div><div class="legend" id="provider-legend"></div></div>
               </article>
               <article class="panel span-6">
-                <header><div><p class="kicker">Repositories</p><h2>Usage value by repository</h2></div></header>
+                <header><div><h2>Usage value by repository</h2></div></header>
                 <div class="bar-list chart-slot" id="repository-spend"></div>
               </article>
               <article class="panel span-6">
-                <header><div><p class="kicker">Consumption</p><h2>Request input processed by repository</h2></div></header>
+                <header><div><h2>Request input processed by repository</h2></div></header>
                 <div class="bar-list chart-slot" id="repository-tokens"></div>
               </article>
               <article class="panel span-4">
@@ -181,7 +190,7 @@
                 <div class="bar-list chart-slot" id="model-spend"></div>
               </article>
               <article class="panel span-4">
-                <header><div><p class="kicker">Execution</p><h2>Tool families</h2></div></header>
+                <header><div><h2>Tool families</h2></div></header>
                 <div class="bar-list chart-slot" id="tool-calls"></div>
               </article>
               <article class="panel span-4">
@@ -207,13 +216,13 @@
           </div>
 
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
-            <header class="view-header"><div><p class="kicker">Session starts</p><h2 id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <article class="panel activity-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key"><span>Less</span><i></i><i></i><i></i><i></i><i></i><i></i><i></i><span>More</span></div></article>
             <article class="panel activity-repositories"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
-            <header class="view-header"><div><p class="kicker">Usage value</p><h2 id="costs-title">Costs</h2><p>Usage value by provider and model, by activity date: the same ledger as Summary and Velocity.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="costs-title">Costs</h2><p>Usage value by provider and model, by activity date: the same ledger as Summary and Velocity.</p></div></header>
             <div class="kpi-grid compact-metrics" aria-label="Cost totals">
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="cost-total">—</strong><small class="kpi-coverage" id="cost-total-coverage"></small><small class="kpi-note">Same total as Summary and Velocity</small></article>
               <article class="kpi"><span class="kpi-label">API-equivalent value</span><strong id="cost-api-total">—</strong><small class="kpi-coverage" id="cost-api-total-coverage"></small><small class="kpi-note" id="cost-api-note">Rate-card priced usage</small></article>
@@ -222,24 +231,24 @@
             </div>
             <p class="chart-note" id="cost-reconciliation"></p>
             <div class="view-grid costs-grid">
-              <article class="panel"><header><div><p class="kicker">Providers</p><h2>Cost by provider</h2></div></header><div class="chart-slot" id="provider-cost-models"></div></article>
-              <article class="panel"><header><div><p class="kicker">Models</p><h2>Cost by model</h2></div></header><div class="chart-slot" id="cost-models"></div></article>
+              <article class="panel"><header><div><h2>Cost by provider</h2></div></header><div class="chart-slot" id="provider-cost-models"></div></article>
+              <article class="panel"><header><div><h2>Cost by model</h2></div></header><div class="chart-slot" id="cost-models"></div></article>
             </div>
           </section>
 
           <section class="analytics-view" data-view-panel="tools" hidden aria-labelledby="tools-title">
-            <header class="view-header"><div><p class="kicker">Usage</p><h2 id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
             <div id="tools-view" class="chart-slot"></div>
           </section>
 
           <section class="analytics-view" data-view-panel="pricing" hidden aria-labelledby="pricing-title">
-            <header class="view-header"><div><p class="kicker">Price evidence</p><h2 id="pricing-title">Pricing</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="pricing-title">Pricing</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
             <div id="pricing-panel"></div>
             <dialog id="pricing-model-dialog" class="help pricing-dialog" aria-labelledby="pricing-model-title"></dialog>
           </section>
 
           <section class="analytics-view" data-view-panel="velocity" hidden aria-labelledby="velocity-title">
-            <header class="view-header"><div><p class="kicker">Activity over time</p><h2 id="velocity-title">Velocity</h2><p>Where usage is moving, by agent and every evidenced dimension.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="velocity-title">Velocity</h2><p>Where usage is moving, by agent and every evidenced dimension.</p></div></header>
             <div id="velocity-view"></div>
           </section>
 
@@ -262,11 +271,12 @@
     </dialog>
 
     <dialog class="help coverage-dialog" id="coverage-dialog" aria-labelledby="coverage-title">
-      <header><div><p class="kicker">Honesty guardrails</p><h2 id="coverage-title">Evidence &amp; coverage</h2></div><button class="icon-button" id="coverage-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
+      <header><h2 id="coverage-title" tabindex="-1" autofocus>Data coverage</h2><button class="icon-button" id="coverage-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
       <div class="coverage-body">
         <p class="coverage-intro" id="coverage-summary">Every number on the dashboard is a lower bound built from local evidence. This panel lists what the current selection can and cannot establish.</p>
-        <section class="warning-banner" id="warning-banner" aria-label="Coverage warnings" hidden>
-          <strong>Coverage notes</strong><ul id="warning-list"></ul>
+        <section class="status-banner warning-banner" data-tone="warn" id="warning-banner" aria-label="Coverage warnings" hidden>
+          <svg class="status-banner-icon" aria-hidden="true"><use href="#i-alert"/></svg>
+          <div class="status-banner-body"><strong class="status-banner-title">Coverage notes</strong><ul id="warning-list"></ul></div>
         </section>
         <p id="retention-note" class="chart-note" hidden></p>
         <section id="provider-evidence" aria-labelledby="provider-evidence-title">
@@ -287,7 +297,7 @@
     </dialog>
 
     <dialog class="help" id="help-overlay" aria-labelledby="help-title">
-      <header><h2 id="help-title">Keyboard shortcuts</h2><button class="icon-button" id="help-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
+      <header><h2 id="help-title" tabindex="-1" autofocus>Keyboard shortcuts</h2><button class="icon-button" id="help-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
       <div class="help-grid">
         <section><h3>Navigate</h3><dl>
           <div><dt>Summary</dt><dd><kbd>g</kbd><kbd>s</kbd></dd></div>
@@ -302,7 +312,7 @@
           <div><dt>Command palette</dt><dd><kbd><span class="key-command">⌘</span>K</kbd> or <kbd>/</kbd></dd></div>
           <div><dt>Last 7 · 30 · 90 days · all</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
           <div><dt>Toggle provider chips in order (Summary chart, Velocity, Tools, Activity)</dt><dd><kbd>p</kbd> <kbd>1</kbd>–<kbd>7</kbd></dd></div>
-          <div><dt>Evidence &amp; coverage</dt><dd><kbd>e</kbd></dd></div>
+          <div><dt>Data coverage</dt><dd><kbd>e</kbd></dd></div>
           <div><dt>Clear repository focus</dt><dd><kbd>esc</kbd></dd></div>
           <div><dt>Switch theme</dt><dd><kbd>t</kbd></dd></div>
           <div><dt>Switch density</dt><dd><kbd>d</kbd></dd></div>

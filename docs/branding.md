@@ -16,13 +16,13 @@
 
 The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
 
-Palette, shared with the dashboard's light and dark themes. The exact logo hexes are used for UI accents (active states, focus rings, status dots); provider charts use the brand palette below; other categorical charts use the non-brand categorical ramp. Dashboard type is Geist (text) and Geist Mono (figures), both bundled under the OFL:
+Palette, shared with the dashboard's light and dark themes. The exact logo hexes are used for UI accents (active states and focus rings); provider charts use the brand palette below; other categorical charts use the non-brand categorical ramp. Dashboard type is Geist (text) and Geist Mono (figures), both bundled under the OFL:
 
 | Role | Color |
 | --- | --- |
 | Ink (tile, light-theme text) | `#181a16` |
 | Paper (light background) | `#efeee7` |
-| Coral (top-level span, accent) | `#d66b55`, text accent `#c85b45` |
+| Coral (top-level span, accent) | `#d66b55`, text accent light `#a0412e` / dark `#ec8d79` |
 | Sage (sub-agent span) | `#7eb7a7` |
 | Ochre (sub-agent span) | `#d4aa70` |
 | Connector | `#62665c` |
@@ -30,6 +30,12 @@ Palette, shared with the dashboard's light and dark themes. The exact logo hexes
 | Heatmap ramp (dark) | `#1a1c18` to `#7eddc0` (sage, dark to light) |
 | Dark surfaces | page `#0e0f0d`, card `#151613`, raised `#1b1d19` / `#22241f`, border `#262823` |
 | Light surfaces | page `#f4f4f1`, card `#ffffff`, raised `#f6f6f3` / `#ecece8`, border `#e4e4df` |
+
+### Status and typography
+
+Status colours are reserved for state and always accompany an icon and text; they never identify data series or the brand. Danger is `#b3124a` in light / `#ff6f9a` in dark; warning is `#b0712a` (text `#8a5a00`) in light / `#e0b67b` in dark; OK is `#1e7f5c` in light / `#6fc7a6` in dark. Banners use subtle surface and border mixes of these tokens.
+
+The shared type scale is 11 / 12.5 / 14 / 20px, with 26px for figures; comfortable density steps it up to 11.5 / 13.5 / 15 / 21 / 28px. Geist Mono is for figures and identifiers, plus small uppercase eyebrow labels and table headers. Sentences use Geist Sans, with tabular numerals where they contain numbers. Every focus ring uses the single `--focus` token, which resolves to coral (`#d66b55`) in both themes.
 
 ### Provider and chart colours
 

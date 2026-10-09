@@ -57,6 +57,7 @@ export function renderModelDetails(target, card, rateCard) {
   target.style?.setProperty?.("--card-accent", providerColor(card.provider));
   const header = el("header"), heading = el("div"), title = el("h2", card.model, "pricing-model");
   title.setAttribute("id", "pricing-model-title");
+  title.setAttribute("tabindex", "-1"); title.setAttribute("autofocus", "");
   heading.append(providerHeading(card.provider), title);
   const close = el("button", null, "icon-button");
   close.setAttribute("type", "button"); close.setAttribute("aria-label", "Close");

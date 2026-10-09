@@ -191,8 +191,9 @@ function coverageText(data) {
 const controllers = new WeakMap();
 function panelShell(kicker, title) {
   const article = el("article", null, "panel"), header = el("header"), block = el("div");
-  const kickerNode = el("p", kicker, "kicker"), heading = el("h3", title);
-  block.append(kickerNode, heading); header.append(block); article.append(header);
+  const heading = el("h3", title);
+  if (kicker) block.append(el("p", kicker, "kicker"));
+  block.append(heading); header.append(block); article.append(header);
   return { article, heading, header };
 }
 export function renderVelocity(container, sessions, context) {
@@ -212,12 +213,12 @@ export function renderVelocity(container, sessions, context) {
     const lead = el("div", null, "kpi-grid compact-metrics velocity-lead");
     const totals = el("div", null, "kpi-grid compact-metrics velocity-totals");
     const comparisons = evidence([], { title: "How the comparisons are built" });
-    const main = panelShell("Observed", "Usage over time");
+    const main = panelShell(null, "Usage over time");
     const subtitle = el("span", null, "panel-meta"); main.header.append(subtitle);
     const chart = el("div"), coverage = evidence([], { title: "Evidence & limits" });
     main.article.append(chart, coverage);
     const projection = panelShell("End-of-month scenario", "Projection");
-    const movers = panelShell("Largest increases", "Top movers");
+    const movers = panelShell(null, "Top movers");
     container.append(lead, controls, main.article, totals, comparisons, projection.article, movers.article);
     controller = { sessions, context, update: null, selectedProviders };
     const update = () => {

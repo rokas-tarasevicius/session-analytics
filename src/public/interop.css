@@ -2,6 +2,6 @@
 #shared-snapshot { margin: 0 0 var(--gap); }
 #shared-snapshot .table-scroll { overflow-x: auto; }
 #shared-snapshot td { overflow-wrap: anywhere; }
-#shared-snapshot h1 { margin: 2px 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
-#shared-snapshot p { color: var(--text-2); font-size: 12.5px; }
+#shared-snapshot h1 { margin: 2px 0 8px; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.02em; }
+#shared-snapshot p { color: var(--text-2); font-size: var(--fs-sm); }
 .filters-bar[hidden], .view-tabs[hidden], #shared-snapshot[hidden] { display: none; }

@@ -50,7 +50,7 @@ export function renderProviderEvidence(container, sessions) {
   for (const item of providerEvidenceRows(sessions)) {
     const row = document.createElement("tr");
     const fields = [providerLabels[item.provider], item.source, `${labels[item.fidelity]}${item.partial ? ` · ${item.partial}/${item.sessions} partial totals` : ""}`, String(item.sessions), `${item.tokenSessions}/${item.sessions} sessions`, `${item.toolSessions}/${item.sessions} sessions`, item.fileTimes ? "File modified · start unknown" : "Provider timestamps"];
-    for (const value of fields) { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); }
+    for (const [index, value] of fields.entries()) { const cell = document.createElement("td"); if ([0, 1, 2, 6].includes(index)) cell.className = "align-left"; cell.textContent = value; row.append(cell); }
     container.append(row);
   }
 }
