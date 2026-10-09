@@ -45,7 +45,7 @@ function breakdown(title, items, total) {
   return section;
 }
 
-function trend(profile) {
+function trend(profile, timeZone = "UTC") {
   const section = el("section", null, "tools-trend");
   section.append(el("h4", "Calls by session-start day"));
   const days = profile.byDay;
@@ -59,7 +59,7 @@ function trend(profile) {
   const peak = days.reduce((best, row) => row.calls > best.calls ? row : best, days[0]);
   const total = days.reduce((sum, row) => sum + row.calls, 0);
   const missing = days.filter((row) => row.coverage.selected > 0 && !row.coverage.eligible).length;
-  const description = `${profile.name}: ${integer.format(total)} calls plotted from ${days[0].day} to ${days.at(-1).day} (UTC). ${peak.calls ? `Peak ${integer.format(peak.calls)} on ${peak.day}.` : "No calls with an evidenced start day in this range."}${missing ? ` ${missing} days have session starts but no tool evidence; these are unavailable, not zero.` : ""}`;
+  const description = `${profile.name}: ${integer.format(total)} calls plotted from ${days[0].day} to ${days.at(-1).day} (${timeZone}). ${peak.calls ? `Peak ${integer.format(peak.calls)} on ${peak.day}.` : "No calls with an evidenced start day in this range."}${missing ? ` ${missing} days have session starts but no tool evidence; these are unavailable, not zero.` : ""}`;
   const scroll = el("div", null, "tools-trend-scroll"), chart = el("div", null, "tools-columns");
   chart.setAttribute("role", "img"); chart.setAttribute("aria-label", description);
   chart.style.setProperty("grid-template-columns", `repeat(${days.length}, minmax(2px, 1fr))`);
@@ -81,7 +81,7 @@ function trend(profile) {
 }
 
 /** Returns the resolved selection so the app can keep it across provider, scope, and window changes. */
-export function renderToolsView(container, { sessions, previousSessions = null, days, selectedTool = null,
+export function renderToolsView(container, { sessions, previousSessions = null, days, timeZone = "UTC", selectedTool = null,
   expanded = false, onSelect = () => {}, onToggle = () => {}, repositories = [] }) {
   container.replaceChildren();
   const data = buildToolsView(sessions, { previousSessions });
@@ -129,14 +129,14 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   profilePanel.result.setAttribute("id", "tools-profile");
   if (selected) {
     const repositoryNames = new Map(repositories.map(({ repository }) => [repository.id, repository.name]));
-    const profile = toolProfile(sessions, selected.name, { days, repositoryNames });
+    const profile = toolProfile(sessions, selected.name, { days, repositoryNames, timeZone });
     const stats = el("dl", null, "tools-profile-stats");
     for (const [label, value] of [["Calls", integer.format(profile.calls)], ["Share of calls", percent(profile.share)],
       ["Sessions using it", integer.format(profile.sessions)], ["Repositories", integer.format(profile.repositories)],
       ["Calls per session using it", decimal.format(profile.callsPerSession)]]) {
       const stat = el("div"); stat.append(el("dt", label), el("dd", value)); stats.append(stat);
     }
-    profilePanel.result.append(stats, trend(profile));
+    profilePanel.result.append(stats, trend(profile, timeZone));
     const splits = el("div", null, "tools-splits"), repositoryRows = profile.byRepository.slice(0, 8);
     if (profile.byRepository.length > 8) repositoryRows.push({ name: "Other", calls: profile.byRepository.slice(8).reduce((sum, row) => sum + row.calls, 0) });
     splits.append(breakdown("By provider", profile.byProvider.map((row) => ({ name: row.label, calls: row.calls, provider: row.provider })), profile.calls),
@@ -146,7 +146,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   container.append(profilePanel.result, evidence([
     `${data.coverage.eligible} of ${data.coverage.selected} selected sessions carry tool evidence. Sessions without tool evidence are excluded from counts and averages; unavailable values are ${DASH}, not zero.`,
     "Tool names come from structured tool-call records only; arguments and results remain excluded. Calls per session uses eligible sessions, including observed zero-call sessions. A tool’s profile average uses only sessions using that tool.",
-    "Day attribution uses the session start day (UTC), not the time of each call. Unknown starts are excluded from the chart. All observed time shows at most the latest 366 calendar days; totals include the full selection.",
+    `Day attribution uses the session start day (${timeZone}), not the time of each call. Unknown starts are excluded from the chart. All observed time shows at most the latest 366 calendar days; totals include the full selection.`,
     "Tool calls carry no cost or duration of their own in local history; session value is not divided across tools.",
     `Change is (current calls − previous calls) / previous calls for the preceding equal-length, fully observed window, using the same repository scope and provider filters. “new” means calls now and zero before. ${DASH} means no comparable window or no tool evidence in one window. An observed window with no sessions has zero calls.`,
     data.previousCoverage ? `Previous window: ${data.previousCoverage.eligible} of ${data.previousCoverage.selected} sessions carry tool evidence. Changes compare recorded totals, not coverage-adjusted estimates; differences in coverage can affect them.` : "No previous-window comparison is available for this selection.",

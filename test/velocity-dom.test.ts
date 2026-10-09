@@ -145,7 +145,7 @@ test("Velocity leads with value cards before filters and keeps them independent 
     const assertLead = (value: number) => assert.equal(lead.querySelectorAll("strong")[1]!.textContent.trim(), formatMetric(value, "value"));
     assertLead(total); assert.equal(lead.querySelector("strong")!.textContent.trim(), "$5.00");
     assert.match(lead.textContent, /per active day · 2 of 4 days active · \$2.50 per calendar day/);
-    assert.match(lead.textContent, /4 calendar days · API-equivalent · partially observed/);
+    assert.match(lead.textContent, /4 calendar days · API-equivalent and provider-reported · partially observed/);
     assert.equal(container.querySelectorAll(".velocity-totals")[0]!.children.length, 3);
     assert.doesNotMatch(container.textContent, /Selected period/);
     const metric = container.querySelector("#velocity-metric")!, granularity = container.querySelector("#velocity-granularity")!;

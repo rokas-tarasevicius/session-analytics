@@ -18,6 +18,6 @@ export interface ToolProfile {
   byProvider: Array<{ provider: string; label: string; calls: number; share: number }>;
   byRepository: Array<{ id: string; name: string; calls: number; share: number }>;
 }
-export function toolsDays(sessions: SessionAnalytics[]): string[];
+export function toolsDays(sessions: SessionAnalytics[], timeZone?: string): string[];
 export function buildToolsView(sessions: SessionAnalytics[], options?: { previousSessions?: SessionAnalytics[] | null }): ToolsView;
-export function toolProfile(sessions: SessionAnalytics[], name: string, options?: { days?: string[]; repositoryNames?: Map<string, string> }): ToolProfile;
+export function toolProfile(sessions: SessionAnalytics[], name: string, options?: { timeZone?: string; days?: string[]; repositoryNames?: Map<string, string> }): ToolProfile;

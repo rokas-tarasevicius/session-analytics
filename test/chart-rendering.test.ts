@@ -4,38 +4,38 @@ import { renderLegend } from "../src/public/chart-legend.js";
 import { modelColor, providerColor } from "../src/public/chart-colors.js";
 import { reportedModel } from "../src/providers/common.ts";
 import { Element } from "./release-dom.ts";
-import { harness, sample } from "./validation/aggregation-ui-harness.ts";
+import { harness, sample, withLedger } from "./validation/aggregation-ui-harness.ts";
 
 const percent = (node: Element) => parseFloat(node.style["width"]);
 const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≈ ${b}`);
 
-test("cost provider stacks share the 191:576 scale and show model shades plus unattributed value", async () => {
-  const codex = sample(), claude = sample(); codex.provider = "codex";
-  codex.cost.totalUsd = 191; codex.models = [reportedModel("gpt-5-mini", codex.tokens, 150), reportedModel("gpt-5", codex.tokens, 0)];
-  claude.cost.totalUsd = 576; claude.models = [reportedModel("claude-opus-4.6", claude.tokens, 400), reportedModel("claude-sonnet-4.6", claude.tokens, 176)];
-  const { document, run } = await harness([claude, codex]);
+test("cost provider stacks share the 191:576 scale, run high to low and show model shades plus unattributed value", async () => {
+  const codex = withLedger(sample(), [["gpt-5-mini", 150], ["gpt-5", 0], ["<unknown>", 41]]), claude = withLedger(sample(), [["claude-opus-4.6", 400], ["claude-sonnet-4.6", 176]]);
+  codex.provider = "codex";
+  const { document, run } = await harness([codex, claude]);
   run("renderCosts(activeView())");
   const container = document.querySelector("#provider-cost-models")!;
   const stacks = container.querySelectorAll(".cost-stack");
   const length = (stack: Element) => stack.children.reduce((sum, part) => sum + percent(part), 0);
-  near(length(stacks[0]!) / length(stacks[1]!), 191 / 576);
-  near(length(stacks[0]!), 191 / 576 * 100); near(length(stacks[1]!), 100);
-  assert.deepEqual(stacks[0]!.children.map((bar) => bar.dataset.series), ["codex:gpt-5-mini", "codex:unattributed"]);
-  assert.equal(stacks[0]!.children[0]!.style.background, modelColor("codex", "gpt-5-mini"));
-  assert.equal(stacks[1]!.children[0]!.style.background, modelColor("claude", "claude-opus-4.6"));
-  assert.equal(stacks[1]!.children[1]!.style.background, modelColor("claude", "claude-sonnet-4.6"));
-  assert.match(stacks[0]!.children[1]!.style.background, /repeating-linear-gradient.*var\(--muted\)/);
-  assert.equal(stacks[0]!.getAttribute("role"), "img");
-  assert.match(stacks[0]!.getAttribute("aria-label")!, /No model evidence: \$41.00 \(21.5% of provider\)/);
-  assert.match((stacks[0] as Element & { title: string }).title, /gpt-5-mini: \$150.00 \(78.5% of provider\)/);
+  // Providers are sorted by value, high to low, whatever the registry order.
+  near(length(stacks[1]!) / length(stacks[0]!), 191 / 576);
+  near(length(stacks[1]!), 191 / 576 * 100); near(length(stacks[0]!), 100);
+  assert.deepEqual(stacks[1]!.children.map((bar) => bar.dataset.series), ["codex:gpt-5-mini", "codex:unattributed"]);
+  assert.equal(stacks[1]!.children[0]!.style.background, modelColor("codex", "gpt-5-mini"));
+  assert.equal(stacks[0]!.children[0]!.style.background, modelColor("claude", "claude-opus-4.6"));
+  assert.equal(stacks[0]!.children[1]!.style.background, modelColor("claude", "claude-sonnet-4.6"));
+  assert.match(stacks[1]!.children[1]!.style.background, /repeating-linear-gradient.*var\(--muted\)/);
+  assert.equal(stacks[1]!.getAttribute("role"), "img");
+  assert.match(stacks[1]!.getAttribute("aria-label")!, /No model evidence: \$41.00 \(21.5% of provider\)/);
+  assert.match((stacks[1] as Element & { title: string }).title, /gpt-5-mini: \$150.00 \(78.5% of provider\)/);
+  // A total line closes the list; the provider rows add up to it.
+  assert.match(container.querySelectorAll(".cost-stack-total")[0]!.textContent, /Total\s+\$767\.00/);
   assert.equal(container.querySelectorAll(".chart-legend-item").length, 0);
 });
 
-test("Costs model rows share one scale across providers, use model shades, and keep token dollars in tooltips", async () => {
-  const claude = sample(), codex = sample(); codex.provider = "codex";
-  claude.cost.totalUsd = 576; claude.models = [reportedModel("claude-opus-4.6", claude.tokens, 576)];
-  codex.cost.totalUsd = 191; codex.models = [reportedModel("gpt-5-mini", codex.tokens, 191)];
-  codex.models[0]!.inputUsd = 100; codex.models[0]!.cachedInputUsd = 50; codex.models[0]!.outputUsd = 41;
+test("Costs model rows share one scale across providers, use model shades, and keep token classes in tooltips", async () => {
+  const claude = withLedger(sample(), [["claude-opus-4.6", 576]]), codex = withLedger(sample(), [["gpt-5-mini", 191]]);
+  codex.provider = "codex";
   const { context, document, run } = await harness([claude, codex]);
   run("renderCosts(activeView())");
   const models = document.querySelector("#cost-models")!;
@@ -48,8 +48,8 @@ test("Costs model rows share one scale across providers, use model shades, and k
   assert.match(row.textContent, /24.9%/);
   assert.match(row.textContent, /1 session · 100 in \/ 20 out tokens/);
   assert.doesNotMatch(row.textContent, /\b0 calls/, "a zero call count is not shown as evidence");
-  assert.doesNotMatch(row.textContent, /Cache read|Cache write|\$100.00|\$50.00/);
-  assert.match(row.querySelector(".cost-model-track")!.getAttribute("aria-label")!, /Input: \$100.00, Cache read: \$50.00, Cache write: \$0.00, Output: \$41.00/);
+  assert.doesNotMatch(row.textContent, /cache read|cache write/);
+  assert.match(row.querySelector(".cost-model-track")!.getAttribute("aria-label")!, /Provider-reported\..*Input 100, cache read 50, cache write 0, output 20 tokens/);
   assert.equal(document.querySelector("#repository-cost-components"), null);
   assert.equal(document.querySelector('[data-view-panel="models"]'), null);
   const container = new Element(); context.container = container;
@@ -62,15 +62,18 @@ test("Costs model rows share one scale across providers, use model shades, and k
 });
 
 test("Costs shows unattributed rows on the model scale, unpriced evidence, and empty states", async () => {
-  const source = sample(); source.models[0]!.priced = false;
-  const { document, run } = await harness([source]); run("renderCosts(activeView())");
+  const source = withLedger(sample(), [["model-synthetic", 6]], { priced: false });
+  const unattributed = withLedger(sample(), [["<unknown>", 4]]);
+  const { document, run } = await harness([source, unattributed]); run("renderCosts(activeView())");
   const models = document.querySelector("#cost-models")!;
   const rows = models.querySelectorAll(".cost-model-row");
   assert.match(rows[0]!.textContent, /unpriced/); assert.match(rows[1]!.textContent, /No model evidence.*\$4.00.*40.0%/);
   const fills = models.querySelectorAll(".cost-model-track").map((track) => track.children[0]!);
   near(percent(fills[1]!) / percent(fills[0]!), 4 / 6);
   assert.match(fills[1]!.style.background, /var\(--muted\)/);
-  run("renderCosts({ sessions: [], summary: summarize([]) })");
+  // 120 of 240 eligible tokens are priced; the share rounds down and is the Pricing view's figure too.
+  assert.equal(document.querySelector("#cost-coverage")!.textContent, "50.0%");
+  run("renderCosts({ sessions: [], scopeSessions: [], summary: summarize([]) })");
   for (const id of ["#provider-cost-models", "#cost-models"]) assert.match(document.querySelector(id)!.textContent, /No priced activity in this view./);
 });
 

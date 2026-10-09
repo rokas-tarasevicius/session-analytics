@@ -3,14 +3,13 @@ import fs from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import { normalizeTimestamp } from '../../src/public/timestamps.js';
-import { daysBetween, dailySpendSeries } from '../../src/public/view-model.js';
+import { daysBetween, dailySpendSeries, sessionStartDay } from '../../src/public/view-model.js';
 import { ledgerCells, localDay } from '../../src/public/velocity-data.js';
 
 function observedRange(sessions: unknown[], snapshot: Record<string, unknown> = {}) {
  const source=fs.readFileSync(new URL('../../src/public/app.js',import.meta.url),'utf8');
- const begin=source.indexOf('function observedRange(');
- const end=source.indexOf('\nfunction ',begin+1);
- return vm.runInNewContext(`${source.slice(begin,end)}\nobservedRange()`,{snapshot:{sessions,...snapshot},normalizeTimestamp,localDay,ledgerCells});
+ const fn=(name:string)=>{const begin=source.indexOf(`function ${name}(`);return source.slice(begin,source.indexOf('\nfunction ',begin+1));};
+ return vm.runInNewContext(`${fn('snapshotTimeZone')}\n${fn('observedRange')}\nobservedRange()`,{snapshot:{sessions,...snapshot},normalizeTimestamp,localDay,ledgerCells,sessionStartDay});
 }
 
 test('time-range: unknown start placeholders cannot erase dated charts through the 3660-day cap',()=>{
@@ -34,8 +33,10 @@ test('time-range: file modification dates cannot widen observed activity history
 });
 
 test('time-range: unknown starts retain independently dated velocity evidence',()=>{
+ // Ledger days (snapshot timezone) date a session with a ledger; legacy UTC spend days only a session without one.
  const bounds=observedRange([
-  {createdAt:'2000-01-01T00:00:00Z',transcript:{startTimeKnown:false},spendByDay:{'2026-09-02':1},velocity:{buckets:[['2026-08-31',1,0,[]]]}},
+  {createdAt:'2000-01-01T00:00:00Z',transcript:{startTimeKnown:false},spendByDay:{'2026-09-03':1},velocity:{buckets:[['2026-08-31',1,0,[]]]}},
+  {createdAt:'2000-01-01T00:00:00Z',transcript:{startTimeKnown:false},spendByDay:{'2026-09-02':1}},
  ]);
  assert.equal(bounds.minimum,'2026-08-31');
  assert.equal(bounds.maximum,'2026-09-02');

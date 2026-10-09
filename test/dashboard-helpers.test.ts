@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  clampWindow, costByModel, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
-  matchesQuery, previousPeriod, shortMoney, sortRepositories, sparklineSummary, summarize, tickScale, windowStartFor,
+  clampWindow, dailyCountSeries, dailySpendSeries, daysBetween, deltaDescription, downsample, groupByRepository, heatLevel,
+  ledgerMoney, matchesQuery, previousPeriod, pricedPercent, pricedShare, sessionsInRange, shortMoney, sortRepositories, sparklineSummary, summarize, tickScale, windowStartFor,
 } from "../src/public/view-model.js";
+import { buildVelocity } from "../src/public/velocity-data.js";
 
 function session(overrides: Record<string, unknown> = {}) {
   return {
@@ -25,56 +26,64 @@ function session(overrides: Record<string, unknown> = {}) {
   };
 }
 
-test("costByModel aggregates provider bases, shares, model details and unattributed value", () => {
-  const model = { model: "claude-opus-5", totalUsd: 2, inputUsd: 1, cachedInputUsd: 0.25, cacheWriteUsd: 0.25, outputUsd: 0.5, calls: 3, inputTokens: 100, outputTokens: 20, priced: true };
-  const result = costByModel([
-    session({ models: [model] }), session({ models: [model] }),
-    session({ costBasis: "provider-reported", cost: { totalUsd: 6 } }),
-    session({ provider: "codex", cost: { totalUsd: 10 }, models: [{ ...model, model: "gpt-5", totalUsd: 8 }] }),
-    session({ provider: "cursor", costBasis: "provider-reported", cost: { totalUsd: 5 } }),
-  ]);
-  assert.equal(result.total, 25);
+/** A ledger session: `cells` are [day, model, value, priced tokens (of 120 eligible), calls]; cells may also be session-dated. */
+function ledger(overrides: Record<string, unknown>, cells: Array<[string, string, number, number?, number?]>, { sessionDated = false } = {}) {
+  const models = [...new Set(cells.map(([, model]) => model))];
+  const rows = cells.map(([day, model, value, priced = 120, calls = 1]) => [day, 9, models.indexOf(model), [value, 100, 50, 50, 0, 20, 0, calls, 0, 0, priced, 0, 100, 0]]);
+  return session({ sessionKey: `k-${Math.random()}`, velocity: { dimensions: models.map((model) => ({ agent: "claude-cli", model, executionKind: "top-level", effort: "unknown" })), buckets: sessionDated ? [] : rows, undated: [], ...(sessionDated ? { sessionDated: rows } : {}) }, ...overrides });
+}
+
+test("ledgerMoney splits the window's ledger by cost basis, provider and model, and every part adds up to buildVelocity's total", () => {
+  const window = { start: "2026-09-20", end: "2026-09-21" };
+  const sessions = [
+    ledger({}, [["2026-09-20", "claude-opus-5", 2], ["2026-09-21", "claude-opus-5", 2], ["2026-09-21", "<unknown>", 1]]),
+    // Started before the window: only the value it used inside the window counts.
+    ledger({ createdAt: "2026-09-10T10:00:00.000Z" }, [["2026-09-19", "claude-opus-5", 100], ["2026-09-20", "claude-opus-5", 3]]),
+    ledger({ costBasis: "provider-reported" }, [["2026-09-21", "claude-opus-5", 6]], { sessionDated: true }),
+    ledger({ provider: "codex" }, [["2026-09-20", "gpt-5", 8]]),
+    // Cursor's database value has no request time: undated, all time, never in a window.
+    session({ provider: "cursor", costBasis: "provider-reported", velocity: { dimensions: [{ agent: "cursor", model: "<unknown>", executionKind: "top-level", effort: "unknown" }], buckets: [], undated: [[0, [5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } }),
+  ];
+  const result = ledgerMoney(sessions, window);
+  assert.equal(result.total, buildVelocity(sessions as unknown as Parameters<typeof buildVelocity>[0], window).totals[0]);
+  assert.equal(result.total, 22); assert.equal(result.api, 16); assert.equal(result.reported, 6);
+  assert.equal(result.undated, 5); assert.equal(result.sessionDated, 6); assert.equal(result.sessionDatedSessions, 1);
   assert.deepEqual(result.providers.map(({ provider, total, api, reported, unattributed }) => ({ provider, total, api, reported, unattributed })), [
-    { provider: "codex", total: 10, api: 10, reported: 0, unattributed: 2 },
-    { provider: "claude", total: 10, api: 4, reported: 6, unattributed: 6 },
-    { provider: "cursor", total: 5, api: 0, reported: 5, unattributed: 5 },
+    { provider: "claude", total: 14, api: 8, reported: 6, unattributed: 1 },
+    { provider: "codex", total: 8, api: 8, reported: 0, unattributed: 0 },
   ]);
   for (const provider of result.providers) assert.equal(provider.total, provider.api + provider.reported);
-  assert.equal(result.providers.reduce((sum, provider) => sum + provider.unattributed, 0) + result.models.reduce((sum, model) => sum + model.value, 0), result.total);
-  assert.deepEqual(result.models.map(({ provider, share }) => [provider, share]), [["codex", 8 / 25], ["claude", 4 / 25]]);
-  assert.deepEqual(result.models[1], { provider: "claude", model: "claude-opus-5", value: 4, share: 4 / 25, sessions: 2, calls: 6, inputTokens: 200, outputTokens: 40, components: { input: 2, cached: 0.5, write: 0.5, output: 1 }, priced: true, eligible: 2, selected: 2, evidence: { calls: 2, tokens: 2 } });
-  assert.deepEqual(result.providers[1]!.coverage, { eligible: 3, selected: 3 });
+  assert.equal(result.models.reduce((sum, model) => sum + model.value, 0), result.total);
+  assert.deepEqual(result.models.map(({ id, value, share, sessions: count }) => [id, value, share, count]), [
+    ["claude:claude-opus-5", 13, 13 / 22, 3], ["codex:gpt-5", 8, 8 / 22, 1], ["claude:<unknown>", 1, 1 / 22, 1],
+  ]);
+  const opus = result.models[0]!;
+  assert.equal(opus.api, 7); assert.equal(opus.reported, 6); assert.equal(opus.calls, 4);
+  assert.deepEqual([opus.sums[1], opus.sums[5]], [400, 80]);
+  assert.deepEqual(ledgerMoney([], window), { ...ledgerMoney([], window) });
+  assert.equal(ledgerMoney([], window).total, 0); assert.deepEqual(ledgerMoney([], window).providers, []);
 });
 
-test("costByModel excludes ineligible cost and token evidence while retaining selected and unpriced models", () => {
-  const model = { model: "claude-opus-5", totalUsd: 2, inputUsd: 1, outputUsd: 1, calls: 3, inputTokens: 100, outputTokens: 20, priced: true };
-  const result = costByModel([
-    session({ models: [model] }),
-    session({ models: [model], transcript: { status: "invalid" } }),
-    session({ models: [{ ...model, priced: false }], costBasis: "unavailable" }),
-    session({ provider: "codex", models: [], costBasis: "unavailable" }),
-  ]);
-  assert.equal(result.total, 2); assert.equal(result.providers.length, 1);
-  const row = result.models[0]!;
-  assert.equal(row.value, 2); assert.equal(row.share, 1); assert.equal(row.eligible, 1);
-  assert.equal(row.selected, 3); assert.equal(row.sessions, 3); assert.equal(row.priced, false);
-  assert.equal(row.calls, 6); assert.equal(row.inputTokens, 200); assert.equal(row.outputTokens, 40);
-  assert.deepEqual(row.components, { input: 1, cached: 0, write: 0, output: 1 });
-  assert.deepEqual(result.providers[0]!.coverage, { eligible: 1, selected: 3 });
-});
-
-test("costByModel sorts by descending value, provider and model, including zero-value evidence", () => {
-  const result = costByModel([
-    session({ provider: "codex", models: [{ model: "z-model", totalUsd: 2 }] }),
-    session({ models: [{ model: "b-model", totalUsd: 2 }, { model: "a-model", totalUsd: 2 }, { model: "high-model", totalUsd: 3 }] }),
-    session({ provider: "gemini", costBasis: "unavailable", models: [{ model: "unpriced-model", totalUsd: 100, priced: false }] }),
-  ]);
-  assert.deepEqual(result.models.map(({ provider, model }) => `${provider}:${model}`), ["claude:high-model", "claude:a-model", "claude:b-model", "codex:z-model", "gemini:unpriced-model"]);
-  assert.deepEqual(result.providers.find(({ provider }) => provider === "claude")!.models.map(({ model }) => model), ["high-model", "a-model", "b-model"]);
+test("ledgerMoney keeps unpriced evidence visible and scales the cache-write upper estimate to the window", () => {
+  const window = { start: "2026-09-20", end: "2026-09-20" };
+  // $10 ordinary and $12 upper for the whole session; $6 of its value is in the window, so $1.20 of premium is.
+  const codex = ledger({ provider: "codex", cost: { totalUsd: 10, upperEstimateUsd: 12 } }, [["2026-09-20", "gpt-5", 6], ["2026-09-21", "gpt-5", 4]]);
+  const gemini = ledger({ provider: "gemini", costBasis: "unavailable" }, [["2026-09-20", "gemini-pro", 0, 0]]);
+  const result = ledgerMoney([codex, gemini], window);
+  assert.equal(result.total, 6); assert.ok(Math.abs(result.upper - 7.2) < 1e-12);
+  assert.ok(Math.abs(result.models.find(({ id }) => id === "codex:gpt-5")!.upper - 7.2) < 1e-12);
+  const unpriced = result.models.find(({ id }) => id === "gemini:gemini-pro")!;
+  assert.equal(unpriced.value, 0); assert.deepEqual([unpriced.evidence.known, unpriced.evidence.eligible], [0, 120]);
   assert.equal(result.providers.find(({ provider }) => provider === "gemini")!.total, 0);
-  assert.deepEqual(costByModel([]), { total: 0, providers: [], models: [] });
-  const zero = costByModel([session({ costBasis: "unavailable", models: [{ model: "unpriced-model", totalUsd: 100 }] })]);
-  assert.equal(zero.total, 0); assert.equal(zero.models[0]!.share, 0);
+  assert.equal(pricedShare(result.evidence), 0.5); assert.equal(pricedPercent(result.evidence), "50.0%");
+});
+
+test("priced shares round down, so only complete evidence reads 100.0%", () => {
+  assert.equal(pricedPercent({ known: 999_999, eligible: 1_000_000, unsupported: 0, complete: false }), "99.9%");
+  assert.equal(pricedPercent({ known: 1_000_000, eligible: 1_000_000, unsupported: 0, complete: true }), "100.0%");
+  assert.equal(pricedPercent({ known: 29, eligible: 100, unsupported: 0, complete: false }), "29.0%");
+  assert.equal(pricedPercent({ known: 0, eligible: 0, unsupported: 0, complete: true }), "N/A");
+  assert.equal(pricedShare(null), null);
 });
 
 test("clampWindow keeps a stale custom range inside the refreshed snapshot and ordered", () => {
@@ -91,6 +100,15 @@ test("previousPeriod only exists when the whole preceding interval is observed",
   assert.deepEqual(previousPeriod({ end: "2026-10-02", min: "2026-08-04", start: "2026-09-03" }), { endDay: "2026-09-02", length: 30, startDay: "2026-08-04" });
   assert.deepEqual(previousPeriod({ end: "2026-10-02", min: "2026-09-25", start: "2026-10-02" }), { endDay: "2026-10-01", length: 1, startDay: "2026-10-01" });
   assert.equal(previousPeriod({ end: "2026-10-02", min: "", start: "2026-10-01" }), null);
+});
+
+test("session-start selection and start-day series use the snapshot timezone, the ledger's calendar", () => {
+  // 23:30 UTC on Sep 20 is 00:30 on Sep 21 in London (BST).
+  const late = session({ createdAt: "2026-09-20T23:30:00.000Z" }), unknown = session({ transcript: { status: "ok", warnings: [], startTimeKnown: false } });
+  assert.deepEqual(sessionsInRange([late, unknown], "2026-09-21", "2026-09-21", "Europe/London"), [late]);
+  assert.deepEqual(sessionsInRange([late, unknown], "2026-09-21", "2026-09-21"), [], "UTC remains the default");
+  assert.deepEqual(sessionsInRange([late, unknown], null, null, "Europe/London"), [late, unknown], "an unbounded window keeps unknown starts");
+  assert.deepEqual(dailyCountSeries([late], ["2026-09-20", "2026-09-21"], () => 1, "Europe/London"), [0, 1]);
 });
 
 test("deltaDescription reports direction, hides empty comparisons, and labels the period", () => {
@@ -158,10 +176,12 @@ test("palette matching accepts substrings and ordered subsequences, never unrela
 });
 
 test("sortRepositories orders by any column in both directions with a stable name tiebreak", () => {
+  // The value column sorts by the window's ledger value (`usage`), the figure it shows; whole-session value plays no part.
+  const evidence = { known: 0, eligible: 0, unsupported: 0, complete: true };
   const rows = [
-    { repository: { id: "1", name: "beta" }, summary: { ...summarize([session()]), estimatedSpendUsd: 5 } },
-    { repository: { id: "2", name: "alpha" }, summary: { ...summarize([session()]), estimatedSpendUsd: 9 } },
-    { repository: { id: "3", name: "gamma" }, summary: { ...summarize([session()]), estimatedSpendUsd: 5 } },
+    { repository: { id: "1", name: "beta" }, summary: { ...summarize([session()]), estimatedSpendUsd: 50 }, usage: { value: 5, evidence } },
+    { repository: { id: "2", name: "alpha" }, summary: { ...summarize([session()]), estimatedSpendUsd: 1 }, usage: { value: 9, evidence } },
+    { repository: { id: "3", name: "gamma" }, summary: { ...summarize([session()]), estimatedSpendUsd: 5 }, usage: { value: 5, evidence } },
   ];
   assert.deepEqual(sortRepositories(rows, "value", "descending").map((row) => row.repository.name), ["alpha", "beta", "gamma"]);
   assert.deepEqual(sortRepositories(rows, "value", "ascending").map((row) => row.repository.name), ["beta", "gamma", "alpha"]);

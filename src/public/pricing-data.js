@@ -1,59 +1,77 @@
 import { modelProvider, providerKey } from "./chart-colors.js";
 import { projectModelId } from "./model-id.js";
+import { providerIds } from "./providers.js";
+import { calendarDays, ledgerCells } from "./velocity-data.js";
+import { ledgerMoney, pricedShare } from "./view-model.js";
 
 const latest = (entries) => [...entries].sort((a, b) => (b.snapshotDate ?? "").localeCompare(a.snapshotDate ?? ""))[0];
+const rank = (provider) => { const index = providerIds.indexOf(provider); return index < 0 ? providerIds.length : index; };
 
 /**
- * Model cards for the Pricing view. Only API-priced sessions contribute: provider-reported values never use a rate card.
- * "Most used" = API-equivalent usage value in the selection, then observed tokens, then calls, then model ID.
- * Unused cards are current rate-card models with no usage in the selection, ordered by provider then model ID.
+ * Rate evidence behind each `${provider}:${model}` with ledger activity in the window: the distinct
+ * `ModelUsage.pricing[]` snapshots and whether every contributing session priced that model completely.
  */
-export function pricingModelCards(rateCard, sessions) {
-  const rates = new Map((rateCard?.models ?? []).map((entry) => [entry.model, entry]));
-  const cards = new Map();
-  let tokens = 0, pricedTokens = 0;
+function rateEvidence(sessions, start, end) {
+  const days = new Set(calendarDays(start, end)), result = new Map();
+  if (!days.size) return result;
   for (const session of sessions) {
-    if (session.costBasis !== "api-list-price-equivalent") continue;
-    for (const usage of session.models ?? []) {
-      const eligible = usage.pricingCoverage?.eligibleTokens ?? usage.inputTokens + usage.outputTokens;
-      const priced = usage.pricingCoverage?.pricedTokens ?? (usage.priced ? eligible : 0);
-      tokens += eligible; pricedTokens += priced;
-      const model = projectModelId(usage.model);
-      const card = cards.get(model) ?? { model, priced: true, provenance: new Map(), sessions: new Set(), providers: new Map(),
-        usage: { valueUsd: 0, upperEstimateUsd: 0, tokens: 0, pricedTokens: 0, calls: 0, sessions: 0,
-          inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0 } };
-      card.priced &&= !!usage.priced;
-      card.sessions.add(session);
-      card.providers.set(session.provider, (card.providers.get(session.provider) ?? 0) + eligible);
-      for (const provenance of usage.pricing ?? []) card.provenance.set(JSON.stringify(provenance), provenance);
-      const total = card.usage;
-      total.valueUsd += usage.totalUsd ?? 0; total.upperEstimateUsd += usage.upperEstimateUsd ?? usage.totalUsd ?? 0;
-      total.tokens += eligible; total.pricedTokens += priced; total.calls += usage.calls ?? 0;
-      total.inputTokens += usage.inputTokens ?? 0; total.cachedInputTokens += usage.cachedInputTokens ?? 0;
-      total.cacheWriteInputTokens += usage.cacheWriteInputTokens ?? 0; total.outputTokens += usage.outputTokens ?? 0;
-      cards.set(model, card);
+    if (!session.velocity) continue;
+    const seen = new Set();
+    for (const [day, , dimensionId] of ledgerCells(session.velocity)) {
+      const dimension = session.velocity.dimensions[dimensionId];
+      if (!dimension || seen.has(dimension.model) || !days.has(day)) continue;
+      seen.add(dimension.model);
+      const key = `${session.provider}:${dimension.model}`;
+      const entry = result.get(key) ?? { provenance: new Map(), priced: true };
+      for (const usage of session.models ?? []) if (usage.model === dimension.model) {
+        entry.priced &&= !!usage.priced;
+        for (const provenance of usage.pricing ?? []) entry.provenance.set(JSON.stringify(provenance), provenance);
+      }
+      result.set(key, entry);
     }
   }
-  const matched = new Set();
-  const used = [...cards.values()].map((card) => {
-    const provenance = [...card.provenance.values()];
-    const entry = rates.get(card.model) ?? rates.get(latest(provenance)?.rateModel);
+  return result;
+}
+
+/**
+ * Model cards for the Pricing view: one per (session provider, model), never merged across providers. Values are the
+ * activity ledger for the selected dates, the same buildVelocity totals as Costs and the Summary KPI (`ledgerMoney`).
+ * Provider-reported value never uses a rate card, so cards cover every other session and add up to the window's
+ * API-equivalent value (`api`); `total` and `reported` reconcile them with the window's usage value.
+ * Token coverage (`tokens`, `pricedTokens`, `coverage`) is the window's ledger pricing coverage, as on Costs.
+ * "Most used" = usage value, then observed tokens, then calls, then model ID and provider.
+ * Unused cards are current rate-card models no card uses, ordered by provider then model ID.
+ */
+export function pricingModelCards(rateCard, sessions, { start, end } = {}) {
+  const rates = new Map((rateCard?.models ?? []).map((entry) => [entry.model, entry]));
+  const all = ledgerMoney(sessions, { start, end });
+  const apiSessions = sessions.filter((session) => session.costBasis !== "provider-reported");
+  const ledger = ledgerMoney(apiSessions, { start, end }), evidence = rateEvidence(apiSessions, start, end);
+  const matched = new Set(), usedModels = new Set();
+  const used = ledger.models.map((row) => {
+    const model = projectModelId(row.model), seen = evidence.get(row.id) ?? { provenance: new Map(), priced: true };
+    const provenance = [...seen.provenance.values()];
+    const entry = rates.get(model) ?? rates.get(latest(provenance)?.rateModel);
     if (entry) matched.add(entry.model);
-    const sessionProvider = [...card.providers.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    return { model: card.model, used: true, priced: card.priced && provenance.length > 0,
-      provider: entry?.rate?.provider ? providerKey(entry.rate.provider) : modelProvider(card.model, sessionProvider),
+    usedModels.add(model);
+    const coverage = pricedShare(row.evidence);
+    return { id: row.id, model, used: true, priced: seen.priced && provenance.length > 0 && (coverage === null || coverage === 1),
+      provider: providerKey(row.provider), vendor: entry?.rate?.provider ? providerKey(entry.rate.provider) : modelProvider(model, row.provider),
       rate: entry?.rate ?? null, source: entry?.source ?? null, current: entry?.provenance ?? null, provenance,
-      usage: { ...card.usage, sessions: card.sessions.size,
-        coverage: card.usage.tokens ? card.usage.pricedTokens / card.usage.tokens : null } };
+      usage: { valueUsd: row.value, upperEstimateUsd: row.upper, tokens: row.evidence.eligible, pricedTokens: row.evidence.known,
+        calls: row.calls, sessions: row.sessions, inputTokens: row.sums[1], cachedInputTokens: row.sums[3],
+        cacheWriteInputTokens: row.sums[4], outputTokens: row.sums[5], coverage } };
   }).sort((a, b) => b.usage.valueUsd - a.usage.valueUsd || b.usage.tokens - a.usage.tokens
-    || b.usage.calls - a.usage.calls || a.model.localeCompare(b.model));
-  const unused = [...rates.values()].filter((entry) => !matched.has(entry.model) && !cards.has(entry.model)).map((entry) => ({
-    model: entry.model, used: false, priced: true, provider: entry.rate?.provider ? providerKey(entry.rate.provider) : modelProvider(entry.model),
-    rate: entry.rate ?? null, source: entry.source ?? null, current: entry.provenance ?? null, provenance: [], usage: null,
-  })).sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
+    || b.usage.calls - a.usage.calls || a.model.localeCompare(b.model) || rank(a.provider) - rank(b.provider));
+  const unused = [...rates.values()].filter((entry) => !matched.has(entry.model) && !usedModels.has(entry.model)).map((entry) => {
+    const provider = entry.rate?.provider ? providerKey(entry.rate.provider) : modelProvider(entry.model);
+    return { id: `${provider}:${entry.model}`, model: entry.model, used: false, priced: true, provider, vendor: provider,
+      rate: entry.rate ?? null, source: entry.source ?? null, current: entry.provenance ?? null, provenance: [], usage: null };
+  }).sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
   const maxValue = Math.max(0, ...used.map(({ usage }) => usage.valueUsd));
   const maxTokens = Math.max(0, ...used.map(({ usage }) => usage.tokens));
-  return { used, unused, tokens, pricedTokens, maxValue, maxTokens };
+  return { used, unused, tokens: all.evidence.eligible, pricedTokens: all.evidence.known, coverage: pricedShare(all.evidence),
+    total: all.total, api: ledger.total, reported: all.reported, maxValue, maxTokens };
 }
 
 /** Rows of [label, USD per 1M or text] for a rate; omits classes the source does not publish. */

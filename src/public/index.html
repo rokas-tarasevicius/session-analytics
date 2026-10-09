@@ -138,7 +138,7 @@
 
           <div class="analytics-view" data-view-panel="summary">
             <section class="kpi-grid" aria-label="Machine totals">
-              <article class="kpi accent"><span class="kpi-label">Priced usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Usage value, not an invoice</small></article>
+              <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Usage value, not an invoice</small></article>
               <article class="kpi"><span class="kpi-label">Repositories</span><strong id="metric-repositories">—</strong><small class="kpi-note" id="metric-repository-note">With local evidence</small></article>
               <article class="kpi"><span class="kpi-label">Sessions analyzed</span><strong id="metric-sessions">—</strong><span class="kpi-delta" id="metric-sessions-delta" hidden></span><svg class="spark" id="metric-sessions-spark"></svg><small class="kpi-note" id="metric-session-note">Matched evidence</small></article>
               <article class="kpi"><span class="kpi-label">Request input processed</span><strong id="metric-input">—</strong><small class="kpi-coverage" id="metric-input-coverage"></small><span class="kpi-delta" id="metric-input-delta" hidden></span><svg class="spark" id="metric-input-spark"></svg><small class="kpi-note" id="metric-cache">— cached · repeated context included</small></article>
@@ -152,7 +152,7 @@
 
             <section class="dashboard-grid" aria-label="Machine analytics">
               <article class="panel span-8">
-                <header><div><p class="kicker">Usage velocity</p><h2>Daily priced usage value</h2></div><div class="provider-key" role="group" aria-label="Filter daily usage by provider">
+                <header><div><p class="kicker">Usage velocity</p><h2>Daily usage value</h2></div><div class="provider-key" role="group" aria-label="Filter daily usage by provider">
                   <label class="chip" data-provider="codex"><input type="checkbox" data-provider-filter="codex" checked aria-label="Codex daily usage" /><img src="/brands/codex.svg" alt="" /><span>Codex</span></label>
                   <label class="chip" data-provider="claude"><input type="checkbox" data-provider-filter="claude" checked aria-label="Claude daily usage" /><img src="/brands/claude.svg" alt="" /><span>Claude</span></label>
                   <label class="chip" data-provider="cursor"><input type="checkbox" data-provider-filter="cursor" checked aria-label="Cursor daily usage" /><img src="/brands/cursor.svg" alt="" /><span>Cursor</span></label>
@@ -162,7 +162,7 @@
                   <label class="chip" data-provider="unsupported" data-unsupported-provider="true" hidden><input type="checkbox" data-provider-filter="unsupported" checked aria-label="Unsupported provider daily usage" /><span>Unsupported</span></label>
                 </div></header>
                 <div class="line-chart chart-slot" id="daily-spend"></div>
-                <p class="chart-note">Activity dates use the snapshot timezone, as in Velocity. The chart includes dated value, and session-dated value from sources without request times on the session's last activity day; undated value, such as Cursor's provider-reported value, and sessions without velocity evidence remain outside the chart. The usage-value KPI, repository values and Velocity use this same ledger. API-equivalent value is not an invoice.</p>
+                <p class="chart-note">Activity dates use the snapshot timezone, as in Velocity. The chart includes dated value, and session-dated value from sources without request times on the session's last activity day; undated value, such as Cursor's provider-reported value, and sessions without velocity evidence remain outside the chart. The usage-value KPI, repository values, the fleet table, Costs, Pricing, Velocity and the daily CSV export all use this same ledger. Not an invoice.</p>
               </article>
               <article class="panel span-4">
                 <header><div><p class="kicker">Provider mix</p><h2>Session share</h2></div></header>
@@ -192,6 +192,7 @@
 
             <section class="panel comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
               <header class="section-header"><div><p class="kicker">Fleet comparison</p><h2 id="comparison-title">Every repository, one ledger</h2></div><span class="table-hint">Click a column to sort · click a row to focus · hover a badge for coverage</span></header>
+              <p class="chart-note">Usage value and Priced: activity-dated ledger for the window, so the rows add up to the Usage value KPI. Other columns: sessions started in the window.</p>
               <div class="table-wrap"><table class="data-table"><thead><tr>
                 <th scope="col"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
                 <th scope="col"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
@@ -212,14 +213,14 @@
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
-            <header class="view-header"><div><p class="kicker">Usage value</p><h2 id="costs-title">Costs</h2><p>API-equivalent and provider-reported value by provider and model. Whole-session values.</p></div></header>
+            <header class="view-header"><div><p class="kicker">Usage value</p><h2 id="costs-title">Costs</h2><p>Usage value by provider and model, by activity date: the same ledger as Summary and Velocity.</p></div></header>
             <div class="kpi-grid compact-metrics" aria-label="Cost totals">
-              <article class="kpi accent"><span class="kpi-label">API-equivalent value</span><strong id="cost-api-total">—</strong><small class="kpi-coverage" id="cost-api-total-coverage"></small><small class="kpi-note">Rate-card priced providers</small></article>
-              <article class="kpi"><span class="kpi-label">Upper estimate</span><strong id="cost-upper-total">—</strong><small class="kpi-coverage" id="cost-upper-total-coverage"></small><small class="kpi-note">Cache-write assumption</small></article>
-              <article class="kpi"><span class="kpi-label">Provider-reported value</span><strong id="cost-provider-total">—</strong><small class="kpi-coverage" id="cost-provider-total-coverage"></small><small class="kpi-note">Retained local estimates</small></article>
-              <article class="kpi"><span class="kpi-label">Pricing coverage</span><strong id="cost-coverage">—</strong><small class="kpi-note">Share of observed tokens with a rate</small></article>
+              <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="cost-total">—</strong><small class="kpi-coverage" id="cost-total-coverage"></small><small class="kpi-note">Same total as Summary and Velocity</small></article>
+              <article class="kpi"><span class="kpi-label">API-equivalent value</span><strong id="cost-api-total">—</strong><small class="kpi-coverage" id="cost-api-total-coverage"></small><small class="kpi-note" id="cost-api-note">Rate-card priced usage</small></article>
+              <article class="kpi"><span class="kpi-label">Provider-reported value</span><strong id="cost-provider-total">—</strong><small class="kpi-coverage" id="cost-provider-total-coverage"></small><small class="kpi-note">Reported by the provider; no rate card</small></article>
+              <article class="kpi"><span class="kpi-label">Pricing coverage</span><strong id="cost-coverage">—</strong><small class="kpi-note" id="cost-coverage-note">Share of observed tokens with a rate</small></article>
             </div>
-            <p class="chart-note">A session’s full value counts when it is in the window. Summary and Velocity use the dated activity ledger.</p>
+            <p class="chart-note" id="cost-reconciliation"></p>
             <div class="view-grid costs-grid">
               <article class="panel"><header><div><p class="kicker">Providers</p><h2>Cost by provider</h2></div></header><div class="chart-slot" id="provider-cost-models"></div></article>
               <article class="panel"><header><div><p class="kicker">Models</p><h2>Cost by model</h2></div></header><div class="chart-slot" id="cost-models"></div></article>

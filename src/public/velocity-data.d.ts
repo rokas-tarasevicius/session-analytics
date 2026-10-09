@@ -2,7 +2,8 @@ import type { SessionAnalytics } from "../types.ts";
 export type Metric = "value" | "input" | "uncached" | "cacheRead" | "cacheWrite" | "output" | "reasoning" | "calls" | "tools" | "sessions";
 export interface VelocityOptions { start: string; end: string; group?: string; metric?: Metric; granularity?: string; mode?: string; limit?: number }
 export interface Evidence { known: number; eligible: number; unsupported: number; complete: boolean }
-export interface Series { id: string; label: string; total: number; values: number[]; calls: number; evidence: Evidence }
+/** `sums` is the group's in-window total of all 14 ledger counters; `sessions` counts the sessions contributing a cell. */
+export interface Series { id: string; label: string; total: number; values: number[]; calls: number; evidence: Evidence; sums: number[]; sessions: number }
 export interface VelocityData {
   start: string; end: string; group: string; metric: Metric; granularity: string; mode: string;
   keys: string[]; series: Series[]; allSeries: Series[];

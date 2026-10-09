@@ -95,11 +95,13 @@ test("the 30-day default excludes unknown starts and limits view exports to the 
   assert.equal(run("filterSnapshot(snapshot, { ...selectedWindow() }).sessions.length"), 3);
 });
 
-test("scope caption distinguishes Velocity activity dates from session-start views", async () => {
+test("scope caption names one timezone and one dating rule: value by activity date, counts by session start", async () => {
   const { document, run } = await harness([sample()]);
-  run("currentViewName = () => 'velocity'; renderSharedView(activeView())");
-  assert.match(document.querySelector("#scope-description")!.textContent, /Activity observed during .* \(/);
-  assert.doesNotMatch(document.querySelector("#scope-description")!.textContent, /Sessions started/);
-  run("currentViewName = () => 'costs'; renderSharedView(activeView())");
-  assert.match(document.querySelector("#scope-description")!.textContent, /Sessions started during .*\(UTC\); whole-session totals/);
+  const caption = (view: string) => { run(`currentViewName = () => '${view}'; renderSharedView(activeView())`); return document.querySelector("#scope-description")!.textContent; };
+  assert.match(caption("velocity"), /Activity observed during .* \(Europe\/London\)/);
+  assert.doesNotMatch(caption("velocity"), /Sessions started/);
+  for (const view of ["costs", "pricing"]) assert.match(caption(view), /Usage value by activity date during .*\(Europe\/London\)/);
+  assert.match(caption("summary"), /Usage value by activity date; sessions, tokens and tools for sessions started during .*\(Europe\/London\)/);
+  for (const view of ["tools", "activity"]) assert.match(caption(view), /Sessions started during .*\(Europe\/London\); whole-session totals/);
+  for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) assert.doesNotMatch(caption(view), /UTC/);
 });

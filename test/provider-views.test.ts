@@ -57,30 +57,41 @@ const descend = (node: Element): Element[] => [node, ...node.children.flatMap(de
 
 test("review: mixed reported/API cost stacks represent the displayed total", async () => {
   const h = await harness(), container = new Element(); h.context["container"] = container;
-  h.run('renderCostRows(container, [{ provider: "claude", total: 100, unattributed: 90, models: [{ model: "claude-opus-5", value: 10 }], coverage: { eligible: 2, selected: 2 } }])');
+  h.run('renderCostRows(container, { total: 100, evidence: { known: 0, eligible: 0, unsupported: 0, complete: true }, providers: [{ provider: "claude", total: 100, unattributed: 90, models: [{ model: "claude-opus-5", value: 10 }], evidence: { known: 0, eligible: 0, unsupported: 0, complete: true } }] })');
   const bars = descend(container).filter((n) => n.tag === "i" && n.style["width"]);
   assert.equal(bars.reduce((n, b) => n + parseFloat(String(b.style["width"])), 0), 100);
   assert.equal(bars.find((b) => b.attributes["data-series"] === "claude:unattributed")!.style["width"], "90%");
+  // The provider rows are followed by the window total they add up to.
+  assert.match(container.textContent, /Total\s+\$100\.00/);
 });
 
-test("review: Costs models retain eligible calls and price coverage for mixed evidence", async () => {
-  const h = await harness(); const summary = sample(evidence()); summary.tokens = tokens(100, 0, 0, 20); summary.models = [reportedModel("claude-opus-5", summary.tokens, 1)]; summary.costBasis = "provider-reported"; summary.cost.totalUsd = 1;
-  const invalid = sample(evidence(), true); invalid.models = summary.models;
-  h.context["sessions"] = [summary, invalid]; h.run('renderModelCosts(elements.costModels, costByModel(sessions))');
-  assert.match(h.elements.get("#cost-models")!.textContent, /\$1.00.*1\/2/);
+/** One ledger cell for `model` on 2026-07-20 carrying `value`, 100 input / 20 output tokens and `calls` model calls. */
+function ledger(session: SessionAnalytics, model: string, value: number, { calls = 0, priced = 120 } = {}): SessionAnalytics {
+  session.velocity = { dimensions: [{ agent: "claude-sdk", model, executionKind: "top-level", effort: "unknown" }], buckets: [["2026-07-20", 9, 0, [value, 100, 50, 50, 0, 20, 0, calls, 0, 0, priced, 0, 100, 0]]], undated: [] };
+  return session;
+}
+
+test("review: Costs models show ledger calls and price coverage for mixed evidence", async () => {
+  const h = await harness(); const summary = ledger(sample(evidence()), "claude-opus-5", 1); summary.costBasis = "provider-reported";
+  const partial = ledger(sample(evidence()), "claude-opus-5", 1, { priced: 60 }); partial.costBasis = "provider-reported";
+  h.context["sessions"] = [summary, partial]; h.run('renderModelCosts(elements.costModels, ledgerMoney(sessions, { start: "2026-07-20", end: "2026-07-20" }))');
+  // Half of the second receipt's tokens are priced: 180 of 240 eligible tokens, so the row says 75% priced.
+  assert.match(h.elements.get("#cost-models")!.textContent, /\$2.00.*75% priced/);
   assert.doesNotMatch(h.elements.get("#cost-models")!.textContent, /\b0 calls/, "run summaries have no request evidence, so no call count is implied");
-  const native = sample(undefined); native.models = [{ ...summary.models[0]!, calls: 2 }]; native.tokens = summary.tokens; native.costBasis = "api-list-price-equivalent"; native.costComplete = true;
-  h.context["sessions"] = [summary, native]; h.run('renderModelCosts(elements.costModels, costByModel(sessions))');
+  const native = ledger(sample(undefined), "claude-opus-5", 1, { calls: 2 }); native.costBasis = "api-list-price-equivalent";
+  h.context["sessions"] = [summary, native]; h.run('renderModelCosts(elements.costModels, ledgerMoney(sessions, { start: "2026-07-20", end: "2026-07-20" }))');
   assert.match(h.elements.get("#cost-models")!.textContent, /2 sessions · 2 calls/);
+  assert.match(h.elements.get("#cost-models")!.textContent, /\$2\.00/);
 });
 
 test("review: invalid and unavailable sessions never imply observed tools or complete repository coverage", async () => {
   const h = await harness(); const invalid = sample(undefined, true), activity = sample(evidence({ source: "cursor-transcript", fidelity: "activity-only", tokens: "unavailable", tools: "observed", usageUnit: "unavailable" }));
   h.context["sessions"] = [invalid, activity];
   assert.equal(h.run('providerEvidenceRows(sessions)[0].toolSessions'), 0);
-  h.run('renderRepositoryTable([{repository:{id:"example",name:"Example"},summary:summarize(sessions)}])');
+  h.run('renderRepositoryTable([{repository:{id:"example",name:"Example"},summary:summarize(sessions),usage:{value:0,evidence:{known:0,eligible:0,unsupported:0,complete:true},available:false}}])');
   const output = h.elements.get("#repository-rows")!.textContent;
-  assert.match(output, /—/); assert.doesNotMatch(output, /complete|N\/A/); assert.match(output, /1\/2.*parsed/);
+  // No activity ledger: the value is unavailable, not $0.00, and no priced share is claimed.
+  assert.match(output, /—/); assert.doesNotMatch(output, /complete|N\/A|\$0\.00/); assert.match(output, /1\/2.*parsed/);
 });
 
 test("review: actual summary and Tools rendering distinguish unavailable, observed zero and partial totals", async () => {
@@ -90,7 +101,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
   const invalid = sample(undefined, true); invalid.tokens = tokens(999, 0, 0, 999); invalid.metrics.toolCalls = 999; invalid.tools = { Read: 999 };
   for (const sessions of [[activity], [summary], [invalid], [summary, activity]]) {
     h.context["sessions"] = sessions;
-    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={sessions,dailySessions:sessions,scopeSessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),spendByModel:mergeModels(sessions),warnings:[]}; renderSummary(view)');
+    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={activity:buildVelocity(sessions,{start:"",end:"",group:"repository"}),sessions,dailySessions:sessions,scopeSessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),warnings:[]}; renderSummary(view)');
     // Values stay bare; the eligible/selected share moves to the coverage badge beside the value.
     assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? "100" : "—");
     const selected = `${sessions.length} selected ${sessions.length === 1 ? "session" : "sessions"}`;

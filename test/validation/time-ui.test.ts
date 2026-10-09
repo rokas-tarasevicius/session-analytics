@@ -21,7 +21,7 @@ test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch
   const elements = { activityProviderFilters: new Element(), activityTooltip: new Element(), activityHeatmap: new Element(), activityRepositories: new Element() };
   const evidence = new Element();
   const render = productionFunction('renderActivity', {
-    elements, normalizeTimestamp, heatLevel, integer: new Intl.NumberFormat('en'),
+    elements, normalizeTimestamp, heatLevel, integer: new Intl.NumberFormat('en'), snapshotTimeZone: () => 'UTC',
     $: () => evidence, renderViewProviderFilters() {}, sessionsForProviders: (s: unknown) => s,
     node: (tag: string, text?: string, cls?: string) => { const e = new Element(tag); e.textContent=text??'';e.className=cls??'';return e; },
     clear: (e: Element) => e.replaceChildren(), renderBars() {},
@@ -55,8 +55,10 @@ test('time-ui: priced-value KPI and sparkline follow activity dates like Velocit
     renderHistoryCoverage(){},renderMetricValue(){},coveredValue:()=>'',money:(v:number)=>`$${v.toFixed(2)}`,percent:String,integer:new Intl.NumberFormat('en'),compact:new Intl.NumberFormat('en'),
     dailyCountSeries,dailySpendSeries,renderDelta(){},renderSparkline:(e:Element,values:number[],_days:string[],options:{label:string})=>{const key=Object.entries(elementMap).find(([,v])=>v===e)![0];series[key]=values;labels[key]=options.label;},
     renderLine(){},dailyProviderSpend(){},renderDonut(){},renderBars(){},renderRepositoryTable(){},renderWarnings(){},renderProviderEvidence(){},selectRepository(){},
+    pricedBadge:()=>null,executionBreakdown:()=>'',subagentValue:()=>0,ledgerMoney:()=>({models:[]}),
   });
-  render({summary:{coverage:{cost:{},apiCost:{},reportedCost:{},tokens:{},tools:{eligible:1},compactions:{}}},sessions:[recent],scopeSessions:[old,recent],dailySessions:[old,recent],repositories:[],spendByModel:[],topTools:[],warnings:[]});
+  const activity = velocityData.buildVelocity([old,recent],{start:'2026-09-01',end:'2026-09-01',group:'repository',metric:'value'});
+  render({activity,summary:{coverage:{cost:{},apiCost:{},reportedCost:{},tokens:{},tools:{eligible:1},compactions:{}}},sessions:[recent],scopeSessions:[old,recent],dailySessions:[old,recent],repositories:[],topTools:[],warnings:[]});
   assert.deepEqual(Array.from(series['#metric-spend-spark']!),[10]);
   assert.equal(lookup('spend').textContent,'$10.00');
   assert.equal(velocityData.buildVelocity([old,recent],{start:'2026-09-01',end:'2026-09-01'}).totals[0],10,'Velocity reports the same total');

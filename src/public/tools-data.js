@@ -1,19 +1,19 @@
 import { metricCoverage, metricEligible, providerIds, providerLabels } from "./providers.js";
-import { daysBetween } from "./view-model.js";
-import { localDay, shiftDay } from "./velocity-data.js";
+import { daysBetween, sessionStartDay } from "./view-model.js";
+import { shiftDay } from "./velocity-data.js";
 
 const order = (provider) => { const index = providerIds.indexOf(provider); return index < 0 ? providerIds.length : index; };
 const callCount = (value) => Number.isFinite(value) && value > 0 ? value : 0;
-const startDay = (session) => session.transcript?.startTimeKnown === false || session.evidence?.timing === "file-mtime"
-  ? null : localDay(session.createdAt, "UTC");
+// Session start days use the snapshot timezone, the calendar of the window and the activity ledger.
+const startDay = sessionStartDay;
 const change = (current, previous) => current === null || previous === null ? null
   : previous > 0 ? (current - previous) / previous : current > 0 ? "new" : 0;
 
 /** The all-time chart shows at most the latest 366 calendar days; totals still cover the full selection. */
-export function toolsDays(sessions) {
+export function toolsDays(sessions, timeZone = "UTC") {
   let first = null, last = null;
   for (const session of sessions) {
-    const day = startDay(session);
+    const day = startDay(session, timeZone);
     if (!day) continue;
     if (first === null || day < first) first = day;
     if (last === null || day > last) last = day;
@@ -60,13 +60,13 @@ export function buildToolsView(sessions, { previousSessions = null } = {}) {
     previousCoverage: previous?.coverage ?? null, previousCalls, change: change(current.totalCalls, previousCalls), tools };
 }
 
-export function toolProfile(sessions, name, { days = toolsDays(sessions), repositoryNames = new Map() } = {}) {
+export function toolProfile(sessions, name, { timeZone = "UTC", days = toolsDays(sessions, timeZone), repositoryNames = new Map() } = {}) {
   const coverage = metricCoverage(sessions, "tools");
   const byDay = new Map(days.map((day) => [day, { day, calls: 0, coverage: { eligible: 0, selected: 0 } }]));
   const providers = new Map(), repositories = new Map();
   let calls = 0, totalCalls = 0, using = 0, undatedCalls = 0, outsideDaysCalls = 0;
   for (const session of sessions) {
-    const day = startDay(session), row = byDay.get(day), eligible = metricEligible(session, "tools");
+    const day = startDay(session, timeZone), row = byDay.get(day), eligible = metricEligible(session, "tools");
     if (row) { row.coverage.selected++; if (eligible) row.coverage.eligible++; }
     if (!eligible) continue;
     totalCalls += Object.values(session.tools).reduce((sum, value) => sum + callCount(value), 0);

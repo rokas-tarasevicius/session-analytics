@@ -3,20 +3,20 @@ import { renderLegend } from "./chart-legend.js";
 import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
-  costByModel, costTotals, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
-  groupByRepository, heatLevel, isTextEntryTarget, mergeModels, namedTotals, percent, presentProviders, previousPeriod, providerLabels,
-  providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionsInRange, shortMoney, singleFlight,
-  sortRepositories, sparklineSummary, spendDays, summarize, tickScale, validDay, windowStartFor,
+  coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
+  groupByRepository, heatLevel, isTextEntryTarget, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
+  providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
+  sortRepositories, sparklineSummary, summarize, tickScale, validDay, windowStartFor,
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
-import { providerMark, renderProviderEvidence, dailySpendByProvider, metricEligible, metricCoverage, coveredValue } from "./providers.js";
+import { providerMark, renderProviderEvidence, metricCoverage } from "./providers.js";
 
 import { renderPricingPanel } from "./pricing.js";
 import { renderToolsView } from "./tools.js";
 import { toolsDays } from "./tools-data.js";
-import { renderVelocity, renderSummaryVelocity } from "./velocity.js";
-import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity, sessionStartWindow } from "./velocity-data.js";
-import { normalizeTimestamp, utcDayBounds } from "./timestamps.js";
+import { renderVelocity, velocityProviders } from "./velocity.js";
+import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity } from "./velocity-data.js";
+import { normalizeTimestamp } from "./timestamps.js";
 import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
@@ -31,9 +31,9 @@ const elements = {
   activityRepositories: $("#activity-repositories"), activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
   cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
-  costApiTotal: $("#cost-api-total"), costCoverage: $("#cost-coverage"),
-  costProviderTotal: $("#cost-provider-total"), costUpperTotal: $("#cost-upper-total"),
-  costApiCoverage: $("#cost-api-total-coverage"), costUpperCoverage: $("#cost-upper-total-coverage"), costProviderCoverage: $("#cost-provider-total-coverage"),
+  costApiTotal: $("#cost-api-total"), costApiNote: $("#cost-api-note"), costCoverage: $("#cost-coverage"), costCoverageNote: $("#cost-coverage-note"),
+  costProviderTotal: $("#cost-provider-total"), costReconciliation: $("#cost-reconciliation"), costTotal: $("#cost-total"), costTotalCoverage: $("#cost-total-coverage"),
+  costApiCoverage: $("#cost-api-total-coverage"), costProviderCoverage: $("#cost-provider-total-coverage"),
   coverageButton: $("#coverage-button"), coverageClose: $("#coverage-close"), coverageDialog: $("#coverage-dialog"), coverageDot: $("#coverage-dot"), coverageLabel: $("#coverage-label"), coverageSummary: $("#coverage-summary"),
   spendCoverage: $("#metric-spend-coverage"), inputCoverage: $("#metric-input-coverage"), outputCoverage: $("#metric-output-coverage"), toolsCoverage: $("#metric-tools-coverage"), compactionsCoverage: $("#metric-compactions-coverage"),
   dateRange: $("#date-range"), density: $("#density-switch"),
@@ -150,13 +150,16 @@ function icon(name, className) {
   return svg;
 }
 
+function snapshotTimeZone() { return snapshot?.velocity?.timeZone || "UTC"; }
+
 function velocityContext() {
-  return { start: elements.windowStart.value || elements.windowStart.min, end: elements.windowEnd.value || elements.windowEnd.max, timeZone: snapshot?.velocity?.timeZone || "UTC", generatedAt: snapshot.generatedAt };
+  return { start: elements.windowStart.value || elements.windowStart.min, end: elements.windowEnd.value || elements.windowEnd.max, timeZone: snapshotTimeZone(), generatedAt: snapshot.generatedAt };
 }
 
+/** Session-start selection: start dates in the snapshot timezone, the calendar the activity ledger uses. */
 function selectedWindow() {
   if (windowPreset === "all") return { start: null, end: null };
-  return utcDayBounds(elements.windowStart.value, elements.windowEnd.value);
+  return { startDay: elements.windowStart.value || null, endDay: elements.windowEnd.value || null, timeZone: snapshotTimeZone() };
 }
 
 function clear(element) { element.replaceChildren(); }
@@ -198,8 +201,11 @@ function historicalSnapshot({ transcript }) {
   return transcript.sourceDeleted || transcript.warnings.includes("Source availability could not be checked; showing the last indexed facts.");
 }
 
-function repositoryAggregate(item, sessions) {
-  return { repository: item.repository, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), summary: summarize(sessions), topTools: namedTotals(sessions, "tools"), warnings: [...new Set([...scanWarnings(item.warnings || []), ...coverageWarnings(sessions)])] };
+const noEvidence = () => ({ known: 0, eligible: 0, unsupported: 0, complete: true });
+
+/** `usage` is the repository's activity-ledger value for the window, the figure the Summary KPI sums; `summary` covers sessions started in it. */
+function repositoryAggregate(item, sessions, usage = null) {
+  return { repository: item.repository, summary: summarize(sessions), topTools: namedTotals(sessions, "tools"), usage: usage ?? { value: 0, evidence: noEvidence(), available: false }, warnings: [...new Set([...scanWarnings(item.warnings || []), ...coverageWarnings(sessions)])] };
 }
 
 function activeProviders() {
@@ -216,14 +222,23 @@ function activeView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
-  const undatedStarts = scopeSessions.filter((session) => session.transcript.startTimeKnown === false || session.evidence?.timing === "file-mtime" || !localDay(session.createdAt, "UTC")).length;
+  const undatedStarts = scopeSessions.filter((session) => sessionStartDay(session, snapshotTimeZone()) === null).length;
   const sourceRepositories = selected ? [selected] : snapshot.repositories;
-  const repositories = sourceRepositories.map((item) => repositoryAggregate(item, sessionsInWindow(repositorySessions(item.repository.id))));
+  // One ledger pass grouped by repository serves the usage-value KPI, its sparkline, the repository bars and the fleet
+  // table, so the table's rows add up to the KPI.
+  const context = velocityContext();
+  const activity = buildVelocity(scopeSessions, { start: context.start, end: context.end, group: "repository", metric: "value" });
+  const usage = new Map(activity.allSeries.map(({ id, total, evidence }) => [id, { value: total, evidence, available: true }]));
+  const repositories = sourceRepositories.map((item) => {
+    const sessions = repositorySessions(item.repository.id);
+    // A repository with no activity ledger at all has an unavailable value, not $0.
+    return repositoryAggregate(item, sessionsInWindow(sessions), usage.get(item.repository.id) ?? { value: 0, evidence: noEvidence(), available: sessions.some((session) => session.velocity) });
+  });
   const sessions = windowSessions;
   const summary = summarize(sessions);
   return {
-    undatedStarts,
-    dailySessions: scopeSessions, repositories, scopeSessions, sessions, spendByDay: spendDays(sessions), spendByModel: mergeModels(sessions), topTools: namedTotals(sessions, "tools"), warnings: [...new Set([...scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]), ...coverageWarnings(sessions)])],
+    undatedStarts, activity,
+    dailySessions: scopeSessions, repositories, scopeSessions, sessions, topTools: namedTotals(sessions, "tools"), warnings: [...new Set([...scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]), ...coverageWarnings(sessions)])],
     summary: { ...summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter(({ summary: item }) => item.sessions > 0).length, retainedSessions: sessions.filter(({ transcript }) => transcript.sourceDeleted).length, historicalWorkingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking && historicalSnapshot(s)).length, workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking && !historicalSnapshot(s)).length },
   };
 }
@@ -475,9 +490,13 @@ function renderActivity(view) {
   const sessions = eligible.filter((s) => s.transcript?.startTimeKnown !== false && s.evidence?.timing !== "file-mtime" && normalizeTimestamp(s.createdAt) !== null);
   $("#activity-evidence").textContent = `${sessions.length}/${eligible.length} sessions have provider start timestamps. Unknown starts and file modification dates are excluded.`;
   const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+  // Weekday and hour in the snapshot timezone, the calendar every other view uses.
+  const clock = new Intl.DateTimeFormat("en-US", { timeZone: snapshotTimeZone(), weekday: "short", hour: "2-digit", hourCycle: "h23" });
+  const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   for (const session of sessions) {
     const date = new Date(normalizeTimestamp(session.createdAt)); if (Number.isNaN(date.valueOf())) continue;
-    grid[(date.getDay() + 6) % 7][date.getHours()] += 1;
+    const parts = clock.formatToParts(date), weekday = weekdays.indexOf(parts.find(({ type }) => type === "weekday")?.value), hour = Number(parts.find(({ type }) => type === "hour")?.value);
+    if (weekday >= 0 && hour >= 0 && hour < 24) grid[weekday][hour] += 1;
   }
   const maximum = Math.max(1, ...grid.flat()); clear(elements.activityHeatmap);
   elements.activityHeatmap.setAttribute("role", "group");
@@ -541,75 +560,120 @@ function renderActivity(view) {
   renderBars(elements.activityRepositories, repositories, (value) => integer.format(value), 12);
 }
 
-const componentLabels = { input: "Input", cached: "Cache read", write: "Cache write", output: "Output" };
 const unattributedColor = "repeating-linear-gradient(45deg, var(--muted) 0 4px, var(--surface-3) 4px 6px)";
 
-function renderCostRows(container, providers) {
+/** "95% priced" badge for a ledger value whose eligible tokens are not all priced; null when complete or N/A. */
+function pricedBadge(evidence, tag = "small") {
+  const share = pricedShare(evidence);
+  if (share === null || share >= 1) return null;
+  const badge = node(tag, `${Math.floor(Math.round(share * 1000) / 10)}% priced`, "coverage");
+  badge.title = `${pricedPercent(evidence)} of eligible tokens have a price (${integer.format(evidence.known)} of ${integer.format(evidence.eligible)})`;
+  badge.setAttribute("aria-label", badge.title);
+  return badge;
+}
+
+/** A ledger value with its priced-share badge: the dashboard's one usage-value presentation. */
+function ledgerValue(value, evidence, tag = "strong") {
+  const holder = node(tag); holder.append(node("span", money(value)));
+  const badge = pricedBadge(evidence);
+  if (badge) holder.append(badge);
+  return holder;
+}
+
+/** Provider stacks, high to low, then the window total: the rows add up to the total line. */
+function renderCostRows(container, ledger) {
   clear(container); const list = node("div", null, "cost-stack-list");
-  const maximum = scaleMaximum(providers.map(({ total }) => total));
-  for (const group of providers) {
-    const row = node("div", null, "cost-stack-row"); row.append(node("strong", providerLabels[group.provider]));
+  const maximum = scaleMaximum(ledger.providers.map(({ total }) => total));
+  for (const group of ledger.providers) {
+    const row = node("div", null, "cost-stack-row"); row.append(node("strong", providerLabels[group.provider] ?? "Unknown provider"));
     const rail = node("div", null, "cost-rail"), stack = node("div", null, "cost-stack");
     const parts = group.models.filter(({ value }) => value > 0).map(({ model, value }) => ({ name: model, value, color: modelColor(group.provider, model), id: `${group.provider}:${model}` }));
     if (group.unattributed > 0) parts.push({ name: "No model evidence", value: group.unattributed, color: unattributedColor, id: `${group.provider}:unattributed` });
     const widths = stackPercents(parts.map(({ value }) => value), maximum);
     const detail = parts.map(({ name, value }) => `${name}: ${money(value)} (${percent(group.total ? value / group.total : 0)} of provider)`);
     stack.setAttribute("role", "img");
-    stack.setAttribute("aria-label", `${providerLabels[group.provider]}: ${money(group.total)}. ${detail.join(", ")}`);
+    stack.setAttribute("aria-label", `${providerLabels[group.provider] ?? "Unknown provider"}: ${money(group.total)}. ${detail.join(", ")}`);
     stack.title = detail.join("\n");
     for (const [index, part] of parts.entries()) {
       const bar = node("i"); bar.setAttribute("data-series", part.id);
       bar.style.width = `${widths[index]}%`; bar.style.background = part.color; stack.append(bar);
     }
-    rail.append(stack); row.append(rail, valueWithCoverage(group.total, group.coverage, money, "priced value")); list.append(row);
+    rail.append(stack); row.append(rail, ledgerValue(group.total, group.evidence)); list.append(row);
   }
   if (list.childElementCount === 0) emptyState(list, "No priced activity in this view.");
+  else {
+    const total = node("div", null, "cost-stack-row cost-stack-total");
+    total.append(node("strong", "Total"), node("div"), ledgerValue(ledger.total, ledger.evidence));
+    list.append(total);
+  }
   container.append(list);
 }
 
-function renderModelCosts(container, data) {
+const tokenClasses = [["Input", 1], ["cache read", 3], ["cache write", 4], ["output", 5]];
+
+function renderModelCosts(container, ledger) {
   clear(container); const list = node("div", null, "cost-model-list");
-  const rows = data.models.map((model) => ({ ...model, coverage: { eligible: model.eligible, selected: model.selected } }));
-  for (const provider of data.providers) if (provider.unattributed > 0.000001) rows.push({ provider: provider.provider, model: "No model evidence", value: provider.unattributed, share: data.total ? provider.unattributed / data.total : 0, coverage: provider.coverage, unattributed: true });
+  const rows = ledger.models.filter(({ model }) => model !== "<unknown>");
+  for (const provider of ledger.providers) if (provider.unattributed > 0.000001) rows.push({ provider: provider.provider, model: "No model evidence", value: provider.unattributed, api: 0, reported: 0, share: ledger.total ? provider.unattributed / ledger.total : 0, evidence: noEvidence(), unattributed: true });
   rows.sort((left, right) => right.value - left.value || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
   const maximum = scaleMaximum(rows.map(({ value }) => value));
   for (const model of rows) {
     const row = node("div", null, "cost-model-row"), label = node("div", null, "cost-model-label");
-    const provider = node("small", providerLabels[model.provider]); provider.style.setProperty("--provider-color", providerColor(model.provider));
+    const provider = node("small", providerLabels[model.provider] ?? "Unknown provider"); provider.style.setProperty("--provider-color", providerColor(model.provider));
     label.append(node("span", model.model), provider);
+    const share = pricedShare(model.evidence);
     const meta = model.unattributed ? "Provider value without model evidence" : [
       `${integer.format(model.sessions)} session${model.sessions === 1 ? "" : "s"}`,
-      model.evidence.calls && model.calls > 0 ? `${integer.format(model.calls)} calls` : null,
-      model.evidence.tokens && model.inputTokens + model.outputTokens > 0 ? `${compact.format(model.inputTokens)} in / ${compact.format(model.outputTokens)} out tokens` : "no model token evidence",
-      model.priced ? null : model.value > 0 ? "partly unpriced" : "unpriced",
+      model.calls > 0 ? `${integer.format(model.calls)} calls` : null,
+      model.sums[1] + model.sums[5] > 0 ? `${compact.format(model.sums[1])} in / ${compact.format(model.sums[5])} out tokens` : "no model token evidence",
+      share === null || share >= 1 ? null : model.value > 0 ? "partly unpriced" : "unpriced",
     ].filter(Boolean).join(" · ");
-    const detail = model.unattributed ? meta : Object.entries(componentLabels).map(([key, name]) => `${name}: ${money(model.components[key])}`).join(", ");
-    row.title = `${model.model} · ${providerLabels[model.provider]}: ${money(model.value)} (${percent(model.share)} of total). ${meta}. ${detail}`;
+    const basis = model.api > 0 && model.reported > 0 ? `${money(model.api)} API-equivalent + ${money(model.reported)} provider-reported. ` : model.reported > 0 ? "Provider-reported. " : "";
+    const detail = model.unattributed ? meta : `${tokenClasses.map(([name, index]) => `${name} ${compact.format(model.sums[index])}`).join(", ")} tokens`;
+    row.title = `${model.model} · ${providerLabels[model.provider] ?? "Unknown provider"}: ${money(model.value)} (${percent(model.share)} of total). ${basis}${meta}. ${detail}`;
     const track = node("div", null, "cost-model-track"), fill = node("i");
     track.setAttribute("role", "img"); track.setAttribute("aria-label", row.title);
     fill.style.width = `${barPercent(model.value, maximum)}%`; fill.style.background = model.unattributed ? unattributedColor : modelColor(model.provider, model.model);
     fill.setAttribute("data-series", `${model.provider}:${model.unattributed ? "unattributed" : model.model}`); track.append(fill);
-    row.append(label, track, valueWithCoverage(model.value, model.coverage, money, "priced value"), node("span", percent(model.share), "cost-model-share"), node("small", meta, "cost-model-meta muted")); list.append(row);
+    row.append(label, track, ledgerValue(model.value, model.evidence), node("span", percent(model.share), "cost-model-share"), node("small", meta, "cost-model-meta muted")); list.append(row);
   }
   if (list.childElementCount === 0) emptyState(list, "No priced activity in this view.");
   container.append(list);
 }
 
+/** Excluded value disclosed beside a window total; it is all-time for the scope and never added to a date window. */
+function ledgerExclusions(ledger) {
+  return [
+    ledger.undated > 0 ? `${money(ledger.undated)} undated` : null,
+    ledger.unledgered.sessions ? `${money(ledger.unledgered.value)} in ${ledger.unledgered.sessions} older-snapshot session${ledger.unledgered.sessions === 1 ? "" : "s"} without activity dates (refresh to include)` : null,
+  ].filter(Boolean);
+}
+
+/** Costs reads the same activity ledger as the Summary KPI and Velocity for the window: totals, providers and models agree. */
 function renderCosts(view) {
-  const cost = costTotals(view.sessions), data = costByModel(view.sessions);
-  renderMetricValue(elements.costApiTotal, cost.total, metricCoverage(view.sessions, "apiCost"), money, "API-priced value", elements.costApiCoverage); renderMetricValue(elements.costUpperTotal, cost.upper, metricCoverage(view.sessions, "apiCost"), money, "API-priced value", elements.costUpperCoverage);
-  renderMetricValue(elements.costProviderTotal, cost.reported, metricCoverage(view.sessions, "reportedCost"), money, "provider-reported value", elements.costProviderCoverage); elements.costCoverage.textContent = view.summary.pricedTokenCoverage === null ? DASH : percent(view.summary.pricedTokenCoverage);
-  renderCostRows(elements.providerCostModels, data.providers);
-  renderModelCosts(elements.costModels, data);
+  const range = velocityContext(), ledger = ledgerMoney(view.scopeSessions, range);
+  const unavailable = !view.scopeSessions.some((session) => session.velocity);
+  const reason = { reason: "No session in this selection has activity dates" };
+  setValue(elements.costTotal, ledger.total, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
+  setValue(elements.costApiTotal, ledger.api, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
+  setValue(elements.costProviderTotal, ledger.reported, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
+  for (const [slot, badge] of [[elements.costTotalCoverage, pricedBadge(ledger.evidence)], [elements.costApiCoverage, null], [elements.costProviderCoverage, null]]) { clear(slot); if (badge && !unavailable) slot.append(badge); }
+  elements.costApiNote.textContent = ledger.upper > ledger.api + 0.005 ? `Upper estimate ${money(ledger.upper)} with the cache-write assumption` : "Rate-card priced usage";
+  elements.costCoverage.textContent = pricedPercent(ledger.evidence) === "N/A" ? DASH : pricedPercent(ledger.evidence);
+  elements.costCoverageNote.textContent = ledger.evidence.eligible > 0 ? `${compact.format(ledger.evidence.known)} of ${compact.format(ledger.evidence.eligible)} eligible tokens priced` : "No eligible tokens in this window";
+  const excluded = ledgerExclusions(ledger);
+  elements.costReconciliation.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${range.start} to ${range.end} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
+  renderCostRows(elements.providerCostModels, ledger);
+  renderModelCosts(elements.costModels, ledger);
 }
 
 function renderTools(view) {
   const sessions = sessionsForProviders(view.sessions, "tools");
   const previous = windowPreset === "all" ? null : previousPeriod({ end: elements.windowEnd.value, min: elements.windowStart.min, start: elements.windowStart.value });
-  const previousSessions = previous ? sessionsForProviders(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay), "tools") : null;
-  const days = windowPreset === "all" ? toolsDays(sessions) : windowDays();
+  const previousSessions = previous ? sessionsForProviders(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay, snapshotTimeZone()), "tools") : null;
+  const days = windowPreset === "all" ? toolsDays(sessions, snapshotTimeZone()) : windowDays();
   toolsSelectedName = renderToolsView(elements.toolsView, {
-    sessions, previousSessions, days, selectedTool: toolsSelectedName, expanded: toolsExpanded, repositories: view.repositories,
+    sessions, previousSessions, days, timeZone: snapshotTimeZone(), selectedTool: toolsSelectedName, expanded: toolsExpanded, repositories: view.repositories,
     onSelect: (name) => { toolsSelectedName = name; renderActiveAnalyticsView(view); },
     onToggle: () => { toolsExpanded = !toolsExpanded; renderActiveAnalyticsView(view); },
   });
@@ -638,7 +702,7 @@ function renderActiveAnalyticsView(view) {
   if (name === "activity") renderActivity(view);
   if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, { ...velocityContext(), providers: snapshotProviders() });
   if (name === "costs") renderCosts(view);
-  if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.sessions);
+  if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.scopeSessions, velocityContext());
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
     renderTools(view);
@@ -650,9 +714,10 @@ function dailyProviderSpend(sessions) {
   const days = new Map(daysBetween(elements.windowStart.value, elements.windowEnd.value).map((name) => [name, { name, ...Object.fromEntries(providerOrder.map((provider) => [provider, 0])) }]));
   for (const session of sessions) {
     if (!providerOrder.includes(session.provider)) continue;
-    for (const [day, , , values] of ledgerCells(session.velocity)) {
+    // The cells buildVelocity sums: in-window days with a known dimension.
+    for (const [day, , dimension, values] of ledgerCells(session.velocity)) {
       const row = days.get(day);
-      if (row) row[session.provider] += values[0];
+      if (row && session.velocity.dimensions[dimension]) row[session.provider] += values[0];
     }
   }
   return [...days.values()];
@@ -703,7 +768,7 @@ function renderLine(items) {
   }
   elements.dailySpend.append(svg);
   attachCrosshair(elements.dailySpend, svg, {
-    xs, plotTop: top, plotBottom: baseline, plotLeft: left, plotRight: width - right, label: "Daily priced usage value in US dollars by provider",
+    xs, plotTop: top, plotBottom: baseline, plotLeft: left, plotRight: width - right, label: "Daily usage value in US dollars by provider",
     title: (index) => new Intl.DateTimeFormat("en-GB", { dateStyle: "full" }).format(new Date(`${items[index].name}T00:00:00`)),
     rows: (index) => providers.map((provider) => ({ label: providerLabels[provider], color: providerColor(provider), value: money(items[index][provider]), dim: items[index][provider] <= 0 })),
     onIndex: (index) => {
@@ -766,7 +831,6 @@ function renderRepositoryTable(repositories) {
     if (button.dataset.sort === tableSort.key) header.setAttribute("aria-sort", tableSort.direction);
     else header.removeAttribute("aria-sort");
   }
-  const maximumValue = Math.max(0.000001, ...repositories.map((item) => item.summary.estimatedSpendUsd));
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
@@ -778,7 +842,11 @@ function renderRepositoryTable(repositories) {
     row.addEventListener("click", (event) => { if (event.target.closest?.("button")) return; selectRepository(item.repository.id); });
     const repositoryCell = node("td"); repositoryCell.append(repositoryButton, node("small", `ID ${repositoryKey(item.repository.id)}`));
     const covered = (value, coverage, format, what) => { const cell = node("td"); cell.append(valueWithCoverage(value, coverage, format, what, "span")); return cell; };
-    row.append(repositoryCell, tableCell(String(summary.sessions), `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent`), covered(summary.estimatedSpendUsd, summary.coverage.cost, money, "priced value"), covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(summary.pricedTokenCoverage === null ? DASH : percent(summary.pricedTokenCoverage), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    // Usage value and Priced read the window's activity ledger (the KPI's rows); the other columns cover sessions started in the window.
+    const value = node("td");
+    if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
+    else value.append(node("span", money(item.usage.value)));
+    row.append(repositoryCell, tableCell(String(summary.sessions), executionBreakdown(summary)), value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
@@ -893,9 +961,12 @@ function renderSharedView(view) {
   elements.retentionNote.hidden = !retained;
   elements.retentionNote.textContent = `${retained} source-deleted sessions retain facts and prices from their last successful ingest. Historical working status does not establish current activity.`;
   const selected = selectedRepository();
-  const population = currentViewName() === "velocity" ? `Activity observed during ${windowCaption()} (${snapshot.velocity?.timeZone || "UTC"}).`
-    : currentViewName() === "summary" ? `Usage value by activity date (${snapshot.velocity?.timeZone || "UTC"}); other totals for sessions started during ${windowCaption()} (UTC).`
-    : `Sessions started during ${windowCaption()} (UTC); whole-session totals.`;
+  // One calendar (the snapshot timezone) and one dating rule everywhere: value by activity date, counts by session start.
+  const name = currentViewName(), timeZone = snapshotTimeZone();
+  const population = name === "velocity" ? `Activity observed during ${windowCaption()} (${timeZone}).`
+    : name === "summary" ? `Usage value by activity date; sessions, tokens and tools for sessions started during ${windowCaption()} (${timeZone}).`
+    : name === "costs" || name === "pricing" ? `Usage value by activity date during ${windowCaption()} (${timeZone}).`
+    : `Sessions started during ${windowCaption()} (${timeZone}); whole-session totals.`;
   elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${population}`;
   elements.scopeChip.hidden = !selected;
   elements.scopeChipLabel.textContent = selected ? selected.repository.name : "";
@@ -918,56 +989,72 @@ function spendDelta(comparison, length) {
   return delta && comparison.partial ? { ...delta, text: `${delta.text} · partial`, label: `${delta.label}, partially priced` } : delta;
 }
 
+/** Top-level, sub-agent, mixed and unknown sessions: each session counted once, so the parts add up to the total. */
+function executionBreakdown(summary) {
+  const mixed = summary.mixedSessions ?? 0, unknown = summary.unknownExecutionSessions ?? 0;
+  return [`${summary.topLevelSessions - mixed} top-level`, `${summary.subagentSessions - mixed} sub-agent`, mixed ? `${mixed} mixed` : null, unknown ? `${unknown} execution unknown` : null].filter(Boolean).join(" · ");
+}
+
+/** Window ledger value recorded by sub-agent executions (explicit evidence only, so a lower bound). */
+function subagentValue(sessions, { start, end }) {
+  return buildVelocity(sessions, { start, end, group: "execution", metric: "value" }).allSeries.find(({ id }) => id === "subagent")?.total ?? 0;
+}
+
 function renderSummary(view) {
   renderHistoryCoverage($("#history-coverage"), snapshot.historyCoverage, snapshot.sessions);
   const summary = view.summary;
   const days = windowDays();
   const context = velocityContext();
-  // One ledger pass grouped by repository serves the KPI, its sparkline and the repository bars.
-  const activity = buildVelocity(view.scopeSessions, { start: context.start, end: context.end, group: "repository", metric: "value" });
+  // The ledger pass grouped by repository (activeView) serves the KPI, its sparkline, the repository bars and the fleet table.
+  const activity = view.activity;
   // Deltas compare against the equal-length period immediately before the window, only when that period is fully observed.
   const previous = windowPreset === "all" ? null : previousPeriod({ end: context.end, min: elements.windowStart.min, start: context.start });
-  const previousSummary = previous ? summarize(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay)) : null;
+  const previousSummary = previous ? summarize(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay, context.timeZone)) : null;
   const previousActivity = previous ? buildVelocity(view.scopeSessions, { start: previous.startDay, end: previous.endDay, metric: "value" }) : null;
   const spendComparison = previousActivity ? comparePeriods(periodFromVelocity(activity), periodFromVelocity(previousActivity), "value", { missingSessions: activity.missingSessions }) : null;
   const unavailable = !view.scopeSessions.some((session) => session.velocity);
   setValue(elements.spend, activity.totals[0], unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { reason: "No session in this selection has activity dates" });
   clear(elements.spendCoverage);
-  const pricedShare = activity.evidence.eligible > 0 ? activity.evidence.known / activity.evidence.eligible : 1;
-  if (!unavailable && (pricedShare < 1 || activity.missingSessions)) {
-    const badge = node("small", activity.missingSessions ? "partial" : `${Math.floor(100 * pricedShare)}% priced`, "coverage");
-    badge.title = activity.missingSessions ? `${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh to collect activity dates` : "Share of dated tokens with a price";
+  if (!unavailable && activity.missingSessions) {
+    const badge = node("small", "partial", "coverage");
+    badge.title = `${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh to collect activity dates`;
     badge.setAttribute("aria-label", badge.title); elements.spendCoverage.append(badge);
-  }
+  } else if (!unavailable) { const badge = pricedBadge(activity.evidence); if (badge) elements.spendCoverage.append(badge); }
   const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} older-snapshot session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates (refresh to include)`] : [])];
   elements.spendNote.textContent = `By activity date (${context.timeZone})${activity.sessionDated[0] > 0 ? ` · includes ${money(activity.sessionDated[0])} session-dated (${activity.sessionDatedSessions} session${activity.sessionDatedSessions === 1 ? "" : "s"} without request times, dated by last activity)` : ""} · excludes, across all time, ${excluded.join(" and ")}${activity.missingSessions ? ` · ${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh` : ""} · not an invoice`;
   if (summary.retainedSessions) elements.spendNote.textContent += " · retained history uses last-ingest prices";
   elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
-  elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${summary.topLevelSessions} top-level · ${summary.subagentSessions} sub-agent${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
+  elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${executionBreakdown(summary)}${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
   renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.inputCoverage);
   elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached · repeated context included` : "Cache share unavailable · repeated context included";
   renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer.format(summary.workingSnapshots);
+  const count = (accessor) => dailyCountSeries(view.sessions, days, accessor, context.timeZone);
   const metrics = [
     ["spend", `Usage value by activity date (${context.timeZone}), including session-dated value; undated value excluded`, money, activity.totals[0], previousActivity?.totals[0], activity.daily.map(({ total }) => total)],
-    ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, dailyCountSeries(view.sessions, days, () => 1)],
-    ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.inputTokens)],
-    ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, dailyCountSeries(view.sessions, days, ({ tokens }) => tokens.outputTokens)],
-    ["tools", "Effective tool calls per session-start day", integer.format, summary.toolCalls, previousSummary?.toolCalls, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.toolCalls)],
-    ["compactions", "Compactions per session-start day", integer.format, summary.compactions, previousSummary?.compactions, dailyCountSeries(view.sessions, days, ({ metrics: item }) => item.compactions)],
+    ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, count(() => 1)],
+    ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, count(({ tokens }) => tokens.inputTokens)],
+    ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, count(({ tokens }) => tokens.outputTokens)],
+    ["tools", "Effective tool calls per session-start day", integer.format, summary.toolCalls, previousSummary?.toolCalls, count(({ metrics: item }) => item.toolCalls)],
+    ["compactions", "Compactions per session-start day", integer.format, summary.compactions, previousSummary?.compactions, count(({ metrics: item }) => item.compactions)],
   ];
   for (const [name, label, format, current, before, series] of metrics) {
     renderDelta($(`#metric-${name}-delta`), name === "spend" ? spendDelta(spendComparison, previous?.length) : previousSummary ? deltaDescription(current, before, previous.length) : null);
     renderSparkline($(`#metric-${name}-spark`), series, days, { format, label });
   }
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
-  const repositoryValue = new Map(activity.allSeries.map(({ id, total }) => [id, total]));
-  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: repositoryValue.get(item.repository.id) ?? 0 })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
+  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.usage.value })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
   renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
-  renderBars(elements.modelSpend, view.spendByModel.map(({ model, provider, totalUsd, eligible, selected }) => ({ name: model, model, value: totalUsd, provider, coverage: { eligible: eligible.value, selected }, what: "priced value" })), money, 8);
+  // Model mix: the same ledger, one row per model and provider ("model · Provider"), as on Costs.
+  // The bars add up to the KPI: past eight rows the remainder is one "Other" row.
+  const ledger = ledgerMoney(view.scopeSessions, context);
+  const mix = ledger.models.filter(({ value }) => value > 0).map(({ id, model, provider, label, value }) => ({ id, name: label, model, value, provider }));
+  const rest = mix.slice(7);
+  renderBars(elements.modelSpend, mix.length > 8 ? [...mix.slice(0, 7), { id: "other", name: `Other (${rest.length} models)`, value: rest.reduce((total, { value }) => total + value, 0) }] : mix, money, 8);
   renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
   if (!summary.coverage.tools.eligible) { clear(elements.toolCalls); elements.toolCalls.append(node("p", `${DASH} No tool evidence in ${summary.coverage.tools.selected} selected sessions`, "empty-line")); }
-  renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.subagentSpendUsd })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
+  // Explicit sub-agent value: ledger cells whose execution kind is "subagent", per repository and window.
+  renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: subagentValue(repositorySessions(item.repository.id), context) })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
   renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
 }
 
@@ -1072,12 +1159,13 @@ function showWindowNote(adjusted) {
 }
 
 function observedRange() {
-  const dates = snapshot.sessions.flatMap(({ createdAt, transcript, evidence, spendByDay, velocity }) => [
-    ...(transcript?.startTimeKnown !== false && evidence?.timing !== "file-mtime" && normalizeTimestamp(createdAt) ? [normalizeTimestamp(createdAt).slice(0, 10)] : []), ...Object.keys(spendByDay),
-    ...ledgerCells(velocity).map(([day]) => day)]).filter(Boolean).sort();
+  // Start and activity dates in the snapshot timezone; legacy UTC `spendByDay` only for sessions without a ledger.
+  const timeZone = snapshotTimeZone();
+  const dates = snapshot.sessions.flatMap((session) => [sessionStartDay(session, timeZone),
+    ...(session.velocity ? ledgerCells(session.velocity).map(([day]) => day) : Object.keys(session.spendByDay ?? {}))]).filter(Boolean).sort();
   const minimum = dates[0] || new Date().toISOString().slice(0, 10);
-  // UTC session-start dates can run a day ahead of the snapshot's local date; never end a window in the future.
-  const today = localDay(snapshot.generatedAt, snapshot.velocity?.timeZone || "UTC");
+  // Never end a window after the snapshot's local date.
+  const today = localDay(snapshot.generatedAt, timeZone);
   const maximum = dates.at(-1) || minimum;
   return { maximum: today && maximum > today && minimum <= today ? today : maximum, minimum };
 }
@@ -1495,14 +1583,33 @@ for (const key of document.querySelectorAll(".key-command")) key.textContent = m
 const initialUrl = parseUrlState(urlParameters.toString(), { views: viewOrder, presets: windowPresets, aliases: viewAliases });
 const storedPreference = readPreference("session-analytics-view");
 const storedView = initialUrl.view ?? viewAliases[storedPreference] ?? storedPreference;
-const resetExportMenu = installExportMenu(() => {
-  if (elements.sync.dataset.state === "loading") return null;
+/** The active view's provider filter, which exports honour: Summary's daily-chart chips, Velocity's chips, Activity and Tools filters; null means all. */
+function exportProviders(view) {
+  if (view === "summary") return activeProviders();
+  if (view === "velocity") return velocityProviders($("#velocity-view"));
+  return viewProviderFilters[view] ? [...viewProviderFilters[view]] : null;
+}
+
+/**
+ * The export preview. JSON, sessions, models and tools cover whole sessions started in the window; daily.csv is the
+ * activity ledger for the window, the same cells (and total) as the dashboard's usage value. The current snapshot stays
+ * exportable while a refresh runs; only a first load has nothing to export.
+ */
+function exportSelection() {
   if (!snapshot || snapshot.kind === "shared") return snapshot;
-  const view = currentViewName();
-  const { start, end } = selectedWindow();
-  const providers = viewProviderFilters[view] ? [...viewProviderFilters[view]] : null;
-  return filterSnapshot(snapshot, { repositoryId: selectedRepository()?.repository.id, start, end, providers });
-}, {
+  const repositoryId = selectedRepository()?.repository.id ?? null, providers = exportProviders(currentViewName());
+  const snapshotProviders = new Set(snapshot.sessions.map(({ provider }) => provider));
+  const scope = (repositoryId ? repositorySessions(repositoryId) : snapshot.sessions).filter(({ provider }) => !providers || providers.includes(provider));
+  const { start, end, timeZone } = velocityContext();
+  const total = buildVelocity(scope, { start, end, group: "provider", metric: "value" }).totals[0];
+  const selected = providers ? providers.filter((provider) => snapshotProviders.has(provider)).length : snapshotProviders.size;
+  return {
+    snapshot: filterSnapshot(snapshot, { repositoryId, ...selectedWindow(), providers }),
+    ledger: { sessions: scope, start, end },
+    basis: `Daily value CSV: ${money(total)} usage value by activity date, ${start} to ${end} (${timeZone}), the same ledger as the dashboard. JSON, sessions, models and tools CSVs: whole sessions started in the window.${selected < snapshotProviders.size ? ` ${selected} of ${snapshotProviders.size} providers.` : ""}`,
+  };
+}
+const resetExportMenu = installExportMenu(exportSelection, {
   unavailableMessage: () => loadFailed && !snapshot ? "Nothing to export: the analysis failed. Use Retry in the banner." : "The snapshot is still loading.",
 });
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary", { history: false });

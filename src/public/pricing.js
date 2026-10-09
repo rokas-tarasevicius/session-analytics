@@ -5,6 +5,9 @@ import { DASH, dataTable, el, evidence, kpi, note } from "./ui.js";
 
 const date = (value) => value ? new Date(value).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "Not cached";
 const integer = (value) => value.toLocaleString("en-GB");
+// Coverage shares arrive rounded down to 0.1% (`pricedShare`); round away float noise before printing so 0.29 stays 29%.
+const tenths = (share) => Math.round(share * 1000) / 10;
+const sharePercent = (share, digits = 1) => digits ? `${tenths(share).toFixed(1)}%` : `${Math.floor(tenths(share))}%`;
 const money = (value, decimals = 2) => `$${value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: decimals })}`;
 const assumptions = (provenance) => provenance?.assumptions.map((code) => assumptionLabels[code] ?? "Derived cache rate").join("; ") || "None";
 const dialogId = "pricing-model-dialog";
@@ -87,7 +90,7 @@ export function renderModelDetails(target, card, rateCard) {
     const values = [["Usage value", money(usage.valueUsd)]];
     if (usage.upperEstimateUsd !== usage.valueUsd) values.push(["Upper estimate", money(usage.upperEstimateUsd)]);
     values.push(["Observed tokens", integer(usage.tokens)],
-      ["Pricing coverage", `${integer(usage.pricedTokens)} / ${integer(usage.tokens)} observed tokens (${usage.coverage === null ? DASH : `${(usage.coverage * 100).toFixed(1)}%`})`],
+      ["Pricing coverage", `${integer(usage.pricedTokens)} / ${integer(usage.tokens)} observed tokens (${usage.coverage === null ? DASH : sharePercent(usage.coverage)})`],
       ["Calls", integer(usage.calls)], ["Sessions", integer(usage.sessions)],
       ["Input tokens", integer(usage.inputTokens)], ["Cached input tokens", integer(usage.cachedInputTokens)],
       ["Cache write tokens", integer(usage.cacheWriteInputTokens)], ["Output tokens", integer(usage.outputTokens)]);
@@ -131,14 +134,14 @@ function modelGrid(cards, data, state, rateCard) {
     const usage = card.usage, provider = providerLabels[card.provider] ?? "Unknown provider";
     const prices = card.rate ? `${money(card.rate.inputPerMillion, 4)} in · ${money(card.rate.outputPerMillion, 4)} out / 1M` : "No matching rate";
     button.setAttribute("type", "button"); button.setAttribute("aria-haspopup", "dialog"); button.setAttribute("aria-controls", dialogId);
-    button.dataset.focusKey = `pricing:model:${card.model}`;
-    button.setAttribute("aria-label", `${card.model}, ${provider}: ${!usage ? "Not used in this selection" : !usage.pricedTokens && !usage.valueUsd ? "no usage value (unpriced)" : `${money(usage.valueUsd)} usage value`}, ${card.rate
+    button.dataset.focusKey = `pricing:model:${card.id}`;
+    button.setAttribute("aria-label", `${card.model}, ${provider}: ${!usage ? "Not used in this selection" : !usage.pricedTokens && !usage.valueUsd ? "no usage value (unpriced)" : `${money(usage.valueUsd)} API-equivalent value`}, ${card.rate
       ? `input ${money(card.rate.inputPerMillion, 4)} / output ${money(card.rate.outputPerMillion, 4)} per 1M tokens` : prices}. Show pricing details`);
     button.style?.setProperty?.("--card-accent", providerColor(card.provider));
     button.append(providerHeading(card.provider), el("span", card.model, "pricing-model"), el("span", prices, "pricing-price"));
     if (usage) {
       const unpriced = !usage.pricedTokens && !usage.valueUsd;
-      button.append(el("strong", unpriced ? DASH : money(usage.valueUsd), "pricing-value"), el("span", unpriced ? "No usage value: unpriced" : "Usage value", "pricing-caption"),
+      button.append(el("strong", unpriced ? DASH : money(usage.valueUsd), "pricing-value"), el("span", unpriced ? "No usage value: unpriced" : "API-equivalent value · activity-dated", "pricing-caption"),
         el("small", `${integer(usage.tokens)} tokens · ${integer(usage.calls)} calls`, "pricing-caption"));
       const share = data.maxValue > 0 ? usage.valueUsd / data.maxValue : data.maxTokens > 0 ? usage.tokens / data.maxTokens : 0;
       const width = Math.max(0, Math.min(100, share * 100));
@@ -146,7 +149,7 @@ function modelGrid(cards, data, state, rateCard) {
       track.setAttribute("role", "img"); track.setAttribute("aria-label", `${Math.round(width)}% of the top model's ${data.maxValue > 0 ? "usage value" : "observed tokens"}`);
       fill.style?.setProperty?.("width", `${width}%`); track.append(fill); button.append(track);
       if (!card.priced || (usage.coverage !== null && usage.coverage < 1)) button.append(el("small",
-        usage.coverage !== null && usage.coverage < 1 ? `${Math.floor(usage.coverage * 100)}% of tokens priced` : "Incomplete rates", "pricing-badge"));
+        usage.coverage !== null && usage.coverage < 1 ? `${sharePercent(usage.coverage, 0)} of tokens priced` : "Incomplete rates", "pricing-badge"));
     } else button.append(el("small", "Not used in this selection", "pricing-caption"));
     state.buttons.set(button.dataset.focusKey, button);
     button.addEventListener?.("click", () => {
@@ -158,8 +161,11 @@ function modelGrid(cards, data, state, rateCard) {
   return grid;
 }
 
-/** Prices shown here are the evidence used by the selected sessions, including mixed historical rates. */
-export function renderPricingPanel(container, rateCard, sessions) {
+/**
+ * Prices shown here are the evidence used by the selected sessions, including mixed historical rates. Card values and
+ * coverage read the activity ledger over `window` (`{ start, end }` calendar dates), as Costs and the Summary KPI do.
+ */
+export function renderPricingPanel(container, rateCard, sessions, window = {}) {
   const state = panelState(container);
   container = state.content; state.buttons.clear();
   container.replaceChildren();
@@ -184,17 +190,18 @@ export function renderPricingPanel(container, rateCard, sessions) {
     link.href = source.url; link.target = "_blank"; link.rel = "noreferrer";
     card.append(link); cards.append(card);
   }
-  const data = pricingModelCards(rateCard, sessions), { tokens, pricedTokens } = data;
-  cards.append(kpi({ label: "Selected token coverage", value: tokens ? `${(100 * pricedTokens / tokens).toFixed(1)}%` : null, reason: tokens ? null : "No API-priced tokens in this selection", note: tokens ? `${pricedTokens.toLocaleString("en-GB")} / ${tokens.toLocaleString("en-GB")} observed tokens` : "Provider-reported values do not use a rate card", accent: true }));
+  const data = pricingModelCards(rateCard, sessions, window), { tokens, pricedTokens } = data;
+  cards.append(kpi({ label: "Pricing coverage", value: data.coverage === null ? null : sharePercent(data.coverage), reason: tokens ? null : "No eligible tokens in this selection", note: tokens ? `${pricedTokens.toLocaleString("en-GB")} / ${tokens.toLocaleString("en-GB")} eligible tokens · activity-dated, as on Costs` : "Provider-reported values do not use a rate card", accent: true }));
   cards.append(kpi({ label: "Price policy", value: status.policy === "reviewed-only" ? "Pinned" : status.offline ? "Offline" : "Live", note: `${mode} · reviewed card effective ${rateCard.effectiveDate}` }));
   container.append(cards);
   container.append(evidence([
+    `Cards add up to ${money(data.api)} API-equivalent value. With ${money(data.reported)} provider-reported value, which has no rate card, that is the ${money(data.total)} usage value for these dates on Summary and Costs.`,
     "API-equivalent value is not an invoice. Each request uses the newest snapshot at or before its timestamp; earlier requests use the oldest available evidence, labelled below.",
-    "Coverage counts explicit token-class rates; substituted cache rates are excluded. Provider-reported values are excluded.",
+    "Coverage is the share of eligible ledger tokens with an explicit token-class rate for these dates, the same measure as Costs; substituted cache rates are excluded. Cursor database usage has no eligible tokens.",
     status.policy === "reviewed-only" ? "The selected reviewed card is pinned. Public pricing sources are bypassed."
       : status.offline ? "Offline mode prevents public pricing requests. Run rates update with offline mode disabled when you want fresh evidence."
       : "The dashboard checks for stale prices after startup. Refresh snapshot after that update to apply it, or run session-analytics rates update.",
-    "Cards are ordered by API-equivalent usage value in the selection, then observed tokens. Provider-reported usage (for example Cursor) does not use a rate card and is not shown here.",
+    "Cards are per provider and model, ordered by usage value for these dates, then observed tokens. Provider-reported usage (for example Cursor) does not use a rate card and is not shown here.",
   ]));
   const panel = el("article", null, "panel detail-panel");
   const header = el("header"), block = el("div");
@@ -209,7 +216,7 @@ export function renderPricingPanel(container, rateCard, sessions) {
   const renderUnused = () => {
     toggle.textContent = showUnused ? "Hide unused models" : `Show ${integer(data.unused.length)} unused models`;
     toggle.setAttribute("aria-expanded", String(showUnused)); unused.hidden = !showUnused;
-    for (const card of data.unused) state.buttons.delete(`pricing:model:${card.model}`);
+    for (const card of data.unused) state.buttons.delete(`pricing:model:${card.id}`);
     unused.replaceChildren(...(showUnused ? [modelGrid(data.unused, data, state, rateCard)] : []));
   };
   toggle.addEventListener?.("click", () => { showUnused = !showUnused; renderUnused(); });

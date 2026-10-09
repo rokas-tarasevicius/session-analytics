@@ -103,6 +103,43 @@ test("export menu disables unloaded/unsupported formats, downloads exactly the s
   } finally { (globalThis as any).document = originalDocument; URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; }
 });
 
+test("a dashboard selection states its value basis and downloads the activity ledger it describes as daily.csv", async () => {
+  const document = new Element(), menu = new Element(), status = new Element(), description = new Element(), summary = new Element();
+  const buttons = ["json", "sessions", "daily", "models", "tools", "shared"].map((kind) => { const button = new Element(); button.dataset.export = kind; return button; });
+  menu.children = buttons; menu.querySelector = () => summary;
+  const downloads: Array<{ name: string; blob: Blob }> = [];
+  const blobs = new Map<string, Blob>();
+  const adapter = Object.assign(document, {
+    body: new Element(),
+    querySelector: (selector: string) => ({ "#export-menu": menu, "#export-status": status, "#export-description": description })[selector],
+    createElement: () => { const link = new Element(); link.click = () => { downloads.push({ name: link.download, blob: blobs.get(link.href)! }); }; return link; },
+  });
+  const originalDocument = (globalThis as any).document;
+  const originalCreate = URL.createObjectURL, originalRevoke = URL.revokeObjectURL;
+  (globalThis as any).document = adapter;
+  URL.createObjectURL = (blob) => { const url = `blob:synthetic-${blobs.size}`; blobs.set(url, blob); return url; };
+  URL.revokeObjectURL = () => {};
+  try {
+    const cell = (day: string, value: number) => [day, 9, 0, [value, 10, 10, 0, 0, 2, 0, 1, 0, 0, 12, 0, 10, 0]];
+    // Started before the window: its whole-session rows are not in the snapshot, but its in-window value is in daily.csv.
+    const earlier = { repositoryId: "r", repositoryName: "Repo", provider: "claude", costBasis: "provider-reported", velocity: { dimensions: [{ agent: "claude-sdk", model: "m", executionKind: "top-level", effort: "unknown" }], buckets: [], undated: [], sessionDated: [cell("2026-09-02", 3)] } };
+    const inside = { ...earlier, costBasis: "api-list-price-equivalent", velocity: { ...earlier.velocity, buckets: [cell("2026-09-01", 1), cell("2026-08-31", 50)], sessionDated: [] } };
+    const snapshot = { schemaVersion: 1, sessions: [], repositories: [] } as unknown as MachineAnalytics;
+    let current: unknown = { snapshot, ledger: { sessions: [earlier, inside], start: "2026-09-01", end: "2026-09-02" }, basis: "Daily value CSV: $4.00 usage value by activity date." };
+    installExportMenu(() => current as MachineAnalytics);
+    menu.open = true; menu.dispatchEvent(new Event("toggle"));
+    assert.match(description.textContent, /^0 sessions in the current repository, date, and view filters\. Daily value CSV: \$4\.00 usage value by activity date\. Downloads include/);
+    // The preview is bound when the menu opens.
+    current = null;
+    buttons[2]!.click();
+    assert.equal(downloads[0]!.name, "daily.csv");
+    const rows = (await downloads[0]!.blob.text()).trim().split("\r\n").map((line) => line.split(","));
+    assert.deepEqual(rows.slice(1).map((row) => [row[4], row[5], row[6], row[7]]), [['"2026-09-01"', '"1"', '"1"', '"0"'], ['"2026-09-02"', '"1"', '"0"', '"3"']]);
+    menu.open = true; current = { snapshot, ledger: null, basis: null }; menu.dispatchEvent(new Event("toggle")); buttons[0]!.click();
+    assert.deepEqual(JSON.parse(await downloads[1]!.blob.text()), snapshot, "JSON is the snapshot itself, never the wrapper");
+  } finally { (globalThis as any).document = originalDocument; URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; }
+});
+
 test("review: shared totals disclose running/partial lower bounds and pricing coverage limits", () => {
   const panel = new Element();
   const original = (globalThis as any).document;
