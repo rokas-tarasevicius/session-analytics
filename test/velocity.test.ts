@@ -8,7 +8,7 @@ import test from "node:test";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { analyzeMachineSessionsIsolated } from "../src/analysis-process.ts";
 import { claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed, localClock, VelocityAccumulator, velocityDimension, velocityEffort, zeroVelocity } from "../src/metrics/velocity.ts";
-import { averagePrice, buildVelocity, calendarDays, guardedDelta, localDay, metricDefinitions, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
+import { averagePrice, buildVelocity, calendarDays, guardedDelta, localDay, metricDefinitions, moverBaseline, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
 import type { SessionAnalytics, SessionVelocity, VelocityValues } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 import { addUnsafeVelocityModels, unsafeVelocityModels } from "./velocity-fixtures.ts";
@@ -296,14 +296,38 @@ test("month comparisons handle unequal months and projections retain an honest n
   assert.equal(short.projection, null, "Fewer than three active days cannot forecast");
 });
 
-test("movers rank absolute increases and guard each group's denominator", () => {
+test("movers rank absolute changes and guard each group's denominator", () => {
   const previous = calendarDays("2026-09-01", "2026-09-07"), current = calendarDays("2026-09-08", "2026-09-14");
   const sessions = [synthetic([...previous.map((day): [string, number] => [day, 1]), ...current.map((day): [string, number] => [day, 5])]), synthetic(current.map((day) => [day, 2]), { model: "new-model", repository: "new-repo", agent: "claude-sdk" })];
   const movers = topMovers(sessions, { start: "2026-09-01", end: "2026-09-14", metric: "value" }, "2026-09-15");
-  assert.equal(movers.available, true); assert.equal(movers.rows[0]?.increase, 28);
-  assert.equal(movers.rows.find((row) => row.label === "new-repo")?.delta, null);
+  assert.equal(movers.available, true); assert.equal(movers.rows[0]?.change, 28);
+  const added = movers.rows.find((row) => row.label === "new-repo")!;
+  assert.equal(added.delta, null); assert.equal(added.base, "new");
   assert.equal(topMovers(sessions, { start: "2026-09-02", end: "2026-09-14", metric: "value" }, "2026-09-15").available, false);
   assert.equal(shiftDay("2026-01-01", -1), "2025-12-31");
+});
+
+test("movers include the biggest decreases, sort by absolute dollars and hide percentages on bases under $1", () => {
+  const previous = calendarDays("2026-09-01", "2026-09-07"), current = calendarDays("2026-09-08", "2026-09-14");
+  const week = (before: number, after: number): Array<[string, number]> => [...previous.map((day): [string, number] => [day, before / 7]), ...current.map((day): [string, number] => [day, after / 7])];
+  const sessions = [
+    synthetic(week(30, 10), { repository: "shrinking", model: "model-down", agent: "claude-cli" }),
+    synthetic(week(0.5, 6), { repository: "tiny-base", model: "model-tiny", agent: "claude-sdk" }),
+    synthetic(week(2, 3), { repository: "steady", model: "model-up", agent: "claude-plan" }),
+    synthetic(week(4, 4), { repository: "flat", model: "model-flat", agent: "claude-explore" }),
+    synthetic(week(9, 0), { repository: "stopped", model: "model-stopped", agent: "claude-desktop" }),
+  ];
+  const movers = topMovers(sessions, { start: "2026-09-01", end: "2026-09-14", metric: "value" }, "2026-09-15");
+  const repositories = movers.rows.filter((row) => row.group === "repository");
+  assert.deepEqual(repositories.map((row) => row.label), ["shrinking", "stopped", "tiny-base"], "three largest by absolute change, decreases included");
+  near(repositories[0]!.change, -20); near(repositories[0]!.delta!, -2 / 3); assert.equal(repositories[0]!.base, null);
+  near(repositories[1]!.change, -9); near(repositories[1]!.delta!, -1);
+  const tiny = repositories[2]!;
+  near(tiny.change, 5.5); assert.equal(tiny.delta, null); assert.equal(tiny.base, "small", "a base under $1 shows no percentage");
+  assert.ok(!movers.rows.some((row) => row.label === "flat"), "unchanged groups are not movers");
+  for (let i = 1; i < movers.rows.length; i += 1) assert.ok(Math.abs(movers.rows[i - 1]!.change) >= Math.abs(movers.rows[i]!.change), "rows are ordered by absolute change");
+  assert.deepEqual(new Set(movers.rows.map((row) => row.group)), new Set(["repository", "model", "agent"]));
+  assert.equal(moverBaseline("value"), 1); assert.equal(moverBaseline("input"), 100, "token metrics keep their own minimum");
 });
 
 test("Codex changes source, execution, model and effort without reassigning earlier usage or copying identity content", async () => {
@@ -374,15 +398,20 @@ test("missing metric evidence cannot become a decline, burn rate, rolling averag
         assert.equal(data.allSeries[0]?.evidence.known, data.evidence.known);
         assert.equal(data.daily.at(-1)?.evidence.complete, false);
       }
-      if (gap === "today") assert.equal(result.burn.ratio, null, `${metric}: today's partial evidence also blocks burn`);
-      assert.equal(result.projection, null, `${metric}: ${gap} evidence gap invalidates month-end scenarios`);
+      if (gap === "today") assert.equal(result.burn.ratio, null, `${metric}: today's missing evidence also blocks burn`);
+      if (gap === "week") assert.equal(result.projection, null, `${metric}: a week-long evidence gap invalidates month-end scenarios`);
+      else {
+        // One day without evidence out of twenty leaves the month above the evidence floor: shown, tagged and explained.
+        assert.equal(result.projection?.partial, true, `${metric}: a one-day ${gap} gap leaves a partial scenario`);
+        assert.match(result.projection!.cause!, /^1 model (with unpriced tokens|without [a-z-]+ detail): synthetic-model$/);
+      }
       const workload = velocityIndicators(buildVelocity([session], { ...options, metric: "input" }), options.end);
       assert.equal(workload.week.delta, 0, "Input workload has not declined");
     }
   }
 });
 
-test("movers cannot rank telemetry recovery or partially observed growth as a measured increase", () => {
+test("movers cannot rank telemetry recovery as a measured increase; partly observed changes are flagged", () => {
   const options = { start: "2026-09-01", end: "2026-09-14" };
   for (const [metric, numerator, counter] of [["value", 10, 0], ["reasoning", 11, 6], ["cacheRead", 12, 3], ["cacheWrite", 13, 4]] as const) {
     for (const gap of ["previous", "current"] as const) {
@@ -393,8 +422,14 @@ test("movers cannot rank telemetry recovery or partially observed growth as a me
         }
       }
       const movers = topMovers([session], { ...options, metric }, "2026-09-15");
-      assert.equal(movers.rows.length, 0, `${metric}: ${gap} evidence gap must not rank as growth`);
-      assert.equal(movers.excludedGroups, 3);
+      if (gap === "previous") {
+        assert.equal(movers.rows.length, 0, `${metric}: a week without evidence must not rank as growth`);
+        assert.equal(movers.excludedGroups, 3);
+      } else {
+        // Six of seven days observed is above the evidence floor: the change is shown on observed values and flagged.
+        assert.equal(movers.excludedGroups, 0);
+        assert.equal(movers.rows.length, 3); assert.ok(movers.rows.every((row) => row.partial && row.change > 0), `${metric}: partial rows are flagged`);
+      }
     }
   }
 });

@@ -6,23 +6,35 @@
 .velocity-totals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 #velocity-view .panel { min-height: 0; margin: 0; }
 #velocity-view .panel-meta { white-space: normal; overflow-wrap: anywhere; }
-.velocity-chart { min-width: 0; }
+.velocity-chart { position: relative; min-width: 0; }
 .velocity-chart > svg { display: block; width: 100%; height: auto; max-height: none; touch-action: pan-y; }
 .velocity-chart svg:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: var(--radius-sm); }
 .velocity-line { stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .velocity-area { stroke-width: 1; fill-opacity: .55; stroke-linejoin: round; }
 .velocity-average { fill: none; stroke: var(--text); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
 .velocity-marker { stroke: var(--line-strong); pointer-events: none; }
-.velocity-average-key { color: var(--muted); }
-.velocity-inspection { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); font: 500 var(--fs-xs)/1.6 var(--font-sans); font-variant-numeric: tabular-nums; }
-.velocity-inspection > strong { flex-basis: 100%; color: var(--text); font-weight: 500; }
-.velocity-inspection > span { overflow-wrap: anywhere; }
+.velocity-average-partial { opacity: .45; }
+.velocity-average-key { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-sm); margin: 8px 0; }
+.velocity-tooltip { transform: none; max-width: calc(100% - 20px); }
+.velocity-tooltip .tip-row { overflow-wrap: anywhere; }
+.velocity-inspection { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); font: 400 var(--fs-sm)/1.6 var(--font-sans); font-variant-numeric: tabular-nums; }
+.velocity-inspection > strong { display: block; color: var(--text); font-weight: 500; }
+.velocity-readout { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; margin: 8px 0 0; }
+.velocity-readout dt { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.velocity-readout dt i { flex: 0 0 12px; height: 3px; background: var(--key-color); }
+.velocity-readout dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.velocity-readout i.is-dashed, .velocity-tooltip .tip-row i.is-dashed { background: repeating-linear-gradient(90deg, var(--key-color) 0 4px, transparent 4px 6px); }
+.velocity-partial-note { color: var(--muted); font: 400 var(--fs-xs) var(--font-sans); letter-spacing: normal; }
+.velocity-partial { display: inline-block; margin-left: 8px; padding: 2px 5px; border: 1px solid var(--line-strong); border-radius: 3px; vertical-align: middle; color: var(--text-2); font: 400 var(--fs-xs)/1.2 var(--font-sans); letter-spacing: normal; }
+.velocity-cause { display: block; color: var(--muted); font: 400 var(--fs-sm)/1.5 var(--font-sans); }
+.kpi .kpi-coverage.velocity-cause { display: block; font: 400 var(--fs-xs)/1.4 var(--font-sans); }
+.velocity-legend .chart-legend-swatch[data-pattern="marker"] { height: 10px; background: radial-gradient(circle at center, var(--surface) 0 2px, var(--series-color) 2px 4px, transparent 4px), linear-gradient(var(--series-color), var(--series-color)) center / 100% 2px no-repeat; }
 .velocity-band { display: block; width: 100%; max-height: 48px; margin: 8px 0 4px; }
 .velocity-band-base { stroke: var(--line-strong); stroke-width: 2; }
 .velocity-band-range { stroke: var(--series-2); stroke-width: 10; opacity: .45; }
 .velocity-band-point { fill: var(--text); stroke: var(--surface); stroke-width: 2; }
 .velocity-movers td:first-child { color: var(--muted); text-transform: capitalize; }
-.velocity-movers td:last-child { min-width: 200px; white-space: normal; font-size: var(--fs-xs); }
 .velocity-projection h3 { margin: 0; }
 .velocity-projection .projected { font: 500 var(--fs-lg)/1.1 var(--font-mono); letter-spacing: -0.03em; margin: 6px 0 2px; }
-@media (max-width: 760px) { .velocity-inspection { max-height: 200px; overflow: auto; } }
+@media (min-width: 760px) { .velocity-readout { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; column-gap: 16px; } }
+@media (max-width: 759px) { .velocity-inspection { max-height: 200px; overflow: auto; } }

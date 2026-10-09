@@ -70,7 +70,6 @@ export function deltaDescription(current: number, previous: number | null | unde
 export function downsample(values: number[], maxPoints: number): { indexFor: (index: number) => number; values: number[] };
 export function sparklineSummary(label: string, values: number[], days: string[], format: (value: number) => string): string;
 export function heatLevel(value: number, maximum: number): number;
-export function tickScale(maximum: number): { axisMaximum: number; tick: number };
 export function matchesQuery(item: PaletteItem, query: string): boolean;
 export function paletteScore(item: PaletteItem, query: string): { score: number; tier: number };
 export function rankPaletteItems<T extends PaletteItem>(items: T[], query: string): T[];

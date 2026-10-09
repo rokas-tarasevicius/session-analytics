@@ -332,13 +332,6 @@ export function heatLevel(value, maximum) {
   return value === 0 ? 0 : Math.max(1, Math.ceil((Math.log1p(value) / Math.log1p(Math.max(1, maximum))) * 7));
 }
 
-export function tickScale(maximum) {
-  const roughTick = Math.max(0.001, maximum) / 4;
-  const tickMagnitude = 10 ** Math.floor(Math.log10(roughTick));
-  const tick = Math.ceil(roughTick / tickMagnitude) * tickMagnitude;
-  return { axisMaximum: tick * 4, tick };
-}
-
 // Match tiers, best first. A label match outranks the same tier in keywords or the group name.
 const matchTiers = { exact: 5, prefix: 4, wordStart: 3, substring: 2, subsequence: 1, none: 0 };
 

@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderLegend } from "../src/public/chart-legend.js";
-import { modelColor, providerColor } from "../src/public/chart-colors.js";
-import { reportedModel } from "../src/providers/common.ts";
+import { modelSlots, providerColor, slotColor } from "../src/public/chart-colors.js";
 import { Element } from "./release-dom.ts";
 import { harness, sample, withLedger } from "./validation/aggregation-ui-harness.ts";
 
@@ -21,9 +20,9 @@ test("cost provider stacks share the 191:576 scale, run high to low and show mod
   near(length(stacks[1]!) / length(stacks[0]!), 191 / 576);
   near(length(stacks[1]!), 191 / 576 * 100); near(length(stacks[0]!), 100);
   assert.deepEqual(stacks[1]!.children.map((bar) => bar.dataset.series), ["codex:gpt-5-mini", "codex:unattributed"]);
-  assert.equal(stacks[1]!.children[0]!.style.background, modelColor("codex", "gpt-5-mini"));
-  assert.equal(stacks[0]!.children[0]!.style.background, modelColor("claude", "claude-opus-4.6"));
-  assert.equal(stacks[0]!.children[1]!.style.background, modelColor("claude", "claude-sonnet-4.6"));
+  assert.equal(stacks[1]!.children[0]!.style.background, "var(--provider-codex-2)", "gpt-5 (standard tier) holds the brand shade; mini keeps its two-step distance");
+  assert.equal(stacks[0]!.children[0]!.style.background, "var(--provider-claude-0)");
+  assert.equal(stacks[0]!.children[1]!.style.background, "var(--provider-claude-1)");
   assert.match(stacks[1]!.children[1]!.style.background, /repeating-linear-gradient.*var\(--muted\)/);
   assert.equal(stacks[1]!.getAttribute("role"), "img");
   assert.match(stacks[1]!.getAttribute("aria-label")!, /No model evidence: \$41.00 \(21.5% of provider\)/);
@@ -42,8 +41,8 @@ test("Costs model rows share one scale across providers, use model shades, and k
   const fills = models.querySelectorAll(".cost-model-track").map((track) => track.children[0]!);
   assert.deepEqual(fills.map((fill) => fill.dataset.series), ["claude:claude-opus-4.6", "codex:gpt-5-mini"]);
   near(percent(fills[1]!) / percent(fills[0]!), 191 / 576);
-  assert.equal(fills[0]!.style.background, modelColor("claude", "claude-opus-4.6"));
-  assert.equal(fills[1]!.style.background, modelColor("codex", "gpt-5-mini"));
+  assert.equal(fills[0]!.style.background, "var(--provider-claude-0)");
+  assert.equal(fills[1]!.style.background, "var(--provider-codex-0)", "a provider's only model wears its brand colour");
   const row = models.querySelectorAll(".cost-model-row")[1]!;
   assert.match(row.textContent, /24.9%/);
   assert.match(row.textContent, /1 session · 100 in \/ 20 out tokens/);
@@ -56,6 +55,9 @@ test("Costs model rows share one scale across providers, use model shades, and k
   run('renderBars(container, [{name:"large",value:1000},{name:"tiny",value:0.001},{name:"zero",value:0}], String)');
   const bars = container.querySelectorAll("i"); near(percent(bars[1]!), 0.0001); assert.equal(percent(bars[2]!), 0);
   assert.ok(bars.every((bar) => bar.style["--series-color"] === "var(--chart-neutral)"));
+  // Summary's model mix uses the same per-provider shades as Costs: distinct for opus-5/opus-4-8, brand for a lone Gemini row.
+  run('renderBars(container, [{name:"a",value:3,provider:"claude",model:"claude-opus-5"},{name:"b",value:2,provider:"claude",model:"claude-opus-4-8"},{name:"c",value:1,provider:"gemini",model:"claude-sonnet-5"}], String)');
+  assert.deepEqual(container.querySelectorAll("i").map((bar) => bar.style["--series-color"]), ["var(--provider-claude-0)", "var(--provider-claude-1)", "var(--provider-gemini-0)"]);
   run('clearInactiveAnalyticsViews("summary")');
   assert.equal(models.childElementCount, 0);
   assert.equal(document.querySelector("#provider-cost-models")!.childElementCount, 0);
@@ -139,14 +141,14 @@ test("donut and daily lines draw every provider in legend order, using brand col
     assert.equal(mark.style["--series-color"], providerColor(mark.dataset["series"]));
   }
   assert.equal(chart.querySelectorAll('div.chart-legend-item[role="listitem"]').length, 7);
-  // Without a measured width the chart keeps its 900-unit fallback; at a phone's width it is drawn in CSS pixels with three date ticks.
+  // Without a measured width the chart keeps its 900-unit fallback; at a phone's width it is drawn in CSS pixels with three date ticks in the shared format.
   assert.equal(chart.querySelector("svg")!.getAttribute("viewBox"), "0 0 900 272");
   const days = ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"].map((name) => ({ ...day, name }));
   Object.assign(chart, { clientWidth: 390 });
   run(`renderLine(${JSON.stringify(days)})`);
   const narrow = chart.querySelector("svg")!;
   assert.equal(narrow.getAttribute("viewBox"), "0 0 390 220");
-  assert.deepEqual(narrow.querySelectorAll(".axis-label").filter((label) => label.getAttribute("y") === "208").map((label) => label.textContent), ["1 Oct", "4 Oct", "7 Oct"]);
+  assert.deepEqual(narrow.querySelectorAll(".axis-label").filter((label) => label.getAttribute("y") === "208").map((label) => label.textContent), ["Oct 1", "Oct 4", "Oct 7"], "three shared-format date ticks at even steps");
 });
 
 test("legend keeps safe wrapping text and order, drops only numeric zero and resets highlights", async () => {
@@ -166,4 +168,90 @@ test("legend keeps safe wrapping text and order, drops only numeric zero and res
   entries[0]!.listeners.get("pointerenter")!(); assert.equal(target.getAttribute("data-highlight"), "unsafe");
   renderLegend(container, [], { target });
   assert.equal(target.getAttribute("data-highlight"), null); assert.equal(mark.getAttribute("data-series-active"), null);
+});
+
+test("Costs shares adjusted model slots across charts, fits direct labels and links hover in both directions", async () => {
+  const names = ["claude-opus-5", "claude-opus-4-8", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5", "claude-haiku-3"];
+  const original = modelSlots(names.map((model) => ({ id: `claude:${model}`, provider: "claude", model })));
+  const overflow = names.find((model) => original.get(`claude:${model}`)!.overflow)!;
+  const neighbour = names.find((model) => model !== overflow && original.get(`claude:${model}`)!.slot === original.get(`claude:${overflow}`)!.slot)!;
+  const ordered = [neighbour, overflow, ...names.filter((model) => model !== neighbour && model !== overflow)];
+  const claude = withLedger(sample(), ordered.map((model, i) => [model, [40, 30, 20, 8, 1.999, 0.001][i]!]));
+  const cursor = withLedger(sample(), [["claude-opus-5", 10]]); cursor.provider = "cursor";
+  const { document, context, run } = await harness([claude, cursor]);
+  const frames: Array<() => void> = [];
+  context.requestAnimationFrame = (callback: () => void) => frames.push(callback);
+  run("renderCosts(activeView())");
+  const providers = document.querySelector("#provider-cost-models")!, models = document.querySelector("#cost-models")!;
+  const bars = providers.querySelectorAll(".cost-stack")[0]!.children;
+  const fills = models.querySelectorAll(".cost-model-track").map((track) => track.children[0]!);
+  assert.deepEqual(bars.map((bar) => bar.dataset.series), ordered.map((model) => `claude:${model}`));
+  const color = (bar: Element) => bar.style.background.match(/var\(--provider-[^)]+\)/)![0] as string;
+  for (const bar of providers.querySelectorAll(".cost-stack").flatMap((stack) => stack.children)) {
+    const fill = fills.find((fill) => fill.dataset.series === bar.dataset.series)!;
+    assert.equal(fill.style.background, bar.style.background, `${bar.dataset.series}: same slot and texture in both views`);
+    assert.equal(bar.querySelectorAll(".cost-segment-label").length, percent(bar) >= 8 ? 1 : 0);
+    assert.equal(bar.getAttribute("style"), null);
+    if (bar.dataset.series!.startsWith("cursor:")) assert.match(bar.style.background, /--provider-cursor-/);
+  }
+  for (let i = 1; i < bars.length; i += 1) assert.notEqual(color(bars[i]!), color(bars[i - 1]!), "adjacent segments never repeat a shade");
+  const repeated = bars.find((bar) => bar.dataset.series === `claude:${overflow}`)!;
+  assert.match(repeated.style.background, /repeating-linear-gradient/);
+  assert.notEqual(color(repeated), slotColor("claude", original.get(`claude:${overflow}`)!.slot), "the fixture exercises adjacency correction");
+  const labelled = bars.filter((bar) => bar.querySelector(".cost-segment-label"));
+  labelled.forEach((bar, i) => {
+    const label = bar.querySelector(".cost-segment-label")!;
+    Object.assign(bar, { clientWidth: i === 0 ? 300 : i === 1 ? 120 : 20 });
+    Object.defineProperty(label, "scrollWidth", { get: () => label.textContent.includes(" · ") ? 150 : 100 });
+  });
+  assert.equal(frames.length, 1); frames.shift()!();
+  assert.match(labelled[0]!.querySelector(".cost-segment-label")!.textContent, /40.0%/);
+  assert.doesNotMatch(labelled[1]!.querySelector(".cost-segment-label")!.textContent, /%/);
+  assert.equal(labelled[1]!.querySelector(".cost-segment-label")!.hidden, false);
+  assert.equal(labelled[2]!.querySelector(".cost-segment-label")!.hidden, true);
+  const key = providers.querySelector(".cost-key")!;
+  assert.match(key.textContent, /Each segment is one model, largest first/); assert.match(key.textContent, /Extra models share a shade, hatched/);
+  assert.doesNotMatch(key.textContent, /No model evidence/);
+  assert.equal(providers.querySelectorAll('[role="listitem"]').length, 0);
+  const tiny = bars.at(-1)!;
+  assert.match((tiny as Element & { title: string }).title, /\(<0.1% of Claude\)/);
+  const tinyRow = models.querySelectorAll(".cost-model-row").find((row) => row.dataset.series === tiny.dataset.series)!;
+  assert.equal(tinyRow.querySelector(".cost-model-share")!.textContent, "<0.1%");
+  assert.match((tinyRow as Element & { title: string }).title, /<0.1% of total/);
+  for (const source of [repeated, tinyRow]) {
+    const id = source.dataset.series;
+    source.listeners.get("pointerenter")!();
+    for (const container of [providers, models]) {
+      assert.equal(container.getAttribute("data-highlight"), id);
+      for (const mark of container.querySelectorAll("[data-series]")) assert.equal(mark.getAttribute("data-series-active"), mark.dataset.series === id ? "true" : null);
+    }
+    const activeRow = models.querySelectorAll(".cost-model-row").find((row) => row.dataset.series === id)!;
+    assert.equal(activeRow.getAttribute("data-active"), "true");
+    source.listeners.get("pointerleave")!();
+    for (const container of [providers, models]) {
+      assert.equal(container.getAttribute("data-highlight"), null);
+      assert.ok(container.querySelectorAll("[data-series]").every((mark) => mark.getAttribute("data-series-active") === null));
+    }
+    assert.equal(activeRow.getAttribute("data-active"), null);
+  }
+});
+
+test("Costs shows only relevant hatch keys, refits labels after resizing and formats tiny legend shares", async () => {
+  const source = withLedger(sample(), [["claude-opus-5", 100], ["<unknown>", 10]]);
+  const { context, document, run } = await harness([source]);
+  let resized: (() => void) | undefined;
+  const original = context.redrawOnResize;
+  context.redrawOnResize = (_container: Element, render: () => void) => { resized = render; };
+  run("renderCosts(activeView())");
+  const container = document.querySelector("#provider-cost-models")!;
+  const key = container.querySelector(".cost-key")!;
+  assert.match(key.textContent, /No model evidence/); assert.doesNotMatch(key.textContent, /Extra models/);
+  const first = container.querySelector(".cost-segment-label")!;
+  first.hidden = true; resized!();
+  assert.notEqual(container.querySelector(".cost-segment-label"), first);
+  assert.equal(container.querySelector(".cost-segment-label")!.hidden, false);
+  context.redrawOnResize = original;
+  const legend = new Element(), target = new Element();
+  renderLegend(legend, [{ id: "tiny", label: "Tiny", color: "grey", value: 0.001, share: 0.00001, mark: "rect" }], { target });
+  assert.equal(legend.querySelector(".chart-legend-share")!.textContent, "<0.1%");
 });
