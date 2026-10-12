@@ -21,6 +21,23 @@ test("the harness fires g v through the dashboard keydown handler", async () => 
   assert.equal(run("currentViewName()"), "velocity");
 });
 
+test("fleet row tooltips retain repository IDs and execution counts for screen readers", async () => {
+  const { document, run } = await harness([withLedger(sample(), [["model-synthetic", 10]])]);
+  run("renderRepositoryTable(activeView().repositories)");
+  const row = document.querySelector("#repository-rows")!.querySelector("tr")!;
+  const button = row.querySelector("button.row-link")!;
+  const details = run("'Synthetic · ID ' + repositoryKey('synthetic')");
+  const breakdown = run("executionBreakdown(activeView().repositories[0].summary)");
+  assert.equal(button.getAttribute("aria-label"), details);
+  assert.equal((button as any).title, details);
+  assert.equal(row.getAttribute("aria-label"), `${details} · 1 session · ${breakdown}`);
+  assert.equal((row.children[1] as any).title, breakdown);
+  assert.equal(row.children[1]!.getAttribute("aria-label"), `1 · ${breakdown}`);
+  assert.equal(row.children[0]!.querySelector("small"), null);
+  assert.equal(row.children[1]!.querySelector("small"), null);
+  assert.equal(row.children.length, 8);
+});
+
 test("shared snapshot ignores view, window and provider shortcuts", async () => {
   const { context, document, run, fireKey } = await harness([sample()]);
   context["sharedFixture"] = { kind: "shared", sources: [], minimumSessions: 5,

@@ -97,3 +97,54 @@ test("visually hidden text in coverage badges and tables cannot widen the page",
     assert.match(rule.body, /(?:^|;)\s*position:\s*relative\s*;/, `${selector} must be positioned`);
   }
 });
+
+test("fleet table details use tooltips and accessible names instead of sub-lines", async () => {
+  const app = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
+  const cells = app.slice(app.indexOf("function renderRepositoryTable("), app.indexOf("function renderWarnings("));
+  assert.doesNotMatch(cells, /node\("small"/);
+  assert.match(cells, /sessionsCell\.title = executionBreakdown\(summary\)/);
+  assert.match(cells, /repositoryButton\.title = repositoryDetails/);
+  assert.match(cells, /row\.setAttribute\("aria-label",.*repositoryDetails.*executionBreakdown\(summary\)/);
+  const css = await readCss("styles.css");
+  const repository = rules(css).find(({ selector }) => selector === "#repository-comparison .row-link");
+  assert.ok(repository);
+  assert.match(repository.body, /text-overflow:\s*ellipsis/);
+  assert.match(repository.body, /overflow:\s*hidden/);
+  const tables = rules(css).find(({ selector }) => selector === "table");
+  assert.ok(tables); assert.doesNotMatch(tables.body, /min-width/);
+  assert.match(css, /#repository-comparison table\s*\{\s*min-width:\s*880px/);
+  assert.match(css, /@media \(max-width: 1279px\)[\s\S]*?#repository-comparison :is\(th, td\):first-child\s*\{[^}]*position:\s*sticky;[^}]*background:\s*var\(--surface\)/);
+  assert.match(css, /#repository-comparison thead th:first-child\s*\{\s*z-index:\s*3/);
+});
+
+test("table wrappers share CSS-only local scroll shadows", async () => {
+  const rule = rules(await readCss("styles.css")).find(({ selector }) => selector === ".table-wrap");
+  assert.ok(rule);
+  assert.match(rule.body, /background-attachment:\s*local,\s*local,\s*scroll,\s*scroll/);
+  assert.match(rule.body, /linear-gradient\(to right, var\(--surface\)/);
+  assert.match(rule.body, /linear-gradient\(to left, var\(--surface\)/);
+  assert.match(rule.body, /radial-gradient\(farthest-side at 0 50%/);
+  assert.match(rule.body, /radial-gradient\(farthest-side at 100% 50%/);
+});
+
+test("daily usage chips have a separate wrapping row with a six-pixel gap", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /<header class="daily-usage-header"><div><h2>Daily usage value<\/h2>/);
+  const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".panel > .daily-usage-header")!.body, /flex-direction:\s*column/);
+  const chips = cssRules.find(({ selector }) => selector === ".daily-usage-header .provider-key");
+  assert.ok(chips); assert.match(chips.body, /flex-wrap:\s*wrap/); assert.match(chips.body, /gap:\s*6px/);
+});
+
+test("all KPI grids share responsive columns without per-view column overrides", async () => {
+  const shared = await readCss("styles.css");
+  assert.match(shared, /\.kpi-grid\s*\{[^}]*grid-template-columns:\s*repeat\(var\(--kpi-columns, 4\), minmax\(0, 1fr\)\)/);
+  assert.match(shared, /@media \(max-width: 1000px\)[\s\S]*?\.kpi-grid\s*\{\s*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  for (const file of ["pricing.css", "velocity.css"]) {
+    const css = await readCss(file);
+    for (const { selector, body } of rules(css)) {
+      if (/\.kpi-grid|\.velocity-(?:lead|totals)/.test(selector)) assert.doesNotMatch(body, /grid-template-columns/, `${file}: ${selector}`);
+    }
+  }
+  assert.doesNotMatch(await readCss("pricing.css"), /@media\s*\(max-width:\s*520px\)/);
+});

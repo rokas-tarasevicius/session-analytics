@@ -16,6 +16,13 @@ function child(source: string, dataDir: string) {
   return { process, exited };
 }
 
+async function stop(running: ReturnType<typeof child> | undefined): Promise<void> {
+  if (!running || running.process.exitCode !== null || running.process.signalCode !== null) return;
+  const fallback = setTimeout(() => running.process.kill("SIGKILL"), 1000);
+  running.process.kill("SIGTERM");
+  try { await running.exited; } finally { clearTimeout(fallback); }
+}
+
 test("writer filesystem mutex serializes simultaneous contenders independently of SQLite", { timeout: 20_000 }, async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "index-gate-test-"));
   try {
@@ -53,9 +60,9 @@ test("a killed writer releases SQLite and its abandoned filesystem ticket can be
   try {
     running = child(`import {openIndexDatabase} from ${JSON.stringify(databaseModule)};
       const db=openIndexDatabase({dataDir:process.argv[1]}); process.stdout.write('ready'); setInterval(()=>{},1000);`, dataDir);
-    await once(running.process.stdout!, "data"); running.process.kill("SIGKILL"); await running.exited;
+    await once(running.process.stdout!, "data"); await stop(running);
     openIndexDatabase({ dataDir }).close();
     assert.equal(indexStatus({ dataDir }).state, "ready");
     assert.equal((await readdir(dataDir)).some((name) => name.startsWith("writer-ticket-")), false);
-  } finally { running?.process.kill("SIGKILL"); await rm(dataDir, { recursive: true, force: true }); }
+  } finally { await stop(running); await rm(dataDir, { recursive: true, force: true }); }
 });

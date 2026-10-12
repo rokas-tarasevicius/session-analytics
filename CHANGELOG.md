@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 
 - Pull requests and pushes now check snapshot schemas, synthetic JSON reports and package contents; pull requests run on Ubuntu and pushes to `master` also run on macOS, where the Chrome dashboard checks run separately without blocking CI. Version tags create a GitHub Release from the matching changelog notes after the full checks pass.
+- The synthetic demo cleans up demo temporary directories older than one day when it starts.
+- Pull requests and pushes now check snapshot schemas, synthetic JSON reports and package contents on Ubuntu and macOS; Chrome dashboard checks run separately on macOS without blocking CI. Version tags create a GitHub Release from the matching changelog notes after the full checks pass.
 - Reusing a running dashboard now requires the same analysis options and a verified launch token. If the port is occupied by a different configuration or an unverified service, stop it or choose `--port`.
 - The README and security policy now agree on supported providers, activity-dated usage value, the 1024 MB analysis limit, startup public-price refreshes, offline pricing controls, and explicit export delivery.
 - The dashboard URL follows the view, window (`?window=`, custom `?start=`/`?end=`) and repository focus (`?repo=` with the opaque repository ID, never a name or path). View, preset and repository changes add a browser history entry and Back/Forward restores them; reload and bookmarks reopen the same place. `?open=`, `?theme=` and `?density=` apply once and are then removed from the URL; a URL theme or density is no longer saved as your preference, and the system theme is no longer saved on first visit.
@@ -30,6 +32,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- The fleet comparison table keeps Cache and Priced visible at laptop widths, truncates long repository names, and shows scroll shadows when tables overflow.
+- Daily usage provider chips sit on their own row below the title with consistent spacing.
+- Pricing and Velocity KPI grids now use the same responsive column breakpoints as the rest of the dashboard.
 - Tools CSV exports now match the Tools view's evidence rules: invalid transcripts and unavailable tool evidence no longer inflate calls, and non-finite, zero or negative counts are excluded.
 - Velocity's rolling 7-day average now uses prior history at the start of the selected window, instead of leaving the first six days blank. Its dashed-line key appears only when an average is available.
 - Malformed HTTP request targets now receive a fixed `400` response instead of stopping the dashboard server.

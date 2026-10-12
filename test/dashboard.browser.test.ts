@@ -6,7 +6,7 @@
 // no SESSION_ANALYTICS_*, CLAUDE_CONFIG_DIR, CODEX_HOME or XDG_* setting from the developer's shell. Every wait
 // polls for the state it needs instead of sleeping for a fixed time.
 import assert from "node:assert/strict";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -141,6 +141,84 @@ async function connect(port: number): Promise<{ browser: Browser; close: () => v
   };
   return { browser, close: () => socket.close() };
 }
+
+test("laptop tables fit and daily usage chips stay one row tall in both densities", { skip: existsSync(chromePath) ? false : "Chrome is not installed" }, async (t) => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-layout-"));
+  let server: ChildProcess | null = null, chrome: ChildProcess | null = null;
+  let close = () => {};
+  try {
+    const fixture = await createSessionAnalyticsFixture(join(temporaryDirectory, "fixture"));
+    const home = join(temporaryDirectory, "home"), demoTemp = join(temporaryDirectory, "demo-temp");
+    await mkdir(home); await mkdir(demoTemp);
+    // The full demo includes all six providers, History coverage, and enough repositories for the fleet table.
+    const demo = spawnSync(process.execPath, [join(repositoryRoot, "scripts/demo.ts"), "report", "--json"], {
+      cwd: repositoryRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 60_000,
+      env: { ...hermeticEnvironment(fixture, home), TMPDIR: demoTemp, TMP: demoTemp, TEMP: demoTemp },
+    });
+    assert.equal(demo.status, 0, demo.stderr);
+    const snapshot = JSON.parse(demo.stdout);
+    assert.equal(new Set(snapshot.sessions.map((session: { provider: string }) => session.provider)).size, 6);
+    assert.ok(snapshot.historyCoverage);
+    // Long bounded display names must not force the Repository column wider.
+    snapshot.repositories[0].repository.name = "Synthetic repository with a very long display name";
+    const snapshotPath = join(temporaryDirectory, "snapshot.json");
+    await writeFile(snapshotPath, JSON.stringify(snapshot));
+    const started = await startServer(hermeticEnvironment(fixture, home), ["--snapshot", snapshotPath]);
+    server = started.child;
+    const debugPort = await availablePort();
+    chrome = spawn(chromePath, ["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${join(temporaryDirectory, "chrome-profile")}`, "--no-first-run", "--no-default-browser-check", "--disable-gpu", "about:blank"], { stdio: "ignore" });
+    const connection = await connect(debugPort).catch((error: unknown) => {
+      if (chrome && (chrome.exitCode !== null || chrome.signalCode !== null)) return null;
+      throw error;
+    });
+    if (!connection) { t.skip("Chrome is installed but cannot launch in this host sandbox"); return; }
+    close = connection.close;
+    const { browser } = connection;
+    await browser.send("Page.enable");
+    await browser.open(`${started.origin}/?window=all`);
+    await browser.evaluate("document.fonts.ready.then(() => true)");
+    for (const density of ["compact", "comfortable"]) for (const [width, height] of [[1280, 800], [1440, 900]]) {
+      const label = `${width}×${height} (${density})`;
+      await browser.evaluate(`document.documentElement.dataset.density = '${density}'`);
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height, mobile: false, width });
+      await browser.until(`innerWidth`, width);
+      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) {
+        await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
+        await browser.until(`document.querySelector('[data-view-panel="${view}"]').hidden`, false);
+        const wraps = await browser.evaluate<Array<{ name: string; scroll: number; client: number }>>(`
+          [...document.querySelectorAll('.table-wrap')].map((wrap) => ({
+            name: wrap.closest('[id]')?.id || wrap.querySelector('table')?.className,
+            scroll: wrap.scrollWidth, client: wrap.clientWidth
+          }))`);
+        for (const wrap of wraps) assert.ok(wrap.scroll <= wrap.client, `${view}: ${wrap.name} at ${label}: ${wrap.scroll} > ${wrap.client}`);
+        if (view === "summary") {
+          const chips = await browser.evaluate<{ row: number; chip: number; count: number; belowTitle: boolean }>(`(() => {
+            const header = document.querySelector('.daily-usage-header'), row = header.querySelector('.provider-key');
+            const chips = [...row.querySelectorAll('.chip')].filter((chip) => !chip.hidden);
+            return { row: row.getBoundingClientRect().height, chip: chips[0].getBoundingClientRect().height, count: chips.length,
+              belowTitle: row.getBoundingClientRect().top >= header.querySelector('h2').getBoundingClientRect().bottom };
+          })()`);
+          assert.equal(chips.count, 6, label);
+          assert.equal(chips.row, chips.chip, `Daily usage chip height at ${label}`);
+          assert.equal(chips.belowTitle, true, label);
+        }
+      }
+    }
+    // Both shared breakpoints must beat per-view defaults, including the later Pricing stylesheet.
+    for (const width of [820, 520]) {
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 900, mobile: false, width });
+      await browser.until(`innerWidth`, width);
+      for (const view of ["summary", "velocity", "pricing"]) {
+        await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
+        const columns = await browser.evaluate<number[]>(`[...document.querySelectorAll('[data-view-panel="${view}"] .kpi-grid')].map((grid) => getComputedStyle(grid).gridTemplateColumns.split(' ').length)`);
+        assert.ok(columns.length > 0 && columns.every((count) => count === 2), `${view} has two KPI columns at ${width}px`);
+      }
+    }
+  } finally {
+    close(); await stop(chrome); await stop(server);
+    await rm(temporaryDirectory, { force: true, recursive: true });
+  }
+});
 
 test("dashboard interactions in a real browser", { skip: existsSync(chromePath) ? false : "Chrome is not installed" }, async (t) => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-browser-"));
