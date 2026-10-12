@@ -142,8 +142,8 @@ function modelGrid(cards, data, state, rateCard, unused = false, timeZone = "UTC
     button.style?.setProperty?.("--card-accent", providerColor(card.provider));
     button.append(providerHeading(card.provider), el("span", card.model, "pricing-model"), prices);
     if (card.used) {
-      button.append(el("strong", view.value, "pricing-value"), el("span", view.caption, "pricing-caption"),
-        el("small", view.detail, "pricing-detail"));
+      button.append(el("strong", view.value, "pricing-value"),
+        el("small", view.value === DASH ? `${view.caption} · ${view.detail}` : view.detail, "pricing-detail"));
       const share = el("span", null, "pricing-share"), label = el("span", null, "pricing-share-label");
       label.append(el("span", view.share.text, "pricing-share-value"), el("span", ` ${view.share.label}`));
       const track = el("span", null, "pricing-bar"), fill = el("span");
@@ -226,7 +226,7 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   ]));
   const panel = el("article", null, "panel detail-panel");
   const header = el("header"), block = el("div");
-  block.append(el("h3", "Model prices"));
+  block.append(el("h3", "Model prices"), note("API-equivalent value · activity-dated", "chart-note"));
   header.append(block); panel.append(header);
   if (!data.used.length) {
     panel.append(note("No API-priced model usage in this selection. Provider-reported values do not use a rate card.", "empty-line"));

@@ -355,15 +355,17 @@ test("pricingCardView preserves incomplete coverage, unavailable rates and unuse
   assert.equal(unused.ariaLabel, "claude-unused, Claude: Not used in this selection, input $5.00 / output $30.00 per 1M tokens. Show pricing details");
 });
 
-test("Every used card keeps eight aligned rows and an accessible share with a reserved badge slot", async () => {
+test("Every used card keeps seven aligned rows with one section subtitle and an accessible share", async () => {
   await withDocument((root) => {
     renderPricingPanel(root, rateCard, sessions, window);
     for (const button of modelButtons(root)) {
       assert.deepEqual(button.children.map((node) => node.className), ["pricing-provider", "pricing-model", "pricing-price",
-        "pricing-value", "pricing-caption", "pricing-detail", "pricing-share", "pricing-badge-slot"]);
-      assert.deepEqual(button.children.map((node) => node.tag), ["span", "span", "span", "strong", "span", "small", "span", "span"]);
+        "pricing-value", "pricing-detail", "pricing-share", "pricing-badge-slot"]);
+      assert.deepEqual(button.children.map((node) => node.tag), ["span", "span", "span", "strong", "small", "span", "span"]);
       assert.deepEqual(byClass(button, "pricing-share")[0]!.children.map((node) => node.className), ["pricing-share-label", "pricing-bar"]);
     }
+    assert.equal(root.text().split("API-equivalent value · activity-dated").length - 1, 1);
+    assert.match(byClass(modelButtons(root)[1]!, "pricing-detail")[0]!.text(), /No usage value: unpriced/);
     const [complete, missing] = modelButtons(root);
     const empty = byClass(complete!, "pricing-badge-slot")[0]!;
     assert.equal(empty.children.length, 0); assert.equal(empty.attributes["aria-hidden"], "true");

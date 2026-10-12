@@ -428,7 +428,7 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     assert.match(await browser.evaluate<string>(`document.querySelector('#window-note').textContent`), /swapped/);
     await setDates("2000-01-01", "2999-12-31");
     assert.deepEqual(await browser.evaluate(`[document.querySelector('#window-start').value, document.querySelector('#window-end').value]`), [minimum, maximum]);
-    assert.match(await browser.evaluate<string>(`document.querySelector('#window-note').textContent`), /Adjusted to the observed history/);
+    assert.match(await browser.evaluate<string>(`document.querySelector('#window-note').textContent`), /Clamped to history/);
     assert.equal(await browser.evaluate(`document.querySelector('#window-note').hidden`), false);
     await browser.evaluate(`document.querySelector('[data-window-preset="all"]').click()`);
     await browser.until(`document.querySelector('#window-note').hidden`, true);

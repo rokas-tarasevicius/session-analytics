@@ -130,7 +130,7 @@ test("donut and daily lines draw every provider in legend order, using brand col
   assert.equal(entries[1]!.getAttribute("data-active"), null);
   assert.equal(paths[1]!.getAttribute("data-series-active"), null);
   const day = { name: "2026-10-01", ...Object.fromEntries(providers.map((provider, i) => [provider, i + 1])) };
-  run(`renderLine(${JSON.stringify([day])})`);
+  run(`renderLine(${JSON.stringify([day, { ...day, name: "2026-10-02" }, { ...day, name: "2026-10-03" }])})`);
   const chart = document.querySelector("#daily-spend")!;
   assert.deepEqual(chart.querySelectorAll(".trend-line").map((line) => line.dataset["series"]), providers.toReversed());
   for (const mark of chart.querySelector("svg")!.querySelectorAll("[data-series]")) {

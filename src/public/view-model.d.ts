@@ -58,6 +58,7 @@ export function ledgerMoney(sessions: SessionLike[], window: { start: string; en
 export function groupByRepository(sessions: SessionLike[]): Map<string, SessionLike[]>;
 export function sessionStartDay(session: SessionLike, timeZone?: string): string | null;
 export function sessionsInRange(sessions: SessionLike[], startDay: string | null, endDay: string | null, timeZone?: string): SessionLike[];
+export function unknownStartsInRange(sessions: SessionLike[], startDay?: string | null, endDay?: string | null, timeZone?: string): number;
 export function daysBetween(startDay: string, endDay: string, cap?: number): string[];
 export function dailySpendSeries(sessions: SessionLike[], days: string[]): number[];
 export function dailyCountSeries(sessions: SessionLike[], days: string[], accessor: (session: SessionLike) => number, timeZone?: string): number[];

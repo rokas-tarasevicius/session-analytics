@@ -198,7 +198,7 @@ test("custom windows keep a cleared bound, swap a reversed range and clamp to th
   assert.equal(note.hidden, false); assert.match(note.textContent, /swapped/);
   start.value = "2026-01-01"; end.value = "2027-01-01"; run("applyCustomWindow()");
   assert.deepEqual([start.value, end.value], ["2026-09-01", "2026-10-03"]);
-  assert.match(note.textContent, /Adjusted to the observed history, 2026-09-01 to 2026-10-03/);
+  assert.match(note.textContent, /Clamped to history · 1 Sept – 3 Oct 2026/);
   start.value = "2026-09-15"; end.value = "2026-09-16"; run("applyCustomWindow()");
   assert.equal(note.hidden, true);
   run("applyWindowPreset('7')");
@@ -436,19 +436,22 @@ test("refreshes share one in-flight request and start again once it settles", as
 test("Summary, Velocity and Tools share axis labels while money totals retain cents", async () => {
   const session = withLedger(sample(), [["model-synthetic", 120]], { day: "2026-09-13" });
   session.createdAt = "2026-09-13T12:00:00Z";
+  const cells = session.velocity!.buckets;
+  cells[0]![3][0] = 40;
+  cells.push(["2026-09-14", 12, 0, [...cells[0]![3]]], ["2026-09-15", 12, 0, [...cells[0]![3]]]);
   session.evidence!.tools = "observed"; session.tools = { Read: 3 }; session.metrics.toolCalls = 3;
   const { document, run } = await harness([session], { start: "2026-09-13", end: "2026-10-12", timeZone: "America/Los_Angeles" });
   run("renderSummary(activeView())");
   const daily = document.querySelector("#daily-spend")!;
   const summaryAxis = daily.querySelectorAll("text").map((node) => node.textContent);
-  assert.ok(summaryAxis.includes("13 Sept")); assert.ok(summaryAxis.includes("12 Oct")); assert.ok(summaryAxis.includes("$120"));
+  assert.ok(summaryAxis.includes("13 Sept")); assert.ok(summaryAxis.includes("12 Oct")); assert.ok(summaryAxis.includes("$40"));
   const legend = daily.querySelector(".chart-legend")!;
   assert.equal(legend.dataset["layout"], "list");
   assert.deepEqual(legend.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
   assert.equal(document.querySelector("#metric-spend")!.textContent, "$120.00");
   run("currentViewName = () => 'velocity'; renderActiveAnalyticsView(activeView())");
   const velocityAxis = document.querySelector(".velocity-chart")!.querySelectorAll(".axis-label").map((node) => node.textContent);
-  assert.ok(velocityAxis.includes("13 Sept")); assert.ok(velocityAxis.includes("12 Oct")); assert.ok(velocityAxis.includes("$120"));
+  assert.ok(velocityAxis.includes("13 Sept")); assert.ok(velocityAxis.includes("12 Oct")); assert.ok(velocityAxis.includes("$40"));
   assert.deepEqual(document.querySelector(".velocity-legend")!.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
   run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
   assert.deepEqual(document.querySelector(".tools-trend-axis")!.children.map((node) => node.textContent), ["13 Sept", "12 Oct"]);
@@ -480,7 +483,7 @@ test("range adjustments and unavailable KPI reasons are visible without hovering
   const note = document.querySelector("#window-note")!;
   assert.equal(note.getAttribute("title"), null);
   assert.equal(note.querySelector(".sr-only"), null);
-  assert.match(note.textContent, /Adjusted to the observed history.*dates were swapped/);
+  assert.match(note.textContent, /Clamped to history.*dates were swapped/);
   run("setValue(elements.spend, 0, { eligible: 0, selected: 1 }, money, { reason: 'No activity dates in this selection', slot: elements.spendCoverage })");
   assert.equal(document.querySelector("#metric-spend-coverage")!.textContent, "No activity dates in this selection");
   run("fixture.sessions = [sampleWithoutLedger]; sessionsByRepository = groupByRepository(fixture.sessions); renderSummary(activeView()); renderCosts(activeView())");
@@ -516,7 +519,7 @@ test("Summary has six KPIs, noun-phrase titles and short notes with full explana
   assert.match(coverage, /rows add up to the Usage value KPI/);
   assert.match(coverage, /Other columns: sessions started in the window/);
   assert.match(coverage, /Request input includes repeated context/);
-  assert.match(document.querySelector("#scope-description")!.textContent, /1 repository · 1 with sessions/);
+  assert.match(document.querySelector("#scope-description")!.textContent, /1 session · 1 Oct 2026 · Synthetic · Claude · \$10.00/);
 });
 
 test("snapshot status shows live counts after load and follows the selected window", async () => {
@@ -533,4 +536,67 @@ test("snapshot status shows live counts after load and follows the selected wind
   context["fetch"] = async () => ({ ok: true, json: async () => ({ kind: "shared", sources: [], minimumSessions: 5, summary: { sessions: 0 }, repositories: [] }) });
   await run("loadSnapshot()");
   assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready", "shared aggregates cannot establish a live count");
+});
+
+test("a one-session window names its scope and offers Show 30d instead of charts", async () => {
+  const session = withLedger(sample(), [["synthetic", 0.15]], { day: "2026-07-24" });
+  session.createdAt = "2026-07-24T12:00:00Z"; session.repositoryName = "data-pipeline";
+  const { document, run } = await harness([session], { repositories: [{ id: "synthetic", name: "data-pipeline" }], start: "2026-07-01", end: "2026-07-30" });
+  run("populateRepositories(); windowPreset = 'custom'; setWindowInputs('2026-07-24', '2026-07-24'); renderView()");
+  assert.equal(document.querySelector("#scope-description")!.textContent, "1 session · 24 Jul 2026 · data-pipeline · Claude · $0.15");
+  const daily = document.querySelector("#daily-spend")!;
+  assert.equal(daily.querySelector("svg"), null);
+  assert.deepEqual(daily.querySelectorAll(".chart-legend-value").map((e) => e.textContent), ["$0.15"]);
+  assert.match(daily.textContent, /Only 24 Jul has activity · widen the window for a trend/);
+  const donut = document.querySelector("#provider-donut")!;
+  assert.equal(donut.querySelector("svg"), null); assert.equal(donut.textContent.trim(), "1 session · Claude");
+  assert.equal(document.querySelector("#provider-legend")!.hidden, true);
+  assert.match(document.querySelector("#repository-subagent-spend")!.textContent, /No sub-agent sessions on 24 Jul 2026\./);
+  daily.querySelector("button")!.listeners.get("click")!();
+  assert.equal(run("windowPreset"), "30");
+  assert.equal(document.querySelector("#window-start")!.value, "2026-07-01");
+  assert.equal(document.querySelector("#window-end")!.value, "2026-07-30");
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$0.15");
+});
+
+test("two active days use a legend while three restore the daily SVG and provider ring", async () => {
+  const sessions = ["24", "25", "26"].map((day, index) => {
+    const s = withLedger(sample(), [["synthetic", index + 1]], { day: `2026-07-${day}` });
+    s.createdAt = `2026-07-${day}T12:00:00Z`; if (index === 2) s.provider = "codex";
+    return s;
+  });
+  const { document, run } = await harness(sessions, { start: "2026-07-01", end: "2026-07-30" });
+  run("windowPreset = 'custom'; setWindowInputs('2026-07-01', '2026-07-25'); renderView()");
+  assert.equal(document.querySelector("#daily-spend")!.querySelector("svg"), null);
+  assert.match(document.querySelector("#daily-spend")!.textContent, /Only 24 Jul and 25 Jul have activity/);
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$3.00");
+  run("setWindowInputs('2026-07-01', '2026-07-26'); renderView()");
+  assert.ok(document.querySelector("#daily-spend")!.querySelector("svg"));
+  assert.ok(document.querySelector("#provider-donut")!.querySelector("svg"));
+  assert.equal(document.querySelector("#provider-legend")!.hidden, false);
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$6.00");
+});
+
+test("unknown-start notes count only fallback dates in the selected window", async () => {
+  const unknown = (date: string) => { const s = sample(); s.createdAt = date; s.transcript.startTimeKnown = false; return s; };
+  const { document, run } = await harness([sample(), unknown("2026-07-24T22:30:00Z"), unknown("2026-07-24T23:30:00Z"), unknown("2026-08-24T12:00:00Z"), unknown("")], { start: "2026-07-01", end: "2026-10-03" });
+  run("windowPreset = 'custom'; setWindowInputs('2026-07-24', '2026-07-24'); renderCoverageSummary(activeView())");
+  assert.match(document.querySelector("#coverage-session-note")!.textContent, /1 unknown starts excluded/);
+  run("setWindowInputs('2026-07-26', '2026-07-26'); renderCoverageSummary(activeView())");
+  assert.doesNotMatch(document.querySelector("#coverage-session-note")!.textContent, /unknown starts/);
+  run("windowPreset = 'all'; renderCoverageSummary(activeView())");
+  assert.match(document.querySelector("#coverage-session-note")!.textContent, /4 unknown starts included/);
+});
+
+test("an earlier-started contributor keeps the fleet caption for a one-session window", async () => {
+  const earlier = withLedger(sample(), [["synthetic", 100]], { day: "2026-07-24" });
+  earlier.createdAt = "2026-07-10T12:00:00Z"; earlier.repositoryId = "other"; earlier.repositoryName = "other";
+  const started = withLedger(sample(), [["synthetic", 2]], { day: "2026-07-24" });
+  started.createdAt = "2026-07-24T12:00:00Z"; started.repositoryId = "synthetic"; started.repositoryName = "data-pipeline";
+  const { document, run } = await harness([earlier, started], { repositories: [{ id: "synthetic", name: "data-pipeline" }, { id: "other", name: "other" }], start: "2026-07-01", end: "2026-07-30" });
+  run("populateRepositories(); windowPreset = 'custom'; setWindowInputs('2026-07-24', '2026-07-24'); renderView()");
+  const scope = document.querySelector("#scope-description")!.textContent;
+  assert.doesNotMatch(scope, /^1 session ·/, "the $102 of activity is not one session's");
+  assert.match(scope, /^2 repositories · 1 with sessions\./);
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$102.00");
 });
