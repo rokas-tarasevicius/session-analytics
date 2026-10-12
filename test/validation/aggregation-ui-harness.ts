@@ -24,20 +24,43 @@ export interface HarnessOptions { repositories?: Array<{ id: string; name: strin
 export async function harness(sessions: SessionAnalytics[], { repositories = [{ id: 'synthetic', name: 'Synthetic' }], generatedAt = '2026-10-03T12:00:00Z', timeZone = 'Europe/London', start = '2026-09-01', end = '2026-10-03' }: HarnessOptions = {}) {
  const html=await readFile(new URL('../../src/public/index.html',import.meta.url),'utf8');
  const document=documentFromHtml(html);
+ // The shell uses descendant selectors to reach the active Velocity chip.
+ document.querySelector = (selector: string) => {
+   const parts = selector.trim().split(/\s+/);
+   return document.body.querySelectorAll(parts.at(-1)!).find((element) => {
+     let ancestor = element.parentElement;
+     for (let index = parts.length - 2; index >= 0; index -= 1) {
+       while (ancestor && !ancestor.matches(parts[index]!)) ancestor = ancestor.parentElement;
+       if (!ancestor) return false;
+       ancestor = ancestor.parentElement;
+     }
+     return true;
+   }) ?? null;
+ };
  // ui.js helpers create nodes through the module-global document, as in the browser.
  (globalThis as any).document=document;
  const source=await readFile(new URL('../../src/public/app.js',import.meta.url),'utf8');
- const modules=['chart-colors','chart-scale','chart-legend','ui','view-model','url-state','providers','timestamps','export-data','evidence','velocity-data','history-coverage','tools-data','tools'];
+ const modules=['chart-colors','chart-scale','chart-legend','ui','view-model','url-state','providers','timestamps','export-data','evidence','velocity-data','history-coverage','tools-data','tools','velocity','pricing','export-menu','shared-view'];
  const helpers: Record<string,unknown>={};
  for(const name of modules) Object.assign(helpers,await import(new URL(`../../src/public/${name}.js`,import.meta.url).href));
  // The app deliberately imports this name from view-model, not evidence.
  helpers['coverageWarnings']=(await import(new URL('../../src/public/view-model.js',import.meta.url).href)).coverageWarnings;
  const fixture={sessions,repositories:repositories.map((repository)=>({repository,warnings:[]})),warnings:[],generatedAt,velocity:{timeZone}};
- const context=createContext({...helpers,document,Option,HTMLElement:Element,Intl,URLSearchParams,fixture,console,
- window:{matchMedia:()=>({matches:false,addEventListener(){}})},localStorage:{getItem:()=>null,setItem(){}},CSS:{escape:(s:string)=>s}});
- runInContext(source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm,'').split('const urlParameters =')[0]!,context);
+ const listeners: Array<{ name: string; listener: (event: any) => unknown; capture: boolean }> = [];
+ document.addEventListener = ((name: string, listener: (event: any) => unknown, capture = false) => {
+   listeners.push({ name, listener, capture });
+ }) as typeof document.addEventListener;
+ const context=createContext({...helpers,document,Option,HTMLElement:Element,Intl,URLSearchParams,Error,TypeError,fixture,console,navigator:{platform:""},
+ window:{location:{pathname:"/",search:"",hash:""},addEventListener(){},scrollTo(){},setTimeout:()=>1,clearTimeout(){},matchMedia:()=>({matches:false,addEventListener(){}})},localStorage:{getItem:()=>null,setItem(){}},CSS:{escape:(s:string)=>s}});
+ runInContext(source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm,'').split('switchView(viewPanels.some')[0]!.replace('const resetExportMenu =', 'let resetExportMenu ='),context);
  const run=(js:string)=>runInContext(js,context);
  context['providerMark']=()=>new Element('span');
  run(`snapshot=fixture; sessionsByRepository=groupByRepository(snapshot.sessions); elements.repositoryFilter.value='all'; elements.windowStart.value=elements.windowStart.min=${JSON.stringify(start)};elements.windowEnd.value=elements.windowEnd.max=${JSON.stringify(end)};`);
- return {run,context,document};
+ // Capture listeners (including Export's Escape handler) run before the dashboard handler.
+ const fireKey = (key: string, target = document.body) => {
+   const event = { key, target, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+   for (const { listener } of listeners.filter(({ name }) => name === "keydown").sort((a, b) => Number(b.capture) - Number(a.capture))) listener(event);
+   return event;
+ };
+ return {run,context,document,fireKey};
 }

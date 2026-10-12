@@ -4,7 +4,7 @@ import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
-  groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
+  groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
   providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
   sortRepositories, sparklineSummary, summarize, tickScale, validDay, windowStartFor,
 } from "./view-model.js";
@@ -20,7 +20,7 @@ import { normalizeTimestamp } from "./timestamps.js";
 import { scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
-import { renderSharedSnapshot } from "./shared-view.js";
+import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
 import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -80,6 +80,7 @@ const windowPresets = ["7", "30", "90", "all", "custom"];
 const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", all: "All observed time", custom: "Custom range" };
 
 let snapshot = null;
+let sharedSnapshot = null;
 let sessionsByRepository = new Map();
 // Providers present in the snapshot: every provider chip row lists these, and `p 1`… counts through them.
 let providerCache = { source: null, providers: [] };
@@ -293,7 +294,7 @@ function restoreUrlState() {
 /** Shows only the active view's panel, or none when there is no snapshot or the window is empty. */
 function showActivePanel() {
   const name = currentViewName();
-  const blocked = (!snapshot && loadFailed) || (windowEmpty && name !== "pricing");
+  const blocked = Boolean(sharedSnapshot) || (!snapshot && loadFailed) || (windowEmpty && name !== "pricing");
   for (const panel of viewPanels) panel.hidden = blocked || panel.dataset.viewPanel !== name;
 }
 
@@ -436,6 +437,7 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
 // --------------------------------------------------------------------- views
 
 function switchView(name, { history: mode = "push" } = {}) {
+  if (sharedSnapshot) return;
   const changed = currentViewName() !== name;
   for (const button of viewButtons) {
     if (button.dataset.viewButton === name) button.setAttribute("aria-current", "page");
@@ -645,7 +647,7 @@ function renderModelCosts(container, ledger) {
     const share = pricedShare(model.evidence);
     const meta = model.unattributed ? "Provider value without model evidence" : [
       `${integer.format(model.sessions)} session${model.sessions === 1 ? "" : "s"}`,
-      model.calls > 0 ? `${integer.format(model.calls)} calls` : null,
+      model.callsEligible > 0 ? `${integer.format(model.calls)} calls` : `${DASH} calls`,
       model.sums[1] + model.sums[5] > 0 ? `${compact.format(model.sums[1])} in / ${compact.format(model.sums[5])} out tokens` : "no model token evidence",
       share === null || share >= 1 ? null : model.value > 0 ? "partly unpriced" : "unpriced",
     ].filter(Boolean).join(" · ");
@@ -673,7 +675,7 @@ function ledgerExclusions(ledger) {
 /** Costs reads the same activity ledger as the Summary KPI and Velocity for the window: totals, providers and models agree. */
 function renderCosts(view) {
   const range = velocityContext(), ledger = ledgerMoney(view.scopeSessions, range);
-  const unavailable = !view.scopeSessions.some((session) => session.velocity);
+  const unavailable = ledgerAvailability(view.scopeSessions).eligible === 0;
   const reason = { reason: "No session in this selection has activity dates" };
   setValue(elements.costTotal, ledger.total, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
   setValue(elements.costApiTotal, ledger.api, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
@@ -1037,7 +1039,7 @@ function renderSummary(view) {
   const previousSummary = previous ? summarize(sessionsInRange(view.scopeSessions, previous.startDay, previous.endDay, context.timeZone)) : null;
   const previousActivity = previous ? buildVelocity(view.scopeSessions, { start: previous.startDay, end: previous.endDay, metric: "value" }) : null;
   const spendComparison = previousActivity ? comparePeriods(periodFromVelocity(activity), periodFromVelocity(previousActivity), "value", { missingSessions: activity.missingSessions }) : null;
-  const unavailable = !view.scopeSessions.some((session) => session.velocity);
+  const unavailable = ledgerAvailability(view.scopeSessions).eligible === 0;
   setValue(elements.spend, activity.totals[0], unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { reason: "No session in this selection has activity dates" });
   clear(elements.spendCoverage);
   if (!unavailable && activity.missingSessions) {
@@ -1319,6 +1321,7 @@ function providerShown(scope, provider) {
 }
 
 function toggleProvider(provider) {
+  closeExportMenu();
   if (!snapshot || !snapshotProviders().includes(provider)) return;
   const scope = providerScope();
   if (scope === "chart") {
@@ -1345,7 +1348,7 @@ let paletteItemsShown = [];
 function paletteItems() {
   const items = [];
   const selectedId = elements.repositoryFilter.value;
-  for (const name of viewOrder) {
+  for (const name of sharedSnapshot ? [] : viewOrder) {
     const chord = Object.entries(viewChords).find(([, view]) => view === name)?.[0] || "";
     items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? `g ${chord}` : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
   }
@@ -1465,6 +1468,7 @@ function armChord(key) {
 }
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { pendingChord = null; window.clearTimeout(chordTimer); }
   if (event.defaultPrevented) return;
   const key = event.key;
   if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "k") { event.preventDefault(); togglePalette(); return; }
@@ -1503,7 +1507,14 @@ document.addEventListener("keydown", (event) => {
 
 const urlParameters = new URLSearchParams(window.location.search);
 
-function showError(message, title = "Analysis failed") {
+function describeLoadError(error) {
+  const message = error instanceof Error && error.message ? error.message.replace(/\.$/, "") : "Failed to fetch";
+  const status = /^HTTP (\d{3})$/.exec(message);
+  return status ? `The analysis failed (HTTP ${status[1]}).` : `The local server did not answer (${message}).`;
+}
+
+function showError(message, title = "Analysis failed", tone = "danger") {
+  elements.error.dataset.tone = tone;
   elements.errorTitle.textContent = title;
   elements.errorMessage.textContent = message;
   elements.errorRetry.hidden = false;
@@ -1517,7 +1528,7 @@ function hideError() {
 
 /** After a failed refresh the previous snapshot stays on screen, marked stale with its own generation time. */
 function markStale(stale) {
-  if (!snapshot || snapshot.kind === "shared") return;
+  if (!snapshot) return;
   elements.generated.textContent = stale ? `${dateTime(snapshot.generatedAt)} · stale` : dateTime(snapshot.generatedAt);
   if (stale) {
     elements.generated.dataset.stale = "true";
@@ -1539,12 +1550,12 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = data; loadFailed = false; renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; sharedSnapshot = data; loadFailed = false; renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
-  $(".topbar-controls").hidden = false; $(".view-nav").hidden = false;
-  $(".repo-nav").hidden = false;
+  for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
+  elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");
   $(".skip-link").href = "#main";
-  snapshot = data; loadFailed = false; sessionsByRepository = groupByRepository(data.sessions);
+  snapshot = data; sharedSnapshot = null; loadFailed = false; sessionsByRepository = groupByRepository(data.sessions);
   for (const input of providerFilters) input.closest(".chip").hidden = !snapshotProviders().includes(input.dataset.providerFilter);
   markStale(false); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
   populateRepositories();
@@ -1560,7 +1571,7 @@ function render(data) {
 
 async function loadSnapshot(refresh = false) {
   resetExportMenu();
-  const previous = snapshot;
+  const previous = snapshot ?? sharedSnapshot;
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous ? "Refreshing local snapshot" : "Mapping local sessions"; elements.refresh.disabled = true;
   elements.main.dataset.state = previous ? "refreshing" : "loading";
@@ -1571,25 +1582,25 @@ async function loadSnapshot(refresh = false) {
   }
   try {
     const response = await fetch(`/api/analytics${refresh && previous ? "?refresh=1" : ""}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = await response.json();
-    if (!response.ok) throw new Error(body.error || `Analysis failed with ${response.status}.`);
     render(body);
     elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready";
   } catch (error) {
-    const message = error instanceof Error && error.message ? error.message : "Unknown analysis failure.";
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;
-    if (snapshot) {
+    if (previous) {
       // Keep the last good snapshot on screen and say how old it is.
-      elements.syncLabel.textContent = "Refresh failed";
+      elements.syncLabel.textContent = snapshot ? `Stale · ${new Date(snapshot.generatedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : "Stale shared snapshot";
       markStale(true);
-      showError(`${message} Showing the snapshot from ${dateTime(snapshot.generatedAt)}.`, "Refresh failed");
+      const retained = snapshot ? `You are looking at the snapshot from ${dateTime(snapshot.generatedAt)}.` : "You are looking at the previous shared snapshot.";
+      showError(`${describeLoadError(error)} ${retained}`, "Couldn't refresh", "warn");
     } else {
       elements.syncLabel.textContent = "Analysis failed";
       loadFailed = true;
       clear(elements.repositoryList);
       elements.generated.textContent = "No snapshot";
-      showError(message);
+      showError("The local analysis did not finish. Retry, or check the terminal running the dashboard.", "No snapshot yet");
       showActivePanel(); renderViewStatus(null);
     }
   } finally {
@@ -1606,6 +1617,7 @@ elements.repositoryFilter.addEventListener("change", () => { if (snapshot) { ren
 elements.scopeChip.addEventListener("click", () => selectRepository("all", { scroll: false }));
 elements.wordmark.addEventListener("click", (event) => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (sharedSnapshot) return;
   event.preventDefault();
   switchView("summary");
 });
@@ -1644,7 +1656,8 @@ function exportProviders(view) {
  * exportable while a refresh runs; only a first load has nothing to export.
  */
 function exportSelection() {
-  if (!snapshot || snapshot.kind === "shared") return snapshot;
+  if (sharedSnapshot) return sharedSnapshot;
+  if (!snapshot) return null;
   const repositoryId = selectedRepository()?.repository.id ?? null, providers = exportProviders(currentViewName());
   const snapshotProviders = new Set(snapshot.sessions.map(({ provider }) => provider));
   const scope = (repositoryId ? repositorySessions(repositoryId) : snapshot.sessions).filter(({ provider }) => !providers || providers.includes(provider));
@@ -1658,7 +1671,7 @@ function exportSelection() {
   };
 }
 const resetExportMenu = installExportMenu(exportSelection, {
-  unavailableMessage: () => loadFailed && !snapshot ? "Nothing to export: the analysis failed. Use Retry in the banner." : "The snapshot is still loading.",
+  unavailableMessage: () => loadFailed && !snapshot && !sharedSnapshot ? "Nothing to export: the analysis failed. Use Retry in the banner." : "The snapshot is still loading.",
 });
 switchView(viewPanels.some(({ dataset }) => dataset.viewPanel === storedView) ? storedView : "summary", { history: false });
 // theme-boot.js already applied these before the first paint; app.js repeats the choice and owns the controls.

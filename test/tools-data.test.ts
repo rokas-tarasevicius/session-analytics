@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { emptySession } from "../src/providers/common.ts";
 import type { SessionAnalytics } from "../src/types.ts";
+import { harness } from "./validation/aggregation-ui-harness.ts";
 
 const { buildToolsView, toolProfile, toolsDays }: typeof import("../src/public/tools-data.js") =
   await import(new URL("../src/public/tools-data.js", import.meta.url).href);
@@ -15,6 +16,15 @@ function session(tools: Record<string, number>, overrides: Partial<SessionAnalyt
 const unavailable = (tools: Record<string, number> = {}) => {
   const result = session(tools); result.evidence!.tools = "unavailable"; return result;
 };
+
+test("profile footer names the snapshot timezone", async () => {
+  const { document, run } = await harness([session({ Read: 3 })], { timeZone: "Europe/London" });
+  run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
+  const trend = document.querySelector(".tools-trend")!;
+  assert.match(trend.querySelectorAll(".chart-note")[0]!.textContent, /baseline 0 · Europe\/London/);
+  assert.match(trend.querySelector('[role="group"]')!.getAttribute("aria-label")!, /baseline 0 · Europe\/London/);
+  assert.doesNotMatch(trend.textContent, /UTC/);
+});
 
 test("tools ranking sorts calls then names, with exact shares and distinct session/repository counts", () => {
   const sessions = [session({ Read: 6, Bash: 2 }), session({ Read: 4, Write: 2 }),

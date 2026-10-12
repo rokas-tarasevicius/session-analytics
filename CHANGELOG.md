@@ -35,6 +35,13 @@ All notable changes to this project are documented here. The format follows [Kee
 - Malformed HTTP request targets now receive a fixed `400` response instead of stopping the dashboard server.
 - Cross-site browser requests and requests from other loopback ports can no longer trigger API refresh scans; header-less local clients remain supported.
 - Installation guidance now directs users to a checkout plus `npm link` and explains the Node 24 type-stripping error from GitHub or tarball installs.
+- Shared snapshots keep their aggregate view when navigation shortcuts or the wordmark are used; the command palette no longer offers unavailable views or repository focus.
+- Keyboard provider toggles close and invalidate the Export view preview, including in Velocity; downloads also check that the selection still matches the preview.
+- Tools profile chart footers name the snapshot timezone instead of always saying UTC.
+- Velocity shows — with a reason when selected sessions have no activity ledger, and marks partially available selections instead of implying complete $0.00 usage.
+- Pricing and Costs show — calls when request counts are unavailable, while preserving observed zero counts as 0.
+- Failed refreshes explain the failure in a warning, keep the dated stale snapshot and offer Retry; a failed first load explains that there is no snapshot yet.
+- Escape cancels an armed navigation chord, and snapshot and view status changes are announced to screen readers.
 - The theme no longer flashes light before a saved dark theme applies: a same-origin script in `<head>` sets theme and density before the first paint.
 - Escape in the export menu closes only the menu instead of also clearing the repository focus; the menu also closes on a press outside it, when focus moves away, and when the theme or density changes.
 - Single-key shortcuts work while a checkbox or button has focus; only text entry suppresses them.

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { harness, sample, withLedger } from "./validation/aggregation-ui-harness.ts";
 
 type Event = { target: Node; key?: string; stopped: boolean; stopPropagation: () => void };
 
@@ -80,7 +81,7 @@ function ledgered<T extends { models: Usage[] }>(session: T, day = window.start)
   });
   const total = session.models.reduce((sum, usage) => sum + (usage.totalUsd ?? 0), 0);
   const upper = session.models.reduce((sum, usage) => sum + (usage.upperEstimateUsd ?? usage.totalUsd ?? 0), 0);
-  return { ...session, sessionKey: `session-${day}-${session.models.map(({ model }) => model).join("-")}`, cost: { totalUsd: total, upperEstimateUsd: upper },
+  return { evidence: { source: "claude-jsonl", fidelity: "message", tokens: "reported", usageUnit: "request" }, ...session, sessionKey: `session-${day}-${session.models.map(({ model }) => model).join("-")}`, cost: { totalUsd: total, upperEstimateUsd: upper },
     velocity: { dimensions: session.models.map(({ model }) => ({ agent: "codex-cli", model, executionKind: "top-level", effort: "unknown" })), buckets: cells, undated: [] } };
 }
 const sessions = [ledgered({ provider: "codex", costBasis: "api-list-price-equivalent", id: "private-session-id", path: "/private/session.json",
@@ -99,6 +100,35 @@ const usage = (model: string, value: number, tokens: number, calls = 1) => ({ mo
 const rankingSessions = [ledgered({ provider: "codex", costBasis: "api-list-price-equivalent", models: [
   usage("gpt-a", 4, 500), usage("gpt-b", 10, 100), usage("gpt-z", 10, 200),
 ] })];
+
+test("a model without call evidence shows — calls", async () => {
+  const make = (provider: "cursor" | "claude", calls: number, unit: "run" | "request" | "session") => {
+    const session = withLedger(sample(), [["synthetic", 3]], { day: window.start, calls });
+    session.provider = provider; session.costBasis = "api-list-price-equivalent";
+    session.evidence!.usageUnit = unit;
+    return session;
+  };
+  const cursor = make("cursor", 0, "run"), claude = make("claude", 3, "request"), zero = make("claude", 0, "request");
+  // A recovered receipt-floor session keeps a session usage unit but its positive recorded count is evidence.
+  const recovered = make("claude", 2, "session");
+  for (const [session, expected] of [[cursor, "—"], [claude, "3"], [zero, "0"], [recovered, "2"]] as const) {
+    await withDocument((root) => {
+      const data = pricingModelCards(rateCard, [session], window), card = data.used[0];
+      assert.match(pricingCardView(card, data).detail, new RegExp(`${expected} calls$`));
+      renderModelDetails(root, card, rateCard);
+      const row = root.all((node) => node.tag === "div" && node.children[0]?.tag === "dt" && node.children[0].textContent === "Calls")[0]!;
+      assert.equal(row.children[1]!.textContent, expected);
+      for (const calls of [null, undefined]) {
+        renderModelDetails(root, { ...card, usage: { ...card.usage, calls } }, rateCard);
+        assert.match(root.text(), /Calls —/);
+      }
+    });
+    const { document, context, run } = await harness([session]);
+    context["costSession"] = session;
+    run(`renderModelCosts(elements.costModels, ledgerMoney([costSession], ${JSON.stringify(window)}))`);
+    assert.match(document.querySelector("#cost-models")!.textContent, new RegExp(`${expected} calls`));
+  }
+});
 
 test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selection evidence", async () => {
   await withDocument((root) => {

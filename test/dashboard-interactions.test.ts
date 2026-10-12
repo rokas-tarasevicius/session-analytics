@@ -10,10 +10,127 @@ import {
 } from "../src/public/view-model.js";
 import type { SessionAnalytics } from "../src/types.ts";
 import { Element, documentFromHtml } from "./release-dom.ts";
-import { harness, sample } from "./validation/aggregation-ui-harness.ts";
+import { harness, sample, withLedger } from "./validation/aggregation-ui-harness.ts";
 
 const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const presets = ["7", "30", "90", "all", "custom"];
+
+test("the harness fires g v through the dashboard keydown handler", async () => {
+  const { run, fireKey } = await harness([sample()]);
+  fireKey("g"); fireKey("v");
+  assert.equal(run("currentViewName()"), "velocity");
+});
+
+test("shared snapshot ignores view, window and provider shortcuts", async () => {
+  const { context, document, run, fireKey } = await harness([sample()]);
+  context["sharedFixture"] = { kind: "shared", sources: [], minimumSessions: 5,
+    summary: { sessions: 5 }, repositories: [{ repository: "repo-synthetic", sessions: 5, apiEquivalentSpendUsd: 1,
+      providerReportedSpendUsd: 0, inputTokens: 100, outputTokens: 20, priceableTokens: 120, pricedTokens: 120 }] };
+  run("render(sharedFixture); elements.windowStart.value = elements.windowEnd.value = elements.windowStart.min = elements.windowEnd.max = ''");
+  assert.equal(run("snapshot"), null);
+  assert.equal(run("exportSelection() === sharedFixture"), true);
+  const assertHidden = () => {
+    assert.ok(document.querySelectorAll("[data-view-panel]").every((panel) => panel.hidden));
+    assert.equal(document.querySelector("#shared-snapshot")!.hidden, false);
+    assert.equal(document.querySelector(".scope-line")!.hidden, true);
+    assert.equal(document.querySelector("#help-button")!.hidden, true);
+  };
+  for (const action of ["switchView('velocity')", "stepView(1)", "applyWindowPreset('7')", "toggleProvider('claude')"]) {
+    assert.doesNotThrow(() => run(action)); assertHidden();
+  }
+  for (const key of ["1", "2", "3", "4", "[", "]", "g", "v", "/"]) {
+    assert.doesNotThrow(() => fireKey(key)); assertHidden();
+  }
+  assert.equal(document.querySelector("#command-palette")!.open, true);
+  assert.equal(run("paletteItems().some((item) => ['Views', 'Repositories'].includes(item.group))"), false);
+  assert.doesNotMatch(document.querySelector("#command-list")!.textContent, /Go to|Focus undefined|Focus repo/);
+  assert.equal((document.querySelector(".wordmark") as any).href, "#shared-snapshot");
+  document.querySelector(".wordmark")!.listeners.get("click")!({ button: 0, preventDefault() { assert.fail("shared anchor should navigate normally"); } });
+  assertHidden();
+  context["fetch"] = async () => { throw new TypeError("Failed to fetch"); };
+  await assert.doesNotReject(async () => { await run("loadSnapshot(true)"); });
+  assertHidden();
+  assert.equal(run("exportSelection() === sharedFixture"), true);
+  assert.equal(document.querySelector("#error-message")!.textContent, "The local server did not answer (Failed to fetch). You are looking at the previous shared snapshot.");
+  run("fixture.rateCard = { effectiveDate: '2026-10-01', models: [] }; render(fixture)");
+  assert.equal(run("sharedSnapshot"), null);
+  for (const selector of [".topbar-controls", ".view-nav", ".repo-nav", ".scope-line", "#help-button"]) assert.equal(document.querySelector(selector)!.hidden, false);
+  assert.equal((document.querySelector(".wordmark") as any).href, "?view=summary");
+});
+
+test("a keyboard provider toggle closes the export menu", async () => {
+  const claude = withLedger(sample(), [["synthetic", 2]]), codex = withLedger(sample(), [["synthetic", 3]]); codex.provider = "codex";
+  const { context, document, run, fireKey } = await harness([claude, codex]);
+  let selections = 0;
+  context["fixedSelection"] = () => { selections++; return { kind: "machine", sessions: [] }; };
+  run("resetExportMenu = installExportMenu(fixedSelection)");
+  const menu = document.querySelector("#export-menu")!, description = document.querySelector("#export-description")!;
+  for (const view of ["summary", "velocity", "tools", "activity"]) {
+    run(`switchView('${view}')`);
+    const chip = view === "velocity" ? document.querySelector('#velocity-view .provider-key [data-provider="codex"] input') : null;
+    if (chip) Object.assign(chip, { click() { chip.checked = !chip.checked; chip.listeners.get("change")!(); } });
+    menu.open = true; menu.listeners.get("toggle")!();
+    assert.notEqual(description.textContent, "");
+    fireKey("p"); fireKey("1");
+    assert.equal(menu.open, false, view); assert.equal(description.textContent, "", view);
+    assert.ok(menu.querySelectorAll("[data-export]").every((button) => button.disabled));
+    const count = selections;
+    menu.querySelector('[data-export="json"]')!.listeners.get("click")!();
+    assert.equal(selections, count, "closed menu discarded its preview");
+    if (chip) assert.equal(chip.checked, false, "the actual Velocity chip changed");
+  }
+});
+
+test("an export download rejects a selection changed since its preview", async () => {
+  const { context, document, run } = await harness([]);
+  context["selection"] = { snapshot: { kind: "machine", sessions: [] }, basis: "All providers" };
+  run("resetExportMenu = installExportMenu(() => selection)");
+  const menu = document.querySelector("#export-menu")!;
+  menu.open = true; menu.listeners.get("toggle")!();
+  run("selection.basis = 'Claude only'");
+  menu.querySelector('[data-export="json"]')!.listeners.get("click")!();
+  assert.equal(menu.open, false); assert.equal(document.querySelector("#export-description")!.textContent, "");
+  assert.equal(document.querySelector("#export-status")!.textContent, "Selection changed; reopen Export");
+  assert.ok(menu.querySelectorAll("[data-export]").every((button) => button.disabled));
+});
+
+test("refresh failure composes a sentence", async () => {
+  const { context, document, run } = await harness([sample()]);
+  assert.equal(run("describeLoadError(new TypeError('Failed to fetch'))"), "The local server did not answer (Failed to fetch).");
+  assert.equal(run("describeLoadError(new TypeError('Failed to fetch.'))"), "The local server did not answer (Failed to fetch).");
+  assert.equal(run("describeLoadError(new Error('HTTP 500'))"), "The analysis failed (HTTP 500).");
+  context["fetch"] = async () => { throw new TypeError("Failed to fetch."); };
+  await run("loadSnapshot(true)");
+  assert.equal(document.querySelector("#error-banner")!.dataset["tone"], "warn");
+  assert.equal(document.querySelector("#error-title")!.textContent, "Couldn't refresh");
+  assert.equal(document.querySelector("#error-message")!.textContent, run("'The local server did not answer (Failed to fetch). You are looking at the snapshot from ' + dateTime(snapshot.generatedAt) + '.'"));
+  assert.match(document.querySelector("#generated-at")!.textContent, / · stale$/);
+  assert.match(document.querySelector("#sync-label")!.textContent, /^Stale · /);
+  assert.equal(document.querySelector("#error-retry")!.hidden, false);
+  context["fetch"] = async () => ({ ok: false, status: 500, json: async () => ({ error: "Analysis failed." }) });
+  await run("loadSnapshot(true)");
+  assert.match(document.querySelector("#error-message")!.textContent, /^The analysis failed \(HTTP 500\)\. You are looking at the snapshot from /);
+  run("snapshot = null"); await run("loadSnapshot()");
+  assert.equal(document.querySelector("#error-title")!.textContent, "No snapshot yet");
+  assert.equal(document.querySelector("#error-message")!.textContent, "The local analysis did not finish. Retry, or check the terminal running the dashboard.");
+  assert.equal(document.querySelector("#error-retry")!.hidden, false);
+});
+
+test("Escape cancels an armed g chord and dashboard statuses are live regions", async () => {
+  const { document, run, fireKey } = await harness([sample()]);
+  fireKey("g"); assert.equal(run("pendingChord"), "g");
+  fireKey("Escape"); assert.equal(run("pendingChord"), null);
+  fireKey("v"); assert.equal(run("currentViewName()"), "summary");
+  fireKey("g");
+  const input = Object.assign(new Element("INPUT"), { type: "search" });
+  fireKey("Escape", input); assert.equal(run("pendingChord"), null);
+  fireKey("g");
+  const menu = document.querySelector("#export-menu")!; menu.open = true;
+  assert.equal(fireKey("Escape").defaultPrevented, true);
+  assert.equal(run("pendingChord"), null);
+  assert.equal(document.querySelector("#sync-context")!.getAttribute("role"), "status");
+  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "polite");
+});
 
 test("palette ranks exact, prefix, word-start, substring, then subsequence matches and drops weak fuzzy matches", async () => {
   const { run } = await harness([sample()]);

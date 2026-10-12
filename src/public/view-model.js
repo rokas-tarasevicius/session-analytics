@@ -128,6 +128,11 @@ function upperPremiums(apiSessions, start, end) {
   return premiums;
 }
 
+/** Sessions with an activity ledger, including ledgers with no cells in the selected window. */
+export function ledgerAvailability(sessions) {
+  return { eligible: sessions.filter((session) => session.velocity).length, selected: sessions.length };
+}
+
 /**
  * One window of the activity ledger for the money views (Costs, Pricing, model mix). Every figure is a buildVelocity
  * total over the same sessions and calendar dates as the Summary KPI and Velocity, so they agree. Sessions whose value
@@ -144,10 +149,25 @@ export function ledgerMoney(sessions, { start, end }) {
   for (const [basis, data] of parts) for (const series of data.allSeries) {
     const split = series.id.indexOf(":");
     const row = models.get(series.id) ?? { id: series.id, provider: series.id.slice(0, split), model: series.id.slice(split + 1), label: series.label,
-      value: 0, api: 0, reported: 0, upper: 0, share: 0, sessions: 0, calls: 0, sums: blankCounters(), evidence: blankEvidence() };
+      value: 0, api: 0, reported: 0, upper: 0, share: 0, sessions: 0, calls: 0, callsEligible: 0, sums: blankCounters(), evidence: blankEvidence() };
     row.value += series.total; row[basis] += series.total; row.sessions += series.sessions; row.calls += series.calls;
     addCounters(row.sums, series.sums); mergeEvidence(row.evidence, series.evidence);
     models.set(series.id, row);
+  }
+  // Call evidence is per selected session/model, independent of whether its observed count is zero: request-unit
+  // evidence counts an observed zero, and a positive recorded count is evidence on its own (recovered receipt-floor
+  // sessions keep a session usage unit while carrying message-derived model calls).
+  for (const session of sessions) {
+    if (!session.velocity) continue;
+    const requestEvidence = metricEligible(session, "calls");
+    const seen = new Set();
+    for (const [day, , dimensionId, values] of ledgerCells(session.velocity)) {
+      if (day < start || day > end || !(requestEvidence || values[7] > 0)) continue;
+      const dimension = session.velocity.dimensions[dimensionId];
+      if (!dimension) continue;
+      const id = `${session.provider}:${dimension.model}`;
+      if (!seen.has(id) && models.has(id)) { models.get(id).callsEligible += 1; seen.add(id); }
+    }
   }
   const [api, reported] = parts.map(([, data]) => data);
   const total = api.totals[0] + reported.totals[0];

@@ -89,7 +89,7 @@ export function renderModelDetails(target, card, rateCard) {
     if (usage.upperEstimateUsd !== usage.valueUsd) values.push(["Upper estimate", money(usage.upperEstimateUsd)]);
     values.push(["Observed tokens", integer(usage.tokens)],
       ["Pricing coverage", `${integer(usage.pricedTokens)} / ${integer(usage.tokens)} observed tokens (${usage.coverage === null ? DASH : sharePercent(usage.coverage)})`],
-      ["Calls", integer(usage.calls)], ["Sessions", integer(usage.sessions)],
+      ["Calls", usage.callsEligible > 0 && usage.calls != null ? integer(usage.calls) : DASH], ["Sessions", integer(usage.sessions)],
       ["Input tokens", integer(usage.inputTokens)], ["Cached input tokens", integer(usage.cachedInputTokens)],
       ["Cache write tokens", integer(usage.cacheWriteInputTokens)], ["Output tokens", integer(usage.outputTokens)]);
     body.append(detailSection("In this selection", definitionList(values)));

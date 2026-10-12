@@ -89,7 +89,8 @@ function trend(profile, timeZone = "UTC") {
   const peak = days.reduce((best, row) => row.calls > best.calls ? row : best, days[0]);
   const total = days.reduce((sum, row) => sum + row.calls, 0);
   const missing = days.filter((row) => row.coverage.selected > 0 && !row.coverage.eligible).length;
-  const description = `${profile.name}: ${integer.format(total)} calls plotted from ${days[0].day} to ${days.at(-1).day} (${timeZone}). ${peak.calls ? `Peak ${integer.format(peak.calls)} on ${peak.day}.` : "No calls with an evidenced start day in this range."}${missing ? ` ${missing} days have session starts but no tool evidence; these are unavailable, not zero.` : ""}`;
+  const suffix = `${peak.calls ? `peak ${integer.format(peak.calls)} on ${peak.day}` : "no dated calls in this range"} · baseline 0 · ${timeZone}`;
+  const description = `${profile.name}: ${integer.format(total)} calls plotted from ${days[0].day} to ${days.at(-1).day}. ${suffix}.${missing ? ` ${missing} days have session starts but no tool evidence; these are unavailable, not zero.` : ""}`;
   const plot = el("div", null, "tools-trend-plot"), labels = el("div", null, "tools-trend-labels");
   labels.setAttribute("aria-hidden", "true"); labels.append(el("span", integer.format(peak.calls)), el("span", "0"));
   const scroll = el("div", null, "tools-trend-scroll"), chart = el("div", null, "tools-columns");
@@ -140,7 +141,7 @@ function trend(profile, timeZone = "UTC") {
   scroll.append(chart); plot.append(labels, scroll); section.append(plot, tooltip);
   const axis = el("div", null, "tools-trend-axis");
   axis.append(el("span", days[0].day), el("span", days.at(-1).day)); section.append(axis);
-  section.append(note(`${integer.format(total)} calls plotted · ${peak.calls ? `peak ${integer.format(peak.calls)} on ${peak.day}` : "no dated calls in this range"} · baseline 0 · UTC`));
+  section.append(note(`${integer.format(total)} calls plotted · ${suffix}`));
   if (missing) section.append(note(`${missing} days have sessions without tool evidence; their counts are ${DASH}.`));
   section.append(...exclusions);
   return section;
