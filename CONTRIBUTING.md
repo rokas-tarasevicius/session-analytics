@@ -24,7 +24,7 @@ There is no build step. Node runs the TypeScript sources directly.
 | `npm run demo` | Generate synthetic sessions in a temporary directory and open the dashboard on port 4175 against that data only. `npm run demo -- report` prints the report; `-- --keep` keeps the generated files. |
 | `npm run typecheck` | `tsc --noEmit` over `bin/`, `src/`, `test/`, and `scripts/`. |
 | `npm test` | `node --test --test-concurrency=2 test/*.test.ts test/validation/*.test.ts verify/*/*.test.ts verify/*/*.test.mjs` |
-| `npm run check` | Type check, then tests. CI runs this on Ubuntu and macOS. |
+| `npm run check` | Type check, then tests. CI runs this on Ubuntu and macOS for pull requests and pushes. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
 
@@ -108,6 +108,8 @@ Public pricing fetches belong only in `src/pricing/`; analysis stays network-fre
 ## Changelog
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time.
+
+Pushing a `vX.Y.Z` tag runs the release workflow on Ubuntu: it installs development dependencies, runs `npm run check`, and creates a GitHub Release using the matching `## [X.Y.Z]` section from `CHANGELOG.md`. A missing section fails the workflow.
 
 ## Style
 

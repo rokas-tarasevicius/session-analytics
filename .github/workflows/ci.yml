@@ -21,17 +21,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pull requests run on Linux only to save macOS minutes (billed at 10x on private repositories).
-        # macOS runs on pushes to master, manual runs, and pull requests labelled `macos`.
-        os: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'macos')) && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","macos-latest"]') }}
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Check out
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
           cache: npm
@@ -41,3 +39,34 @@ jobs:
 
       - name: Type check and test
         run: npm run check
+
+      - name: Check snapshot schemas
+        run: node scripts/snapshot-schema.ts --check
+
+      - name: Smoke test synthetic JSON report
+        run: node scripts/demo.ts report --json | node -e 'JSON.parse(require("fs").readFileSync(0, "utf8"))'
+
+      - name: Check package contents
+        run: npm pack --dry-run
+
+  browser:
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test dashboard in Chrome
+        run: node --test test/dashboard.browser.test.ts

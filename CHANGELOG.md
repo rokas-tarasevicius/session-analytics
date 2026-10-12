@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Pull requests and pushes now check snapshot schemas, synthetic JSON reports and package contents on Ubuntu and macOS; Chrome dashboard checks run separately on macOS without blocking CI. Version tags create a GitHub Release from the matching changelog notes after the full checks pass.
 - The dashboard URL follows the view, window (`?window=`, custom `?start=`/`?end=`) and repository focus (`?repo=` with the opaque repository ID, never a name or path). View, preset and repository changes add a browser history entry and Back/Forward restores them; reload and bookmarks reopen the same place. `?open=`, `?theme=` and `?density=` apply once and are then removed from the URL; a URL theme or density is no longer saved as your preference, and the system theme is no longer saved on first visit.
 - Switching views starts the new view at the top of the page.
 - Command palette results are ranked: exact, then prefix, word-start, substring and fuzzy matches, and fuzzy-only matches are dropped when a closer match exists (`help` finds Keyboard shortcuts first). The palette gains an **Export view…** entry.
