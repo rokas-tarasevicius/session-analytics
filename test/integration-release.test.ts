@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
@@ -12,6 +14,68 @@ import { version } from "../src/version.ts";
 
 const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
+
+test("release: package, lockfile, CLI and latest changelog versions agree", async () => {
+  const [manifest, lockfile, changelog] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../package-lock.json", import.meta.url), "utf8"),
+    readFile(new URL("../CHANGELOG.md", import.meta.url), "utf8"),
+  ]);
+  const latest = /^## \[(\d+\.\d+\.\d+)\](?:\s|$)/m.exec(changelog);
+  assert.ok(latest, "CHANGELOG.md must have a released version heading");
+  assert.equal(JSON.parse(manifest).version, version, "package.json matches src/version.ts");
+  assert.equal(JSON.parse(lockfile).version, version, "package-lock.json matches src/version.ts");
+  assert.equal(latest[1], version, "latest CHANGELOG.md release matches src/version.ts");
+});
+
+test("release: CI gates run on both platforms with independent advisory browser checks", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const [check, browser] = workflow.split("\n  browser:\n");
+  assert.ok(check && browser);
+  assert.match(check, /os: \[ubuntu-latest, macos-latest\]/);
+  assert.match(check, /permissions:\n  contents: read/);
+  assert.match(check, /concurrency:\n  group: ci-.*\n  cancel-in-progress: true/);
+  const commands = ["npm run check", "node scripts/snapshot-schema.ts --check", 'node scripts/demo.ts report --json | node -e \'JSON.parse(require("fs").readFileSync(0, "utf8"))\'', "npm pack --dry-run"];
+  const runs = [...check.matchAll(/^        run: (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(runs, ["npm ci", ...commands]);
+  assert.match(browser, /runs-on: macos-latest\n    continue-on-error: true/);
+  assert.doesNotMatch(workflow, /\bneeds:/);
+  assert.match(browser, /run: node --test test\/dashboard\.browser\.test\.ts/);
+  for (const job of [check, browser]) {
+    assert.match(job, /uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n        with:\n          persist-credentials: false/);
+    assert.match(job, /uses: actions\/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7\n        with:\n          node-version: 24/);
+    assert.match(job, /run: npm ci/);
+  }
+});
+
+test("release: tag workflow extracts only matching changelog notes and rejects missing sections", async () => {
+  const workflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  assert.match(workflow, /on:\n  push:\n    tags: \['v\*'\]/);
+  assert.match(workflow, /permissions:\n  contents: write/);
+  assert.match(workflow, /runs-on: ubuntu-latest/);
+  assert.match(workflow, /run: npm ci[\s\S]*run: npm run check[\s\S]*name: Extract release notes[\s\S]*name: Create GitHub Release/);
+  assert.match(workflow, /run: gh release create "\$GITHUB_REF_NAME" --title "\$GITHUB_REF_NAME" --notes-file notes\.md\n        env:\n          GH_TOKEN: \$\{\{ github.token \}\}/);
+  const block = /      - name: Extract release notes\n        run: \|\n([\s\S]*?)\n      - name: Create GitHub Release/.exec(workflow);
+  assert.ok(block, "release workflow has an extraction script");
+  const script = block[1]!.split("\n").map((line) => line.replace(/^          /, "")).join("\n");
+  const root = await mkdtemp(join(tmpdir(), "session-analytics-release-"));
+  try {
+    await writeFile(join(root, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\nPending.\n\n## [1.2.3] - 2026-10-12\n\n### Changed\n\n- Current notes.\n\n## [1.2.2]\n\n- Older notes.\n");
+    for (const [tag, notes] of [["v1.2.3", "### Changed\n\n- Current notes.\n"], ["v1.2.2", "- Older notes.\n"]]) {
+      const result = spawnSync("bash", ["-e", "-o", "pipefail", "-c", script], { cwd: root, env: { ...process.env, GITHUB_REF_NAME: tag }, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(await readFile(join(root, "notes.md"), "utf8"), notes);
+    }
+    for (const tag of ["v9.9.9", "v1.2"]) {
+      const result = spawnSync("bash", ["-e", "-o", "pipefail", "-c", script], { cwd: root, env: { ...process.env, GITHUB_REF_NAME: tag }, encoding: "utf8" });
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /No CHANGELOG\.md section found for/);
+      assert.equal(await readFile(join(root, "notes.md"), "utf8"), "- Older notes.\n", "missing section does not overwrite notes");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("release: every dispatcher command shares help and version without scanning", () => {
   for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp"]) {
