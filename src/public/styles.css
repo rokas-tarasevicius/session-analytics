@@ -463,6 +463,8 @@ h2 { font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.01em; }
 .chart-legend-icon img { width: 16px; height: 16px; object-fit: contain; }
 .chart-legend-icon .mark { padding: 0; border: 0; font-size: 9px; }
 .chart-legend[data-layout="list"] { display: grid; gap: 6px; margin-top: 0; }
+#daily-spend .chart-legend[data-layout="list"] { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+#daily-spend .chart-legend[data-layout="list"] .chart-legend-item { grid-template-columns: 16px minmax(0, 1fr) auto; }
 .chart-legend[data-layout="list"] .chart-legend-item { display: grid; grid-template-columns: 12px 16px minmax(min-content, 1fr) auto auto; width: 100%; }
 .chart-target [data-series] { transition: opacity var(--t-fast); }
 .chart-target[data-highlight] [data-series]:not([data-series-active]) { opacity: .25; }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 
 const styles = ["styles.css", "velocity.css", "pricing.css", "tools.css", "interop.css"];
@@ -147,4 +148,24 @@ test("all KPI grids share responsive columns without per-view column overrides",
     }
   }
   assert.doesNotMatch(await readCss("pricing.css"), /@media\s*\(max-width:\s*520px\)/);
+});
+
+test("dashboard formatting is centralized in format.js", async () => {
+  const root = new URL("../src/public/", import.meta.url);
+  for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || entry.name === "format.js") continue;
+    const file = join(entry.parentPath, entry.name);
+    const source = await readFile(file, "utf8");
+    assert.doesNotMatch(source, /new\s+Intl\.|\btoLocaleString\s*\(/, file);
+  }
+});
+
+test("daily usage legend uses two list columns so provider values cannot orphan", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  const list = cssRules.find(({ selector }) => selector === '#daily-spend .chart-legend[data-layout="list"]');
+  assert.ok(list);
+  assert.match(list.body, /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  const item = cssRules.find(({ selector }) => selector === '#daily-spend .chart-legend[data-layout="list"] .chart-legend-item');
+  assert.ok(item);
+  assert.match(item.body, /grid-template-columns:\s*16px minmax\(0, 1fr\) auto/);
 });

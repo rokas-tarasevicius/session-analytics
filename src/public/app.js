@@ -1,3 +1,4 @@
+import { compact, dateRange, dateTime, dayLabel, disjunction, fullDate, integer, money, timeLabel } from "./format.js";
 import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
@@ -112,19 +113,8 @@ const viewProviderFilters = {
 };
 const hoverListeners = new Set();
 const navHoverListeners = new Set();
-const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
-const integer = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
-const currency = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
-const money = (value) => currency.format(value || 0);
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const wideLayout = window.matchMedia("(min-width: 1121px)");
-
-function dateTime(value) {
-  if (!value) return "Unknown time";
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(normalizeTimestamp(value)));
-}
-
-const shortDate = (day) => new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(`${day}T00:00:00`));
 
 function node(tag, value, className) {
   const element = document.createElement(tag);
@@ -497,7 +487,7 @@ function renderActivity(view) {
     clear(status);
     let empty = renderProviderEmptyState(status, "activity", eligible.length, view.sessions.length);
     if (!empty && eligible.length && !counted) {
-      emptyState(status, `None of the ${integer.format(eligible.length)} selected sessions has a provider start timestamp; unknown starts and file modification times are not plotted.`, "No known session starts");
+      emptyState(status, `None of the ${integer(eligible.length)} selected sessions has a provider start timestamp; unknown starts and file modification times are not plotted.`, "No known session starts");
       empty = true;
     }
     status.hidden = !empty;
@@ -511,14 +501,14 @@ function renderActivity(view) {
     key.append(node("span", "Session starts per hour", "heatmap-key-label"), node("span", "0"));
     for (const { level, min, max } of heatLegend(maximum)) {
       const swatch = node("i"); swatch.dataset.level = String(level);
-      swatch.setAttribute("title", min === max ? `${integer.format(min)} ${min === 1 ? "session" : "sessions"}` : `${integer.format(min)}–${integer.format(max)} sessions`);
+      swatch.setAttribute("title", min === max ? `${integer(min)} ${min === 1 ? "session" : "sessions"}` : `${integer(min)}–${integer(max)} sessions`);
       swatch.setAttribute("aria-hidden", "true"); key.append(swatch);
     }
-    key.append(node("span", integer.format(maximum)), node("span", `Colour scale from 0 to ${integer.format(maximum)} session starts per weekday-hour cell; darker means more.`, "sr-only"));
+    key.append(node("span", integer(maximum)), node("span", `Colour scale from 0 to ${integer(maximum)} session starts per weekday-hour cell; darker means more.`, "sr-only"));
   }
   clear(elements.activityHeatmap);
   elements.activityHeatmap.setAttribute("role", "group");
-  elements.activityHeatmap.setAttribute("aria-label", `Session starts by local weekday and hour for ${integer.format(counted)} selected sessions.`);
+  elements.activityHeatmap.setAttribute("aria-label", `Session starts by local weekday and hour for ${integer(counted)} selected sessions.`);
   elements.activityHeatmap.append(node("span", "", "heat-hour"));
   for (let hour = 0; hour < 24; hour += 1) elements.activityHeatmap.append(node("span", String(hour).padStart(2, "0"), `heat-hour${hour % 4 ? " heat-hour-minor" : ""}`));
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -534,11 +524,11 @@ function renderActivity(view) {
       cell.dataset.focusKey = `heat:${day}:${hour}`;
       cell.setAttribute("tabindex", day === 0 && hour === 0 ? "0" : "-1");
       cell.setAttribute("role", "img");
-      cell.setAttribute("aria-label", `${integer.format(value)} session${value === 1 ? "" : "s"}, ${days[day]}, ${hourLabel}`);
+      cell.setAttribute("aria-label", `${integer(value)} session${value === 1 ? "" : "s"}, ${days[day]}, ${hourLabel}`);
       const showTooltip = () => {
         clear(elements.activityTooltip);
         elements.activityTooltip.append(
-          node("strong", integer.format(value)),
+          node("strong", integer(value)),
           node("span", `${value === 1 ? "session" : "sessions"} · ${days[day]} · ${hourLabel}`),
         );
         elements.activityTooltip.hidden = false;
@@ -580,7 +570,7 @@ function renderActivity(view) {
     name: repository.name,
     value: sessions.filter(({ repositoryId }) => repositoryId === repository.id).length,
   })).filter(({ value }) => value > 0).sort((left, right) => right.value - left.value);
-  renderBars(elements.activityRepositories, repositories, (value) => integer.format(value), 12);
+  renderBars(elements.activityRepositories, repositories, (value) => integer(value), 12);
 }
 
 const unattributedColor = "repeating-linear-gradient(45deg, var(--muted) 0 4px, var(--surface-3) 4px 6px)";
@@ -590,7 +580,7 @@ function pricedBadge(evidence, tag = "small") {
   const share = pricedShare(evidence);
   if (share === null || share >= 1) return null;
   const badge = node(tag, `${Math.floor(Math.round(share * 1000) / 10)}% priced`, "coverage");
-  badge.title = `${pricedPercent(evidence)} of eligible tokens have a price (${integer.format(evidence.known)} of ${integer.format(evidence.eligible)})`;
+  badge.title = `${pricedPercent(evidence)} of eligible tokens have a price (${integer(evidence.known)} of ${integer(evidence.eligible)})`;
   badge.setAttribute("aria-label", badge.title);
   return badge;
 }
@@ -646,13 +636,13 @@ function renderModelCosts(container, ledger) {
     label.append(node("span", model.model), provider);
     const share = pricedShare(model.evidence);
     const meta = model.unattributed ? "Provider value without model evidence" : [
-      `${integer.format(model.sessions)} session${model.sessions === 1 ? "" : "s"}`,
-      model.callsEligible > 0 ? `${integer.format(model.calls)} calls` : `${DASH} calls`,
-      model.sums[1] + model.sums[5] > 0 ? `${compact.format(model.sums[1])} in / ${compact.format(model.sums[5])} out tokens` : "no model token evidence",
+      `${integer(model.sessions)} session${model.sessions === 1 ? "" : "s"}`,
+      model.callsEligible > 0 ? `${integer(model.calls)} calls` : `${DASH} calls`,
+      model.sums[1] + model.sums[5] > 0 ? `${compact(model.sums[1])} in / ${compact(model.sums[5])} out tokens` : "no model token evidence",
       share === null || share >= 1 ? null : model.value > 0 ? "partly unpriced" : "unpriced",
     ].filter(Boolean).join(" · ");
     const basis = model.api > 0 && model.reported > 0 ? `${money(model.api)} API-equivalent + ${money(model.reported)} provider-reported. ` : model.reported > 0 ? "Provider-reported. " : "";
-    const detail = model.unattributed ? meta : `${tokenClasses.map(([name, index]) => `${name} ${compact.format(model.sums[index])}`).join(", ")} tokens`;
+    const detail = model.unattributed ? meta : `${tokenClasses.map(([name, index]) => `${name} ${compact(model.sums[index])}`).join(", ")} tokens`;
     row.title = `${model.model} · ${providerLabels[model.provider] ?? "Unknown provider"}: ${money(model.value)} (${percent(model.share)} of total). ${basis}${meta}. ${detail}`;
     const track = node("div", null, "cost-model-track"), fill = node("i");
     track.setAttribute("role", "img"); track.setAttribute("aria-label", row.title);
@@ -683,9 +673,9 @@ function renderCosts(view) {
   for (const [slot, badge] of [[elements.costTotalCoverage, pricedBadge(ledger.evidence)], [elements.costApiCoverage, null], [elements.costProviderCoverage, null]]) { clear(slot); if (badge && !unavailable) slot.append(badge); }
   elements.costApiNote.textContent = ledger.upper > ledger.api + 0.005 ? `Upper estimate ${money(ledger.upper)} with the cache-write assumption` : "Rate-card priced usage";
   elements.costCoverage.textContent = pricedPercent(ledger.evidence) === "N/A" ? DASH : pricedPercent(ledger.evidence);
-  elements.costCoverageNote.textContent = ledger.evidence.eligible > 0 ? `${compact.format(ledger.evidence.known)} of ${compact.format(ledger.evidence.eligible)} eligible tokens priced` : "No eligible tokens in this window";
+  elements.costCoverageNote.textContent = ledger.evidence.eligible > 0 ? `${compact(ledger.evidence.known)} of ${compact(ledger.evidence.eligible)} eligible tokens priced` : "No eligible tokens in this window";
   const excluded = ledgerExclusions(ledger);
-  elements.costReconciliation.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${range.start} to ${range.end} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
+  elements.costReconciliation.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${dateRange(range.start, range.end)} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
   renderCostRows(elements.providerCostModels, ledger);
   renderModelCosts(elements.costModels, ledger);
 }
@@ -776,7 +766,7 @@ function renderLine(items) {
   }
   const xAt = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
   const tickIndexes = [...new Set(width < 560 ? [0, Math.round((items.length - 1) / 2), items.length - 1] : [0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
-  for (const index of tickIndexes) addSvgText(svg, shortDate(items[index].name), xAt(index), height - 12, index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
+  for (const index of tickIndexes) addSvgText(svg, dayLabel(items[index].name), xAt(index), height - 12, index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
   const xs = items.map((_, index) => xAt(index));
   const baseline = top + plotHeight;
   const dots = {};
@@ -796,7 +786,7 @@ function renderLine(items) {
   elements.dailySpend.append(svg);
   attachCrosshair(elements.dailySpend, svg, {
     xs, plotTop: top, plotBottom: baseline, plotLeft: left, plotRight: width - right, label: "Daily usage value in US dollars by provider",
-    title: (index) => new Intl.DateTimeFormat("en-GB", { dateStyle: "full" }).format(new Date(`${items[index].name}T00:00:00`)),
+    title: (index) => fullDate(items[index].name),
     rows: (index) => providers.map((provider) => ({ label: providerLabels[provider], color: providerColor(provider), value: money(items[index][provider]), dim: items[index][provider] <= 0 })),
     onIndex: (index) => {
       for (const provider of providers) {
@@ -808,7 +798,7 @@ function renderLine(items) {
     },
   });
   const legend = node("div");
-  renderLegend(legend, providers.map((provider) => ({ id: provider, label: providerLabels[provider], color: providerColor(provider), value: totals[provider], valueLabel: money(totals[provider]), mark: "line" })), { target: svg });
+  renderLegend(legend, providers.map((provider) => ({ id: provider, label: providerLabels[provider], color: providerColor(provider), value: totals[provider], valueLabel: money(totals[provider]), mark: "line" })), { target: svg, layout: "list" });
   elements.dailySpend.append(legend);
 }
 
@@ -826,7 +816,7 @@ function renderDonut(sessions) {
   const total = sessions.length;
   const providers = Object.keys(counts).filter((provider) => counts[provider] > 0).sort((a, b) => counts[b] - counts[a]);
   clear(elements.providerDonut);
-  const svg = svgNode("svg", { viewBox: "0 0 120 120", role: "img", "aria-label": `${integer.format(total)} sessions by provider` });
+  const svg = svgNode("svg", { viewBox: "0 0 120 120", role: "img", "aria-label": `${integer(total)} sessions by provider` });
   let angle = -Math.PI / 2;
   for (const provider of providers) {
     const sweep = counts[provider] / total * Math.PI * 2;
@@ -836,11 +826,11 @@ function renderDonut(sessions) {
   }
   if (total === 0) svg.append(svgNode("circle", { cx: 60, cy: 60, r: 49, fill: "none", stroke: "var(--surface-3)", "stroke-width": 18 }));
   const center = node("div", null, "donut-center");
-  center.append(node("strong", integer.format(total)), node("span", total === 1 ? "session" : "sessions"));
+  center.append(node("strong", integer(total)), node("span", total === 1 ? "session" : "sessions"));
   elements.providerDonut.append(svg, center);
   renderLegend(elements.providerLegend, providers.map((provider) => ({
     id: provider, label: shortProviderLabels[provider] ?? providerLabels[provider] ?? "Unknown", color: providerColor(provider),
-    value: counts[provider], valueLabel: integer.format(counts[provider]), share: counts[provider] / total, mark: "logo", icon: providerMark(provider),
+    value: counts[provider], valueLabel: integer(counts[provider]), share: counts[provider] / total, mark: "logo", icon: providerMark(provider),
   })), { target: elements.providerDonut, layout: "list" });
 }
 
@@ -878,7 +868,7 @@ function renderRepositoryTable(repositories) {
     const value = node("td");
     if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
     else value.append(node("span", money(item.usage.value)));
-    row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
@@ -985,7 +975,7 @@ wideLayout.addEventListener("change", () => { if (snapshot && navDirty) renderRe
 
 function windowCaption() {
   if (elements.windowStart.value === elements.windowStart.min && elements.windowEnd.value === elements.windowEnd.max) return "all observed dates";
-  return `${elements.windowStart.value} through ${elements.windowEnd.value}`;
+  return dateRange(elements.windowStart.value, elements.windowEnd.value);
 }
 
 function renderSharedView(view) {
@@ -1058,17 +1048,17 @@ function renderSummary(view) {
   elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
   elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
   elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${executionBreakdown(summary)}${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
-  renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.inputCoverage);
+  renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence", elements.inputCoverage);
   elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached · repeated context included` : "Cache share unavailable · repeated context included";
-  renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer.format(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer.format(summary.workingSnapshots);
+  renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer(summary.workingSnapshots);
   const count = (accessor) => dailyCountSeries(view.sessions, days, accessor, context.timeZone);
   const metrics = [
     ["spend", `Usage value by activity date (${context.timeZone}), including session-dated value; undated value excluded`, money, activity.totals[0], previousActivity?.totals[0], activity.daily.map(({ total }) => total)],
-    ["sessions", "Sessions started per day", integer.format, summary.sessions, previousSummary?.sessions, count(() => 1)],
-    ["input", "Request input processed per session-start day", compact.format, summary.totalInputTokens, previousSummary?.totalInputTokens, count(({ tokens }) => tokens.inputTokens)],
-    ["output", "Output tokens per session-start day", compact.format, summary.outputTokens, previousSummary?.outputTokens, count(({ tokens }) => tokens.outputTokens)],
-    ["tools", "Effective tool calls per session-start day", integer.format, summary.toolCalls, previousSummary?.toolCalls, count(({ metrics: item }) => item.toolCalls)],
-    ["compactions", "Compactions per session-start day", integer.format, summary.compactions, previousSummary?.compactions, count(({ metrics: item }) => item.compactions)],
+    ["sessions", "Sessions started per day", integer, summary.sessions, previousSummary?.sessions, count(() => 1)],
+    ["input", "Request input processed per session-start day", compact, summary.totalInputTokens, previousSummary?.totalInputTokens, count(({ tokens }) => tokens.inputTokens)],
+    ["output", "Output tokens per session-start day", compact, summary.outputTokens, previousSummary?.outputTokens, count(({ tokens }) => tokens.outputTokens)],
+    ["tools", "Effective tool calls per session-start day", integer, summary.toolCalls, previousSummary?.toolCalls, count(({ metrics: item }) => item.toolCalls)],
+    ["compactions", "Compactions per session-start day", integer, summary.compactions, previousSummary?.compactions, count(({ metrics: item }) => item.compactions)],
   ];
   for (const [name, label, format, current, before, series] of metrics) {
     renderDelta($(`#metric-${name}-delta`), name === "spend" ? spendDelta(spendComparison, previous?.length) : previousSummary ? deltaDescription(current, before, previous.length) : null);
@@ -1076,14 +1066,14 @@ function renderSummary(view) {
   }
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
   renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.usage.value })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
-  renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), (value) => compact.format(value), 12, ({ id }) => selectRepository(id));
+  renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), (value) => compact(value), 12, ({ id }) => selectRepository(id));
   // Model mix: the same ledger, one row per model and provider ("model · Provider"), as on Costs.
   // The bars add up to the KPI: past eight rows the remainder is one "Other" row.
   const ledger = ledgerMoney(view.scopeSessions, context);
   const mix = ledger.models.filter(({ value }) => value > 0).map(({ id, model, provider, label, value }) => ({ id, name: label, model, value, provider }));
   const rest = mix.slice(7);
   renderBars(elements.modelSpend, mix.length > 8 ? [...mix.slice(0, 7), { id: "other", name: `Other (${rest.length} models)`, value: rest.reduce((total, { value }) => total + value, 0) }] : mix, money, 8);
-  renderBars(elements.toolCalls, view.topTools, (value) => integer.format(value), 10);
+  renderBars(elements.toolCalls, view.topTools, (value) => integer(value), 10);
   if (!summary.coverage.tools.eligible) { clear(elements.toolCalls); elements.toolCalls.append(node("p", `${DASH} No tool evidence in ${summary.coverage.tools.selected} selected sessions`, "empty-line")); }
   // Explicit sub-agent value: ledger cells whose execution kind is "subagent", per repository and window.
   renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: subagentValue(repositorySessions(item.repository.id), context) })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
@@ -1107,9 +1097,9 @@ function statusAction(label, run) {
 function renderProviderEmptyState(container, scope, eligibleCount, windowCount) {
   const providers = snapshotProviders(), selected = providers.filter((provider) => viewProviderFilters[scope].has(provider));
   if (selected.length && eligibleCount) return false;
-  const names = new Intl.ListFormat("en", { style: "long", type: "disjunction" }).format(selected.map((provider) => providerLabels[provider] ?? provider));
+  const names = disjunction(selected.map((provider) => providerLabels[provider] ?? provider));
   const message = !selected.length ? `Every provider is switched off for this view, so there are no ${scope === "tools" ? "tool calls" : "session starts"} to show.`
-    : `None of the ${integer.format(windowCount)} sessions in this window came from ${names}.`;
+    : `None of the ${integer(windowCount)} sessions in this window came from ${names}.`;
   const box = emptyState(container, message, selected.length ? "No sessions from the selected providers" : "No providers selected");
   if (!selected.length || selected.length < providers.length) {
     const actions = node("div", null, "status-actions");
@@ -1534,7 +1524,7 @@ function hideError() {
 /** After a failed refresh the previous snapshot stays on screen, marked stale with its own generation time. */
 function markStale(stale) {
   if (!snapshot) return;
-  elements.generated.textContent = stale ? `${dateTime(snapshot.generatedAt)} · stale` : dateTime(snapshot.generatedAt);
+  elements.generated.textContent = stale ? `${dateTime(snapshot.generatedAt, snapshotTimeZone())} · stale` : dateTime(snapshot.generatedAt, snapshotTimeZone());
   if (stale) {
     elements.generated.dataset.stale = "true";
     elements.generated.title = "The latest refresh failed; these figures come from this earlier snapshot.";
@@ -1596,9 +1586,9 @@ async function loadSnapshot(refresh = false) {
     delete elements.main.dataset.state;
     if (previous) {
       // Keep the last good snapshot on screen and say how old it is.
-      elements.syncLabel.textContent = snapshot ? `Stale · ${new Date(snapshot.generatedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : "Stale shared snapshot";
+      elements.syncLabel.textContent = snapshot ? `Stale · ${timeLabel(snapshot.generatedAt, snapshotTimeZone())}` : "Stale shared snapshot";
       markStale(true);
-      const retained = snapshot ? `You are looking at the snapshot from ${dateTime(snapshot.generatedAt)}.` : "You are looking at the previous shared snapshot.";
+      const retained = snapshot ? `You are looking at the snapshot from ${dateTime(snapshot.generatedAt, snapshotTimeZone())}.` : "You are looking at the previous shared snapshot.";
       showError(`${describeLoadError(error)} ${retained}`, "Couldn't refresh", "warn");
     } else {
       elements.syncLabel.textContent = "Analysis failed";

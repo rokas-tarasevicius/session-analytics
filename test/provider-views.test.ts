@@ -36,7 +36,7 @@ async function harness() {
   const velocityData = await import(new URL("../src/public/velocity-data.js", import.meta.url).href);
   const tools = await import(new URL("../src/public/tools.js", import.meta.url).href);
   const toolsData = await import(new URL("../src/public/tools-data.js", import.meta.url).href);
-  const charts = Object.assign({}, ...await Promise.all(["chart-colors", "chart-scale", "chart-legend"].map((name) => import(new URL(`../src/public/${name}.js`, import.meta.url).href))));
+  const charts = Object.assign({}, ...await Promise.all(["format", "chart-colors", "chart-scale", "chart-legend"].map((name) => import(new URL(`../src/public/${name}.js`, import.meta.url).href))));
   const context = createContext({ renderHistoryCoverage() {}, ...charts, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, ...tools, ...toolsData, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");

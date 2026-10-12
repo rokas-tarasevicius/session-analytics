@@ -437,3 +437,27 @@ test("Pricing reuses the dialog supplied by index.html", async () => {
     assert.equal(dialog.listeners.close!.length, 1);
   });
 });
+
+test("pricing freshness and model detail date-times use the snapshot timezone", async () => {
+  await withDocument(async (root) => {
+    const panel = new Node("div"); root.append(panel);
+    renderPricingPanel(panel, rateCard, sessions, { ...window, timeZone: "America/Los_Angeles" });
+    assert.match(byClass(panel, "pricing-freshness")[0]!.text(), /fetched 31 Dec 2025, 16:00/);
+    const button = modelButtons(panel)[0]!;
+    button.dispatch("click");
+    const dialog = root.all((node) => node.attributes.id === "pricing-model-dialog")[0]!;
+    assert.match(dialog.text(), /31 Dec 2025, 16:00/);
+    assert.doesNotMatch(dialog.text(), /1 Jan 2026, 00:00/);
+  });
+});
+
+test("date-only pricing provenance dates render as calendar dates, not 1970", async () => {
+  await withDocument((root) => {
+    const data = pricingModelCards(rateCard, sessions, window);
+    const card = data.used.find((item: { current: unknown }) => item.current) ?? data.used[0]!;
+    const current = { ...(card.current ?? {}), snapshotDate: "2026-10-02" };
+    renderModelDetails(root, { ...card, current }, rateCard, "America/Los_Angeles");
+    assert.match(root.text(), /2 Oct 2026/);
+    assert.doesNotMatch(root.text(), /1970|Invalid Date/);
+  });
+});

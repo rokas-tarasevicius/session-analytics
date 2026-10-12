@@ -1,11 +1,13 @@
+import { dateLabel, dateTime } from "./format.js";
 import { providerColor } from "./chart-colors.js";
 import { ageLabel, contextRows, integer, money, pricingCardView, pricingModelCards, rateRows, sharePercent } from "./pricing-data.js";
 import { providerLabels, providerMark } from "./providers.js";
 import { DASH, dataTable, el, evidence, kpi, note } from "./ui.js";
 
-const date = (value) => value ? new Date(value).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "Not cached";
+// Provenance dates may be calendar dates (schema: date or date-time); a calendar date stays a calendar label.
+const date = (value, timeZone) => !value ? "Not cached" : /^\d{4}-\d{2}-\d{2}$/.test(value) ? dateLabel(value) : dateTime(value, timeZone);
 const humanDate = (value) => Number.isFinite(Date.parse(value))
-  ? new Date(value).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : value;
+  ? dateLabel(new Date(value).toISOString().slice(0, 10)) : value;
 const assumptions = (provenance) => provenance?.assumptions.map((code) => assumptionLabels[code] ?? "Derived cache rate").join("; ") || "None";
 const dialogId = "pricing-model-dialog";
 const panels = new WeakMap();
@@ -49,7 +51,7 @@ function detailSection(title, ...children) {
 }
 
 /** Current public rates and the historical evidence actually used by the selected sessions. */
-export function renderModelDetails(target, card, rateCard) {
+export function renderModelDetails(target, card, rateCard, timeZone = "UTC") {
   target.replaceChildren();
   target.style?.setProperty?.("--card-accent", providerColor(card.provider));
   const header = el("header"), heading = el("div"), title = el("h2", card.model, "pricing-model");
@@ -74,7 +76,7 @@ export function renderModelDetails(target, card, rateCard) {
   const source = detailSection("Current rate source", current ? definitionList([
     ["Source", current.source],
     ["Kind", { reviewed: "Reviewed override (pinned)", fallback: "Bundled reviewed card (fallback)", api: "Public API price list" }[current.kind]],
-    ["Snapshot", date(current.snapshotDate)],
+    ["Snapshot", date(current.snapshotDate, timeZone)],
     ["Match", current.match === "alias" ? `Alias match · ${current.rateModel}` : "Exact match"],
     ["Assumptions", assumptions(current)],
   ]) : note("No current rate source available"));
@@ -97,7 +99,7 @@ export function renderModelDetails(target, card, rateCard) {
     if (!card.priced || (usage.coverage !== null && usage.coverage < 1)) entries.push(null);
     const rows = entries.map((provenance) => [
       provenance ? `${provenance.source} / ${provenance.kind}` : card.provenance.length ? "Some tokens use estimated or unavailable rates" : "No matching rate",
-      provenance ? date(provenance.snapshotDate) : DASH,
+      provenance ? date(provenance.snapshotDate, timeZone) : DASH,
       !provenance ? "Incomplete token-class coverage" : provenance.temporal === "oldest" ? "Oldest available (later than request)"
         : provenance.temporal === "undated" ? "Latest; request time unavailable" : "At or before request",
       assumptions(provenance),
@@ -125,7 +127,7 @@ function panelState(container) {
   panels.set(container, state); return state;
 }
 
-function modelGrid(cards, data, state, rateCard, unused = false) {
+function modelGrid(cards, data, state, rateCard, unused = false, timeZone = "UTC") {
   const grid = el("ul", null, `pricing-grid${unused ? " pricing-grid-unused" : ""}`); grid.setAttribute("role", "list");
   for (const card of cards) {
     const item = el("li"), button = el("button", null, `pricing-card${card.used ? "" : " pricing-card-unused"}`);
@@ -156,7 +158,7 @@ function modelGrid(cards, data, state, rateCard, unused = false) {
     state.buttons.set(button.dataset.focusKey, button);
     button.addEventListener?.("click", () => {
       state.openerKey = button.dataset.focusKey;
-      renderModelDetails(state.dialog, card, rateCard); state.dialog.showModal?.();
+      renderModelDetails(state.dialog, card, rateCard, timeZone); state.dialog.showModal?.();
     });
     item.append(button); grid.append(item);
   }
@@ -201,7 +203,7 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   cards.append(kpi({ label: "Pricing coverage", value: data.coverage === null ? null : sharePercent(data.coverage), reason: tokens ? null : "No eligible tokens in this selection", note: tokens ? `${integer(pricedTokens)} / ${integer(tokens)} eligible tokens · activity-dated, as on Costs` : "Provider-reported values do not use a rate card", accent: true }));
   for (const source of status.policy === "reviewed-only" ? [] : status.sources) {
     const age = ageLabel(source.ageDays);
-    const card = kpi({ label: `${source.source} prices`, value: age === null ? null : `${age[0].toUpperCase()}${age.slice(1)} old`, reason: age === null ? "No cached snapshot" : null, note: `${source.models} models · ${source.stale ? "stale or missing" : "current"}${source.fetchedAt ? ` · fetched ${date(source.fetchedAt)}` : " · not cached"}` });
+    const card = kpi({ label: `${source.source} prices`, value: age === null ? null : `${age[0].toUpperCase()}${age.slice(1)} old`, reason: age === null ? "No cached snapshot" : null, note: `${source.models} models · ${source.stale ? "stale or missing" : "current"}${source.fetchedAt ? ` · fetched ${date(source.fetchedAt, window.timeZone ?? "UTC")}` : " · not cached"}` });
     card.className += " pricing-freshness";
     const link = el("a", "Public price list ↗");
     link.href = source.url; link.target = "_blank"; link.rel = "noreferrer";
@@ -225,7 +227,7 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   header.append(block); panel.append(header);
   if (!data.used.length) {
     panel.append(note("No API-priced model usage in this selection. Provider-reported values do not use a rate card.", "empty-line"));
-  } else panel.append(modelGrid(data.used, data, state, rateCard));
+  } else panel.append(modelGrid(data.used, data, state, rateCard, false, window.timeZone ?? "UTC"));
   const toggle = el("button", null, "button pricing-toggle"), unused = el("div", null, "pricing-unused");
   toggle.setAttribute("type", "button"); toggle.dataset.focusKey = "pricing:unused";
   toggle.setAttribute("aria-controls", "pricing-unused-models"); unused.setAttribute("id", "pricing-unused-models");
@@ -233,7 +235,7 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
     toggle.textContent = showUnused ? "Hide unused models" : `Show ${integer(data.unused.length)} unused models`;
     toggle.setAttribute("aria-expanded", String(showUnused)); unused.hidden = !showUnused;
     for (const card of data.unused) state.buttons.delete(`pricing:model:${card.id}`);
-    unused.replaceChildren(...(showUnused ? [modelGrid(data.unused, data, state, rateCard, true)] : []));
+    unused.replaceChildren(...(showUnused ? [modelGrid(data.unused, data, state, rateCard, true, window.timeZone ?? "UTC")] : []));
   };
   toggle.addEventListener?.("click", () => { showUnused = !showUnused; renderUnused(); });
   if (data.unused.length) { renderUnused(); panel.append(toggle, unused); }

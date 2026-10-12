@@ -1,3 +1,4 @@
+import { compact, integer } from "../src/public/format.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -38,7 +39,7 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
     wideLayout: { matches: true, addEventListener() {} }, navCache: { key: null }, navHoverListeners: new Set(), navDirty: false,
     node: (tag: string, text?: string, className?: string) => { const e = new Element(tag); e.textContent = text ?? ""; e.className = className ?? ""; return e; },
     svgNode: (tag: string) => new Element(tag), icon: () => new Element("svg"), clear: (e: Element) => e.replaceChildren(),
-    money: (v: number) => `$${v.toFixed(2)}`, shortMoney: (v: number) => `$${v.toFixed(2)}`, percent: String, integer: new Intl.NumberFormat("en"), compact: new Intl.NumberFormat("en"),
+    money: (v: number) => `$${v.toFixed(2)}`, shortMoney: (v: number) => `$${v.toFixed(2)}`, percent: String, integer, compact,
     renderHistoryCoverage() {}, renderMetricValue() {}, renderSparkline() {}, renderLine() {}, dailyProviderSpend() {}, renderDonut() {}, renderBars() {}, renderRepositoryTable() {}, renderWarnings() {}, selectRepository() {},
     renderDelta: (e: Element, delta: unknown) => { deltas[Object.entries(elementMap).find(([, v]) => v === e)![0]] = delta; },
   });

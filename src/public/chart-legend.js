@@ -1,3 +1,4 @@
+import { percent } from "./format.js";
 /** @typedef {import("./chart-legend.js").LegendItem} LegendItem */
 /** @typedef {import("./chart-legend.js").LegendOptions} LegendOptions */
 /** @type {WeakMap<HTMLElement, () => void>} */
@@ -49,7 +50,7 @@ export function renderLegend(container, items, { target, layout = "wrap" }) {
     const entry = element("div", "chart-legend-item"); entry.setAttribute("role", "listitem");
     entry.setAttribute("data-series", item.id);
     const value = item.valueLabel ?? (item.value === undefined ? "" : String(item.value));
-    const share = item.share === undefined ? "" : typeof item.share === "number" ? `${(item.share * 100).toFixed(1)}%` : item.share;
+    const share = item.share === undefined ? "" : typeof item.share === "number" ? percent(item.share) : item.share;
     entry.setAttribute("aria-label", `${item.label}${value ? `: ${value}` : ""}${share ? ` (${share})` : ""}`);
     const swatch = element("i", "chart-legend-swatch"); swatch.setAttribute("aria-hidden", "true");
     swatch.dataset.mark = item.mark; swatch.dataset.pattern = item.pattern || "solid";

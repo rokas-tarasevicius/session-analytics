@@ -197,6 +197,15 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       assert.equal(await requestWithHost(port, `127.0.0.1:${port}`, { Origin: "http://localhost:3000", "Sec-Fetch-Site": "cross-site" }, "/app.js"), 200);
     });
 
+    await t.test("shared formatters are served as a same-origin dashboard module", async () => {
+      const module = await fetch(`${origin}/format.js`);
+      assert.equal(module.status, 200);
+      assert.match(module.headers.get("content-type")!, /javascript/);
+      assert.match(module.headers.get("content-security-policy")!, /script-src 'self'/);
+      assert.match(await module.text(), /export function moneyAxis/);
+      assert.equal((await fetch(`${origin}/format.d.ts`)).status, 404);
+    });
+
     const response = await fetch(`${origin}/api/analytics`);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");

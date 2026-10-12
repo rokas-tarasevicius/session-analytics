@@ -1,10 +1,9 @@
+import { integer, money, percent } from "./format.js";
 import { sharedEvidenceCaveat } from "./evidence.js";
 const node = (tag, text, className) => {
   const element = document.createElement(tag); if (text !== undefined) element.textContent = text;
   if (className) element.className = className; return element;
 };
-const number = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
-const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
 export const sharedHiddenSelectors = [".topbar-controls", ".view-nav", ".repo-nav", ".scope-line", "#help-button"];
 
@@ -18,7 +17,7 @@ export function renderSharedSnapshot(snapshot) {
   document.querySelector("#rate-card-links").replaceChildren();
   const panel = document.querySelector("#shared-snapshot"); panel.hidden = false; panel.replaceChildren();
   panel.append(node("p", "SHARED SNAPSHOT", "kicker"), node("h1", "Repository aggregates"));
-  panel.append(node("p", `${number.format(snapshot.summary.sessions)} sessions across ${snapshot.repositories.length} repositories from ${snapshot.sources.length} disjoint sources. Every source bucket met the minimum of ${snapshot.minimumSessions} sessions.`));
+  panel.append(node("p", `${integer(snapshot.summary.sessions)} sessions across ${snapshot.repositories.length} repositories from ${snapshot.sources.length} disjoint sources. Every source bucket met the minimum of ${snapshot.minimumSessions} sessions.`));
   panel.append(node("p", sharedEvidenceCaveat, "chart-note"));
   panel.append(node("p", "Only included repositories contribute to these totals. Session timestamps, names, model and tool breakdowns are unavailable. The threshold counts sessions, not people, and does not guarantee anonymity.", "chart-note"));
   const wrap = node("div", undefined, "table-scroll");
@@ -29,7 +28,7 @@ export function renderSharedSnapshot(snapshot) {
   const body = node("tbody");
   for (const row of snapshot.repositories) {
     const tr = node("tr");
-    for (const value of [row.repository, number.format(row.sessions), dollars.format(row.apiEquivalentSpendUsd), dollars.format(row.providerReportedSpendUsd), number.format(row.inputTokens), number.format(row.outputTokens), row.priceableTokens ? `${(100 * row.pricedTokens / row.priceableTokens).toFixed(1)}% (${number.format(row.pricedTokens)} / ${number.format(row.priceableTokens)} tokens)` : "N/A · no priceable tokens"]) tr.append(node("td", value));
+    for (const value of [row.repository, integer(row.sessions), money(row.apiEquivalentSpendUsd), money(row.providerReportedSpendUsd), integer(row.inputTokens), integer(row.outputTokens), row.priceableTokens ? `${percent(row.pricedTokens / row.priceableTokens)} (${integer(row.pricedTokens)} / ${integer(row.priceableTokens)} tokens)` : "N/A · no priceable tokens"]) tr.append(node("td", value));
     body.append(tr);
   }
   table.append(body); wrap.append(table); panel.append(wrap);

@@ -131,6 +131,7 @@ const staticFiles = new Map<string, string>([
   ["/history-coverage.js", join(publicRoot, "history-coverage.js")],
   ["/", join(publicRoot, "index.html")],
   ["/app.js", join(publicRoot, "app.js")],
+  ["/format.js", join(publicRoot, "format.js")],
   ["/view-model.js", join(publicRoot, "view-model.js")],
   ["/url-state.js", join(publicRoot, "url-state.js")],
   ["/theme-boot.js", join(publicRoot, "theme-boot.js")],

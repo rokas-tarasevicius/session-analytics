@@ -1,0 +1,17 @@
+export function integer(value: number): string;
+export function decimal(value: number): string;
+export function compact(value: number): string;
+export function money(value: number, maximumFractionDigits?: number): string;
+export function moneyAxis(value: number): string;
+export function percent(value: number | null | undefined, digits?: number, minimumFractionDigits?: number): string;
+export function dayLabel(day: string): string;
+export function dateLabel(day: string): string;
+export function fullDate(day: string): string;
+export function toolDayLabel(day: string): string;
+export function monthLabel(month: string): string;
+export function dateRange(start: string, end: string): string;
+export function timeLabel(value: string, timeZone?: string): string;
+export function dateTime(value: string | null | undefined, timeZone?: string): string;
+export function calendarParts(date: Date, timeZone: string): Intl.DateTimeFormatPart[];
+export function weekdayHourParts(date: Date, timeZone: string): Intl.DateTimeFormatPart[];
+export function disjunction(values: string[]): string;
