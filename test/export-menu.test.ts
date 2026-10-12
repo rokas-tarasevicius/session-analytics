@@ -70,15 +70,17 @@ test("export menu disables unloaded/unsupported formats, downloads exactly the s
     document.dispatchEvent(escape); assert.equal(summary.focused, false);
     menu.open = true; document.dispatchEvent(escape); assert.equal(menu.open, false); assert.equal(summary.focused, true);
 
-    // The described selection must be the one downloaded even if a caller changes
-    // its current object before the next render/reset notification.
+    // A changed selection is rejected even if the caller missed a render/reset notification.
     menu.open = true; menu.dispatchEvent(new Event("toggle"));
     const shared = selection;
     const full = { ...shared, sessions: [], kind: undefined } as unknown as MachineAnalytics;
     selection = full;
+    const downloadCount = downloads.length;
     buttons[0]!.click();
-    assert.equal(downloads.at(-1)!.name, "shared.json");
-    assert.deepEqual(JSON.parse(await downloads.at(-1)!.blob.text()), shared);
+    assert.equal(downloads.length, downloadCount);
+    assert.equal(menu.open, false);
+    assert.equal(description.textContent, "");
+    assert.equal(status.textContent, "Selection changed; reopen Export");
 
     // Loading completion, filter changes, and both file-kind transitions close
     // the menu and invalidate controls until a new preview is opened.
@@ -129,9 +131,13 @@ test("a dashboard selection states its value basis and downloads the activity le
     installExportMenu(() => current as MachineAnalytics);
     menu.open = true; menu.dispatchEvent(new Event("toggle"));
     assert.match(description.textContent, /^0 sessions in the current repository, date, and view filters\. Daily value CSV: \$4\.00 usage value by activity date\. Downloads include/);
-    // The preview is bound when the menu opens.
+    // Losing the selection invalidates the preview at download time too.
+    const selection = current;
     current = null;
     buttons[2]!.click();
+    assert.equal(downloads.length, 0); assert.equal(menu.open, false);
+    assert.equal(status.textContent, "Selection changed; reopen Export");
+    current = selection; menu.open = true; menu.dispatchEvent(new Event("toggle")); buttons[2]!.click();
     assert.equal(downloads[0]!.name, "daily.csv");
     const rows = (await downloads[0]!.blob.text()).trim().split("\r\n").map((line) => line.split(","));
     assert.deepEqual(rows.slice(1).map((row) => [row[4], row[5], row[6], row[7]]), [['"2026-09-01"', '"1"', '"1"', '"0"'], ['"2026-09-02"', '"1"', '"0"', '"3"']]);

@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { Element } from '../release-dom.ts';
 import { normalizeTimestamp } from '../../src/public/timestamps.js';
-import { activityGrid, dailyCountSeries, dailySpendSeries, heatLegend, heatLevel } from '../../src/public/view-model.js';
+import { activityGrid, dailyCountSeries, dailySpendSeries, heatLegend, heatLevel, ledgerAvailability } from '../../src/public/view-model.js';
 // Loaded dynamically like the other harnesses: ui.js is browser JavaScript without type declarations.
 const ui: Record<string, unknown> = await import(new URL('../../src/public/ui.js', import.meta.url).href);
 const velocityData = await import(new URL('../../src/public/velocity-data.js', import.meta.url).href);
@@ -60,7 +60,7 @@ test('time-ui: priced-value KPI and sparkline follow activity dates like Velocit
     renderHistoryCoverage(){},renderMetricValue(){},coveredValue:()=>'',money:(v:number)=>`$${v.toFixed(2)}`,percent:String,integer:new Intl.NumberFormat('en'),compact:new Intl.NumberFormat('en'),
     dailyCountSeries,dailySpendSeries,renderDelta(){},renderSparkline:(e:Element,values:number[],_days:string[],options:{label:string})=>{const key=Object.entries(elementMap).find(([,v])=>v===e)![0];series[key]=values;labels[key]=options.label;},
     renderLine(){},dailyProviderSpend(){},renderDonut(){},renderBars(){},renderRepositoryTable(){},renderWarnings(){},renderProviderEvidence(){},selectRepository(){},
-    pricedBadge:()=>null,executionBreakdown:()=>'',subagentValue:()=>0,ledgerMoney:()=>({models:[]}),
+    pricedBadge:()=>null,executionBreakdown:()=>'',subagentValue:()=>0,ledgerAvailability,ledgerMoney:()=>({models:[]}),
   });
   const activity = velocityData.buildVelocity([old,recent],{start:'2026-09-01',end:'2026-09-01',group:'repository',metric:'value'});
   render({activity,summary:{coverage:{cost:{},apiCost:{},reportedCost:{},tokens:{},tools:{eligible:1},compactions:{}}},sessions:[recent],scopeSessions:[old,recent],dailySessions:[old,recent],repositories:[],topTools:[],warnings:[]});

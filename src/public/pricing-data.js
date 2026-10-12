@@ -1,3 +1,4 @@
+import { DASH } from "./ui.js";
 import { modelProvider, providerKey } from "./chart-colors.js";
 import { projectModelId } from "./model-id.js";
 import { providerIds, providerLabels } from "./providers.js";
@@ -44,7 +45,7 @@ export function pricingCardView(card, data) {
   }
   return { prices, value,
     caption: !usage ? "Not used in this selection" : unpriced ? "No usage value: unpriced" : "API-equivalent value · activity-dated",
-    detail: usage ? `${integer(usage.tokens)} tokens · ${integer(usage.calls)} calls` : null,
+    detail: usage ? `${integer(usage.tokens)} tokens · ${usage.callsEligible > 0 && usage.calls != null ? integer(usage.calls) : DASH} calls` : null,
     share,
     badge: !usage ? null : usage.coverage !== null && usage.coverage < 1 ? `${sharePercent(usage.coverage, 0)} of tokens priced`
       : !card.priced ? "Incomplete rates" : null,
@@ -104,7 +105,7 @@ export function pricingModelCards(rateCard, sessions, { start, end } = {}) {
       provider: providerKey(row.provider), vendor: entry?.rate?.provider ? providerKey(entry.rate.provider) : modelProvider(model, row.provider),
       rate: entry?.rate ?? null, source: entry?.source ?? null, current: entry?.provenance ?? null, provenance,
       usage: { valueUsd: row.value, upperEstimateUsd: row.upper, tokens: row.evidence.eligible, pricedTokens: row.evidence.known,
-        calls: row.calls, sessions: row.sessions, inputTokens: row.sums[1], cachedInputTokens: row.sums[3],
+        calls: row.calls, callsEligible: row.callsEligible, sessions: row.sessions, inputTokens: row.sums[1], cachedInputTokens: row.sums[3],
         cacheWriteInputTokens: row.sums[4], outputTokens: row.sums[5], coverage } };
   }).sort((a, b) => b.usage.valueUsd - a.usage.valueUsd || b.usage.tokens - a.usage.tokens
     || b.usage.calls - a.usage.calls || a.model.localeCompare(b.model) || rank(a.provider) - rank(b.provider));

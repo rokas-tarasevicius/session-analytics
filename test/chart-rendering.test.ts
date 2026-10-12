@@ -46,8 +46,8 @@ test("Costs model rows share one scale across providers, use model shades, and k
   assert.equal(fills[1]!.style.background, modelColor("codex", "gpt-5-mini"));
   const row = models.querySelectorAll(".cost-model-row")[1]!;
   assert.match(row.textContent, /24.9%/);
-  assert.match(row.textContent, /1 session · 100 in \/ 20 out tokens/);
-  assert.doesNotMatch(row.textContent, /\b0 calls/, "a zero call count is not shown as evidence");
+  assert.match(row.textContent, /1 session · — calls · 100 in \/ 20 out tokens/);
+  assert.doesNotMatch(row.textContent, /\b0 calls/, "missing call evidence is not shown as zero");
   assert.doesNotMatch(row.textContent, /cache read|cache write/);
   assert.match(row.querySelector(".cost-model-track")!.getAttribute("aria-label")!, /Provider-reported\..*Input 100, cache read 50, cache write 0, output 20 tokens/);
   assert.equal(document.querySelector("#repository-cost-components"), null);

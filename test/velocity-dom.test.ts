@@ -4,9 +4,35 @@ import { agentLabels, buildVelocity } from "../src/public/velocity-data.js";
 import type { SessionAnalytics, VelocityEffort } from "../src/types.ts";
 
 import { Element, documentFromHtml } from "./release-dom.ts";
+import { sample, withLedger } from "./validation/aggregation-ui-harness.ts";
 
 const descendants = (node: Element): Element[] => node.children.flatMap((child) => [child, ...descendants(child)]);
 const hasClass = (node: Element, name: string) => `${node.className} ${node.getAttribute("class") ?? ""}`.split(" ").includes(name);
+
+test("lead cards show a dash when no session has a ledger", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocity } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const container = new Element(), context = { start: "2026-09-30", end: "2026-10-01", generatedAt: "2026-10-01T12:00:00Z", timeZone: "Europe/London" };
+    const missing = sample(), ledgered = withLedger(sample(), [["synthetic", 3]]);
+    const usage = () => container.querySelector(".velocity-lead")!.children[1]!;
+    renderVelocity(container, [missing], context);
+    assert.equal(usage().querySelector("strong")!.textContent, "—");
+    assert.equal(usage().querySelector("strong")!.getAttribute("aria-label"), "No session in this selection has activity dates");
+    assert.match(usage().querySelector(".kpi-reason")!.textContent, /No session in this selection has activity dates/);
+    renderVelocity(container, [ledgered, missing], context);
+    assert.equal(usage().querySelector("strong")!.textContent, "$3.00");
+    assert.match(usage().querySelector(".coverage")!.textContent, /partial.*1\/2/);
+    assert.match(usage().textContent, /1 of 2 selected sessions provide activity dates/);
+    renderVelocity(container, [withLedger(sample(), [["synthetic", 0]])], context);
+    assert.equal(usage().querySelector("strong")!.textContent, "$0.00", "an observed zero is available");
+    assert.equal(usage().querySelector(".coverage"), null);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
 
 function categorySessions(group: string, ids: string[]): SessionAnalytics[] {
   return ids.map((id, i) => ({
@@ -163,7 +189,8 @@ test("Velocity leads with value cards before filters and keeps them independent 
     renderVelocity(container, sessions, { ...context, end: "2026-09-02" }); assertLead(2);
     assert.match(lead.textContent, /1 of 2 days active · \$1.00 per calendar day/);
     const claude = container.querySelector('[data-provider="claude"]')!.querySelector("input")!;
-    claude.checked = false; claude.listeners.get("change")!(); assertLead(0);
+    claude.checked = false; claude.listeners.get("change")!();
+    assert.equal(lead.querySelectorAll("strong")[1]!.textContent.trim(), "—");
     assert.equal(lead.querySelector("strong")!.textContent.trim(), "—");
     assert.match(lead.textContent, /No days with positive usage value/);
   } finally {

@@ -78,7 +78,7 @@ test("review: Costs models show ledger calls and price coverage for mixed eviden
   // Half of the second receipt's tokens are priced: 180 of 240 eligible tokens, so the row says 75% priced.
   assert.match(h.elements.get("#cost-models")!.textContent, /\$2.00.*75% priced/);
   assert.doesNotMatch(h.elements.get("#cost-models")!.textContent, /\b0 calls/, "run summaries have no request evidence, so no call count is implied");
-  const native = ledger(sample(undefined), "claude-opus-5", 1, { calls: 2 }); native.costBasis = "api-list-price-equivalent";
+  const native = ledger(sample(evidence({ usageUnit: "request" })), "claude-opus-5", 1, { calls: 2 }); native.costBasis = "api-list-price-equivalent";
   h.context["sessions"] = [summary, native]; h.run('renderModelCosts(elements.costModels, ledgerMoney(sessions, { start: "2026-07-20", end: "2026-07-20" }))');
   assert.match(h.elements.get("#cost-models")!.textContent, /2 sessions · 2 calls/);
   assert.match(h.elements.get("#cost-models")!.textContent, /\$2\.00/);

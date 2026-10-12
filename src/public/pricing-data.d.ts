@@ -2,7 +2,7 @@ import type { PublicModelRate, RateProvenance, RepositoryAnalytics, SessionAnaly
 import type { ProviderKey } from "./chart-colors.js";
 
 export interface PricingCardUsage {
-  valueUsd: number; upperEstimateUsd: number; tokens: number; pricedTokens: number; calls: number; sessions: number;
+  valueUsd: number; upperEstimateUsd: number; tokens: number; pricedTokens: number; calls: number; callsEligible: number; sessions: number;
   inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; outputTokens: number; coverage: number | null;
 }
 export interface PricingModelCard {

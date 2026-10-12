@@ -40,7 +40,7 @@ export interface LedgerEvidence { known: number; eligible: number; unsupported: 
 /** One (provider, model) of the window's activity ledger; `sums` holds the 14 ledger counters. */
 export interface LedgerModel {
   id: string; provider: string; model: string; label: string; value: number; api: number; reported: number; upper: number;
-  share: number; sessions: number; calls: number; sums: number[]; evidence: LedgerEvidence;
+  share: number; sessions: number; calls: number; callsEligible: number; sums: number[]; evidence: LedgerEvidence;
 }
 export interface LedgerProvider {
   provider: string; total: number; api: number; reported: number; upper: number; unattributed: number; evidence: LedgerEvidence; models: LedgerModel[];
@@ -53,6 +53,7 @@ export interface LedgerMoney {
 export function mergeEvidence(target: LedgerEvidence, source: LedgerEvidence): LedgerEvidence;
 export function pricedShare(evidence: LedgerEvidence | null | undefined): number | null;
 export function pricedPercent(evidence: LedgerEvidence | null | undefined): string;
+export function ledgerAvailability(sessions: SessionLike[]): { eligible: number; selected: number };
 export function ledgerMoney(sessions: SessionLike[], window: { start: string; end: string }): LedgerMoney;
 export function groupByRepository(sessions: SessionLike[]): Map<string, SessionLike[]>;
 export function sessionStartDay(session: SessionLike, timeZone?: string): string | null;

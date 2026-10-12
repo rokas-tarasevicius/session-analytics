@@ -6,10 +6,12 @@ const node = (tag, text, className) => {
 const number = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
 const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
+export const sharedHiddenSelectors = [".topbar-controls", ".view-nav", ".repo-nav", ".scope-line", "#help-button"];
+
 export function renderSharedSnapshot(snapshot) {
-  document.querySelector(".topbar-controls").hidden = true;
-  document.querySelector(".view-nav").hidden = true;
-  document.querySelector(".repo-nav").hidden = true;
+  for (const selector of sharedHiddenSelectors) document.querySelector(selector).hidden = true;
+  const wordmark = document.querySelector(".wordmark");
+  wordmark.href = "#shared-snapshot"; wordmark.setAttribute("aria-label", "Session Analytics, Shared snapshot");
   document.querySelector("#page-title").textContent = "Shared snapshot";
   for (const panel of document.querySelectorAll("[data-view-panel]")) panel.hidden = true;
   document.querySelector("#warning-banner").hidden = true;

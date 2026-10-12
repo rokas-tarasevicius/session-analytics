@@ -115,7 +115,7 @@
             </div>
           </div>
           <div class="topbar-actions">
-            <span class="status" id="sync-context" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
+            <span class="status" id="sync-context" role="status" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
             <button class="coverage-button" id="coverage-button" type="button" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
             <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
@@ -142,7 +142,7 @@
             <button type="button" class="button error-retry" id="error-retry">Retry</button>
           </div>
           <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></span></p>
-          <section class="view-status" id="view-status" aria-label="View status" hidden></section>
+          <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
             <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>

@@ -21,6 +21,14 @@ function unwrap(selection) {
   return { snapshot: selection, ledger: null, basis: null };
 }
 
+function selectionDescription(selection, unavailableMessage) {
+  const data = selection.snapshot;
+  if (!data) return unavailableMessage();
+  return data.kind === "shared"
+    ? `Shared aggregates only · ${data.summary.sessions} sessions · minimum ${data.minimumSessions} per repository. No upload.`
+    : `${data.sessions.length} sessions in the current repository, date, and view filters.${selection.basis ? ` ${selection.basis}` : ""} Downloads include repository names and session keys. For sharing, use report --share.`;
+}
+
 /**
  * Wires the export menu. `getSelection` returns the snapshot (or ledger-backed selection) to export, or null when none
  * is available; `unavailableMessage` explains a null selection (still loading, or no snapshot because the analysis failed).
@@ -62,9 +70,7 @@ export function installExportMenu(getSelection, { unavailableMessage = () => "Th
       return;
     }
     const shared = data.kind === "shared";
-    description.textContent = shared
-      ? `Shared aggregates only · ${data.summary.sessions} sessions · minimum ${data.minimumSessions} per repository. No upload.`
-      : `${data.sessions.length} sessions in the current repository, date, and view filters.${selection.basis ? ` ${selection.basis}` : ""} Downloads include repository names and session keys. For sharing, use report --share.`;
+    description.textContent = selectionDescription(selection, unavailableMessage);
     for (const button of buttons) {
       button.disabled = shared ? !["json", "shared"].includes(button.dataset.export) : button.dataset.export === "shared";
       button.hidden = !shared && button.dataset.export === "shared";
@@ -73,10 +79,13 @@ export function installExportMenu(getSelection, { unavailableMessage = () => "Th
     focusFirst = false;
   });
   for (const button of buttons) button.addEventListener("click", () => {
-    // The object described when the menu opened is the download source. App
-    // renders invalidate it before any data/filter change can be downloaded.
+    // Recheck the scope description in case a selection change missed the normal invalidation path.
     const selection = preview;
     if (!menu.open || !selection) return;
+    const current = unwrap(getSelection());
+    if (selectionDescription(current, unavailableMessage) !== description.textContent) {
+      reset(); status.textContent = "Selection changed; reopen Export"; return;
+    }
     const data = selection.snapshot, kind = button.dataset.export;
     if (!(data.kind === "shared" ? ["json", "shared"] : ["json", "sessions", "daily", "models", "tools"]).includes(kind)) return;
     if (kind === "json") downloadFile(data.kind === "shared" ? "shared.json" : "snapshot.json", `${JSON.stringify(data, null, 2)}\n`, "application/json");

@@ -2,6 +2,7 @@ import { categoryColor, categorySlotCount, modelColor, providerColor, providerKe
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
+import { ledgerAvailability } from "./view-model.js";
 import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, shiftDay, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
@@ -253,10 +254,13 @@ export function renderVelocity(container, sessions, context) {
       const data = buildVelocity(scoped, { ...options, rollingHistory: comparisonData });
       const valueData = options.metric === "value" && options.granularity === "day" ? data : buildVelocity(scoped, { ...options, metric: "value", granularity: "day", mode: "lines" });
       const price = averagePrice(valueData);
+      const availability = ledgerAvailability(scoped);
       const shownProviders = chipProviders.filter((provider) => selectedProviders.has(provider)).length;
+      const usageCard = kpi({ label: "Usage value", value: availability.eligible ? formatMetric(price.total, "value") : null, reason: "No session in this selection has activity dates", coverage: availability, what: "activity dates", note: `${price.days} calendar days · API-equivalent and provider-reported${valueData.evidence.complete ? "" : " · partially observed"}${shownProviders < chipProviders.length ? ` · ${shownProviders} of ${chipProviders.length} providers` : ""}` });
+      if (availability.eligible > 0 && availability.eligible < availability.selected) usageCard.querySelector(".coverage").prepend(el("span", "partial"));
       lead.replaceChildren(
         kpi({ label: "Average price", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: `per active day · ${price.activeDays} of ${price.days} days active · ${formatMetric(price.perCalendarDay, "value")} per calendar day`, accent: true }),
-        kpi({ label: "Usage value", value: formatMetric(price.total, "value"), note: `${price.days} calendar days · API-equivalent and provider-reported${valueData.evidence.complete ? "" : " · partially observed"}${shownProviders < chipProviders.length ? ` · ${shownProviders} of ${chipProviders.length} providers` : ""}` }),
+        usageCard,
       );
       const indicators = velocityIndicators(comparisonData, today);
       main.heading.textContent = `${metricDefinitions[options.metric].label} by ${group.select.selectedOptions[0].textContent.toLowerCase()}`;
