@@ -310,7 +310,7 @@ Analysis runs in a child process with a capped heap, and Cursor's database is pa
 - **Cost basis follows the evidence source.** Cursor's composer database and Conductor results retain provider-reported values. Cursor SDK run counters use dated resolved API rates, with aggregate-context uncertainty labeled. Summary values are not allocated to days; activity-only evidence has no usage value.
 - **Sub-agent value is a lower bound.** It counts only usage with explicit sub-agent evidence.
 
-The current 0.7.0 release and unreleased changes include independent raw-data oracles under `verify/`. On the maintainer's machine, `npm run verify:real` compares a full scan with cold and warm disposable indexes, runs all ten oracle areas, and writes a monthly before/after table. It uses offline prices from a copied local pricing cache, reads provider history without modifying it, and emits content-free diagnostics. A shared lock serializes real scans. Exact source changes are identified separately; unexplained differences fail the command. The retained reference snapshot and platform-specific provider stores are required for this release audit.
+The 0.8.0 release includes independent raw-data oracles under `verify/`. On the maintainer's machine, `npm run verify:real` compares a full scan with cold and warm disposable indexes, runs all ten oracle areas, and writes a monthly before/after table. It uses offline prices from a copied local pricing cache, reads provider history without modifying it, and emits content-free diagnostics. A shared lock serializes real scans. Exact source changes are identified separately; unexplained differences fail the command. The retained reference snapshot and platform-specific provider stores are required for this release audit.
 
 Provider evidence has metric-specific coverage: unavailable observations display **N/A**, partial totals show eligible/selected session counts. Conductor recovery groups cumulative Claude SDK receipts and labels uncertain accounting partial; reported USD is not an invoice. OpenCode forks exclude inherited requests. See [provider fidelity and resource limits](docs/providers.md#review-hardening-and-resource-limits).
 
@@ -342,7 +342,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 
 ## Roadmap
 
-The current release is 0.7.0, with further dashboard and accounting changes under [Unreleased](CHANGELOG.md#unreleased). The integrated index, six providers, pricing, velocity, MCP and interchange are shipped. Remaining items include additional provider formats, profile dimensions, task-matched baselines, hooks, and packaging/user-research gates. See the checked delivery list in [docs/roadmap.md](docs/roadmap.md); the [product proposals](docs/proposals/) distinguish research from shipped behavior.
+The current release is 0.8.0 (see the [changelog](CHANGELOG.md)). The integrated index, six providers, pricing, velocity, MCP and interchange are shipped. Remaining items include additional provider formats, profile dimensions, task-matched baselines, hooks, and packaging/user-research gates. See the checked delivery list in [docs/roadmap.md](docs/roadmap.md); the [product proposals](docs/proposals/) distinguish research from shipped behavior.
 
 ## How it compares
 
