@@ -6,6 +6,8 @@ The [product proposal's metric contracts](proposals/metric-contracts.md) define 
 
 ## Evidence boundary
 
+The dashboard's `/api/health` is operational metadata, separate from analytics: `service` is `session-analytics`, `status` is `ok`, `dataSource` is `live` or `snapshot`, and `snapshot` is `ready`, `building` or `not-started`. `instanceToken` is a random 32-byte per-launch value encoded as hex; `optionsHash` is a hex SHA-256 digest of normalized analysis options (resolved explicit paths and data directory, boolean defaults and pricing defaults, with stable key order). They verify live port reuse without exposing paths, option values or local evidence. See the [health privacy contract](privacy.md#health-endpoint).
+
 The analyzer may read provider transcripts locally, but its returned data is restricted to:
 
 - a stable local repository key and display name;

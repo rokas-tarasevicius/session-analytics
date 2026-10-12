@@ -421,6 +421,15 @@ export interface AnalyzeOptions extends PricingOptions {
   repositoryRoot?: string;
 }
 
+export interface DashboardHealth {
+  service: "session-analytics";
+  dataSource: "live" | "snapshot";
+  snapshot: "ready" | "building" | "not-started";
+  status: "ok";
+  instanceToken: string;
+  optionsHash: string;
+}
+
 export interface ProviderEvidence {
   /** Partial means retained usage does not prove a complete, disjoint accounting interval. */
   accounting?: "complete" | "partial";

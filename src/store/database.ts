@@ -30,7 +30,7 @@ export function indexPath(options: Pick<AnalyzeOptions, "dataDir"> = {}): string
   return join(dataDirectory(options), "index.sqlite");
 }
 
-function secureDirectory(path: string): void {
+export function secureDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   const info = lstatSync(path);
   if (!info.isDirectory() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())) {
@@ -40,7 +40,7 @@ function secureDirectory(path: string): void {
 }
 
 /** Refuse links and foreign-owned files rather than chmod-ing their targets. */
-function secureFile(path: string, create = false): void {
+export function secureFile(path: string, create = false): void {
   if (!existsSync(path) && create) {
     try { closeSync(openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }

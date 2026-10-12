@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 
 - Pull requests and pushes now check snapshot schemas, synthetic JSON reports and package contents on Ubuntu and macOS; Chrome dashboard checks run separately on macOS without blocking CI. Version tags create a GitHub Release from the matching changelog notes after the full checks pass.
+- Reusing a running dashboard now requires the same analysis options and a verified launch token. If the port is occupied by a different configuration or an unverified service, stop it or choose `--port`.
 - The dashboard URL follows the view, window (`?window=`, custom `?start=`/`?end=`) and repository focus (`?repo=` with the opaque repository ID, never a name or path). View, preset and repository changes add a browser history entry and Back/Forward restores them; reload and bookmarks reopen the same place. `?open=`, `?theme=` and `?density=` apply once and are then removed from the URL; a URL theme or density is no longer saved as your preference, and the system theme is no longer saved on first visit.
 - Switching views starts the new view at the top of the page.
 - Command palette results are ranked: exact, then prefix, word-start, substring and fuzzy matches, and fuzzy-only matches are dropped when a closer match exists (`help` finds Keyboard shortcuts first). The palette gains an **Export view…** entry.
@@ -30,6 +31,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Tools CSV exports now match the Tools view's evidence rules: invalid transcripts and unavailable tool evidence no longer inflate calls, and non-finite, zero or negative counts are excluded.
 - Velocity's rolling 7-day average now uses prior history at the start of the selected window, instead of leaving the first six days blank. Its dashed-line key appears only when an average is available.
+- Malformed HTTP request targets now receive a fixed `400` response instead of stopping the dashboard server.
+- Cross-site browser requests and requests from other loopback ports can no longer trigger API refresh scans; header-less local clients remain supported.
 - The theme no longer flashes light before a saved dark theme applies: a same-origin script in `<head>` sets theme and density before the first paint.
 - Escape in the export menu closes only the menu instead of also clearing the repository focus; the menu also closes on a press outside it, when focus moves away, and when the theme or density changes.
 - Single-key shortcuts work while a checkbox or button has focus; only text entry suppresses them.
@@ -117,7 +120,6 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - Read checkpointed external SQLite sources in read-only directories without losing sessions when WAL sidecars are absent; reject concurrent source changes (`INTEGRATION-SQLITE-01`).
-
 - Reconcile native request identities, continuation files, billing iterations, replay, output classification and strict request dates across full and indexed scans.
 - Correct historical tariffs, conservative receipt scope, partial pricing, repository ownership, provider snapshots and aggregate displays. Preserve unknown evidence and unattributed estimates explicitly.
 - Run every imported validation regression in `npm test`; add `npm run verify:real` for independent raw-data comparisons and disposable full/cold/warm index checks.
