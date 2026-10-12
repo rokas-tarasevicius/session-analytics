@@ -15,7 +15,7 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 
 ## M0: Correctness
 
-**0.7.0 shipped.** The completed items below are available in the current release; remaining correctness work stays open, with further dashboard and accounting changes under Unreleased.
+**0.8.0 shipped.** The completed items below are available in the current release; remaining correctness work stays open.
 
 - [x] Extract into a standalone repository with a single brand module (`src/brand.ts`).
 - [x] Discover every local profile: `~/.claude-*`, `CLAUDE_CONFIG_DIR`, `~/.config/claude`, `~/.codex-*`, and `CODEX_HOME`, deduplicated by real path.

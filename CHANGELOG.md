@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-13
+
 ### Changed
 
 - README screenshots are regenerated from the synthetic demo at the current dashboard; Velocity's chart subtitle uses the shared date-range format.
