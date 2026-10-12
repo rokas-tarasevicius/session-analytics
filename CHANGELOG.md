@@ -28,6 +28,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Tools CSV exports now match the Tools view's evidence rules: invalid transcripts and unavailable tool evidence no longer inflate calls, and non-finite, zero or negative counts are excluded.
+- Velocity's rolling 7-day average now uses prior history at the start of the selected window, instead of leaving the first six days blank. Its dashed-line key appears only when an average is available.
 - The theme no longer flashes light before a saved dark theme applies: a same-origin script in `<head>` sets theme and density before the first paint.
 - Escape in the export menu closes only the menu instead of also clearing the repository focus; the menu also closes on a press outside it, when focus moves away, and when the theme or density changes.
 - Single-key shortcuts work while a checkbox or button has focus; only text entry suppresses them.

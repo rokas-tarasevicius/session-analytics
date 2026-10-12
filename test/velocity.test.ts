@@ -8,10 +8,11 @@ import test from "node:test";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { analyzeMachineSessionsIsolated } from "../src/analysis-process.ts";
 import { claudeEntrypoint, claudeSubagentType, codexOriginator, codexSource, counterExposed, localClock, VelocityAccumulator, velocityDimension, velocityEffort, zeroVelocity } from "../src/metrics/velocity.ts";
-import { averagePrice, buildVelocity, calendarDays, guardedDelta, localDay, metricDefinitions, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
+import { averagePrice, buildVelocity, calendarDays, comparisonSpan, guardedDelta, localDay, metricDefinitions, periodKey, shiftDay, topMovers, velocityIndicators } from "../src/public/velocity-data.js";
 import type { SessionAnalytics, SessionVelocity, VelocityValues } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 import { addUnsafeVelocityModels, unsafeVelocityModels } from "./velocity-fixtures.ts";
+import { Element, documentFromHtml } from "./release-dom.ts";
 
 const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-8 * Math.max(1, Math.abs(b)), `${a} != ${b}`);
 const sumCells = (velocity: SessionVelocity): number[] => {
@@ -259,6 +260,72 @@ test("rolling average includes zero days but never invents prehistory; short bas
   assert.equal(guardedDelta(20, 1, "value", 2), null);
   assert.equal(guardedDelta(20, 1, "sessions"), null);
   assert.equal(guardedDelta(12, 6, "tools"), 1);
+});
+
+test("rolling average covers the first six days from prior history", async () => {
+  const options = { start: "2026-09-01", end: "2026-09-30" };
+  const history = comparisonSpan(options.end, options.end);
+  const session = synthetic(calendarDays(history.start, options.end).map((day) => [day, day < options.start ? 14 : 7]));
+  const comparisonData = buildVelocity([session], history);
+  const data = buildVelocity([session], { ...options, rollingHistory: comparisonData });
+  assert.deepEqual(data.rolling.slice(0, 7), [13, 12, 11, 10, 9, 8, 7]);
+  assert.equal(data.rolling.length, 30);
+  assert.equal(data.totals[0], 210, "Prior history changes the average, not the selected total");
+  assert.ok(data.rolling.every((value) => value !== null));
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocity } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    // Exercise the renderer's existing comparison build, including a window longer than its default span.
+    for (const start of [options.start, "2026-06-10"]) {
+      const container = new Element();
+      const activity = start === options.start ? session : synthetic(calendarDays("2026-05-01", options.end).map((day) => [day, 14]));
+      renderVelocity(container, [activity], { ...options, start, generatedAt: "2026-09-30T12:00:00Z", timeZone: "UTC", providers: ["claude"] });
+      const svg = container.querySelector(".velocity-chart")!.querySelector("svg")!;
+      assert.ok(svg.querySelector(".velocity-average")!.getAttribute("d")!.startsWith(`M${svg.querySelector(".grid-line")!.getAttribute("x1")},`), "The rolling line starts at the first plotted day");
+      svg.listeners.get("keydown")!({ key: "Home", preventDefault() {} });
+      assert.match(container.querySelector(".velocity-inspection")!.textContent, new RegExp(`7-day average: \\$${start === options.start ? "13" : "14"}\\.00`));
+      assert.ok(container.querySelector(".velocity-average-key"));
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("rolling history preserves prehistory and incomplete-evidence gaps at the window edge", () => {
+  const options = { start: "2026-09-01", end: "2026-09-07" };
+  const history = comparisonSpan(options.end, options.end);
+  const fresh = synthetic([[options.start, 7]]);
+  const freshData = buildVelocity([fresh], { ...options, rollingHistory: buildVelocity([fresh], history) });
+  assert.deepEqual(freshData.rolling, [null, null, null, null, null, null, 1]);
+  const partial = synthetic(calendarDays("2026-08-01", options.end).map((day) => [day, 7]));
+  partial.velocity!.buckets.find(([day]) => day === "2026-08-31")![3][10] = 0;
+  const partialData = buildVelocity([partial], { ...options, rollingHistory: buildVelocity([partial], history) });
+  assert.deepEqual(partialData.rolling, [null, null, null, null, null, null, 7]);
+});
+
+test("rolling average key is absent when every value is null", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const session = synthetic([["2026-09-01", 7]]), container = new Element();
+    for (const mode of ["lines", "stacked"]) {
+      const short = buildVelocity([session], { start: "2026-09-01", end: "2026-09-06", mode });
+      assert.ok(short.rolling.every((value) => value === null));
+      renderVelocityChart(container, short, { rolling: true });
+      assert.equal(container.querySelector(".velocity-average-key"), null);
+      const complete = buildVelocity([session], { start: "2026-09-01", end: "2026-09-07", mode });
+      renderVelocityChart(container, complete, { rolling: true });
+      assert.equal(container.querySelector(".velocity-average-key")!.textContent, "Dashed: total · rolling 7-day average");
+      renderVelocityChart(container, complete, { rolling: false });
+      assert.equal(container.querySelector(".velocity-average-key"), null);
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
 });
 
 test("comparisons use matched complete dates; projection and burn expose their denominators", () => {

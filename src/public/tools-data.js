@@ -3,7 +3,7 @@ import { daysBetween, sessionStartDay } from "./view-model.js";
 import { guardedDelta, shiftDay } from "./velocity-data.js";
 
 const order = (provider) => { const index = providerIds.indexOf(provider); return index < 0 ? providerIds.length : index; };
-const callCount = (value) => Number.isFinite(value) && value > 0 ? value : 0;
+export const callCount = (value) => Number.isFinite(value) && value > 0 ? value : 0;
 // Session start days use the snapshot timezone, the calendar of the window and the activity ledger.
 const startDay = sessionStartDay;
 const comparison = (current, previous) => {

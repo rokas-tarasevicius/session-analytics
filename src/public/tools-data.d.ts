@@ -2,6 +2,7 @@ import type { SessionAnalytics } from "../types.ts";
 import type { MetricCoverage } from "./providers.js";
 
 export type ToolChange = number | null | "new";
+export function callCount(value: number): number;
 export interface ToolRow {
   name: string; calls: number; share: number; sessions: number; repositories: number;
   providers: Array<{ provider: string; label: string; calls: number }>;

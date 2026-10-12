@@ -1654,7 +1654,7 @@ function exportSelection() {
   return {
     snapshot: filterSnapshot(snapshot, { repositoryId, ...selectedWindow(), providers }),
     ledger: { sessions: scope, start, end },
-    basis: `Daily value CSV: ${money(total)} usage value by activity date, ${start} to ${end} (${timeZone}), the same ledger as the dashboard. JSON, sessions, models and tools CSVs: whole sessions started in the window.${selected < snapshotProviders.size ? ` ${selected} of ${snapshotProviders.size} providers.` : ""}`,
+    basis: `Daily value CSV: ${money(total)} usage value by activity date, ${start} to ${end} (${timeZone}), the same ledger as the dashboard. JSON, sessions, models and tools CSVs: whole sessions started in the window. Tools CSV counts only eligible tool evidence, as in the Tools view.${selected < snapshotProviders.size ? ` ${selected} of ${snapshotProviders.size} providers.` : ""}`,
   };
 }
 const resetExportMenu = installExportMenu(exportSelection, {
