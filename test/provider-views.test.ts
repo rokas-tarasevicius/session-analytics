@@ -109,7 +109,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
     // The headline is the activity-dated ledger shared with Velocity. A provider-reported summary has no
     // activity dates, so the headline is unavailable and its whole-session value is disclosed, not hidden.
     assert.equal(h.elements.get("#metric-spend")!.textContent, "—");
-    assert.equal(h.elements.get("#metric-spend-coverage")!.textContent.trim(), "");
+    assert.equal(h.elements.get("#metric-spend-coverage")!.textContent.trim(), "No session in this selection has activity dates");
     const note = h.elements.get("#metric-spend-note")!.textContent;
     if (sessions.includes(summary)) assert.match(note, /\$1\.00 in \d older-snapshot sessions? without activity dates/);
     assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? "0" : "—");

@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Unchecked provider chips use readable text and solid borders while retaining their hollow dots and dimmed marks.
+- Provider marks are larger, and repository row links, footer links and rate-source summaries have targets of at least 24 px.
+- Coverage fractions appear as plain text; range adjustments and unavailable reasons are visible without hovering.
+- Printed dashboards use static navigation and headers, expand tables, and hide top-bar actions and export controls.
+- Dark trend areas and chart grids are clearer; Other and Unknown lines in both themes and dark Claude/Codex light-model shades meet 3:1 contrast on cards.
+- Refreshes say “Refreshing…” even with reduced motion enabled.
+
 - Pull requests and pushes now check snapshot schemas, synthetic JSON reports and package contents; pull requests run on Ubuntu and pushes to `master` also run on macOS, where the Chrome dashboard checks run separately without blocking CI. Version tags create a GitHub Release from the matching changelog notes after the full checks pass.
 - Dates and money are formatted the same way on every dashboard view; chart axes share day labels and compact dollar amounts, while tables keep cents.
 - The synthetic demo cleans up demo temporary directories older than one day when it starts.
@@ -19,7 +26,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - A failed first load shows a "No snapshot" state with **Retry**; a failed refresh keeps the last snapshot on screen, marks its time as stale and offers **Retry**. The export menu says when there is nothing to export because the analysis failed.
 - Accessibility: legend entries are list items instead of focusable buttons that did nothing; the Summary repository table's first cell is a real button instead of a focusable row; coverage badges such as `87/116` carry their sentence for screen readers; repository bars, the Coverage button and the repository scope chip have accessible names that include their visible text and values; the density control is a named toggle; the wordmark goes to Summary. Tooltips name a shortcut key only while single-key shortcuts are on, key caps are lowercase everywhere, and `/` is listed in the shortcut help.
 - The money metric is called "Usage value" everywhere, with one definition (API list-price equivalent of recorded usage; provider-reported values included; not an invoice). Velocity's value metric, Summary's KPI and daily chart drop "Priced".
-- Dashboard visual system: every table uses one header style, with text cells in Geist and figures in Geist Mono; shared text and figure tokens enlarge with comfortable density, and focus rings share one colour. Costs closes its provider list with a separated Total, and values line up whether or not a "% priced" badge follows them.
+- Dashboard visual system: uppercase labels use 11 px, notes 12 px, body and tables 13 px, controls 14 px, panel titles 15 px, view and dialog titles 18 px, secondary figures 20 px and KPI figures 26 px, with explicit larger sizes in comfortable density. Tables use Geist text and Geist Mono figures, and controls share one focus ring. Costs closes its provider list with a separated Total, and values line up whether or not a "% priced" badge follows them.
 - Errors and warnings use their own status colours with an icon and title instead of the coral brand accent. Usage deltas are neutral (▲/▼) rather than coral for "went up".
 - The coverage dialog is titled "Data coverage", opens on its title instead of flashing a focus ring on Close, and its table scrolls inside the dialog on small screens.
 - Phones (390 px): no view scrolls sideways; KPIs sit two per row; cost bars get full-width rows; touch targets are at least 40 px and keyboard hints are hidden on touch screens. Line charts are drawn at the container's pixel width, so axis labels stay readable on narrow screens.

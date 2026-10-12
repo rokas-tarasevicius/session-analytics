@@ -37,7 +37,7 @@ function deltaE(first: string, second: string): number {
 test("shared type and status tokens remain readable and distinct from the brand in both themes", async () => {
   const css = await readFile(new URL("../src/public/styles.css", import.meta.url), "utf8");
   const light = tokens(css, ":root {"), dark = tokens(css, ':root[data-theme="dark"] {');
-  for (const [name, size] of Object.entries({ xs: "11px", sm: "12.5px", md: "14px", lg: "20px", figure: "26px" })) {
+  for (const [name, size] of Object.entries({ caps: "11px", xs: "12px", sm: "13px", md: "14px", title: "15px", h1: "18px", lg: "20px", figure: "26px" })) {
     assert.equal(light[`--fs-${name}`], size, name);
   }
   assert.equal(light["--focus"], "var(--coral)");
@@ -61,11 +61,12 @@ function rules(css: string) {
 test("every stylesheet uses the shared font scale, apart from boxed mark glyphs", async () => {
   for (const [index, css] of (await Promise.all(styles.map(readCss))).entries()) {
     for (const { selector, body } of rules(css)) {
-      if (/\.mark\b/.test(selector)) continue;
+      if (selector.startsWith(":root")) continue;
+      if (selector === ".pill.mark") { assert.match(body, /font: 600 10px\/1 var\(--font-mono\)/); continue; }
       for (const match of body.matchAll(/(?:^|;)\s*(font-size|font):\s*([^;]+)/g)) {
         const value = match[2]!.trim(), label = `${styles[index]} ${selector}: ${match[1]}: ${value}`;
         if (value === "inherit") continue; // Inherit carries the parent's tokenized size.
-        assert.match(value, /var\(--fs-(?:xs|sm|md|lg|figure)\)/, label);
+        assert.match(value, /var\(--fs-(?:caps|xs|sm|md|title|h1|lg|figure)\)/, label);
         assert.doesNotMatch(value, /\d*\.?\d+(?:px|rem|em|vh|%)/, label.replace(value, "literal size"));
       }
     }
@@ -82,6 +83,11 @@ test("focus rings use one colour and panels have no decorative left stripes", as
       for (const match of body.matchAll(/(?:^|;)\s*border-left:\s*([\d.]+)px\b([^;]*)/g)) {
         if (/\btransparent\b/.test(match[2]!)) continue; // tooltip arrows are drawn with transparent borders
         assert.ok(Number(match[1]) < 3, `${styles[index]} ${selector}: left stripe`);
+      }
+      assert.doesNotMatch(body, /(?:^|;)\s*border-left-color:/, `${styles[index]} ${selector}: selection stripe`);
+      for (const shadow of body.matchAll(/\binset\s+(-?[\d.]+)(?:px)?\s+(-?[\d.]+)(?:px)?(?:\s+(-?[\d.]+)(?:px)?)?(?:\s+(-?[\d.]+)(?:px)?)?/g)) {
+        const [x, y, blur, spread] = shadow.slice(1).map((value) => Number(value ?? 0));
+        if (blur === 0) assert.ok(Math.max(Math.abs(x!), Math.abs(y!), Math.abs(spread!)) <= 2, `${styles[index]} ${selector}: inset stripe`);
       }
       assert.ok(!/\.kpi\b[^,]*::before/.test(selector), `${styles[index]} ${selector}: KPI stripe`);
     }
@@ -168,4 +174,125 @@ test("daily usage legend uses two list columns so provider values cannot orphan"
   const item = cssRules.find(({ selector }) => selector === '#daily-spend .chart-legend[data-layout="list"] .chart-legend-item');
   assert.ok(item);
   assert.match(item.body, /grid-template-columns:\s*16px minmax\(0, 1fr\) auto/);
+});
+
+test("title roles and fixed figures use the explicit compact and comfortable type scales", async () => {
+  const css = await readCss("styles.css"), cssRules = rules(css);
+  const comfortable = tokens(css, ':root[data-density="comfortable"] {');
+  for (const [name, size] of Object.entries({ caps: "11.5px", xs: "12.5px", sm: "13.5px", md: "15px", title: "16px", h1: "19px", lg: "21px", figure: "28px" })) assert.equal(comfortable[`--fs-${name}`], size);
+  for (const [selector, role] of [[".topbar-title h1", "h1"], [".help h2", "h1"], ["h2", "title"], [".panel > header h3, .panel > h3", "title"], [".kpi strong", "figure"]]) {
+    const body = cssRules.find((rule) => rule.selector === selector)!.body;
+    assert.ok(body.includes(`var(--fs-${role})`), selector); assert.doesNotMatch(body, /clamp\(/);
+  }
+  assert.match(await readCss("interop.css"), /#shared-snapshot h1\s*\{[^}]*font-size: var\(--fs-h1\)/);
+});
+
+test("uppercase labels and loading placeholders share one caps and shimmer rule", async () => {
+  const css = await readCss("styles.css"), cssRules = rules(css);
+  assert.equal(tokens(css, ":root {")["--track-caps"], ".06em");
+  const caps = cssRules.filter(({ body }) => /text-transform:\s*uppercase/.test(body));
+  assert.equal(caps.length, 1);
+  assert.ok(caps[0]!.selector.startsWith(".caps,"));
+  for (const selector of [".nav-heading", ".kicker", "thead th", ".pill:not(.mark)", ".evidence-pill", ".palette-group", ".help h3", ".field-label"]) assert.ok(caps[0]!.selector.includes(selector), selector);
+  assert.match(caps[0]!.body, /var\(--fs-caps\)/); assert.match(caps[0]!.body, /var\(--track-caps\)/);
+  const shimmer = cssRules.filter(({ body }) => /animation:\s*shimmer/.test(body));
+  assert.equal(shimmer.length, 1); assert.ok(shimmer[0]!.selector.startsWith(".shimmer,"));
+  assert.equal((css.match(/linear-gradient\(90deg/g) ?? []).length, 2, "one loading gradient and the existing dashed legend swatch");
+});
+
+test("base component rules and responsive width blocks are consolidated", async () => {
+  const css = await readCss("styles.css"), base = css.slice(0, css.indexOf("/* ---------------------------------------------------------------- responsive */"));
+  for (const selector of ["main > footer", ".compact-metrics", ".help", ".field", ".kpi", "tbody tr"]) assert.equal(rules(base).filter((rule) => rule.selector === selector).length, 1, selector);
+  for (const width of [1120, 760, 520]) assert.equal((css.match(new RegExp(`@media \\(max-width: ${width}px\\)`, "g")) ?? []).length, 1, String(width));
+  assert.doesNotMatch(css, /max-width:\s*1240px/);
+  assert.match(rules(base).find(({ selector }) => selector === "tbody tr")!.body, /cursor:\s*default/);
+  assert.match(rules(base).find(({ selector }) => selector === 'tbody tr[role="link"], tbody tr[data-row-link]')!.body, /cursor:\s*pointer/);
+});
+
+test("focus has exactly one global ring and the three allowed carriers", async () => {
+  const expected = new Map([
+    ["styles.css :focus-visible", "2px"],
+    ["styles.css .chip:has(input:focus-visible)", "2px"],
+    ["styles.css .check:has(input:focus-visible)", "2px"],
+    ["tools.css #tools-view .tools-select:focus-visible, #tools-view .tools-column:focus-visible", "-2px"],
+  ]);
+  const found = new Map<string, string>();
+  for (const file of styles) for (const { selector, body } of rules(await readCss(file))) {
+    if (!selector.includes(":focus-visible")) continue;
+    assert.match(body, /outline:\s*2px solid var\(--focus\)/);
+    assert.doesNotMatch(body, /border-radius/);
+    found.set(`${file} ${selector}`, body.match(/outline-offset:\s*([^;]+)/)![1]!.trim());
+  }
+  assert.deepEqual(found, expected);
+});
+
+test("rounded geometry uses tokens and no control advertises hover-only help", async () => {
+  for (const file of styles) for (const { selector, body } of rules(await readCss(file))) {
+    assert.doesNotMatch(body, /cursor:\s*help/, `${file}: ${selector}`);
+    if (selector.startsWith(":root")) continue;
+    for (const match of body.matchAll(/(?:^|;)\s*border(?:-(?:top|bottom)-(?:left|right))?-radius:\s*([^;]+)/g)) {
+      assert.doesNotMatch(match[1]!, /[\d.]+(?:px|rem|em|%)/, `${file}: ${selector}`);
+      assert.match(match[1]!, /^(?:var\(--radius[\w-]*\)|0)(?:\s+(?:var\(--radius[\w-]*\)|0))*$/);
+    }
+  }
+});
+
+test("chart contrast and theme-scoped grid and area tokens meet their surface roles", async () => {
+  const css = await readCss("styles.css"), light = tokens(css, ":root {"), dark = tokens(css, ':root[data-theme="dark"] {');
+  for (const [name, theme] of [["light", light], ["dark", dark]] as const) {
+    const palette = { ...light, ...theme };
+    for (const token of ["--provider-unknown", ...(name === "dark" ? ["--provider-codex-3", "--provider-claude-3"] : [])]) {
+      const ratio = contrast(palette[token]!, palette["--surface"]!);
+      assert.ok(ratio >= 3, `${name}: ${token} = ${ratio.toFixed(2)}:1`);
+    }
+  }
+  assert.equal(light["--grid-line"], "var(--line)"); assert.equal(dark["--grid-line"], "var(--line-strong)");
+  assert.equal(light["--area-alpha"], ".1"); assert.equal(dark["--area-alpha"], ".18");
+  assert.match(css, /\.grid-line\s*\{\s*stroke:\s*var\(--grid-line\)/);
+  assert.match(css, /\.trend-area\s*\{[^}]*fill-opacity:\s*var\(--area-alpha\)/);
+  assert.match(css, /\.logo-tile\s*\{\s*fill:\s*var\(--surface-3\);\s*stroke:\s*var\(--line-strong\)/);
+});
+
+test("unchecked chips keep readable text, solid borders and distinct state marks", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  const body = cssRules.find(({ selector }) => selector === ".chip:has(input:not(:checked))")!.body;
+  assert.match(body, /color:\s*var\(--text-2\)/); assert.match(body, /border-color:\s*var\(--line\)/); assert.doesNotMatch(body, /dashed/);
+  assert.match(cssRules.find(({ selector }) => selector === ".chip:has(input:not(:checked))::before")!.body, /background:\s*transparent;.*inset/);
+  assert.match(cssRules.find(({ selector }) => selector === ".chip:has(input:not(:checked)) img")!.body, /opacity:\s*\.45/);
+});
+
+test("marks, inline targets and coverage fractions use their readable shared styles", async () => {
+  const css = await readCss("styles.css"), cssRules = rules(css);
+  const mark = cssRules.find(({ selector }) => selector === ".pill.mark")!.body;
+  assert.match(mark, /width:\s*18px;\s*height:\s*18px/); assert.match(mark, /font:\s*600 10px\/1/);
+  for (const selector of [".row-link", "main > footer a", ".rate-links > summary"]) {
+    const body = cssRules.find((rule) => rule.selector === selector)!.body;
+    assert.match(body, /min-height:\s*24px/, selector);
+    if (selector === ".row-link") assert.match(body, /padding:\s*3px 0/);
+    else { assert.match(body, /display:\s*inline-block/); assert.match(body, /line-height:\s*24px/); }
+  }
+  const coverage = cssRules.find(({ selector }) => selector === ".coverage")!.body;
+  assert.match(coverage, /color:\s*var\(--muted\)/); assert.doesNotMatch(coverage, /(?:background|border|padding|height):/);
+  assert.doesNotMatch(await readFile(new URL("../src/public/index.html", import.meta.url), "utf8"), /hover a badge for coverage/);
+});
+
+test("print expands tables and removes sticky chrome and export actions", async () => {
+  const css = await readCss("styles.css"), print = css.slice(css.indexOf("@media print {"));
+  assert.match(print, /\.sidebar\s*\{[^}]*position:\s*static/);
+  assert.match(print, /\.topbar\s*\{[^}]*position:\s*static/);
+  assert.match(print, /\.table-wrap[^}]*max-height:\s*none/);
+  assert.match(print, /\.topbar-actions, \.export-menu\s*\{\s*display:\s*none/);
+});
+
+test("reduced motion stops the spinner and pulse and narrow screens retain loading text", async () => {
+  const css = await readCss("styles.css");
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\*, \*::before, \*::after\s*\{\s*animation:\s*none !important/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.status\[data-state="loading"\] #sync-label\s*\{\s*display:\s*inline-block/);
+});
+
+test("narrow four-column KPI rows give the fixed-size figure the full card width", async () => {
+  const css = await readCss("styles.css");
+  const block = /@media \(max-width: 1320px\) \{([\s\S]*?)\n\}/.exec(css)![1]!;
+  assert.match(block, /\.kpi \{ grid-template-areas: "label label" "value value" "coverage spark" "delta spark" "note note"; \}/);
+  assert.match(block, /\.kpi \.spark \{ width: 64px; \}/);
 });

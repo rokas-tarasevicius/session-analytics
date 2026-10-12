@@ -22,10 +22,8 @@
   #pricing-panel .pricing-grid-unused > li { grid-row: span 4; }
 }
 #pricing-panel .pricing-card:hover { border-color: var(--line-strong); }
-#pricing-panel :is(.pricing-card, .pricing-toggle, .pricing-notice-action):focus-visible, .pricing-dialog :is(button, a):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 #pricing-panel .pricing-provider, .pricing-dialog .pricing-provider { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: var(--fs-xs); }
 #pricing-panel .pricing-provider img, .pricing-dialog .pricing-provider img { width: 16px; height: 16px; object-fit: contain; }
-#pricing-panel .pricing-provider .mark, .pricing-dialog .pricing-provider .mark { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 2px; font-size: 9px; }
 #pricing-panel .pricing-model, .pricing-dialog .pricing-model { min-width: 0; overflow-wrap: break-word; font: 500 var(--fs-sm) var(--font-mono); }
 #pricing-panel .pricing-price { display: flex; flex-wrap: wrap; column-gap: .4em; color: var(--text-2); font: var(--fs-xs) var(--font-mono); }
 #pricing-panel .pricing-price > span { white-space: nowrap; }

@@ -38,13 +38,13 @@ test("fleet rows expose a native repository button and select once when its clic
   assert.equal(unselected.querySelector("button.row-link")!.getAttribute("aria-current"), null);
 });
 
-test("coverage badges expose the sentence as screen-reader text and retain the fraction and tooltip", async () => {
+test("coverage fractions retain their screen-reader sentence without a hover tooltip", async () => {
   const { run } = await harness([]);
   const badge = run('coverageBadge({eligible:1,selected:2}, "token evidence")') as Element;
   assert.equal(badge.tagName, "small");
   assert.equal(badge.className, "coverage");
   assert.equal(badge.getAttribute("aria-label"), null);
-  assert.equal(badge.getAttribute("title"), "1 of 2 selected sessions provide token evidence");
+  assert.equal(badge.getAttribute("title"), null);
   assert.equal(badge.children.length, 2);
   assert.equal(badge.children[0]!.tagName, "span");
   assert.equal(badge.children[0]!.textContent, "1/2");
