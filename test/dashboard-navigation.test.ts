@@ -96,7 +96,7 @@ test("the 30-day default excludes unknown starts and limits view exports to the 
 });
 
 test("scope caption names one timezone and one dating rule: value by activity date, counts by session start", async () => {
-  const { document, run } = await harness([sample()]);
+  const { document, run } = await harness([sample(), sample()]);
   const caption = (view: string) => { run(`currentViewName = () => '${view}'; renderSharedView(activeView())`); return document.querySelector("#scope-description")!.textContent; };
   assert.match(caption("velocity"), /Activity observed during .* \(Europe\/London\)/);
   assert.doesNotMatch(caption("velocity"), /Sessions started/);

@@ -218,6 +218,17 @@ export function sessionsInRange(sessions, startDay, endDay, timeZone = "UTC") {
   });
 }
 
+/** Unknown starts belong to a bounded window only when a recorded date places them in it.
+ * This scopes the exclusion note without treating a fallback timestamp as a known session start. */
+export function unknownStartsInRange(sessions, startDay, endDay, timeZone = "UTC") {
+  return sessions.filter((session) => {
+    if (sessionStartDay(session, timeZone) !== null) return false;
+    if (!startDay && !endDay) return true;
+    const day = localDay(normalizeTimestamp(session.createdAt), timeZone);
+    return day !== null && (!startDay || day >= startDay) && (!endDay || day <= endDay);
+  }).length;
+}
+
 const isoDay = (date) => date.toISOString().slice(0, 10);
 
 export function daysBetween(startDay, endDay, cap = 3660) {

@@ -1,4 +1,4 @@
-import { compact, dateRange, dateTime, dayLabel, disjunction, fullDate, integer, money, timeLabel } from "./format.js";
+import { compact, dateLabel, dateRange, dateTime, dayLabel, disjunction, fullDate, integer, money, timeLabel } from "./format.js";
 import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
@@ -7,7 +7,7 @@ import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
   groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
   providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
-  sortRepositories, sparklineSummary, summarize, tickScale, validDay, windowStartFor,
+  sortRepositories, sparklineSummary, summarize, tickScale, unknownStartsInRange, validDay, windowStartFor,
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
 import { providerMark, renderProviderEvidence, metricCoverage } from "./providers.js";
@@ -102,6 +102,7 @@ let restoringUrl = false;
 let toolsSelectedName = null;
 let toolsExpanded = false;
 let windowPreset = "30";
+let tableExpansion = { key: null, showEmpty: false };
 let tableSort = { direction: "descending", key: "value" };
 let shortcutsEnabled = true;
 let navCache = { key: null };
@@ -213,7 +214,8 @@ function activeView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
-  const undatedStarts = scopeSessions.filter((session) => sessionStartDay(session, snapshotTimeZone()) === null).length;
+  const window = selectedWindow();
+  const undatedStarts = unknownStartsInRange(scopeSessions, window.startDay, window.endDay, snapshotTimeZone());
   const sourceRepositories = selected ? [selected] : snapshot.repositories;
   // One ledger pass grouped by repository serves the usage-value KPI, its sparkline, the repository bars and the fleet
   // table, so the table's rows add up to the KPI.
@@ -755,6 +757,19 @@ function renderLine(items) {
         : "No daily priced activity in this view.";
     emptyState(elements.dailySpend, message, "Nothing to plot"); syncHover(null); return;
   }
+  const activeDays = items.filter((item) => providers.some((provider) => item[provider] > 0));
+  if (activeDays.length <= 2) {
+    const legend = node("div");
+    renderLegend(legend, providers.map((provider) => ({ id: provider, label: providerLabels[provider], color: providerColor(provider), value: totals[provider], valueLabel: money(totals[provider]), mark: "line" })), { target: elements.dailySpend, layout: "list" });
+    const dates = activeDays.map(({ name }) => dayLabel(name)).join(" and ");
+    const actions = node("div", null, "status-actions");
+    const button = statusAction("Show 30d", () => applyWindowPreset("30"));
+    button.dataset.focusKey = "daily:show-30d";
+    actions.append(button);
+    elements.dailySpend.append(legend, node("p", `Only ${dates} ${activeDays.length === 1 ? "has" : "have"} activity · widen the window for a trend`, "chart-note"), actions);
+    syncHover(null);
+    return;
+  }
   const width = chartWidth(elements.dailySpend, 900), height = width < 560 ? 220 : 272, left = 52, right = 14, top = 14, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
@@ -818,6 +833,13 @@ function renderDonut(sessions) {
   const total = sessions.length;
   const providers = Object.keys(counts).filter((provider) => counts[provider] > 0).sort((a, b) => counts[b] - counts[a]);
   clear(elements.providerDonut);
+  elements.providerDonut.dataset.presentation = providers.length === 1 ? "text" : "chart";
+  elements.providerLegend.hidden = providers.length === 1;
+  if (providers.length === 1) {
+    clear(elements.providerLegend);
+    elements.providerDonut.append(node("p", `${integer(total)} session${total === 1 ? "" : "s"} · ${providerLabels[providers[0]]}`));
+    return;
+  }
   const svg = svgNode("svg", { viewBox: "0 0 120 120", role: "img", "aria-label": `${integer(total)} sessions by provider` });
   let angle = -Math.PI / 2;
   for (const provider of providers) {
@@ -844,7 +866,36 @@ function tableCell(primary, secondary, className) {
 function renderRepositoryTable(repositories) {
   const restoreFocus = rememberFocus();
   clear(elements.repositoryRows);
-  const sorted = sortRepositories(repositories, tableSort.key, tableSort.direction);
+  const selected = selectedRepository();
+  const context = velocityContext();
+  const key = `${snapshot.generatedAt}|${context.start}|${context.end}|${elements.repositoryFilter.value}`;
+  if (tableExpansion.key !== key) tableExpansion = { key, showEmpty: false };
+  const quiet = selected ? [] : repositories.filter(({ summary }) => summary.sessions === 0);
+  const visible = selected || tableExpansion.showEmpty ? repositories : repositories.filter(({ summary }) => summary.sessions > 0);
+  const sorted = sortRepositories(visible, tableSort.key, tableSort.direction);
+  $("#comparison-title").textContent = selected ? `${selected.repository.name} vs fleet` : "Repositories";
+  const hint = $("#repository-table-hint");
+  clear(hint);
+  if (selected) {
+    const button = statusAction("Clear focus", () => selectRepository("all", { scroll: false }));
+    button.dataset.focusKey = "table:clear-focus";
+    hint.append(node("span", `Showing ${selected.repository.name} · `), button);
+    const ledger = ledgerMoney(snapshot.sessions, context);
+    sorted.push({ repository: { id: null, name: "All repositories" }, summary: summarize(sessionsInWindow(snapshot.sessions)), usage: { value: ledger.total, evidence: ledger.evidence, available: ledgerAvailability(snapshot.sessions).eligible > 0 } });
+  } else hint.textContent = "Click a column to sort · click a row to focus";
+  const footer = $("#repository-footer");
+  clear(footer);
+  if (quiet.length && !tableExpansion.showEmpty) {
+    const row = node("tr"), cell = node("td", null, "empty-line"); cell.colSpan = 8;
+    const button = statusAction("Show them", () => {
+      tableExpansion.showEmpty = true;
+      renderRepositoryTable(repositories);
+      elements.repositoryRows.querySelector("button.row-link")?.focus({ preventScroll: true });
+    });
+    button.dataset.focusKey = "table:show-empty";
+    cell.append(node("span", `${integer(quiet.length)} repositor${quiet.length === 1 ? "y" : "ies"} without sessions · `), button);
+    row.append(cell); footer.append(row);
+  }
   for (const button of sortButtons) {
     const header = button.closest("th");
     if (button.dataset.sort === tableSort.key) header.setAttribute("aria-sort", tableSort.direction);
@@ -853,15 +904,19 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
-    const repositoryDetails = `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
+    const comparator = item.repository.id === null;
+    const repositoryDetails = comparator ? item.repository.name : `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
+    if (comparator) row.className = "fleet-total";
     row.setAttribute("aria-label", `${repositoryDetails} · ${summary.sessions} session${summary.sessions === 1 ? "" : "s"} · ${executionBreakdown(summary)}`);
-    row.dataset.rowLink = "true";
-    const repositoryButton = node("button", item.repository.name, "row-link"); repositoryButton.type = "button";
+    if (!comparator) row.dataset.rowLink = "true";
+    const repositoryButton = node(comparator ? "span" : "button", item.repository.name, comparator ? "" : "row-link"); repositoryButton.type = "button";
     repositoryButton.title = repositoryDetails; repositoryButton.setAttribute("aria-label", repositoryDetails);
     repositoryButton.dataset.focusKey = `table:${item.repository.id}`;
     if (item.repository.id === selectedId) { row.setAttribute("aria-current", "true"); repositoryButton.setAttribute("aria-current", "true"); }
-    repositoryButton.addEventListener("click", () => selectRepository(item.repository.id));
-    row.addEventListener("click", (event) => { if (event.target.closest?.("button")) return; selectRepository(item.repository.id); });
+    if (!comparator) {
+      repositoryButton.addEventListener("click", () => selectRepository(item.repository.id));
+      row.addEventListener("click", (event) => { if (event.target.closest?.("button")) return; selectRepository(item.repository.id); });
+    }
     const repositoryCell = node("td"); repositoryCell.append(repositoryButton);
     const sessionsCell = tableCell(String(summary.sessions)); sessionsCell.title = executionBreakdown(summary);
     sessionsCell.setAttribute("aria-label", `${summary.sessions} · ${sessionsCell.title}`);
@@ -874,7 +929,7 @@ function renderRepositoryTable(repositories) {
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
-    const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories in this view."); row.append(cell); elements.repositoryRows.append(row);
+    const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
   }
   restoreFocus();
 }
@@ -882,10 +937,9 @@ function renderRepositoryTable(repositories) {
 function renderWarnings(warnings) {
   clear(elements.warningList); elements.warning.hidden = !warnings.length;
   warnings.forEach((warning) => elements.warningList.append(node("li", warning)));
-  elements.coverageLabel.textContent = warnings.length ? `Coverage · ${warnings.length}` : "Coverage";
+  elements.coverageLabel.textContent = warnings.length ? `Coverage · ${integer(warnings.length)}` : "Coverage";
   elements.coverageDot.hidden = !warnings.length;
-  if (warnings.length) elements.coverageButton.setAttribute("aria-label", `Coverage · ${warnings.length} note${warnings.length === 1 ? "" : "s"}`);
-  else elements.coverageButton.removeAttribute("aria-label");
+  elements.coverageButton.setAttribute("aria-label", `Coverage: ${integer(warnings.length)} notes`);
 }
 
 /** Selection explanations live in Coverage; chart and KPI notes stay short. */
@@ -1000,7 +1054,14 @@ function renderSharedView(view) {
     : name === "summary" ? `Usage value by activity date; sessions, tokens and tools for sessions started during ${windowCaption()} (${timeZone}).`
     : name === "costs" || name === "pricing" ? `Usage value by activity date during ${windowCaption()} (${timeZone}).`
     : `Sessions started during ${windowCaption()} (${timeZone}); whole-session totals.`;
-  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : `${integer(view.summary.repositories)} repositor${view.summary.repositories === 1 ? "y" : "ies"} · ${integer(view.summary.repositoriesWithSessions)} with sessions.`} ${population}`;
+  if (name === "summary" && selected) {
+    elements.scope.textContent = `${selected.repository.name} · ${integer(view.sessions.length)} session${view.sessions.length === 1 ? "" : "s"} · ${dateRange(elements.windowStart.value, elements.windowEnd.value)} (${timeZone})`;
+  } else if (name === "summary" && view.sessions.length === 1 && soleContributor(view, view.sessions[0])) {
+    const session = view.sessions[0];
+    elements.scope.textContent = `1 session · ${dateLabel(sessionStartDay(session, timeZone) ?? elements.windowStart.value)} · ${session.repositoryName} · ${providerLabels[session.provider]} · ${ledgerAvailability(view.scopeSessions).eligible ? money(view.activity.totals[0]) : DASH}`;
+  } else {
+    elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : `${integer(view.summary.repositories)} repositor${view.summary.repositories === 1 ? "y" : "ies"} · ${integer(view.summary.repositoriesWithSessions)} with sessions.`} ${population}`;
+  }
   elements.scopeChip.hidden = !selected;
   elements.scopeChipLabel.textContent = selected ? selected.repository.name : "";
   elements.scopeChip.setAttribute("aria-label", selected ? `${selected.repository.name}: clear repository focus` : "Clear repository focus");
@@ -1029,6 +1090,12 @@ function executionBreakdown(summary) {
 }
 
 /** Window ledger value recorded by sub-agent executions (explicit evidence only, so a lower bound). */
+/** The compact one-session caption applies only when that session is the window's sole activity contributor; sessions started earlier can add value. */
+function soleContributor(view, session) {
+  const context = velocityContext();
+  return view.activity.contributingSessions === buildVelocity([session], { start: context.start, end: context.end, metric: "value" }).contributingSessions;
+}
+
 function subagentValue(sessions, { start, end }) {
   return buildVelocity(sessions, { start, end, group: "execution", metric: "value" }).allSeries.find(({ id }) => id === "subagent")?.total ?? 0;
 }
@@ -1073,18 +1140,53 @@ function renderSummary(view) {
     renderSparkline($(`#metric-${name}-spark`), series, days, { format, label });
   }
   renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
-  renderBars(elements.repositorySpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.usage.value })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
-  renderBars(elements.repositoryTokens, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), (value) => compact(value), 12, ({ id }) => selectRepository(id));
+  const selected = selectedRepository();
+  const ledger = ledgerMoney(view.scopeSessions, context);
+  $("#repository-spend-title").textContent = selected ? "Usage value by provider" : "Usage value by repository";
+  $("#repository-tokens-title").textContent = selected ? "Request input by provider" : "Request input processed by repository";
+  if (selected) {
+    renderBars(elements.repositorySpend, ledger.providers.map(({ provider, total }) => ({ name: providerLabels[provider], value: total })), money, providerOrder.length);
+    const providers = presentProviders(view.sessions).map((provider) => {
+      const summary = summarize(view.sessions.filter((session) => session.provider === provider));
+      return { name: providerLabels[provider], value: summary.totalInputTokens, coverage: summary.coverage.tokens, what: "token evidence" };
+    }).sort((a, b) => b.value - a.value);
+    renderBars(elements.repositoryTokens, providers, compact, providerOrder.length);
+  } else {
+    const active = view.repositories.filter((item) => item.summary.sessions > 0 || activity.allSeries.some(({ id }) => id === item.repository.id));
+    const quiet = view.repositories.length - active.length;
+    renderBars(elements.repositorySpend, active.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.usage.value })).sort((a, b) => b.value - a.value), money, 12, ({ id }) => selectRepository(id));
+    renderBars(elements.repositoryTokens, active.map((item) => ({ id: item.repository.id, name: item.repository.name, value: item.summary.totalInputTokens, coverage: item.summary.coverage.tokens, what: "token evidence" })).sort((a, b) => b.value - a.value), compact, 12, ({ id }) => selectRepository(id));
+    if (quiet) for (const container of [elements.repositorySpend, elements.repositoryTokens]) container.append(node("p", `${integer(quiet)} repositor${quiet === 1 ? "y" : "ies"} had no activity in this window`, "empty-line"));
+  }
   // Model mix: the same ledger, one row per model and provider ("model · Provider"), as on Costs.
   // The bars add up to the KPI: past eight rows the remainder is one "Other" row.
-  const ledger = ledgerMoney(view.scopeSessions, context);
   const mix = ledger.models.filter(({ value }) => value > 0).map(({ id, model, provider, label, value }) => ({ id, name: label, model, value, provider }));
   const rest = mix.slice(7);
   renderBars(elements.modelSpend, mix.length > 8 ? [...mix.slice(0, 7), { id: "other", name: `Other (${rest.length} models)`, value: rest.reduce((total, { value }) => total + value, 0) }] : mix, money, 8);
   renderBars(elements.toolCalls, view.topTools, (value) => integer(value), 10);
   if (!summary.coverage.tools.eligible) { clear(elements.toolCalls); elements.toolCalls.append(node("p", `${DASH} No tool evidence in ${summary.coverage.tools.selected} selected sessions`, "empty-line")); }
   // Explicit sub-agent value: ledger cells whose execution kind is "subagent", per repository and window.
-  renderBars(elements.repositorySubagentSpend, view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: subagentValue(repositorySessions(item.repository.id), context) })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value), money, 10, ({ id }) => selectRepository(id));
+  const subagentNote = $("#subagent-note");
+  subagentNote.hidden = !selected;
+  elements.repositorySubagentSpend.hidden = Boolean(selected);
+  const subagentWindow = context.start === context.end ? `on ${dateLabel(context.start)}` : `during ${dateRange(context.start, context.end)}`;
+  if (selected) {
+    clear(elements.repositorySubagentSpend);
+    // Sub-agent sessions without an activity ledger have no measurable value: show a dash, never a measured zero.
+    const pool = view.scopeSessions.filter(({ executionKind }) => executionKind === "subagent" || executionKind === "mixed");
+    const count = `${integer(summary.subagentSessions)} sub-agent session${summary.subagentSessions === 1 ? "" : "s"}`;
+    subagentNote.textContent = !summary.subagentSessions ? `No sub-agent sessions ${subagentWindow}.`
+      : !ledgerAvailability(pool).eligible ? `Sub-agent value ${DASH} · ${count} · no activity dates`
+      : `Sub-agent value ${money(subagentValue(view.scopeSessions, context))} · ${count}`;
+  } else {
+    const items = view.repositories.map((item) => ({ id: item.repository.id, name: item.repository.name, value: subagentValue(repositorySessions(item.repository.id), context) })).filter(({ value }) => value > 0).sort((a, b) => b.value - a.value);
+    if (items.length) renderBars(elements.repositorySubagentSpend, items, money, 10, ({ id }) => selectRepository(id));
+    else {
+      clear(elements.repositorySubagentSpend);
+      const message = summary.subagentSessions ? `No dated sub-agent value ${subagentWindow}.` : `No sub-agent sessions ${subagentWindow}.`;
+      emptyState(elements.repositorySubagentSpend, message);
+    }
+  }
   renderRepositoryTable(view.repositories); renderWarnings(view.warnings);
 }
 
@@ -1195,7 +1297,7 @@ function showWindowNote(adjusted) {
   const target = elements.windowNote;
   if (!target) return;
   const notes = adjusted.map((reason) => reason === "clamped"
-    ? `Adjusted to the observed history, ${elements.windowStart.min} to ${elements.windowEnd.max}.`
+    ? `Clamped to history · ${dateRange(elements.windowStart.min, elements.windowEnd.max)}.`
     : windowNoteText[reason]).filter(Boolean);
   target.textContent = notes.join(" ");
   target.hidden = !notes.length;

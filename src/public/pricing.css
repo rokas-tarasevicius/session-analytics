@@ -12,12 +12,12 @@
 #pricing-panel .pricing-notice > div { flex: 1 1 30rem; min-width: 0; }
 #pricing-panel .pricing-notice-action { flex: 0 0 auto; }
 
-/* Cards share row tracks (subgrid), so the value, caption, bar and coverage slot line up across a row of cards. */
+/* Cards share row tracks (subgrid), so the value, detail, bar and coverage slot line up across a row of cards. */
 #pricing-panel .pricing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.5rem), 1fr)); gap: var(--gap); padding: 0; margin: 0; list-style: none; }
 #pricing-panel .pricing-grid > li { display: grid; min-width: 0; row-gap: 8px; }
 #pricing-panel .pricing-card { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; align-items: start; row-gap: 8px; width: 100%; padding: 16px; border: 1px solid var(--line); box-shadow: inset 0 2px 0 color-mix(in srgb, var(--card-accent) 55%, transparent); border-radius: var(--radius); background: var(--surface); color: var(--text); text-align: left; font-variant-numeric: tabular-nums; }
 @supports (grid-template-rows: subgrid) {
-  #pricing-panel .pricing-grid > li { grid-row: span 8; grid-template-rows: subgrid; }
+  #pricing-panel .pricing-grid > li { grid-row: span 7; grid-template-rows: subgrid; }
   #pricing-panel .pricing-card { grid-row: 1 / -1; grid-template-rows: subgrid; }
   #pricing-panel .pricing-grid-unused > li { grid-row: span 4; }
 }

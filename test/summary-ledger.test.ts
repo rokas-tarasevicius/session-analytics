@@ -1,4 +1,4 @@
-import { compact, integer } from "../src/public/format.js";
+import { compact, dateLabel, dateRange, integer } from "../src/public/format.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -41,7 +41,7 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
     node: (tag: string, text?: string, className?: string) => { const e = new Element(tag); e.textContent = text ?? ""; e.className = className ?? ""; return e; },
     svgNode: (tag: string) => new Element(tag), icon: () => new Element("svg"), clear: (e: Element) => e.replaceChildren(),
     money: (v: number) => `$${v.toFixed(2)}`, shortMoney: (v: number) => `$${v.toFixed(2)}`, percent: String, integer, compact,
-    renderHistoryCoverage() {}, renderMetricValue() {}, renderSparkline() {}, renderLine() {}, dailyProviderSpend() {}, renderDonut() {}, renderBars() {}, renderRepositoryTable() {}, renderWarnings() {}, selectRepository() {},
+    selectedRepository: () => null, repositorySessions: (id: string) => (sessions as Array<{ repositoryId: string }>).filter((s) => s.repositoryId === id), emptyState() {}, dateLabel, dateRange, renderHistoryCoverage() {}, renderMetricValue() {}, renderSparkline() {}, renderLine() {}, dailyProviderSpend() {}, renderDonut() {}, renderBars() {}, renderRepositoryTable() {}, renderWarnings() {}, selectRepository() {},
     renderDelta: (e: Element, delta: unknown) => { deltas[Object.entries(elementMap).find(([, v]) => v === e)![0]] = delta; },
   });
   const render = () => {
@@ -116,4 +116,98 @@ test("session-dated value counts in the Summary KPI and Coverage says how much",
   const plain = harness([session("repo-a", days("2026-09-08", "2026-09-14").map((d) => bucket(d, 10)))]);
   plain.render();
   assert.doesNotMatch(plain.lookup("coverageUsageNote").textContent, /session-dated/);
+});
+
+test("a focused repository keeps provider values and a full-fleet comparator on the same ledgers", async () => {
+  const { harness: dashboard, sample, withLedger } = await import("./validation/aggregation-ui-harness.ts");
+  const make = (id: string, provider: "claude" | "codex", value: number, executionKind = "top-level") => {
+    const s = withLedger(sample(), [["synthetic", value]], { day: "2026-09-30", executionKind });
+    s.repositoryId = id; s.repositoryName = id; s.provider = provider;
+    if (executionKind === "subagent") s.executionKind = "subagent";
+    return s;
+  };
+  const sessions = [make("data-pipeline", "claude", 11.90, "subagent"), make("data-pipeline", "codex", 5), make("other", "claude", 20)];
+  const { document, run } = await dashboard(sessions, { repositories: [{ id: "data-pipeline", name: "data-pipeline" }, { id: "other", name: "other" }], start: "2026-09-13", end: "2026-10-12" });
+  run("populateRepositories(); selectRepository('data-pipeline', { scroll: false })");
+  assert.equal(document.querySelector("#scope-description")!.textContent, "data-pipeline · 2 sessions · 13 Sept – 12 Oct 2026 (Europe/London)");
+  assert.equal(document.querySelector("#repository-spend-title")!.textContent, "Usage value by provider");
+  assert.equal(document.querySelector("#repository-tokens-title")!.textContent, "Request input by provider");
+  assert.deepEqual(document.querySelector("#repository-spend")!.querySelectorAll(".bar-label").map((e) => e.textContent.trim()), ["Claude $11.90", "Codex $5.00"]);
+  assert.equal(document.querySelector("#repository-tokens")!.querySelectorAll(".bar-row").length, 2);
+  assert.equal(document.querySelector("#repository-subagent-spend")!.hidden, true);
+  assert.equal(document.querySelector("#repository-subagent-spend")!.children.length, 0);
+  assert.equal(document.querySelector("#subagent-note")!.textContent, "Sub-agent value $11.90 · 1 sub-agent session");
+  assert.equal(document.querySelector("#comparison-title")!.textContent, "data-pipeline vs fleet");
+  const rows = document.querySelector("#repository-rows")!.querySelectorAll("tr");
+  assert.equal(rows.length, 2); assert.equal(rows[0]!.getAttribute("aria-current"), "true");
+  assert.deepEqual(rows.map((e) => [e.children[0]!.textContent.trim(), e.children[1]!.textContent.trim(), e.children[2]!.textContent.trim()]), [["data-pipeline", "2", "$16.90"], ["All repositories", "3", "$36.90"]]);
+  assert.equal(rows[1]!.className, "fleet-total"); assert.equal(rows[1]!.querySelector("button"), null);
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$16.90");
+  const hint = document.querySelector("#repository-table-hint")!;
+  assert.equal(hint.textContent.trim().replace(/\s+/g, " "), "Showing data-pipeline · Clear focus");
+  hint.querySelector("button")!.listeners.get("click")!();
+  assert.equal(run("elements.repositoryFilter.value"), "all");
+  assert.equal(document.querySelector("#comparison-title")!.textContent, "Repositories");
+  assert.equal(document.querySelector("#repository-spend-title")!.textContent, "Usage value by repository");
+  assert.equal(document.querySelector("#repository-subagent-spend")!.hidden, false);
+  assert.equal(document.querySelector("#subagent-note")!.hidden, true);
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$36.90");
+});
+
+test("quiet repository panels collapse and the Show them footer reveals unchanged fleet rows", async () => {
+  const { harness: dashboard, sample, withLedger } = await import("./validation/aggregation-ui-harness.ts");
+  const active = withLedger(sample(), [["synthetic", 0.15]], { day: "2026-07-24" });
+  active.createdAt = "2026-07-24T12:00:00Z";
+  const quiet = withLedger(sample(), [["synthetic", 9]], { day: "2026-07-01" });
+  quiet.createdAt = "2026-07-01T12:00:00Z"; quiet.repositoryId = "quiet"; quiet.repositoryName = "Quiet";
+  const repositories = [{ id: "synthetic", name: "Synthetic" }, { id: "quiet", name: "Quiet" }, { id: "empty", name: "Empty" }];
+  const { document, run } = await dashboard([active, quiet], { repositories, start: "2026-07-01", end: "2026-07-30" });
+  run("windowPreset = 'custom'; setWindowInputs('2026-07-24', '2026-07-24'); renderView()");
+  for (const id of ["repository-spend", "repository-tokens"]) {
+    const panel = document.querySelector(`#${id}`)!;
+    assert.equal(panel.querySelectorAll(".bar-row").length, 1);
+    assert.equal(panel.querySelector(".empty-line")!.textContent, "2 repositories had no activity in this window");
+  }
+  assert.equal(document.querySelector("#repository-rows")!.querySelectorAll("tr").length, 1);
+  const footer = document.querySelector("#repository-footer")!;
+  assert.equal(footer.textContent.trim().replace(/\s+/g, " "), "2 repositories without sessions · Show them");
+  footer.querySelector("button")!.listeners.get("click")!();
+  const rows = document.querySelector("#repository-rows")!.querySelectorAll("tr");
+  assert.deepEqual(rows.map((e) => [e.children[0]!.textContent.trim(), e.children[1]!.textContent.trim(), e.children[2]!.textContent.trim()]), [["Synthetic", "1", "$0.15"], ["Quiet", "0", "$0.00"], ["Empty", "0", "—"]]);
+  assert.equal(footer.children.length, 0);
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$0.15");
+  run("tableSort = { key: 'name', direction: 'ascending' }; renderRepositoryTable(activeView().repositories)");
+  assert.equal(document.querySelector("#repository-rows")!.querySelectorAll("tr").length, 3, "sorting preserves expansion");
+  run("setWindowInputs('2026-07-25', '2026-07-25'); renderRepositoryTable(activeView().repositories)");
+  assert.match(footer.textContent, /3 repositories without sessions/);
+});
+
+test("activity from an earlier start stays in repository panels and behind the fleet footer", async () => {
+  const { harness: dashboard, sample, withLedger } = await import("./validation/aggregation-ui-harness.ts");
+  const session = withLedger(sample(), [["synthetic", 2]], { day: "2026-07-24" });
+  session.createdAt = "2026-07-01T12:00:00Z";
+  const { document, run } = await dashboard([session], { start: "2026-07-01", end: "2026-07-30" });
+  run("windowPreset = 'custom'; setWindowInputs('2026-07-24', '2026-07-24'); renderView()");
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$2.00");
+  const bars = document.querySelector("#repository-spend")!;
+  assert.equal(bars.querySelectorAll(".bar-row").length, 1);
+  assert.match(bars.textContent, /\$2.00/); assert.equal(bars.querySelector(".empty-line"), null);
+  assert.match(document.querySelector("#repository-rows")!.textContent, /No repositories with sessions in this window/);
+  const footer = document.querySelector("#repository-footer")!;
+  assert.match(footer.textContent, /1 repository without sessions/);
+  footer.querySelector("button")!.listeners.get("click")!();
+  assert.equal(document.querySelector("#repository-rows")!.querySelector("tr")!.children[2]!.textContent.trim(), "$2.00");
+});
+
+test("a focused repository with ledger-less sub-agent sessions shows a dash, not a measured zero", async () => {
+  const { harness: dashboard, sample, withLedger } = await import("./validation/aggregation-ui-harness.ts");
+  const ledgered = withLedger(sample(), [["synthetic", 5]], { day: "2026-09-30" });
+  ledgered.repositoryId = "data-pipeline"; ledgered.repositoryName = "data-pipeline";
+  const subagent = sample();
+  subagent.repositoryId = "data-pipeline"; subagent.repositoryName = "data-pipeline"; subagent.executionKind = "subagent";
+  delete (subagent as { velocity?: unknown }).velocity;
+  const { document, run } = await dashboard([ledgered, subagent], { repositories: [{ id: "data-pipeline", name: "data-pipeline" }], start: "2026-09-13", end: "2026-10-12" });
+  run("populateRepositories(); selectRepository('data-pipeline', { scroll: false })");
+  assert.equal(document.querySelector("#subagent-note")!.textContent, "Sub-agent value — · 1 sub-agent session · no activity dates");
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$5.00");
 });

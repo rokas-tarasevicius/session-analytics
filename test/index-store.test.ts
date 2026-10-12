@@ -282,7 +282,7 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
       ...await import(new URL("../src/public/ui.js", import.meta.url).href) };
     const element = () => ({ value: "", textContent: "", dataset: {}, style: {}, classList: { add() {}, remove() {}, toggle() {} }, setAttribute() {}, addEventListener() {}, querySelectorAll: () => [], replaceChildren() {}, append() {} });
     const elements = new Map<string, ReturnType<typeof element>>();
-    const document = { addEventListener() {}, documentElement: { dataset: {} }, querySelectorAll: () => [], createElement: element, querySelector: (selector: string) => {
+    const document = { addEventListener() {}, documentElement: { dataset: {} }, querySelectorAll: () => [], createElement: element, createElementNS: element, querySelector: (selector: string) => {
       if (!elements.has(selector)) elements.set(selector, { ...element(), value: selector === "#repository-filter" ? "all" : "" });
       return elements.get(selector);
     } };

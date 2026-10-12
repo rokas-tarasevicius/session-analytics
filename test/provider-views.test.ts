@@ -44,6 +44,7 @@ async function harness() {
   // Shared components resolve `document` at call time, so the stub is exposed as the global for this harness.
   (globalThis as any).document = document;
   runInContext(source, context);
+  runInContext('elements.repositoryFilter.value="all"; elements.windowStart.value=elements.windowStart.min="2026-07-20"; elements.windowEnd.value=elements.windowEnd.max="2026-07-20";', context);
   return { elements, context, run: (js: string) => runInContext(js, context) };
 }
 const evidence = (overrides: Partial<ProviderEvidence> = {}): ProviderEvidence => ({ source: "conductor-result", fidelity: "summary", tokens: "reported", tools: "unavailable", turns: "unavailable", timing: "provider", usageUnit: "run", ...overrides });
@@ -88,7 +89,7 @@ test("review: invalid and unavailable sessions never imply observed tools or com
   const h = await harness(); const invalid = sample(undefined, true), activity = sample(evidence({ source: "cursor-transcript", fidelity: "activity-only", tokens: "unavailable", tools: "observed", usageUnit: "unavailable" }));
   h.context["sessions"] = [invalid, activity];
   assert.equal(h.run('providerEvidenceRows(sessions)[0].toolSessions'), 0);
-  h.run('renderRepositoryTable([{repository:{id:"example",name:"Example"},summary:summarize(sessions),usage:{value:0,evidence:{known:0,eligible:0,unsupported:0,complete:true},available:false}}])');
+  h.run('snapshot={sessions}; renderRepositoryTable([{repository:{id:"example",name:"Example"},summary:summarize(sessions),usage:{value:0,evidence:{known:0,eligible:0,unsupported:0,complete:true},available:false}}])');
   const output = h.elements.get("#repository-rows")!.textContent;
   // No activity ledger: the value is unavailable, not $0.00, and no priced share is claimed.
   assert.match(output, /—/); assert.doesNotMatch(output, /complete|N\/A|\$0\.00/); assert.match(output, /1\/2.*parsed/);

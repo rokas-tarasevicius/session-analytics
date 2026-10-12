@@ -116,7 +116,7 @@
           </div>
           <div class="topbar-actions">
             <span class="status" id="sync-context" role="status" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
-            <button class="coverage-button" id="coverage-button" type="button" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
+            <button class="coverage-button" id="coverage-button" type="button" aria-label="Coverage: 0 notes" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
             <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
               <summary class="icon-button" title="Export view" aria-label="Export view"><svg aria-hidden="true"><use href="#i-export"/></svg></summary>
@@ -176,11 +176,11 @@
                 <div class="donut-layout chart-slot"><div class="donut" id="provider-donut"></div><div class="legend" id="provider-legend"></div></div>
               </article>
               <article class="panel span-6">
-                <header><div><h2>Usage value by repository</h2></div></header>
+                <header><div><h2 id="repository-spend-title">Usage value by repository</h2></div></header>
                 <div class="bar-list chart-slot" id="repository-spend"></div>
               </article>
               <article class="panel span-6">
-                <header><div><h2>Request input processed by repository</h2></div></header>
+                <header><div><h2 id="repository-tokens-title">Request input processed by repository</h2></div></header>
                 <div class="bar-list chart-slot" id="repository-tokens"></div>
               </article>
               <article class="panel span-4">
@@ -192,14 +192,14 @@
                 <div class="bar-list chart-slot" id="tool-calls"></div>
               </article>
               <article class="panel span-4">
-                <header><div><h2>Sub-agent value</h2></div></header>
+                <header><div><h2>Sub-agent value</h2><p class="chart-note" id="subagent-note" hidden></p></div></header>
                 <div class="bar-list chart-slot" id="repository-subagent-spend"></div>
                 <p class="chart-note">Explicit sub-agent evidence · lower bound</p>
               </article>
             </section>
 
             <section class="panel comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
-              <header class="section-header"><div><h2 id="comparison-title">Repositories</h2></div><span class="table-hint">Click a column to sort · click a row to focus</span></header>
+              <header class="section-header"><div><h2 id="comparison-title">Repositories</h2></div><span class="table-hint" id="repository-table-hint">Click a column to sort · click a row to focus</span></header>
               <p class="chart-note">Activity-dated value · session-start counters</p>
               <div class="table-wrap"><table class="data-table"><thead><tr>
                 <th scope="col"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
@@ -210,7 +210,7 @@
                 <th scope="col"><button type="button" class="sort" data-sort="tools">Tools<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
                 <th scope="col"><button type="button" class="sort" data-sort="cache">Cache<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
                 <th scope="col"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-              </tr></thead><tbody id="repository-rows"></tbody></table></div>
+              </tr></thead><tbody id="repository-rows"></tbody><tfoot id="repository-footer"></tfoot></table></div>
             </section>
           </section>
 

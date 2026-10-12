@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Focused repositories show provider breakdowns, a sub-agent summary and an All repositories comparator in the fleet table.
+- Windows with one or two active days show daily totals as a list with Show 30d; single-provider session shares use text, quiet repository rows collapse, and pricing cards share one activity-dated subtitle.
+
 - Unchecked provider chips use readable text and solid borders while retaining their hollow dots and dimmed marks.
 - Provider marks are larger, and repository row links, footer links and rate-source summaries have targets of at least 24 px.
 - Coverage fractions appear as plain text; range adjustments and unavailable reasons are visible without hovering.
@@ -40,6 +43,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Activity: the heatmap legend shows its numbers (0 to the busiest hour, with each shade's range on hover) instead of "Less … More". On phones the heatmap turns so hours run down the page and weekdays across, without sideways scrolling; arrow keys follow the layout. With every provider switched off, or none of the selected providers having sessions or known start times, Activity and Tools show an empty state that names the cause, with **Select all providers**, instead of a page of zeros.
 
 ### Fixed
+
+- Sub-agent empty states name the missing activity and selected dates; clamped ranges say Clamped to history, and unknown-start notes count only the selected window.
 
 - The fleet comparison table keeps Cache and Priced visible at laptop widths, truncates long repository names, and shows scroll shadows when tables overflow.
 - Daily usage provider chips sit on their own row below the title with consistent spacing.

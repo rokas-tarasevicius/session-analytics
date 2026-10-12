@@ -84,7 +84,7 @@ test("coverage and repository scope names retain their visible labels as state c
   const coverage = document.querySelector("#coverage-button")!;
   for (const count of [2, 1, 0]) {
     run(`renderWarnings(${JSON.stringify(Array(count).fill("Coverage note"))})`);
-    assert.equal(coverage.getAttribute("aria-label"), count ? `Coverage · ${count} note${count === 1 ? "" : "s"}` : null);
+    assert.equal(coverage.getAttribute("aria-label"), `Coverage: ${count} notes`);
     assert.equal(document.querySelector("#coverage-label")!.textContent, count ? `Coverage · ${count}` : "Coverage");
     assert.equal(coverage.getAttribute("title"), "Data coverage");
   }

@@ -80,9 +80,12 @@ for (const window of windows) for (const focus of ["all", "beta"]) {
     const kpi = cents(document.querySelector("#metric-spend")!.textContent);
     assert.equal(kpi, round(expected), "Summary KPI is the ledger total");
 
-    // Fleet table: one Usage value cell per repository, adding up to the KPI.
+    // Fleet table: expand quiet rows before reconciling; the focused fleet comparator is a separate total.
+    document.querySelector("#repository-footer")!.querySelector("button")?.listeners.get("click")!();
     const header = within(document, "#repository-comparison", "th").findIndex((th) => th.querySelector("[data-sort=value]") !== null);
-    const rows = within(document, "#repository-rows", "tr");
+    const rows = within(document, "#repository-rows", "tr").filter((row) => row.dataset["rowLink"] === "true");
+    const comparator = within(document, "#repository-rows", ".fleet-total")[0];
+    if (focus !== "all") assert.equal(cents(comparator!.children[header]!.textContent), round(buildVelocity(sessions, { start: window.start, end: window.end }).totals[0]), "the comparator includes the whole fleet");
     assert.equal(rows.length, focus === "all" ? repositories.length : 1);
     assert.equal(rows.reduce((sum, row) => sum + cents(firstSpan(row.children[header]!)!.textContent), 0), kpi, "fleet rows add up to the KPI");
     const bars = within(document, "#repository-spend", ".bar-label").map((label) => label.children[1]!);
