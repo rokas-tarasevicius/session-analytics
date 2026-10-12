@@ -24,7 +24,7 @@ There is no build step. Node runs the TypeScript sources directly.
 | `npm run demo` | Generate synthetic sessions in a temporary directory and open the dashboard on port 4175 against that data only. `npm run demo -- report` prints the report; `-- --keep` keeps the generated files. |
 | `npm run typecheck` | `tsc --noEmit` over `bin/`, `src/`, `test/`, and `scripts/`. |
 | `npm test` | `node --test --test-concurrency=2 test/*.test.ts test/validation/*.test.ts verify/*/*.test.ts verify/*/*.test.mjs` |
-| `npm run check` | Type check, then tests. CI runs this on Ubuntu and macOS for pull requests and pushes. |
+| `npm run check` | Type check, then tests. CI runs this on Ubuntu for pull requests, and on Ubuntu and macOS for pushes to `master` while the repository is private. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
 

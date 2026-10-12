@@ -21,7 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Pull requests run on Linux only while the repository is private (macOS minutes bill at 10x and
+        # exhausted the spending limit on 2026-10-12). macOS runs on pushes to master and manual runs.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","macos-latest"]') }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -50,6 +52,7 @@ jobs:
         run: npm pack --dry-run
 
   browser:
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     continue-on-error: true
     timeout-minutes: 15
