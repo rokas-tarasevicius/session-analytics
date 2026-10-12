@@ -15,11 +15,13 @@ test("fleet rows expose a native repository button and select once when its clic
   assert.equal(button.type, "button");
   assert.equal(button.textContent, "Synthetic");
   assert.equal(button.dataset["focusKey"], "table:synthetic");
-  assert.match(cell.querySelector("small")!.textContent, /^ID [a-z0-9]{8}$/i);
+  assert.equal(cell.querySelector("small"), null);
+  assert.match((button as any).title, /^Synthetic · ID [a-z0-9]{8}$/i);
+  assert.equal(button.getAttribute("aria-label"), (button as any).title);
   assert.equal(row.getAttribute("role"), null);
   assert.equal(row.getAttribute("tabindex"), null);
   assert.equal("tabIndex" in row, false);
-  assert.equal(row.getAttribute("aria-label"), null);
+  assert.match(row.getAttribute("aria-label")!, /^Synthetic · ID [a-z0-9]{8} · 1 session · .*top-level/i);
   assert.equal(row.dataset["focusKey"], undefined);
   assert.equal(row.dataset["rowLink"], "true");
   assert.equal(row.listeners.has("keydown"), false);
@@ -28,7 +30,7 @@ test("fleet rows expose a native repository button and select once when its clic
   button.listeners.get("click")!({ target: button });
   row.listeners.get("click")!({ target: button });
   assert.deepEqual(selections, ["synthetic"]);
-  row.listeners.get("click")!({ target: cell.querySelector("small")! });
+  row.listeners.get("click")!({ target: cell });
   assert.deepEqual(selections, ["synthetic", "synthetic"]);
   run('elements.repositoryFilter.value = "all"; renderRepositoryTable(activeView().repositories)');
   const unselected = document.querySelector("#repository-rows")!.children[0]!;

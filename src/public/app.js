@@ -861,19 +861,24 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
+    const repositoryDetails = `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
+    row.setAttribute("aria-label", `${repositoryDetails} · ${summary.sessions} session${summary.sessions === 1 ? "" : "s"} · ${executionBreakdown(summary)}`);
     row.dataset.rowLink = "true";
     const repositoryButton = node("button", item.repository.name, "row-link"); repositoryButton.type = "button";
+    repositoryButton.title = repositoryDetails; repositoryButton.setAttribute("aria-label", repositoryDetails);
     repositoryButton.dataset.focusKey = `table:${item.repository.id}`;
     if (item.repository.id === selectedId) { row.setAttribute("aria-current", "true"); repositoryButton.setAttribute("aria-current", "true"); }
     repositoryButton.addEventListener("click", () => selectRepository(item.repository.id));
     row.addEventListener("click", (event) => { if (event.target.closest?.("button")) return; selectRepository(item.repository.id); });
-    const repositoryCell = node("td"); repositoryCell.append(repositoryButton, node("small", `ID ${repositoryKey(item.repository.id)}`));
+    const repositoryCell = node("td"); repositoryCell.append(repositoryButton);
+    const sessionsCell = tableCell(String(summary.sessions)); sessionsCell.title = executionBreakdown(summary);
+    sessionsCell.setAttribute("aria-label", `${summary.sessions} · ${sessionsCell.title}`);
     const covered = (value, coverage, format, what) => { const cell = node("td"); cell.append(valueWithCoverage(value, coverage, format, what, "span")); return cell; };
     // Usage value and Priced read the window's activity ledger (the KPI's rows); the other columns cover sessions started in the window.
     const value = node("td");
     if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
     else value.append(node("span", money(item.usage.value)));
-    row.append(repositoryCell, tableCell(String(summary.sessions), executionBreakdown(summary)), value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact.format(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact.format(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {

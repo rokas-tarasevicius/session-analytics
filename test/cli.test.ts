@@ -92,3 +92,37 @@ test("report reads SESSION_ANALYTICS_* settings and returns only fixture evidenc
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("demo sweeps stale temp roots", async () => {
+  const { lstat, mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const directory = await mkdtemp(resolve(tmpdir(), "session-analytics-demo-sweep-test-"));
+  try {
+    const stale = resolve(directory, "session-analytics-demo-x");
+    const fresh = resolve(directory, "session-analytics-demo-fresh");
+    const kept = resolve(directory, "session-analytics-demo-kept");
+    const owned = resolve(directory, "session-analytics-demo-owned");
+    const abandoned = resolve(directory, "session-analytics-demo-abandoned");
+    const unrelated = resolve(directory, "unrelated-directory");
+    const file = resolve(directory, "session-analytics-demo-file");
+    const link = resolve(directory, "session-analytics-demo-link");
+    for (const root of [stale, fresh, kept, owned, abandoned, unrelated]) await mkdir(root);
+    await writeFile(resolve(stale, "synthetic-data"), "fixture");
+    await writeFile(resolve(kept, ".keep"), "");
+    // A live owner (this test process) protects its root; a dead owner does not.
+    await writeFile(resolve(owned, ".demo-owner"), `${process.pid}\n`);
+    await writeFile(resolve(abandoned, ".demo-owner"), `${spawnSync(process.execPath, ["-e", "0"]).pid}\n`);
+    await writeFile(file, "fixture");
+    await symlink(unrelated, link, "dir");
+    const old = new Date(Date.now() - 2 * 86_400_000);
+    for (const path of [stale, kept, owned, abandoned, unrelated, file]) await utimes(path, old, old);
+    const result = spawnSync(process.execPath, [resolve(here, "../scripts/demo.ts"), "report", "--json"], {
+      encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 60_000,
+      env: { ...process.env, TMPDIR: directory, TMP: directory, TEMP: directory },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(JSON.parse(result.stdout).sessions.length > 0);
+    assert.deepEqual((await readdir(directory)).sort(), ["session-analytics-demo-file", "session-analytics-demo-fresh", "session-analytics-demo-kept", "session-analytics-demo-link", "session-analytics-demo-owned", "unrelated-directory"]);
+    assert.equal((await lstat(link)).isSymbolicLink(), true);
+  } finally { await rm(directory, { force: true, recursive: true }); }
+});

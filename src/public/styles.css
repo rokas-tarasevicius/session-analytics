@@ -370,7 +370,7 @@ main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 .warning-banner ul { margin: 6px 0 0; padding-left: 18px; }
 
 /* ---------------------------------------------------------------- kpi */
-.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap); }
+.kpi-grid { display: grid; grid-template-columns: repeat(var(--kpi-columns, 4), minmax(0, 1fr)); gap: var(--gap); }
 .kpi { min-width: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label label" "value spark" "delta spark" "note note"; align-content: start; gap: 2px 10px; min-height: calc(112px * var(--density)); padding: calc(13px * var(--density)) var(--pad); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-1); transition: border-color var(--t-fast); }
 .kpi:hover { border-color: var(--line-strong); }
 .kpi-label { grid-area: label; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0; }
@@ -392,6 +392,8 @@ main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 .span-4 { grid-column: span 4; } .span-6 { grid-column: span 6; } .span-8 { grid-column: span 8; }
 .panel { min-width: 0; min-height: 0; padding: var(--pad); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-1); }
 .panel > header, .section-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.panel > .daily-usage-header { flex-direction: column; gap: 6px; }
+.daily-usage-header .provider-key { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
 .kicker { margin: 0 0 3px; color: var(--muted); font: 500 var(--fs-xs)/1.2 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
 h2 { font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.01em; }
 .panel header > span { max-width: 100%; color: var(--muted); font: 500 var(--fs-xs) var(--font-sans); white-space: normal; font-variant-numeric: tabular-nums; }
@@ -470,8 +472,23 @@ h2 { font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.01em; }
 .comparison-section { margin-top: var(--gap); min-height: 0; }
 .table-hint { color: var(--muted); font-size: var(--fs-xs); white-space: normal; }
 /* Positioned so visually hidden (absolute) text in a cell stays inside the scroll area instead of widening the page. */
-.table-wrap { position: relative; min-width: 0; max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); max-height: 560px; }
-table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 880px; font-size: var(--fs-sm); }
+.table-wrap {
+  position: relative; min-width: 0; max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); max-height: 560px;
+  background:
+    linear-gradient(to right, var(--surface) 30%, transparent) left center,
+    linear-gradient(to left, var(--surface) 30%, transparent) right center,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--text) 16%, transparent), transparent) left center,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--text) 16%, transparent), transparent) right center;
+  background-color: var(--surface);
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); }
+#repository-comparison table { min-width: 880px; }
+#repository-comparison td:first-child { width: 18%; max-width: 0; }
+#repository-comparison .row-link { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#repository-comparison td .coverage { margin-left: 4px; padding: 0 3px; }
 thead th { height: 34px; padding: 0 12px; vertical-align: middle; background: var(--surface-2); color: var(--muted); border-bottom: 1px solid var(--line); font: 500 var(--fs-xs)/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; text-align: left; position: sticky; top: 0; z-index: 2; }
 thead th:not(:first-child):not(.align-left) { text-align: right; }
 thead th:has(> .sort) { padding: 0; }
@@ -670,8 +687,11 @@ dialog::backdrop { background: var(--backdrop); backdrop-filter: blur(2px); }
 
 /* ---------------------------------------------------------------- responsive */
 @media (max-width: 1240px) {
-  .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .kpi .spark { width: 64px; }
+}
+@media (max-width: 1279px) {
+  #repository-comparison :is(th, td):first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+  #repository-comparison thead th:first-child { z-index: 3; }
 }
 @media (max-width: 1320px) {
   .topbar:has(#date-range:not([hidden])) { flex-wrap: wrap; }
@@ -872,7 +892,6 @@ tbody tr[data-row-link] { cursor: pointer; }
 .view-status .status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 
 @media (max-width: 520px) {
-  .kpi-grid, #pricing-panel .kpi-grid, .kpi-grid.velocity-lead, .kpi-grid.velocity-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpi { grid-template-columns: minmax(0, 1fr); grid-template-areas: "label" "value" "coverage" "delta" "note"; padding: 12px; min-height: 0; }
   .kpi .spark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .kpi strong { font-size: var(--fs-lg); overflow-wrap: anywhere; }

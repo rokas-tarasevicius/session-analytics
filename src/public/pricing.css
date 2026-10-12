@@ -1,7 +1,7 @@
 /* Pricing panel: shared KPI cards, panels and tables from styles.css. */
 #pricing-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); padding-top: 2px; }
 #pricing-panel .pricing-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); min-width: 0; }
-#pricing-panel .kpi-grid { margin: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
+#pricing-panel .kpi-grid { margin: 0; --kpi-columns: 4; }
 #pricing-panel .kpi a { display: inline-block; grid-column: 1 / -1; grid-row: 6; justify-self: start; margin-top: 6px; color: var(--text-2); font-size: var(--fs-xs); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
 #pricing-panel .kpi a:hover { color: var(--text); border-color: var(--text); }
 #pricing-panel :is(.pricing-freshness, .pricing-updates) strong { grid-column: 1 / -1; font-family: var(--font-sans); }
@@ -58,5 +58,3 @@
 .pricing-dialog th, .pricing-dialog td { white-space: normal; overflow-wrap: anywhere; }
 .pricing-dialog .table-wrap { max-height: none; }
 .pricing-dialog .table-wrap td.align-left { text-align: left; }
-
-@media (max-width: 520px) { #pricing-panel .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

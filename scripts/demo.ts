@@ -14,7 +14,7 @@
  * explicit flags nor profile discovery can reach the machine's real history.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -599,8 +599,32 @@ if (!reportMode && !mcpMode && !(await portIsFree(port))) {
   fail(`Port ${port} is already in use. Stop that process or pass --port with a free port.`);
 }
 
-const root = mkdtempSync(join(tmpdir(), "session-analytics-demo-"));
+const tempParent = tmpdir();
+const staleBefore = Date.now() - DAY;
+// Each demo root records its owning process and whether it was retained, so a sweep never removes a demo that is
+// still running (a dashboard open for days) or one kept with --keep; only abandoned roots older than a day go.
+const OWNER_FILE = ".demo-owner";
+const KEEP_FILE = ".keep";
+function ownerAlive(candidate: string): boolean {
+  let pid: number;
+  try { pid = Number.parseInt(readFileSync(join(candidate, OWNER_FILE), "utf8"), 10); } catch { return false; }
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+}
+for (const entry of readdirSync(tempParent, { withFileTypes: true })) {
+  if (!entry.name.startsWith("session-analytics-demo-") || !entry.isDirectory()) continue;
+  const candidate = join(tempParent, entry.name);
+  try {
+    const stats = lstatSync(candidate);
+    if (!stats.isDirectory() || stats.mtimeMs >= staleBefore) continue;
+    if (lstatSync(join(candidate, KEEP_FILE), { throwIfNoEntry: false }) || ownerAlive(candidate)) continue;
+    rmSync(candidate, { force: true, recursive: true });
+  } catch { /* Another demo may have removed the root, or it may be inaccessible. */ }
+}
+const root = mkdtempSync(join(tempParent, "session-analytics-demo-"));
 const keep = has("--keep");
+writeFileSync(join(root, OWNER_FILE), `${process.pid}\n`, { mode: 0o600 });
+if (keep) writeFileSync(join(root, KEEP_FILE), "", { mode: 0o600 });
 const cleanup = (): void => {
   if (!keep) rmSync(root, { force: true, recursive: true });
 };

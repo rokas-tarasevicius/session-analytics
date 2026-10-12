@@ -108,8 +108,13 @@ function client(args: string[], cwd: string, settings: NodeJS.ProcessEnv = {}, e
     async close() {
       if (processChild.exitCode !== null || processChild.signalCode) return;
       const ended = once(processChild, "exit");
-      const kill = setTimeout(() => processChild.kill("SIGKILL"), 2000);
-      processChild.stdin.end(); await ended; clearTimeout(kill); lines.close();
+      let fallback: ReturnType<typeof setTimeout> | undefined;
+      const terminate = setTimeout(() => {
+        processChild.kill("SIGTERM");
+        fallback = setTimeout(() => processChild.kill("SIGKILL"), 1000);
+      }, 2000);
+      processChild.stdin.end();
+      try { await ended; } finally { clearTimeout(terminate); clearTimeout(fallback); lines.close(); }
     },
   };
 }
@@ -308,9 +313,13 @@ test("spawned stdio server shuts down promptly on signals and EOF, including par
       try {
         await c.initialize();
         const exited = once(c.processChild, "exit");
-        const fallback = setTimeout(() => c.processChild.kill("SIGKILL"), 2000);
+        let kill: ReturnType<typeof setTimeout> | undefined;
+        const fallback = setTimeout(() => {
+          c.processChild.kill("SIGTERM");
+          kill = setTimeout(() => c.processChild.kill("SIGKILL"), 1000);
+        }, 2000);
         c.processChild.kill(signal);
-        const [code, cause] = await exited; clearTimeout(fallback);
+        const [code, cause] = await exited; clearTimeout(fallback); clearTimeout(kill);
         assert.equal(code, 0); assert.equal(cause, null); assert.equal(c.stderr(), "");
       } finally { await c.close(); }
     }
