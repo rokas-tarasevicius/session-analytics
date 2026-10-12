@@ -2,7 +2,7 @@ import { categoryColor, categorySlotCount, modelColor, providerColor, providerKe
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
-import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, topMovers, velocityIndicators } from "./velocity-data.js";
+import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, shiftDay, topMovers, velocityIndicators } from "./velocity-data.js";
 
 const element = (tag, text, className) => {
   const result = document.createElement(tag);
@@ -159,7 +159,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     valueLabel: formatMetric(series.total, data.metric, true), mark: stacked ? "rect" : "line",
     pattern: encodings[index].pattern === "solid" ? "solid" : stacked ? "diagonal" : "dashed",
   })), { target: svg });
-  if (overlay) legend.append(element("span", "Dashed: total · rolling 7-day average", "velocity-average-key"));
+  if (overlay && data.rolling.some((value) => value !== null)) legend.append(element("span", "Dashed: total · rolling 7-day average", "velocity-average-key"));
   const inspection = element("div", undefined, "velocity-inspection");
   inspection.setAttribute("aria-live", "polite"); inspection.setAttribute("aria-atomic", "true");
   const remembered = keepInspected ? data.keys.indexOf(inspectedKeys.get(container)) : -1;
@@ -244,7 +244,13 @@ export function renderVelocity(container, sessions, context) {
       if (options.granularity === "hour" && options.mode === "cumulative") { options.mode = "lines"; mode.select.value = "lines"; }
       rolling.disabled = options.granularity !== "day" || options.mode === "cumulative";
       rollingLabel.title = rolling.disabled ? "A daily average is shown on non-cumulative daily charts." : "Seven calendar days, including inactive dates.";
-      const data = buildVelocity(scoped, options);
+      const today = localDay(current.generatedAt, current.timeZone);
+      const comparison = comparisonSpan(current.end, today);
+      // Long windows also need six dates before their first plotted day.
+      const rollingStart = shiftDay(current.start, -6);
+      if (rollingStart < comparison.start) comparison.start = rollingStart;
+      const comparisonData = buildVelocity(scoped, { ...options, ...comparison, granularity: "day", mode: "lines" });
+      const data = buildVelocity(scoped, { ...options, rollingHistory: comparisonData });
       const valueData = options.metric === "value" && options.granularity === "day" ? data : buildVelocity(scoped, { ...options, metric: "value", granularity: "day", mode: "lines" });
       const price = averagePrice(valueData);
       const shownProviders = chipProviders.filter((provider) => selectedProviders.has(provider)).length;
@@ -252,8 +258,6 @@ export function renderVelocity(container, sessions, context) {
         kpi({ label: "Average price", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: `per active day · ${price.activeDays} of ${price.days} days active · ${formatMetric(price.perCalendarDay, "value")} per calendar day`, accent: true }),
         kpi({ label: "Usage value", value: formatMetric(price.total, "value"), note: `${price.days} calendar days · API-equivalent and provider-reported${valueData.evidence.complete ? "" : " · partially observed"}${shownProviders < chipProviders.length ? ` · ${shownProviders} of ${chipProviders.length} providers` : ""}` }),
       );
-      const today = localDay(current.generatedAt, current.timeZone);
-      const comparisonData = buildVelocity(scoped, { ...options, ...comparisonSpan(current.end, today), granularity: "day", mode: "lines" });
       const indicators = velocityIndicators(comparisonData, today);
       main.heading.textContent = `${metricDefinitions[options.metric].label} by ${group.select.selectedOptions[0].textContent.toLowerCase()}`;
       const plottedTotal = el("span", formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric)); plottedTotal.setAttribute("data-velocity-total", "");

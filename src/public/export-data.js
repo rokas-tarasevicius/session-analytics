@@ -8,6 +8,8 @@
 import { coverageWarnings, filteredWarning, scanWarnings } from "./evidence.js";
 import { normalizeTimestamp, timestampMilliseconds } from "./timestamps.js";
 import { calendarDays, ledgerCells, localDay } from "./velocity-data.js";
+import { metricEligible } from "./providers.js";
+import { callCount } from "./tools-data.js";
 /** @type {Array<keyof import("../types.ts").TokenUsage>} */
 const tokenFields = ["inputTokens", "uncachedInputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "outputTokens", "reasoningOutputTokens", "nonReasoningOutputTokens"];
 /** @type {Array<keyof import("../types.ts").CostBreakdown>} */
@@ -81,7 +83,10 @@ export function csvTables(snapshot, { ledger = null } = {}) {
       for (const key of [...tokenFields, ...costFields]) row[key] += m[key];
       models.set(key, row);
     }
-    for (const [tool, calls] of Object.entries(s.tools)) {
+    if (!metricEligible(s, "tools")) continue;
+    for (const [tool, value] of Object.entries(s.tools)) {
+      const calls = callCount(value);
+      if (!calls) continue;
       const key = JSON.stringify([s.repositoryId, s.provider, tool]);
       const row = tools.get(key) || { ...base, tool, contributingSessions: 0, calls: 0 };
       row.contributingSessions++; row.calls += calls; tools.set(key, row);
@@ -130,7 +135,10 @@ export function aggregateSessions(sessions) {
     cacheDenominator += s.tokens.uncachedInputTokens + s.tokens.cachedInputTokens + s.tokens.cacheWriteInputTokens;
     if (s.pricedTokenCoverage !== null) { const count = s.tokens.inputTokens + s.tokens.outputTokens; priceable += count; priced += count * s.pricedTokenCoverage; }
     for (const [name, amount] of Object.entries(s.spendByDay)) days.set(name, (days.get(name) || 0) + amount);
-    for (const [name, amount] of Object.entries(s.tools)) tools.set(name, (tools.get(name) || 0) + amount);
+    if (metricEligible(s, "tools")) for (const [name, value] of Object.entries(s.tools)) {
+      const calls = callCount(value);
+      if (calls) tools.set(name, (tools.get(name) || 0) + calls);
+    }
     for (const source of s.models) {
       const row = models.get(source.model) || { model: source.model, calls: 0, priced: true, ...zeroFields([...tokenFields, ...costFields]) };
       for (const key of [...tokenFields, ...costFields]) row[key] += source[key];

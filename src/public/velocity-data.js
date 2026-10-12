@@ -127,7 +127,7 @@ export function ledgerCells(velocity) {
 /** Sum occupied hourly cells; never use session creation as the activity date. Every series also carries `sums`, the
  * group's in-window total of all 14 counters, and `sessions`, the sessions contributing a cell to it (the "Other"
  * remainder adds its members' counts). */
-export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7 } = {}) {
+export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7, rollingHistory = null } = {}) {
   const index = metricDefinitions[metric].index;
   const dates = calendarDays(start, end);
   const dailyMap = new Map(dates.map((day) => [day, { day, values: blank(), total: 0, evidence: blankEvidence() }]));
@@ -189,7 +189,10 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
     series = [...series.slice(0, limit), other];
   }
   const daily = [...dailyMap.values()];
-  const rolling = daily.map((_, i) => i < 6 || daily[i - 6].day < earliest || missingSessions || !daily.slice(i - 6, i + 1).every((item) => item.evidence.complete) ? null : sum(daily.slice(i - 6, i + 1).map((item) => item.total)) / 7);
+  // Comparison history already includes the preceding dates and the same evidence guards.
+  const historyRolling = rollingHistory && new Map(rollingHistory.daily.map(({ day }, i) => [day, rollingHistory.rolling[i]]));
+  const rolling = historyRolling ? daily.map(({ day }) => historyRolling.get(day) ?? null)
+    : daily.map((_, i) => i < 6 || daily[i - 6].day < earliest || missingSessions || !daily.slice(i - 6, i + 1).every((item) => item.evidence.complete) ? null : sum(daily.slice(i - 6, i + 1).map((item) => item.total)) / 7);
   if (mode === "cumulative" && granularity !== "hour") series = series.map((item) => { let running = 0; return { ...item, values: item.values.map((value) => running += value) }; });
   return { start, end, group, metric, granularity, mode, keys, series, allSeries, daily, rolling, totals, undated, sessionDated, sessionDatedSessions, coverage, evidence, earliest, missingSessions, unledgered, contributingSessions };
 }

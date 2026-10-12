@@ -18,6 +18,7 @@ import { matchesSchema, snapshotSchema, sharedSchema } from "../src/interop/sche
 import { writeNewFiles, readJsonFile } from "../src/interop/files.ts";
 import { otlpEndpoint, otlpLogs, postOtlp, semanticConventionsCommit } from "../src/interop/otlp.ts";
 import { csv, csvTables, filterSnapshot } from "../src/public/export-data.js";
+import { buildToolsView } from "../src/public/tools-data.js";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 
 const run = promisify(execFile);
@@ -111,6 +112,31 @@ test("CSV preserves quoted cells, null coverage, numeric sums and provider cost 
   assert.equal(cursor[columns.indexOf("costBasis")], "provider-reported");
   assert.ok(parseCsv(files["daily.csv"]!).slice(1).every((row) => row[3] !== "cursor"));
   for (const content of Object.values(csvTables(filterSnapshot(snapshot, { providers: [] })))) assert.equal(parseCsv(content).length, 1);
+});
+
+test("tools.csv applies the Tools eligibility rule", () => {
+  const source = snapshot.sessions.find((s) => s.provider === "claude")!;
+  const observed = structuredClone(source);
+  observed.tools = { Read: 8, NotFinite: NaN, Infinite: Infinity, Negative: -2, Zero: 0 };
+  observed.evidence = { source: "conductor-messages", fidelity: "message", tokens: "reported", tools: "observed", turns: "observed", timing: "provider", usageUnit: "request" };
+  const invalid = structuredClone(source);
+  invalid.tools = { Invalid: 1000, Read: 1000 }; invalid.transcript.status = "invalid";
+  const unavailable = structuredClone(source);
+  unavailable.tools = { Missing: 1000, Read: 1000 }; unavailable.evidence = { ...observed.evidence, tools: "unavailable" };
+  const legacy = structuredClone(source);
+  legacy.tools = { Read: 2 }; delete legacy.evidence;
+  const sessions = [observed, invalid, unavailable, legacy];
+  const filtered = filterSnapshot({ ...snapshot, sessions });
+  const content = csvTables(filtered)["tools.csv"]!;
+  const rows = parseCsv(content); const columns = rows.shift()!;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]![columns.indexOf("tool")], "Read");
+  assert.equal(rows[0]![columns.indexOf("contributingSessions")], "2");
+  assert.equal(rows[0]![columns.indexOf("calls")], "10");
+  assert.doesNotMatch(content, /Invalid|Missing|NotFinite|Infinite|Negative|Zero|NaN|Infinity/);
+  const tools = buildToolsView(sessions).tools.map(({ name, calls }) => ({ name, value: calls }));
+  assert.deepEqual(filtered.topTools, tools);
+  assert.deepEqual(filtered.repositories.find((r) => r.repository.id === source.repositoryId)!.topTools, tools);
 });
 
 test("NDJSON frames every row with schemaVersion and reconstructs the snapshot evidence", () => {

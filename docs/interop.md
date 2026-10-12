@@ -33,7 +33,7 @@ session-analytics export --snapshot snapshot.json --format csv --out ./saved-csv
 | `sessions.csv` | One session, flattened tokens, costs, cost basis, pricing coverage, timestamps, execution/evidence labels, and execution counters. |
 | `daily.csv` | The activity ledger: repository × provider × activity day in the snapshot's declared timezone (`velocity.timeZone`), with API-equivalent and provider-reported value (session-dated receipt value included) and contributing-session count. Only evidenced value dates appear; Cursor database totals are not assigned invented dates. |
 | `models.csv` | Repository × provider × cost basis × model, with contributing sessions, calls, priced flag, token classes, and cost components. Cursor model costs do not establish model-level token attribution. |
-| `tools.csv` | Repository × provider × tool name, with effective calls and contributing sessions. |
+| `tools.csv` | Repository × provider × tool name, with effective calls and contributing sessions. Like the Tools view, it includes only parsed sessions with observed tool evidence (legacy snapshots without evidence labels remain eligible) and finite, positive call counts. |
 | `snapshot.ndjson` | First a `kind: "snapshot"` header with generation time, rate card, summary, and warnings; then `kind: "repository"` rollups and `kind: "session"` records. Every record carries `schemaVersion: 1`. Empty scans still have a header. |
 | `otlp-logs.json` | One OTLP `ExportLogsServiceRequest`; one content-free log record per observed session. |
 

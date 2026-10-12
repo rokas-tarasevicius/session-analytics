@@ -305,8 +305,9 @@ The chart header shows the selected metric's period total.
   occurrences, and the missing spring hour contributes no activity. Cumulative lines
   restart at the selected start date and are disabled for unordered hour profiles.
 - The rolling overlay is the total over the last seven calendar dates divided by seven,
-  including zero-activity dates. It needs seven dates inside both the selected range and
-  observed history. It is available on daily lines/areas; it is disabled for cumulative,
+  including zero-activity dates. It needs seven dates within observed history with complete
+  metric evidence; dates before the selected range are included, so the first plotted day
+  can have an average. It is available on daily lines/areas; it is disabled for cumulative,
   weekly, monthly and hour views so incompatible units are never overlaid.
 
 ### Session-dated value
