@@ -259,7 +259,7 @@ export function renderVelocity(container, sessions, context) {
       const indicators = velocityIndicators(comparisonData, today);
       main.heading.textContent = `${metricDefinitions[options.metric].label} by ${group.select.selectedOptions[0].textContent.toLowerCase()}`;
       const plottedTotal = el("span", formatMetric(data.totals[metricDefinitions[options.metric].index], options.metric)); plottedTotal.setAttribute("data-velocity-total", "");
-      subtitle.replaceChildren(el("span", "Total "), plottedTotal, el("span", ` · ${current.start} → ${current.end} · ${current.timeZone}`));
+      subtitle.replaceChildren(el("span", "Total "), plottedTotal, el("span", ` · ${dateRange(current.start, current.end)} · ${current.timeZone}`));
       renderVelocityChart(chart, data, { rolling: rolling.checked && !rolling.disabled });
       coverage.replaceChildren(el("summary", "Evidence & limits"), (() => { const body = el("div", null, "evidence-body"); for (const text of [
         options.granularity === "hour" ? "Totals for each local clock hour; repeated DST hours combine." : options.granularity === "week" || options.granularity === "month" ? "Boundary periods include only selected dates." : "Inactive calendar dates are included.",
