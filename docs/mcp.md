@@ -60,14 +60,14 @@ Startup, discovery, listing and pings are immediate and do not scan history. The
 | `repo_profile` | Typical session value, turns and duration; tool mix, cache hits and compactions | Requires one repository; top 20 tools |
 | `tool_stats` | Calls by tool name (`{ name, calls }`) from structured tool-call records | `limit`, `offset` |
 | `recent_sessions` | Hashed session keys, provider, models, duration and value, newest activity first | `limit`, `offset` |
-| `compare_agents` | Claude Code, Codex and Cursor on the same repository | Requires one repository; no provider filter |
+| `compare_agents` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported` on the same repository | Requires one repository; no provider filter |
 
 Shared arguments are optional and strictly validated:
 
 - `window`: `today`, `week`, `7d`, `30d` (default), `90d`, `all`. Calendar windows use UTC; `week` starts Monday; `7d` includes today and six preceding dates.
 - `scope`: `repository` or `machine`. Default is the launch repository when one is found; otherwise machine. `repo_profile` and `compare_agents` accept repository scope only.
 - `repositoryId`: a `conductor-<20 hex>` or `discovered-<20 hex>` key returned by this server. It cannot be combined with machine scope.
-- `provider`: `claude`, `codex`, or `cursor`, except on `compare_agents`.
+- `provider`: `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported`, except on `compare_agents`.
 - Where listed, `limit`: 1–50 (default 10); `offset`: 0–100000 (default 0). `nextOffset` is `null` at the end. Pagination uses the current cached snapshot; compare `snapshot.generatedAt` across pages and restart if it changes.
 
 For example, `usage_summary({"window":"7d","groupBy":"provider"})` describes the launch repository. Discover other repository keys with `usage_summary({"scope":"machine","groupBy":"repository","window":"all"})`, then pass a returned key to `repo_profile`. No tool accepts a working directory, filename, command, URL, SQL, glob, or transcript selector. Unknown arguments are rejected rather than ignored.
@@ -102,7 +102,7 @@ Every payload includes provider `sourceHealth`, independent of selected sessions
 
 As verified on 2026-10-02, the server supports MCP **2026-07-28**, including `server/discover`, required per-request version/capability metadata and `resultType: "complete"`. It also supports the `initialize` → `notifications/initialized` lifecycle for **2025-11-25** and **2025-06-18**. Unsupported modern versions receive `-32022`; legacy initialization negotiates a supported legacy version. `ping` is also accepted. The transport is one JSON-RPC 2.0 message per UTF-8 line. No batches, HTTP transport, resources, prompts, sampling, elicitation, tasks or roots capability is advertised. Sources: [versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning), [stdio](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio), [legacy lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle).
 
-Input frames are capped at 64 KiB, at most 16 tool requests can wait concurrently, and output buffering is bounded. Malformed input receives fixed errors. Valid notifications receive no response; cancelled requests receive no later result. Tool/input/analysis failures use `isError: true` where appropriate without forwarding exception text. Worker V8 old space is limited with `--max-old-space-size=256`; this is not a 256 MiB total-heap or RSS guarantee. Serialized snapshots are capped at 128 MiB with a five-minute analysis deadline; output tool responses retain their separate limits. EOF/signals abort and reap the worker; stdout gets at most 250 ms to drain. Buffer overflow at 4 MiB forces immediate output teardown. The CLI explicitly exits after cleanup because Node does not close standard stdout through `destroy()`.
+Input frames are capped at 64 KiB, at most 16 tool requests can wait concurrently, and output buffering is bounded. Malformed input receives fixed errors. Valid notifications receive no response; cancelled requests receive no later result. Tool/input/analysis failures use `isError: true` where appropriate without forwarding exception text. Worker V8 old space is limited with `--max-old-space-size=1024`; this is not a 1024 MiB total-heap or RSS guarantee. Serialized snapshots are capped at 128 MiB with a five-minute analysis deadline; output tool responses retain their separate limits. EOF/signals abort and reap the worker; stdout gets at most 250 ms to drain. Buffer overflow at 4 MiB forces immediate output teardown. The CLI explicitly exits after cleanup because Node does not close standard stdout through `destroy()`.
 
 ```sh
 npm run check

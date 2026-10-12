@@ -59,8 +59,8 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement through a private
-message on GitHub to the maintainer,
+reported to the community leaders responsible for enforcement through the
+maintainer's contact channel listed on their GitHub profile,
 [@rokas-tarasevicius](https://github.com/rokas-tarasevicius), or through a
 [private security advisory](https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new)
 on this repository.

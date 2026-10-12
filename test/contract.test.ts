@@ -3,11 +3,14 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { toolDefinitions } from "../src/mcp/tools.ts";
+import { sessionStatuses } from "../src/public/evidence.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(here, "..");
 const skill = readFileSync(resolve(projectRoot, "skills/session-analytics/SKILL.md"), "utf8");
 const metrics = readFileSync(resolve(projectRoot, "docs/metrics.md"), "utf8");
+const privacy = readFileSync(resolve(projectRoot, "docs/privacy.md"), "utf8");
 const rateCard = JSON.parse(
   readFileSync(resolve(projectRoot, "data/rate-cards.json"), "utf8"),
 ) as {
@@ -30,6 +33,45 @@ test("ships an agent skill that names every evidence store", () => {
   assert.match(skill, /Cursor: `~\/Library\/Application Support\/Cursor/);
   assert.match(skill, /Provider stores define the scan/);
   assert.match(skill, /Conductor is optional enrichment and is never required/);
+});
+
+test("provider descriptions cover every supported provider", () => {
+  const packageMetadata = JSON.parse(readFileSync(resolve(projectRoot, "package.json"), "utf8")) as { description: string };
+  const description = skill.match(/^description: (.+)$/m)?.[1] ?? "";
+  const contract = skill.split("## Contract")[1]?.split("## Phase 1")[0] ?? "";
+  for (const provider of ["Claude Code", "Codex", "Cursor", "Copilot CLI", "OpenCode", "Gemini CLI"]) {
+    for (const text of [packageMetadata.description, description, contract]) assert.ok(text.includes(provider), provider);
+  }
+  assert.doesNotMatch(packageMetadata.description, /reliability/i);
+});
+
+test("documented MCP providers match the published tool schema", () => {
+  const schema = toolDefinitions.find(({ name }) => name === "usage_summary")!.inputSchema;
+  assert.ok("provider" in schema.properties);
+  const providers = schema.properties.provider.enum;
+  const mcp = readFileSync(resolve(projectRoot, "docs/mcp.md"), "utf8");
+  const filter = mcp.split("- `provider`: ")[1]?.split("\n")[0] ?? "";
+  const comparison = mcp.split("| `compare_agents` | ")[1]?.split("\n")[0] ?? "";
+  const metricComparison = metrics.split("`compare_agents.agents[]` always contains ")[1]?.split(" totals/profiles")[0] ?? "";
+  for (const text of [filter, comparison, metricComparison]) {
+    assert.deepEqual([...text.matchAll(/`([a-z]+)`/g)].map((match) => match[1]), providers);
+  }
+});
+
+test("the Session field manifest has one continuous row per field and current status labels", () => {
+  const section = privacy.split("### Session (`SessionAnalytics`)")[1]?.split("### Session metrics")[0] ?? "";
+  const rows = [...section.matchAll(/^\| `([^`]+)` \| (.+) \| P[01](?:\/P1)? \|$/gm)];
+  const fields = rows.map((row) => row[1]);
+  assert.ok(fields.length > 0);
+  assert.equal(new Set(fields).size, fields.length);
+  const first = section.indexOf("| Field |");
+  const last = section.lastIndexOf("| P0 |");
+  assert.ok(section.slice(first, last).split("\n").every((line) => line.startsWith("|")));
+  const status = rows.find((row) => row[1] === "status")![2]!;
+  assert.deepEqual([...status.split(";")[0]!.matchAll(/`([^`]+)`/g)].map((match) => match[1]), sessionStatuses);
+  for (const field of ["provider", "effort", "transcript.snapshotWhileWorking", "transcript.warnings[]", "transcript.sourceDeleted", "transcript.startTimeKnown"]) {
+    assert.ok(fields.includes(field), field);
+  }
 });
 
 test("launches through one automatic idempotent command", () => {

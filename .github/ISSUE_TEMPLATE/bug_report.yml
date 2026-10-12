@@ -35,6 +35,8 @@ body:
         - Dashboard
         - Terminal report
         - JSON snapshot
+        - MCP server
+        - Export
         - Agent skill
         - Demo
     validations:
@@ -49,6 +51,10 @@ body:
         - Claude Desktop local agents
         - Codex
         - Cursor
+        - Cursor SDK
+        - Copilot CLI
+        - OpenCode
+        - Gemini CLI
         - Conductor metadata
         - Not provider-specific
   - type: dropdown
@@ -69,7 +75,7 @@ body:
     attributes:
       label: Version
       description: Output of `session-analytics --version`.
-      placeholder: 0.5.0
+      placeholder: 0.7.0
     validations:
       required: true
   - type: input

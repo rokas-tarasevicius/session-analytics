@@ -31,7 +31,7 @@ Use the demo for screenshots, bug reproductions, and UI work. Never attach scree
 ## Project layout
 
 ```text
-bin/session-analytics.ts     command dispatcher (dashboard, report)
+bin/session-analytics.ts     command dispatcher (dashboard, report, rates, export, merge, index, mcp)
 src/
   analyzer.ts                discovery, identity, repository assignment, parsers, pricing, aggregation
   analysis-process.ts        runs an analysis in a child process
@@ -41,11 +41,18 @@ src/
   cli.ts                     terminal report and JSON snapshot
   types.ts                   public snapshot types and internal correlation types
   brand.ts, version.ts       product identity and version
+  providers/                 content-free provider adapters
+  pricing/                   public feeds, dated catalog and private cache
+  interop/                   snapshot schemas, exports, sharing and merge
+  mcp/                       metrics-only stdio server
+  store/                     private derived index and incremental ingest
   public/                    dashboard (HTML, ES module, CSS, fonts, provider marks)
 data/rate-cards.json         versioned model rates with source URLs
 skills/session-analytics/    agent skill
 scripts/demo.ts              synthetic dataset and demo launcher
 test/                        node:test suites and fixtures
+verify/                      independent accounting oracles and verification guide
+schemas/                     closed public snapshot and sharing schemas
 docs/                        metrics, privacy, architecture, providers, roadmap, branding
 assets/                      logo, social preview, screenshots
 ```
@@ -64,16 +71,13 @@ These rules apply to every change, including dashboard and documentation changes
    - covered by a test that plants sentinel content in the relevant provider records (see `test/fixtures.ts`) and asserts with `assert.doesNotMatch` that it does not appear in the serialized output.
 3. **Names must be bounded.** Tool names come from structured tool-call records. Do not derive names from prompts, system instructions, or arbitrary text.
 4. **No paths, IDs, or errors in output.** File paths, working directories, repository roots and remotes, raw session or provider IDs, branch names, titles, and raw exception messages stay inside the analysis process. Use the existing hashed keys and fixed error messages.
-5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add telemetry, CORS headers, or non-loopback binds. Public pricing GETs in `src/pricing/sources.ts` are the documented exception to network isolation; see [pricing](docs/pricing.md).
-
-5. **Read-only and local.** Open SQLite with `readOnly: true`, never write to provider directories, and do not add background network requests, telemetry, CORS headers, or non-loopback binds. The sole opt-in network surface is the reviewed OTLP export flag; see `docs/interop.md`.
-5. **Read-only sources and local storage.** Open provider SQLite databases with `readOnly: true`, never write to provider directories, and do not add network requests, telemetry, CORS headers, or non-loopback binds. Only `src/store/` may write the private derived index. Extend its explicit disk projection when adding public session fields; test full-scan/index parity and sentinel absence on disk as well as in output. Give fixtures and demo runs their own `dataDir`.
+5. **Read-only sources and local storage.** Open provider SQLite databases with `readOnly: true`, never write to provider directories, and do not add telemetry, CORS headers, or non-loopback binds. Network requests are limited to documented fixed public-pricing GETs (`--offline` disables them) and explicit `export --otlp-endpoint` delivery, independent of the pricing setting; see [pricing](docs/pricing.md) and [the delivery boundary](docs/interop.md#opentelemetry-mapping). Only `src/store/` may write the private derived index. Extend its explicit disk projection when adding public session fields; test full-scan/index parity and sentinel absence on disk as well as in output. Give fixtures and demo runs their own `dataDir`.
 6. **No runtime dependencies.** Use Node built-ins. A new development dependency needs a reason in the pull request.
 7. **Opt-in for content.** Features that need content (privacy tiers P2 and P3) must be off by default, behind an explicit option, and labeled in the interface.
 
 ## Adding a provider
 
-Provider adapters live in `src/providers/`; the host in `src/analyzer.ts` supplies shared repository assignment, pricing, and aggregation. A new source needs:
+Provider adapters live in `src/providers/`. Implement `ProviderAdapter` (`discoverRoots`, `identify`, `analyze`) and register the source in `src/providers/index.ts`; the host in `src/analyzer.ts` supplies shared repository assignment, pricing, and aggregation. A new source needs:
 
 1. **Discovery.** Default locations, profile handling if the tool supports several profiles, and an explicit override option added to `src/options.ts`, which gives both commands the flag and its `SESSION_ANALYTICS_*` environment variable. An explicit override must replace discovery so synthetic and narrowed scans never read real history.
 2. **Identity.** Read the provider's own session ID and working directory, and only accept a file whose recorded ID matches its name or key.
@@ -81,12 +85,10 @@ Provider adapters live in `src/providers/`; the host in `src/analyzer.ts` suppli
 4. **Cost basis.** Use the rate card when the provider records model IDs and token classes; otherwise use a provider-reported value on its own basis, or mark cost unavailable. Never present an imputed token-class price as observed evidence; any documented substitution must carry a bounded assumption and exclude affected tokens from explicit-rate coverage.
 5. **Evidence labels.** Set `executionKind` and fidelity honestly. Missing data is `unavailable`, not zero.
 6. **Types and UI.** Extend `SessionProvider` and the dashboard provider registry. Prefer text labels for new providers; a vendor mark requires a license/provenance note in `src/public/brands/NOTICE.md`.
-7. **Fixtures and tests.** Add records in the provider's real shape to `test/fixtures.ts`, including sentinel content, and test counts, dedupe, cost, and the absence of content.
+7. **Fixtures and tests.** Add records in the provider's real shape to `test/fixtures.ts`, including sentinel content, and test counts, dedupe, cost, and the absence of content. Preserve native-provider outputs with parity fixtures when migrating a parser. Extend `scripts/demo-providers.ts` so visual QA stays synthetic.
 8. **Docs.** Add a section to [docs/providers.md](docs/providers.md) and a column or row to the README's evidence table.
 
 Open a [provider support issue](https://github.com/rokas-tarasevicius/session-analytics/issues/new?template=provider_support.yml) first so the record format can be discussed with redacted samples.
-
-Provider implementations live in `src/providers/`. Implement `ProviderAdapter` (`discoverRoots`, `identify`, `analyze`), register the source in `src/providers/index.ts`, and inject pricing/repository assignment through the host. Keep raw IDs, paths, and source objects behind that boundary. Add explicit path options, primary-source schema references, synthetic sentinel fixtures, and fidelity/availability labels. Preserve native-provider outputs with parity fixtures when migrating a parser. Extend `scripts/demo-providers.ts` when adding a source so visual QA remains entirely synthetic.
 
 ## Rate-card changes
 

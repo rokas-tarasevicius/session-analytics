@@ -124,4 +124,4 @@ npm run check
 
 The test suite covers fixture/schema parity, privacy sentinels, CSV quoting and injection, empty exports, filter totals, suppression boundaries, private key persistence, aliasing, merge conflicts, bounded file reads, no-overwrite writes, dashboard file refresh, OTLP field mapping, and a loopback collector including redirects and partial acknowledgement. No real history is used for test fixtures or screenshots.
 
-The initial v1 contract is still unreleased. These corrections keep version 1; regenerate pre-release files containing formerly accepted raw warning/status strings or inconsistent evidence. When merging provider/metric lanes, extend the closed schema and privacy manifest atomically, preserve optional fields as optional, and add filtered-export reconciliation coverage.
+The v1 contract shipped in 0.6.0. These corrections keep version 1; regenerate older files containing formerly accepted raw warning/status strings or inconsistent evidence. When merging provider/metric lanes, extend the closed schema and privacy manifest atomically, preserve optional fields as optional, and add filtered-export reconciliation coverage.
