@@ -124,13 +124,13 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 ## Dashboard server
 
 - Binds to `127.0.0.1` only. The port comes from `--port`, `SESSION_ANALYTICS_PORT`, `CONDUCTOR_PORT + 4`, or `4174`.
-- Rejects requests whose `Host` is not `127.0.0.1` or `localhost`, or whose `Origin` (when present) is not a loopback origin, with `403`.
+- Rejects requests whose `Host` is not `127.0.0.1` or `localhost` before parsing the target; malformed targets get a fixed `400` response. For `/api/*`, a present `Sec-Fetch-Site` must be `same-origin` or `none` and a present `Origin` must match the request's Host including port, otherwise `403`. Static files retain the loopback Origin check. An unhandled rejection logs one fixed line and leaves the server running.
 - Accepts `GET` only; anything else gets `405`.
 - Serves static files from a fixed map of URL paths, so request paths never reach the file system.
 - After the first successful scan, refreshes stale public pricing feeds once in the background unless offline or pinned to a reviewed card. This does not mutate the in-memory analytics snapshot; the next explicit refresh loads new cache evidence. There is no price-update HTTP endpoint.
 - Caches one snapshot promise. `/api/analytics?refresh=1` starts a new scan; concurrent requests share the scan in progress.
 - Sends a strict Content Security Policy (`default-src 'self'`, no inline script or style, `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and same-origin opener and resource policies. No CORS headers are sent.
-- If the port is taken, it checks `/api/health` for its own service ID and reuses that dashboard; otherwise it exits with an error.
+- If the port is taken, it reuses a live dashboard only when `/api/health` has its service ID, the same normalized analysis-options SHA-256 hash, and a launch token matching `dashboard-PORT.token` in the caller's private data directory. The token is random per launch, written atomically with mode `0600` only after binding the port, inside a mode `0700` directory. A different configuration or an unverifiable service exits with an error directing you to stop it or choose `--port`. Saved-file dashboards and the demo refuse port reuse.
 
 ## Persistent index
 

@@ -1,20 +1,21 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { appendFile, chmod, link, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { request } from "node:http";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 import { addUnsafeVelocityModels } from "./velocity-fixtures.ts";
 
 import { plantMalformedModels } from "./model-privacy-fixture.ts";
+import { readDashboardToken, writeDashboardToken } from "../src/store/dashboard.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -58,10 +59,10 @@ async function stopServer(child: ChildProcess): Promise<void> {
   ]);
 }
 
-async function requestWithHost(port: number, host: string): Promise<number | undefined> {
+async function requestWithHost(port: number, host: string, headers: Record<string, string> = {}, path = "/api/health"): Promise<number | undefined> {
   return await new Promise((resolve, reject) => {
     const outgoing = request(
-      { hostname: "127.0.0.1", port, path: "/api/health", headers: { Host: host } },
+      { hostname: "127.0.0.1", port, path, headers: { Host: host, ...headers } },
       (response) => {
         response.resume();
         resolve(response.statusCode);
@@ -72,7 +73,7 @@ async function requestWithHost(port: number, host: string): Promise<number | und
   });
 }
 
-test("serves a localhost-only read-only analytics API and dashboard", { timeout: 20_000 }, async () => {
+test("serves a localhost-only read-only analytics API and dashboard", { timeout: 30_000 }, async (t) => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "conductor-session-server-"));
   let child: ChildProcess | null = null;
   try {
@@ -90,6 +91,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       JSON.stringify({ type: "event_msg", timestamp: "2026-07-20T10:10:00Z", payload: { type: "token_count", info: null,
         rate_limits: { limit_id: "secret-limit-payload", plan_type: "secret-limit-payload", primary: { used_percent: 80, window_minutes: 300, resets_at: 1784548800, payload: "secret-limit-payload" }, credits: { balance: "secret-limit-payload" } } } }) + "\n");
     const port = await availablePort();
+    const rejectionModule = join(temporaryDirectory, "rejection.mjs");
+    await writeFile(rejectionModule, 'setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL")); }, 1000);\n');
     const childEnvironment = {
       ...process.env,
       SESSION_ANALYTICS_NO_INDEX: "1", SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0",
@@ -105,7 +108,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES: "1",
 
     };
-    child = spawn(process.execPath, [serverPath, "--port", String(port)], {
+    child = spawn(process.execPath, ["--import", pathToFileURL(rejectionModule).href, serverPath, "--port", String(port)], {
       cwd: repositoryRoot,
       env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
@@ -133,6 +136,66 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal(healthBody.status, "ok");
     assert.ok(["building", "not-started", "ready"].includes(String(healthBody.snapshot)));
     assert.match(health.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+    await t.test("health exposes only content-free launch identity and stores a private per-port token", async () => {
+      assert.deepEqual(Object.keys(healthBody).sort(), ["dataSource", "instanceToken", "optionsHash", "service", "snapshot", "status"]);
+      assert.match(String(healthBody.instanceToken), /^[a-f0-9]{64}$/);
+      assert.match(String(healthBody.optionsHash), /^[a-f0-9]{64}$/);
+      const tokenFile = join(childEnvironment.SESSION_ANALYTICS_DATA_DIR, `dashboard-${port}.token`);
+      assert.equal(await readFile(tokenFile, "utf8"), healthBody.instanceToken);
+      assert.equal((await stat(tokenFile)).mode & 0o777, 0o600);
+      assert.equal((await stat(childEnvironment.SESSION_ANALYTICS_DATA_DIR)).mode & 0o777, 0o700);
+      assert.doesNotMatch(JSON.stringify(healthBody), /API-STRUCTURED-SECRET|secret|conductor-session-server|pricing-data|claudeRoot|includeHidden/);
+    });
+    await t.test("a malformed request target gets 400 and the server survives", async () => {
+      const rawRequest = async (host: string): Promise<string> => new Promise((resolve, reject) => {
+        const socket = connect(port, "127.0.0.1", () => {
+          socket.write(`GET http://a:b:c/ HTTP/1.1\r\nHost: ${host}\r\n\r\n`);
+        });
+        let raw = "";
+        socket.setEncoding("utf8");
+        socket.setTimeout(3_000, () => socket.destroy(new Error("Raw request timed out.")));
+        socket.on("data", (chunk) => {
+          raw += chunk;
+          if (/\{"error":"[^"\n]*"\}\n/.test(raw)) { socket.destroy(); resolve(raw); }
+        });
+        socket.on("error", reject);
+      });
+      const response = await rawRequest(`127.0.0.1:${port}`);
+      assert.match(response, /^HTTP\/1\.1 400 /);
+      assert.match(response, /\{"error":"Bad request\."\}\n/);
+      assert.match(await rawRequest("evil.example"), /^HTTP\/1\.1 403 /, "loopback check runs first");
+      assert.equal((await fetch(`${origin}/api/health`)).status, 200);
+    });
+    await t.test("an unhandled rejection logs a fixed line and the server survives", async () => {
+      const line = "Session analytics encountered an unexpected asynchronous failure; the server is still running.";
+      await waitFor(() => stderr.includes(line), () => "The rejection backstop did not log.");
+      assert.equal(stderr.split(line).length - 1, 1);
+      assert.doesNotMatch(stderr, /PRIVATE-REJECTION-SENTINEL|rejection\.mjs|Error:/);
+      assert.equal((await fetch(`${origin}/api/health`)).status, 200);
+    });
+
+    for (const [name, headers] of [
+      ["external Origin", { Origin: "https://evil.example" }],
+      ["null Origin", { Origin: "null" }],
+      ["another loopback port", { Origin: "http://localhost:3000" }],
+      ["same loopback hostname on another port", { Origin: "http://127.0.0.1:3000" }],
+      ["cross-site fetch", { "Sec-Fetch-Site": "cross-site" }],
+      ["same-site fetch", { "Sec-Fetch-Site": "same-site" }],
+      ["same-origin fetch with a mismatched Origin", { "Sec-Fetch-Site": "same-origin", Origin: "http://localhost:3000" }],
+    ] as Array<[string, Record<string, string>]>) {
+      await t.test(`API rejects ${name}`, async () => {
+        for (const path of ["/api/analytics", "/api/analytics?refresh=1", "/api/health"]) {
+          assert.equal(await requestWithHost(port, `127.0.0.1:${port}`, headers, path), 403, path);
+        }
+      });
+    }
+    await t.test("API accepts same-origin and header-less loopback requests while static files remain reachable", async () => {
+      for (const headers of [{}, { Origin: origin }, { "Sec-Fetch-Site": "same-origin", Origin: origin }, { "Sec-Fetch-Site": "none" }] as Array<Record<string, string>>) {
+        assert.equal(await requestWithHost(port, `127.0.0.1:${port}`, headers, "/api/analytics"), 200);
+      }
+      assert.equal(await requestWithHost(port, `localhost:${port}`, { Origin: `http://localhost:${port}` }, "/api/analytics"), 200);
+      assert.equal(await requestWithHost(port, `127.0.0.1:${port}`, { Origin: "http://localhost:3000", "Sec-Fetch-Site": "cross-site" }, "/app.js"), 200);
+    });
 
     const response = await fetch(`${origin}/api/analytics`);
     assert.equal(response.status, 200);
@@ -158,6 +221,14 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);
+    await t.test("concurrent refresh requests share one scan", async () => {
+      const snapshots = await Promise.all(Array.from({ length: 6 }, async () => {
+        const response = await fetch(`${origin}/api/analytics?refresh=1`);
+        assert.equal(response.status, 200);
+        return await response.json() as { generatedAt: string };
+      }));
+      assert.equal(new Set(snapshots.map((snapshot) => snapshot.generatedAt)).size, 1);
+    });
     const page = await fetch(origin);
     assert.equal(page.status, 200);
     const pageText = await page.text();
@@ -237,22 +308,81 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal((await fetch(`${origin}/missing`)).status, 404);
     assert.equal(await requestWithHost(port, "analytics.example.test"), 403);
 
-    const reused = spawn(process.execPath, [serverPath, "--port", String(port)], {
-      cwd: repositoryRoot,
-      env: childEnvironment,
-      stdio: ["ignore", "pipe", "pipe"],
+    const launchAgain = async (flags: string[] = []): Promise<{ code: unknown; stdout: string; stderr: string }> => {
+      const reused = spawn(process.execPath, [serverPath, "--port", String(port), ...flags], {
+        cwd: repositoryRoot,
+        env: childEnvironment,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let reusedStdout = "";
+      let reusedStderr = "";
+      reused.stdout?.setEncoding("utf8");
+      reused.stderr?.setEncoding("utf8");
+      reused.stdout?.on("data", (chunk: string) => { reusedStdout += chunk; });
+      reused.stderr?.on("data", (chunk: string) => { reusedStderr += chunk; });
+      const [reuseExitCode] = await once(reused, "exit");
+      return { code: reuseExitCode, stdout: reusedStdout, stderr: reusedStderr };
+    };
+    await t.test("an identical launch reuses the running dashboard", async () => {
+      const reused = await launchAgain();
+      assert.equal(reused.code, 0, reused.stderr);
+      assert.match(reused.stdout, /Session Analytics already running:/);
+      const normalized = await launchAgain(["--include-hidden", "--pricing-policy", "reviewed-first", "--pricing-max-age-days", "7", "--data-dir", join(childEnvironment.SESSION_ANALYTICS_DATA_DIR, ".")]);
+      assert.equal(normalized.code, 0, normalized.stderr);
+      assert.equal((await (await fetch(`${origin}/api/health`)).json() as Record<string, unknown>).instanceToken, healthBody.instanceToken);
     });
-    let reusedStdout = "";
-    let reusedStderr = "";
-    reused.stdout?.setEncoding("utf8");
-    reused.stderr?.setEncoding("utf8");
-    reused.stdout?.on("data", (chunk: string) => { reusedStdout += chunk; });
-    reused.stderr?.on("data", (chunk: string) => { reusedStderr += chunk; });
-    const [reuseExitCode] = await once(reused, "exit");
-    assert.equal(reuseExitCode, 0, reusedStderr);
-    assert.match(reusedStdout, /Session Analytics already running:/);
+    await t.test("a second launch with different options refuses to reuse the port", async () => {
+      for (const flags of [["--exclude-hidden"], ["--data-dir", join(temporaryDirectory, "other-data")], ["--rate-card", join(temporaryDirectory, "private-rate-card.json")]]) {
+        const refused = await launchAgain(flags);
+        assert.equal(refused.code, 1, refused.stderr);
+        assert.equal(refused.stderr.trim(), "Session Analytics is already running on this port with different options; stop it or choose --port.");
+        assert.equal(refused.stdout, "");
+      }
+    });
+    await t.test("a health response without the matching private token cannot be reused", async () => {
+      const tokenFile = join(childEnvironment.SESSION_ANALYTICS_DATA_DIR, `dashboard-${port}.token`);
+      await writeFile(tokenFile, "0".repeat(64));
+      assert.equal((await launchAgain()).code, 1);
+      await rm(tokenFile);
+      assert.equal((await launchAgain()).code, 1);
+      await writeFile(tokenFile, String(healthBody.instanceToken), { mode: 0o600 });
+      assert.equal((await launchAgain()).code, 0);
+    });
   } finally {
     if (child) await stopServer(child);
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
+});
+
+test("dashboard tokens rotate per port and reject links or insecure permissions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-token-"));
+  const options = { dataDir: join(directory, "data") };
+  const path = join(options.dataDir, "dashboard-4174.token");
+  const first = "1".repeat(64), second = "2".repeat(64);
+  try {
+    writeDashboardToken(options, 4174, first);
+    writeDashboardToken(options, 4175, first);
+    writeDashboardToken(options, 4174, second);
+    assert.equal(readDashboardToken(options, 4174), second);
+    assert.equal(readDashboardToken(options, 4175), first);
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+    await chmod(path, 0o644);
+    assert.throws(() => readDashboardToken(options, 4174));
+    await chmod(path, 0o600);
+    const target = join(directory, "target");
+    await link(path, target);
+    assert.throws(() => readDashboardToken(options, 4174));
+    assert.throws(() => writeDashboardToken(options, 4174, first));
+    await rm(path);
+    await symlink(target, path);
+    assert.throws(() => readDashboardToken(options, 4174));
+    assert.throws(() => writeDashboardToken(options, 4174, first));
+    assert.equal(await readFile(target, "utf8"), second, "linked targets are never overwritten");
+    const linkedDirectory = join(directory, "linked-data");
+    await symlink(options.dataDir, linkedDirectory);
+    assert.throws(() => readDashboardToken({ dataDir: linkedDirectory }, 4175));
+    assert.throws(() => writeDashboardToken({ dataDir: linkedDirectory }, 4175, second));
+    await chmod(options.dataDir, 0o755);
+    assert.throws(() => readDashboardToken(options, 4175));
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

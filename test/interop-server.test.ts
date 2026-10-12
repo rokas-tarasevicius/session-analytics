@@ -35,7 +35,7 @@ test("file dashboard serves full and shared snapshots, re-reads on refresh, and 
     const server = new URL("../src/server.ts", import.meta.url).pathname;
     child = spawn(process.execPath, [server, "--snapshot", path, "--port", String(serverPort)], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, SESSION_ANALYTICS_RATE_CARD: join(directory, "secret-path-do-not-load.json") },
+      env: { ...process.env, SESSION_ANALYTICS_DATA_DIR: join(directory, "data"), SESSION_ANALYTICS_RATE_CARD: join(directory, "secret-path-do-not-load.json") },
     });
     let output = ""; child.stdout!.on("data", (chunk) => { output += String(chunk); });
     for (let i = 0; !output.includes("ready:") && i < 200; i++) await delay(20);
@@ -74,6 +74,7 @@ test("review: live and saved dashboards cannot reuse each other's ports", { time
   const directory = await mkdtemp(join(tmpdir(), "interop-source-"));
   let child: ChildProcess | undefined;
   const server = new URL("../src/server.ts", import.meta.url).pathname;
+  const env = { ...process.env, SESSION_ANALYTICS_DATA_DIR: join(directory, "data") };
   try {
     const { repositoryRoot, remote, ...options } = await createSessionAnalyticsFixture(directory);
     const full = await analyzeMachineSessions(options);
@@ -83,16 +84,16 @@ test("review: live and saved dashboards cannot reuse each other's ports", { time
     for (const snapshot of [full, shareSnapshot(full, Buffer.alloc(32, 7), 2), null]) {
       await writeFile(path, JSON.stringify(snapshot ?? full));
       const serverPort = await port(), origin = `http://127.0.0.1:${serverPort}`;
-      child = spawn(process.execPath, [server, "--no-open", "--port", String(serverPort), ...(snapshot ? ["--snapshot", path] : flags)], { stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(process.execPath, [server, "--no-open", "--port", String(serverPort), ...(snapshot ? ["--snapshot", path] : flags)], { env, stdio: ["ignore", "pipe", "pipe"] });
       let output = ""; child.stdout!.on("data", (chunk) => { output += chunk; });
       for (let i = 0; !output.includes("ready:") && i < 200; i++) await delay(20);
       assert.match(output, /ready:/);
       const caller = snapshot ? flags : ["--snapshot", path];
-      await assert.rejects(promisify(execFile)(process.execPath, [server, "--no-open", "--port", String(serverPort), ...caller]));
+      await assert.rejects(promisify(execFile)(process.execPath, [server, "--no-open", "--port", String(serverPort), ...caller], { env }));
       const health = await (await fetch(`${origin}/api/health`)).json() as any;
       assert.equal(health.dataSource, snapshot ? "snapshot" : "live");
       assert.doesNotMatch(JSON.stringify(health), /saved\.json|interop-source/);
-      if (!snapshot) await promisify(execFile)(process.execPath, [server, "--no-open", "--port", String(serverPort), ...flags]);
+      if (!snapshot) await promisify(execFile)(process.execPath, [server, "--no-open", "--port", String(serverPort), ...flags], { env });
       await stop(child); child = undefined;
     }
   } finally { if (child) await stop(child); await rm(directory, { recursive: true, force: true }); }

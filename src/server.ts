@@ -1,18 +1,22 @@
 import { execFile } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
-import { extname, join } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, setting, argument } from "./options.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
-import type { MachineAnalytics, SharedSnapshot } from "./types.ts";
+import { pricingConfiguration } from "./pricing/catalog.ts";
+import type { DashboardHealth, MachineAnalytics, SharedSnapshot } from "./types.ts";
 import { loadSnapshot } from "./interop/snapshot.ts";
 import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
 import { version } from "./version.ts";
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
+import { dataDirectory } from "./store/database.ts";
+import { readDashboardToken, writeDashboardToken } from "./store/dashboard.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
@@ -40,7 +44,7 @@ if (process.argv.includes("--help")) {
 Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
-If a compatible dashboard already uses the port, the command reuses it.
+If a compatible dashboard already uses the port, the command reuses it only with the same analysis options.
 ${pricingHelp}
 --snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
 Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
@@ -113,6 +117,16 @@ function loopbackRequest(request: { headers: Record<string, string | string[] | 
   }
 }
 
+function sameOriginApiRequest(request: { headers: Record<string, string | string[] | undefined> }): boolean {
+  const site = request.headers["sec-fetch-site"];
+  if (site !== undefined && site !== "same-origin" && site !== "none") return false;
+  const origin = request.headers.origin;
+  if (origin === undefined) return true;
+  if (Array.isArray(origin)) return false;
+  try { return new URL(origin).host === request.headers.host; }
+  catch { return false; }
+}
+
 const staticFiles = new Map<string, string>([
   ["/history-coverage.js", join(publicRoot, "history-coverage.js")],
   ["/", join(publicRoot, "index.html")],
@@ -163,6 +177,23 @@ try { assertSnapshotOptions(process.argv); } catch {
   process.exit(2);
 }
 const snapshotFile = argument(process.argv, "--snapshot");
+const pricing = pricingConfiguration(analyzeOptions);
+const normalizedOptions = {
+  ...analyzeOptions,
+  dataDir: dataDirectory(analyzeOptions),
+  includeHidden: analyzeOptions.includeHidden !== false,
+  additionalProviders: analyzeOptions.additionalProviders !== false,
+  noIndex: analyzeOptions.noIndex === true,
+  offline: pricing.offline,
+  pricingPolicy: pricing.policy,
+  pricingSources: pricing.sources,
+  pricingMaxAgeDays: pricing.maxAgeDays,
+};
+const optionsHash = createHash("sha256").update(JSON.stringify(Object.fromEntries(
+  Object.entries(normalizedOptions).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) =>
+    [key, typeof value === "string" && (key.endsWith("Root") || key.endsWith("Path") || key === "dataDir") ? resolve(value) : value]),
+))).digest("hex");
+const instanceToken = randomBytes(32).toString("hex");
 
 let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
@@ -183,11 +214,20 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
   return analyticsPromise;
 }
 
+process.on("unhandledRejection", () => {
+  process.stderr.write("Session analytics encountered an unexpected asynchronous failure; the server is still running.\n");
+});
+
 const server = createServer(async (request, response) => {
-  const url = new URL(request.url ?? "/", "http://127.0.0.1");
+  let url: URL | undefined;
   try {
     if (!loopbackRequest(request)) {
       sendJson(response, 403, { error: "Session analytics accepts loopback requests only." });
+      return;
+    }
+    url = new URL(request.url ?? "/", "http://127.0.0.1");
+    if (url.pathname.startsWith("/api/") && !sameOriginApiRequest(request)) {
+      sendJson(response, 403, { error: "Session analytics accepts same-origin API requests only." });
       return;
     }
     if (request.method !== "GET") {
@@ -195,12 +235,15 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/health") {
-      sendJson(response, 200, {
+      const health: DashboardHealth = {
         service: serviceId,
         dataSource: snapshotFile ? "snapshot" : "live",
         snapshot: snapshotReady ? "ready" : analyticsPending ? "building" : "not-started",
         status: "ok",
-      });
+        instanceToken,
+        optionsHash,
+      };
+      sendJson(response, 200, health);
       return;
     }
     if (url.pathname === "/api/analytics") {
@@ -214,6 +257,10 @@ const server = createServer(async (request, response) => {
     }
     sendJson(response, 404, { error: "Not found." });
   } catch (error) {
+    if (!url) {
+      sendJson(response, 400, { error: "Bad request." });
+      return;
+    }
     if (url.pathname === "/api/analytics") analyticsPromise = null;
     sendJson(response, 502, { error: safeError(error) });
   }
@@ -255,8 +302,9 @@ async function compatibleDashboardIsRunning(): Promise<boolean> {
       signal: AbortSignal.timeout(2_000),
     });
     if (!response.ok) return false;
-    const body = await response.json() as { service?: unknown; status?: unknown; dataSource?: unknown };
-    return body.service === serviceId && body.status === "ok" && body.dataSource === "live";
+    const body = await response.json() as Partial<DashboardHealth>;
+    return body.service === serviceId && body.status === "ok" && body.dataSource === "live" &&
+      body.optionsHash === optionsHash && body.instanceToken === readDashboardToken(analyzeOptions, port);
   } catch {
     return false;
   }
@@ -270,7 +318,7 @@ server.on("error", (error: NodeJS.ErrnoException) => {
       process.exit(0);
     }
     if (error.code === "EADDRINUSE") {
-      process.stderr.write(`Port ${port} is already in use by another local service.\n`);
+      process.stderr.write("Session Analytics is already running on this port with different options; stop it or choose --port.\n");
     } else {
       process.stderr.write(`${brand.name} could not start: ${safeError(error)}\n`);
     }
@@ -279,6 +327,12 @@ server.on("error", (error: NodeJS.ErrnoException) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
+  try { writeDashboardToken(analyzeOptions, port, instanceToken); }
+  catch {
+    process.stderr.write("Session Analytics could not store its private dashboard token.\n");
+    server.close(() => process.exit(1));
+    return;
+  }
   process.stdout.write(`${brand.name} ready: ${dashboardUrl}\n`);
   process.stdout.write("Read-only local analysis; transcript message and reasoning content is not returned.\n");
   const warmup = analytics(false);

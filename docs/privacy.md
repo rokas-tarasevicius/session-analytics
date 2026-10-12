@@ -79,6 +79,7 @@ The following is the complete disk field manifest. Index source keys and integri
 | `index.key` | Private random HMAC key, never part of output | Private key |
 | SQLite metadata / `writer.sqlite` | Schema version, transaction metadata, and local writer coordination; no transcript data | P0 |
 | `writer-ticket-*` / `.next` | Transient process ID, random nonce, and numeric mutex order; no provider data, paths, or session IDs; removed on release or dead-process recovery | P0 |
+| `dashboard-PORT.token` / `.next` | Random 32-byte per-launch dashboard token encoded as 64 hex characters; mode `0600` inside the private mode `0700` data directory; no local evidence or option values | P0 |
 
 The index retains previously observed history after provider deletion. `index prune --before YYYY-MM-DD` removes old verified session facts, clears reusable evidence, vacuums the active database, and keeps a retention floor, minimal keyed exclusion checkpoints, and keyed anti-rebilling reservations. Subsequent scans may rebuild ledger evidence from surviving provider files; unchanged exclusion checkpoints skip session parsing without restoring session facts. The cutoff is exclusive UTC midnight; provider files are untouched. Unverified legacy dates are kept until the source can be reparsed. Rebuild discards retained history and resets the floor. Corruption recovery places unreadable main or writer databases in private `.rebuild-*` quarantine files, which are excluded from analysis, status, and prune; remove those separately when no longer needed. Retention is of derived facts, never a raw transcript archive. Index payloads written by earlier versions may still contain removed analysis namespaces; they are dropped when read and never returned, except that a Claude session's stored profile key and per-day model tokens are carried forward as `historyProfile`.
 
@@ -443,7 +444,7 @@ minimum-activity guards and unknown-data rules are in [metrics.md](metrics.md#ve
 
 ### Health endpoint
 
-`GET /api/health` returns `{ service: "session-analytics", snapshot: "ready" | "building" | "not-started", status: "ok" }`. All fields are P0.
+`GET /api/health` returns `{ service: "session-analytics", dataSource: "live" | "snapshot", snapshot: "ready" | "building" | "not-started", status: "ok", instanceToken: "<64 hex characters>", optionsHash: "<64 hex characters>" }`. All fields are P0 and carry no local evidence. `instanceToken` is random per launch; `optionsHash` is the SHA-256 of normalized analysis options. Neither returns paths, option values, snapshot filenames or transcript data. Live port reuse requires both the same options hash and a token matching `dashboard-PORT.token` in the private data directory. Each dashboard writes its token even with `--no-index` or `--snapshot`; this does not open or write the index. Tokens are replaced on the next launch on that port and contain no retained analytics.
 
 ### Browser storage
 
@@ -595,6 +596,9 @@ All formats retain only the declared P0/P1 fields; no content is exported. These
 | NDJSON `kind` | `snapshot`, `repository`, or `session`; remaining fields are existing public fields | P0 |
 | Filtered JSON `warnings[]` | Preserved fixed discovery caveats, regenerated selection coverage notes, and an appended filtering explanation | P0 |
 | `/api/health.dataSource` | Fixed `live` or `snapshot` label used to prevent cross-source server reuse; never the snapshot filename | P0 |
+| `/api/health.service`, `.snapshot`, `.status` | Fixed service ID, readiness enum and `ok` status; no local evidence | P0 |
+| `/api/health.instanceToken` | Random per-launch 32-byte token encoded as hex, checked against the private per-port token file for reuse; no local evidence | P0 |
+| `/api/health.optionsHash` | SHA-256 of normalized analysis options; only the digest, with no paths, option values or local evidence | P0 |
 | Shared JSON `kind`, `minimumSessions` | `shared`; minimum distinct session count required for every released bucket | P0 |
 | Shared `sources[]` | Domain-separated HMAC installation identities, 128 bits; used to reject repeated contributions | P1 |
 | Shared `repositories[].repository` | `repo-<128-bit HMAC>` or `alias-<explicit user alias>`; no original ID/name | P1 |
