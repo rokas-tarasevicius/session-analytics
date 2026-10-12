@@ -33,6 +33,7 @@ test("release: CI gates run on both platforms with independent advisory browser 
   const [check, browser] = workflow.split("\n  browser:\n");
   assert.ok(check && browser);
   assert.match(check, /os: \$\{\{ github\.event_name == 'pull_request' && fromJSON\('\["agentbox"\]'\) \|\| fromJSON\('\["agentbox","macos-latest"\]'\) \}\}/);
+  assert.match(check, /runs-on: \$\{\{ matrix\.os \}\}\n(?:\s*#[^\n]*\n)*\s*continue-on-error: \$\{\{ matrix\.os == 'macos-latest' \}\}/, "the hosted macOS leg is advisory while hosted minutes are blocked");
   assert.match(check, /permissions:\n  contents: read/);
   assert.match(check, /concurrency:\n  group: ci-.*\n  cancel-in-progress: true/);
   const commands = ["npm run check", "node scripts/snapshot-schema.ts --check", 'node scripts/demo.ts report --json | node -e \'JSON.parse(require("fs").readFileSync(0, "utf8"))\'', "npm pack --dry-run"];
@@ -52,9 +53,10 @@ test("release: tag workflow extracts only matching changelog notes and rejects m
   const workflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   assert.match(workflow, /on:\n  push:\n    tags: \['v\*'\]/);
   assert.match(workflow, /permissions:\n  contents: write/);
-  assert.match(workflow, /runs-on: ubuntu-latest/);
+  assert.match(workflow, /runs-on: agentbox/);
   assert.match(workflow, /run: npm ci[\s\S]*run: npm run check[\s\S]*name: Extract release notes[\s\S]*name: Create GitHub Release/);
-  assert.match(workflow, /run: gh release create "\$GITHUB_REF_NAME" --title "\$GITHUB_REF_NAME" --notes-file notes\.md\n        env:\n          GH_TOKEN: \$\{\{ github.token \}\}/);
+  assert.match(workflow, /name: Create GitHub Release[\s\S]*?fetch\(`https:\/\/api\.github\.com\/repos\/\$\{process\.env\.GITHUB_REPOSITORY\}\/releases`[\s\S]*?GH_TOKEN: \$\{\{ github.token \}\}/);
+  assert.doesNotMatch(workflow, /gh release create/, "the runner has no gh dependency");
   const block = /      - name: Extract release notes\n        run: \|\n([\s\S]*?)\n      - name: Create GitHub Release/.exec(workflow);
   assert.ok(block, "release workflow has an extraction script");
   const script = block[1]!.split("\n").map((line) => line.replace(/^          /, "")).join("\n");
