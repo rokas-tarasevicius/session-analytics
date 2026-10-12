@@ -8,6 +8,7 @@ import { Element } from "./release-dom.ts";
 // Summary's usage-value KPI, delta, badge and sidebar read Velocity's activity ledger. These run the
 // production functions from app.js unchanged, with deterministic DOM collaborators.
 const ui: Record<string, unknown> = await import(new URL("../src/public/ui.js", import.meta.url).href);
+const providers: Record<string, unknown> = await import(new URL("../src/public/providers.js", import.meta.url).href);
 const viewModel: Record<string, unknown> = await import(new URL("../src/public/view-model.js", import.meta.url).href);
 const velocityData: Record<string, unknown> = await import(new URL("../src/public/velocity-data.js", import.meta.url).href);
 const source = fs.readFileSync(new URL("../src/public/app.js", import.meta.url), "utf8");
@@ -33,8 +34,8 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
   windowStart.value = start; windowStart.min = min; windowEnd.value = end; windowEnd.max = max;
   const deltas: Record<string, unknown> = {};
   const repositories = [...new Set((sessions as Array<{ repositoryId: string }>).map(({ repositoryId }) => repositoryId))].map((id) => ({ repository: { id, name: id } }));
-  const context = productionFunctions(["renderSummary", "spendDelta", "renderRepositoryNav", "windowDays", "velocityContext", "snapshotTimeZone", "pricedBadge", "executionBreakdown", "subagentValue"], {
-    ...ui, ...viewModel, ...velocityData, elements, $: lookup, windowPreset: preset, Map, Set, Intl,
+  const context = productionFunctions(["renderSummary", "renderCoverageSummary", "spendDelta", "renderRepositoryNav", "windowDays", "velocityContext", "snapshotTimeZone", "pricedBadge", "executionBreakdown", "subagentValue"], {
+    ...ui, ...providers, ...viewModel, ...velocityData, elements, $: lookup, windowPreset: preset, Map, Set, Intl,
     snapshot: { generatedAt: "2026-09-15T09:00:00Z", velocity: { timeZone: "UTC" }, sessions, repositories },
     wideLayout: { matches: true, addEventListener() {} }, navCache: { key: null }, navHoverListeners: new Set(), navDirty: false,
     node: (tag: string, text?: string, className?: string) => { const e = new Element(tag); e.textContent = text ?? ""; e.className = className ?? ""; return e; },
@@ -49,6 +50,7 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
     const activity = (velocityData.buildVelocity as (s: unknown[], o: unknown) => unknown)(sessions, { start: window.start, end: window.end, group: "repository", metric: "value" });
     const view = { activity, summary: { topLevelSessions: 0, subagentSessions: 0, coverage: { cost: {}, apiCost: {}, reportedCost: {}, tokens: {}, tools: { eligible: 1 }, compactions: {} } }, sessions, scopeSessions: sessions, dailySessions: sessions, repositories: [], topTools: [], warnings: [] };
     (context.renderSummary as (v: unknown) => void)(view);
+    (context.renderCoverageSummary as (v: unknown) => void)(view);
   };
   return { context, elements, lookup, deltas, render };
 }
@@ -82,14 +84,14 @@ test("a quiet window shows $0.00 while a scope with no activity ledger shows a d
   const quiet = harness([session("repo-a", [bucket("2026-08-02", 5)]), gemini]);
   quiet.render();
   assert.equal(quiet.lookup("spend").textContent, "$0.00");
-  assert.match(quiet.lookup("spendNote").textContent, /across all time, \$0\.00 undated and \$2\.00 in 1 older-snapshot session without activity dates \(refresh to include\)/);
+  assert.match(quiet.lookup("coverageUsageNote").textContent, /across all time, \$0\.00 undated and \$2\.00 in 1 older-snapshot session without activity dates \(refresh to include\)/);
   const none = harness([gemini]);
   none.render();
   assert.equal(none.lookup("spend").textContent, "—");
   const stale = harness([session("repo-a", days("2026-09-01", "2026-09-14").map((d) => bucket(d, 10))), { provider: "claude", repositoryId: "repo-a", createdAt: "2026-09-10T10:00:00Z", tokens: { inputTokens: 0, outputTokens: 0 }, metrics: { toolCalls: 0, compactions: 0 } }]);
   stale.render();
   assert.equal(stale.lookup("spendCoverage").textContent.trim(), "partial");
-  assert.match(stale.lookup("spendNote").textContent, /1 session need a refresh/);
+  assert.match(stale.lookup("coverageUsageNote").textContent, /1 session need a refresh/);
 });
 
 test("the sidebar totals match the Summary KPI, also when the window inputs are cleared", () => {
@@ -105,13 +107,13 @@ test("the sidebar totals match the Summary KPI, also when the window inputs are 
   }
 });
 
-test("session-dated value counts in the Summary KPI and its note says how much", () => {
+test("session-dated value counts in the Summary KPI and Coverage says how much", () => {
   const receipt = { ...session("repo-a", []), velocity: { dimensions: [{ agent: "claude-sdk", model: "m", executionKind: "unknown", effort: "unknown" }], buckets: [], undated: [], sessionDated: [bucket("2026-09-12", 4)] } };
   const h = harness([session("repo-a", days("2026-09-08", "2026-09-14").map((d) => bucket(d, 10))), receipt]);
   h.render();
   assert.equal(h.lookup("spend").textContent, "$74.00");
-  assert.match(h.lookup("spendNote").textContent, /includes \$4\.00 session-dated \(1 session without request times, dated by last activity\)/);
+  assert.match(h.lookup("coverageUsageNote").textContent, /includes \$4\.00 session-dated \(1 session without request times, dated by last activity\)/);
   const plain = harness([session("repo-a", days("2026-09-08", "2026-09-14").map((d) => bucket(d, 10)))]);
   plain.render();
-  assert.doesNotMatch(plain.lookup("spendNote").textContent, /session-dated/);
+  assert.doesNotMatch(plain.lookup("coverageUsageNote").textContent, /session-dated/);
 });

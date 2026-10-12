@@ -15,11 +15,10 @@ export function changeLabel(change) {
   return `${rounded === 0 ? "" : change > 0 ? "+" : "−"}${integer(rounded)}%`;
 }
 
-function panel(kicker, title, id) {
+function panel(title, id) {
   const result = el("article", null, "panel"), header = el("header"), heading = el("div");
   const name = el("h3", title);
   name.setAttribute("id", id); result.setAttribute("aria-labelledby", id);
-  if (kicker) heading.append(el("p", kicker, "kicker"));
   heading.append(name); header.append(heading); result.append(header);
   return { result, header };
 }
@@ -79,8 +78,8 @@ function trend(profile, timeZone = "UTC") {
   section.append(el("h4", "Calls by session-start day"));
   const days = profile.byDay;
   const exclusions = [];
-  if (profile.outsideDaysCalls) exclusions.push(note(`${integer(profile.outsideDaysCalls)} calls fall outside the plotted days; totals above include them.`));
-  if (profile.undatedCalls) exclusions.push(note(`${integer(profile.undatedCalls)} calls have no known session-start day and are excluded from the chart.`));
+  if (profile.outsideDaysCalls) exclusions.push(note(`${integer(profile.outsideDaysCalls)} calls outside plotted days`, "chart-note"));
+  if (profile.undatedCalls) exclusions.push(note(`${integer(profile.undatedCalls)} undated calls excluded`));
   if (!days.length || !days.some((row) => row.coverage.eligible > 0)) {
     section.append(note(`${DASH} ${days.length ? "No tool evidence on known session-start days in this range." : "No known session-start days in this selection."}`, "empty-line"), ...exclusions);
     return section;
@@ -139,8 +138,8 @@ function trend(profile, timeZone = "UTC") {
   scroll.append(chart); plot.append(labels, scroll); section.append(plot, tooltip);
   const axis = el("div", null, "tools-trend-axis");
   axis.append(el("span", dayLabel(days[0].day)), el("span", dayLabel(days.at(-1).day))); section.append(axis);
-  section.append(note(`${integer(total)} calls plotted · ${suffix}`));
-  if (missing) section.append(note(`${missing} days have sessions without tool evidence; their counts are ${DASH}.`));
+  section.append(note(`${integer(total)} calls plotted · baseline 0 · ${timeZone}`));
+  if (missing) section.append(note(`${integer(missing)} days without tool evidence (${DASH})`));
   section.append(...exclusions);
   return section;
 }
@@ -158,15 +157,15 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   cards.append(
     kpi({ label: "Tool calls", value: available ? integer(data.totalCalls) : null, reason,
       coverage: data.coverage, what: "tool evidence",
-      note: !available ? null : data.smallBaseline ? `Previous window too small to compare (${calls(data.previousCalls)})` : data.change === null ? "Effective calls in this selection" : `${changeLabel(data.change)} vs previous window` }),
+      note: !available ? null : data.smallBaseline ? `Small baseline (${calls(data.previousCalls)})` : data.change === null ? "Effective calls in this selection" : `${changeLabel(data.change)} vs previous window` }),
     kpi({ label: "Distinct tools", value: available ? integer(data.distinctTools) : null, reason, note: "Structured tool-call names" }),
-    kpi({ label: "Calls per session", value: available ? decimal(data.callsPerSession) : null, reason, note: "Across sessions with tool evidence" }),
+    kpi({ label: "Calls per session", value: available ? decimal(data.callsPerSession) : null, reason, note: "Per eligible session" }),
     kpi({ label: "Most used tool", value: top?.name ?? null, reason: available ? "No recorded tool calls" : reason,
-      note: top ? `${percent(top.share)} of calls · ${top.providers.map(({ label }) => label).join(", ")}` : null }),
+      note: top ? `${percent(top.share)} of calls` : null }),
   );
   layout.append(cards);
 
-  const ranking = panel(null, "Top tools", "tools-ranking-title");
+  const ranking = panel("Top tools", "tools-ranking-title");
   const badge = coverageBadge(data.coverage, "tool evidence");
   if (badge) ranking.header.append(badge);
   const rows = (expanded ? data.tools : data.tools.slice(0, 12)).map((tool) => {
@@ -206,7 +205,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   }
   layout.append(ranking.result);
 
-  const profilePanel = panel("Tool profile", selected?.name ?? DASH, "tools-profile-title");
+  const profilePanel = panel(selected?.name ?? DASH, "tools-profile-title");
   profilePanel.result.setAttribute("id", "tools-profile");
   if (selected) {
     const repositoryNames = new Map(repositories.map(({ repository }) => [repository.id, repository.name]));

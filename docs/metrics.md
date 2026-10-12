@@ -410,9 +410,9 @@ excluded. This changes coverage, not existing token/value accounting.
 
 Counters aggregate on the server before serialization. There are no public per-request
 records, no IDs in cells, and no duplicate daily/hour or six-dimensional marginal payloads.
-Model/repository charts show the largest seven series plus an exact Other remainder; agent,
-provider, execution and effort charts retain every evidenced group. This cap changes only
-presentation, never totals. All chart modes share a text readout, pointer inspection, and
+Velocity groups by Provider by default. Every grouping shows its largest six series by total
+plus an exact Other (N) remainder when more than six have values. This cap changes only
+presentation, never totals. All chart modes share a two-column text readout, pointer inspection, and
 one keyboard focus stop with Left/Right, Home/End navigation.
 All 19 supported agent categories have fixed identity slots: eight theme-aware colors, each with
 solid/diagonal area fills or solid/dashed lines. Legends reproduce the actual SVG encoding.

@@ -122,7 +122,7 @@ export function ledgerCells(velocity) {
 /** Sum occupied hourly cells; never use session creation as the activity date. Every series also carries `sums`, the
  * group's in-window total of all 14 counters, and `sessions`, the sessions contributing a cell to it (the "Other"
  * remainder adds its members' counts). */
-export function buildVelocity(sessions, { start, end, group = "agent", metric = "value", granularity = "day", mode = "lines", limit = 7, rollingHistory = null } = {}) {
+export function buildVelocity(sessions, { start, end, group = "provider", metric = "value", granularity = "day", mode = "lines", limit = 6, rollingHistory = null } = {}) {
   const index = metricDefinitions[metric].index;
   const dates = calendarDays(start, end);
   const dailyMap = new Map(dates.map((day) => [day, { day, values: blank(), total: 0, evidence: blankEvidence() }]));
@@ -178,7 +178,7 @@ export function buildVelocity(sessions, { start, end, group = "agent", metric = 
   // evidence. Only the chart omits empty series.
   const allSeries = [...groups.values()].sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
   let series = allSeries.filter(({ total }) => total > 0);
-  if ((group === "repository" || group === "model") && series.length > limit) {
+  if (series.length > limit) {
     const remainder = series.slice(limit);
     const other = { id: "other", label: `Other (${remainder.length})`, total: sum(remainder.map((item) => item.total)), values: keys.map((_, i) => sum(remainder.map((item) => item.values[i]))), calls: sum(remainder.map((item) => item.calls)), evidence: remainder.reduce((total, item) => addEvidence(total, item.evidence), blankEvidence()), sums: remainder.reduce((total, item) => add(total, item.sums), blank()), sessions: sum(remainder.map((item) => item.sessions)) };
     series = [...series.slice(0, limit), other];

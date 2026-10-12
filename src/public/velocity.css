@@ -13,8 +13,8 @@
 .velocity-average { fill: none; stroke: var(--text); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
 .velocity-marker { stroke: var(--line-strong); pointer-events: none; }
 .velocity-average-key { color: var(--muted); }
-.velocity-inspection { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); font: 500 var(--fs-xs)/1.6 var(--font-sans); font-variant-numeric: tabular-nums; }
-.velocity-inspection > strong { flex-basis: 100%; color: var(--text); font-weight: 500; }
+.velocity-inspection { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); font: 500 var(--fs-xs)/1.6 var(--font-sans); font-variant-numeric: tabular-nums; }
+.velocity-inspection > strong { grid-column: 1 / -1; color: var(--text); font-weight: 500; }
 .velocity-inspection > span { overflow-wrap: anywhere; }
 .velocity-band { display: block; width: 100%; max-height: 48px; margin: 8px 0 4px; }
 .velocity-band-base { stroke: var(--line-strong); stroke-width: 2; }

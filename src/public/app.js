@@ -40,15 +40,15 @@ const elements = {
   dateRange: $("#date-range"), density: $("#density-switch"),
   error: $("#error-banner"), errorMessage: $("#error-message"), errorRetry: $("#error-retry"), errorTitle: $("#error-title"),
   generated: $("#generated-at"), help: $("#help-overlay"), helpButton: $("#help-button"), helpClose: $("#help-close"),
-  input: $("#metric-input"), live: $("#metric-live"), main: $("#main"),
+  input: $("#metric-input"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
-  liveNote: $("#metric-live-note"), retentionNote: $("#retention-note"),
+  coverageUsageNote: $("#coverage-usage-note"), coverageSessionNote: $("#coverage-session-note"), coverageLiveNote: $("#coverage-live-note"), coverageCostNote: $("#coverage-cost-note"), retentionNote: $("#retention-note"),
   pageTitle: $("#page-title"), palette: $("#command-palette"),
   providerCostModels: $("#provider-cost-models"), costModels: $("#cost-models"),
   providerDonut: $("#provider-donut"), providerLegend: $("#provider-legend"),
   rateCardDate: $("#rate-card-date"), rateCardLinks: $("#rate-card-links"), refresh: $("#refresh-button"),
-  repositories: $("#metric-repositories"), repositorySubagentSpend: $("#repository-subagent-spend"),
-  repositoryFilter: $("#repository-filter"), repositoryList: $("#repository-list"), repositoryNote: $("#metric-repository-note"),
+  repositorySubagentSpend: $("#repository-subagent-spend"),
+  repositoryFilter: $("#repository-filter"), repositoryList: $("#repository-list"),
   repositoryNav: $(".repo-nav"), repositoryNavCount: $("#repo-nav-count"),
   repositoryRows: $("#repository-rows"), repositorySpend: $("#repository-spend"),
   repositoryTokens: $("#repository-tokens"), scope: $("#scope-description"),
@@ -671,11 +671,13 @@ function renderCosts(view) {
   setValue(elements.costApiTotal, ledger.api, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costApiCoverage });
   setValue(elements.costProviderTotal, ledger.reported, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costProviderCoverage });
   for (const [slot, badge] of [[elements.costTotalCoverage, pricedBadge(ledger.evidence)], [elements.costApiCoverage, null], [elements.costProviderCoverage, null]]) { if (badge && !unavailable) slot.append(badge); }
-  elements.costApiNote.textContent = ledger.upper > ledger.api + 0.005 ? `Upper estimate ${money(ledger.upper)} with the cache-write assumption` : "Rate-card priced usage";
+  elements.costApiNote.textContent = ledger.upper > ledger.api + 0.005 ? `Cache-write upper estimate ${money(ledger.upper)}` : "Rate-card priced usage";
   elements.costCoverage.textContent = pricedPercent(ledger.evidence) === "N/A" ? DASH : pricedPercent(ledger.evidence);
   elements.costCoverageNote.textContent = ledger.evidence.eligible > 0 ? `${compact(ledger.evidence.known)} of ${compact(ledger.evidence.eligible)} eligible tokens priced` : "No eligible tokens in this window";
   const excluded = ledgerExclusions(ledger);
-  elements.costReconciliation.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${dateRange(range.start, range.end)} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
+  elements.coverageCostNote.hidden = false;
+  elements.coverageCostNote.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${dateRange(range.start, range.end)} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
+  elements.costReconciliation.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} reported`;
   renderCostRows(elements.providerCostModels, ledger);
   renderModelCosts(elements.costModels, ledger);
 }
@@ -886,8 +888,16 @@ function renderWarnings(warnings) {
   else elements.coverageButton.removeAttribute("aria-label");
 }
 
-/** One sentence for the coverage dialog: what the current selection can establish. */
+/** Selection explanations live in Coverage; chart and KPI notes stay short. */
 function renderCoverageSummary(view) {
+  elements.coverageCostNote.hidden = true;
+  const summary = view.summary, activity = view.activity, context = velocityContext();
+  const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} older-snapshot session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates (refresh to include)`] : [])];
+  elements.coverageUsageNote.textContent = `By activity date (${context.timeZone})${activity.sessionDated[0] > 0 ? ` · includes ${money(activity.sessionDated[0])} session-dated (${activity.sessionDatedSessions} session${activity.sessionDatedSessions === 1 ? "" : "s"} without request times, dated by last activity)` : ""} · excludes, across all time, ${excluded.join(" and ")}${activity.missingSessions ? ` · ${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh` : ""} · not an invoice`;
+  if (summary.retainedSessions) elements.coverageUsageNote.textContent += " · retained history uses last-ingest prices";
+  elements.coverageLiveNote.textContent = `${integer(summary.workingSnapshots)} live snapshots from present sources; totals may still move.${summary.historicalWorkingSnapshots ? ` ${integer(summary.historicalWorkingSnapshots)} historical working observations excluded.` : ""}`;
+  elements.coverageSessionNote.textContent = `${executionBreakdown(summary)}${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
+
   const sessions = view.sessions.length;
   if (!sessions) { elements.coverageSummary.textContent = "No sessions in this selection. Widen the window or clear the repository focus."; return; }
   const part = (metric, what) => { const { eligible } = metricCoverage(view.sessions, metric); return `${eligible} ${what}`; };
@@ -979,6 +989,7 @@ function windowCaption() {
 }
 
 function renderSharedView(view) {
+  if (elements.sync.dataset.state === "live") elements.syncLabel.textContent = `Local snapshot ready · ${integer(view.summary.workingSnapshots)} live`;
   const retained = view?.summary?.retainedSessions ?? 0;
   elements.retentionNote.hidden = !retained;
   elements.retentionNote.textContent = `${retained} source-deleted sessions retain facts and prices from their last successful ingest. Historical working status does not establish current activity.`;
@@ -989,7 +1000,7 @@ function renderSharedView(view) {
     : name === "summary" ? `Usage value by activity date; sessions, tokens and tools for sessions started during ${windowCaption()} (${timeZone}).`
     : name === "costs" || name === "pricing" ? `Usage value by activity date during ${windowCaption()} (${timeZone}).`
     : `Sessions started during ${windowCaption()} (${timeZone}); whole-session totals.`;
-  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : "Every repository evidenced by local agent history."} ${population}`;
+  elements.scope.textContent = `${selected ? `Focused on ${selected.repository.name}.` : `${integer(view.summary.repositories)} repositor${view.summary.repositories === 1 ? "y" : "ies"} · ${integer(view.summary.repositoriesWithSessions)} with sessions.`} ${population}`;
   elements.scopeChip.hidden = !selected;
   elements.scopeChipLabel.textContent = selected ? selected.repository.name : "";
   elements.scopeChip.setAttribute("aria-label", selected ? `${selected.repository.name}: clear repository focus` : "Clear repository focus");
@@ -1042,15 +1053,12 @@ function renderSummary(view) {
     badge.title = `${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh to collect activity dates`;
     badge.setAttribute("aria-label", badge.title); elements.spendCoverage.append(badge);
   } else if (!unavailable) { const badge = pricedBadge(activity.evidence); if (badge) elements.spendCoverage.append(badge); }
-  const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} older-snapshot session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates (refresh to include)`] : [])];
-  elements.spendNote.textContent = `By activity date (${context.timeZone})${activity.sessionDated[0] > 0 ? ` · includes ${money(activity.sessionDated[0])} session-dated (${activity.sessionDatedSessions} session${activity.sessionDatedSessions === 1 ? "" : "s"} without request times, dated by last activity)` : ""} · excludes, across all time, ${excluded.join(" and ")}${activity.missingSessions ? ` · ${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh` : ""} · not an invoice`;
-  if (summary.retainedSessions) elements.spendNote.textContent += " · retained history uses last-ingest prices";
-  elements.liveNote.textContent = summary.historicalWorkingSnapshots ? `${summary.historicalWorkingSnapshots} historical working observations excluded` : "Present sources; totals may still move";
-  elements.repositories.textContent = String(summary.repositories); elements.repositoryNote.textContent = `${summary.repositoriesWithSessions} with sessions`;
-  elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`; elements.sessionNote.textContent = `${executionBreakdown(summary)}${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
+  elements.spendNote.textContent = "Activity-dated. Not an invoice.";
+  elements.sessions.textContent = `${summary.analyzedSessions}/${summary.sessions}`;
+  elements.sessionNote.textContent = "By session start";
   renderMetricValue(elements.input, summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence", elements.inputCoverage);
-  elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached · repeated context included` : "Cache share unavailable · repeated context included";
-  renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer(v), "compaction evidence", elements.compactionsCoverage); elements.live.textContent = integer(summary.workingSnapshots);
+  elements.cache.textContent = summary.coverage.tokens.eligible && summary.cacheReadRatio !== null ? `${percent(summary.cacheReadRatio)} cached` : "Cache share unavailable";
+  renderMetricValue(elements.output, summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence", elements.outputCoverage); renderMetricValue(elements.tools, summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence", elements.toolsCoverage); renderMetricValue(elements.compactions, summary.compactions, summary.coverage.compactions, (v) => integer(v), "compaction evidence", elements.compactionsCoverage);
   const count = (accessor) => dailyCountSeries(view.sessions, days, accessor, context.timeZone);
   const metrics = [
     ["spend", `Usage value by activity date (${context.timeZone}), including session-dated value; undated value excluded`, money, activity.totals[0], previousActivity?.totals[0], activity.daily.map(({ total }) => total)],
@@ -1572,7 +1580,7 @@ async function loadSnapshot(refresh = false) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = await response.json();
     render(body);
-    elements.sync.dataset.state = "live"; elements.syncLabel.textContent = "Local snapshot ready";
+    elements.sync.dataset.state = "live"; elements.syncLabel.textContent = snapshot ? `Local snapshot ready · ${integer(activeView().summary.workingSnapshots)} live` : "Local snapshot ready";
   } catch (error) {
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;

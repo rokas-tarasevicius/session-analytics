@@ -296,3 +296,11 @@ test("narrow four-column KPI rows give the fixed-size figure the full card width
   assert.match(block, /\.kpi \{ grid-template-areas: "label label" "value value" "coverage spark" "delta spark" "note note"; \}/);
   assert.match(block, /\.kpi \.spark \{ width: 64px; \}/);
 });
+
+test("Summary uses three KPI columns and Velocity inspection uses a two-column grid", async () => {
+  const css = await readCss("styles.css"), velocity = await readCss("velocity.css");
+  assert.match(rules(css).find(({ selector }) => selector === ".summary-metrics")!.body, /--kpi-columns:\s*3/);
+  assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection")!.body, /display:\s*grid/);
+  assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection")!.body, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection > strong")!.body, /grid-column:\s*1\s*\/\s*-1/);
+});

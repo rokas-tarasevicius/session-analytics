@@ -1,6 +1,7 @@
 // Regression tests for dashboard shell interactions: palette ranking, custom windows, URL state, shortcut targets,
 // provider shortcuts, the export menu's Escape handling and the shared in-flight refresh.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { installExportMenu, openExportMenu } from "../src/public/export-menu.js";
@@ -340,12 +341,12 @@ test("Velocity provider chips list present providers and count N of M against th
     assert.doesNotMatch(lead.textContent, /of \d+ providers/);
     const codex = container.querySelector('[data-provider="codex"]')!.querySelector("input")!;
     codex.checked = false; codex.listeners.get("change")!();
-    assert.match(lead.textContent, /1 of 2 providers/);
+    assert.match(container.querySelector(".evidence")!.textContent, /1 of 2 providers/);
     // A refreshed snapshot with another provider rebuilds the chips and keeps the earlier choice.
     renderVelocity(container, sessions, { ...context, providers: ["codex", "claude", "gemini"] });
     assert.deepEqual(chips(), ["codex", "claude", "gemini"]);
     assert.equal(container.querySelector('[data-provider="codex"]')!.querySelector("input")!.checked, false);
-    assert.match(lead.textContent, /2 of 3 providers/);
+    assert.match(container.querySelector(".evidence")!.textContent, /2 of 3 providers/);
   } finally {
     if (previous) Object.defineProperty(globalThis, "document", previous);
     else Reflect.deleteProperty(globalThis, "document");
@@ -486,4 +487,50 @@ test("range adjustments and unavailable KPI reasons are visible without hovering
   for (const id of ["metric-spend-coverage", "cost-total-coverage", "cost-api-total-coverage", "cost-provider-total-coverage"]) assert.equal(document.querySelector(`#${id}`)!.textContent, "No session in this selection has activity dates", id);
   run("fixture.sessions = [sampleWithLedger]; sessionsByRepository = groupByRepository(fixture.sessions); renderSummary(activeView()); renderCosts(activeView())");
   for (const id of ["metric-spend-coverage", "cost-total-coverage", "cost-api-total-coverage", "cost-provider-total-coverage"]) assert.equal(document.querySelector(`#${id}`)!.textContent, "", `${id}: available figures clear the reason`);
+});
+
+test("Summary has six KPIs, noun-phrase titles and short notes with full explanations in Coverage", async () => {
+  const session = withLedger(sample(), [["synthetic", 10]], { sessionDated: true });
+  const { document, run } = await harness([session]);
+  run("renderView()");
+  const summary = document.querySelector('[data-view-panel="summary"]')!;
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  const summaryHtml = html.split('data-view-panel="summary"')[1]!.split('data-view-panel="activity"')[0]!;
+  assert.deepEqual([...summaryHtml.matchAll(/class="kpi-label"[^>]*>([^<]+)</g)].map((match) => match[1]), [
+    "Usage value", "Sessions analyzed", "Request input processed", "Output tokens", "Effective tools", "Compactions",
+  ]);
+  assert.equal(summary.querySelectorAll(".kicker").length, 0);
+  for (const id of ["metric-live", "metric-live-note", "metric-repositories", "metric-repository-note"]) assert.equal(document.querySelector(`#${id}`), null);
+  for (const title of ["Sessions by provider", "Usage value by model", "Sub-agent value", "Repositories"]) {
+    assert.match(summaryHtml, new RegExp(`<h2[^>]*>${title}</h2>`), title);
+  }
+  assert.match(html, /id="activity-repositories-panel"[^]*?<h2>Sessions by repository<\/h2>/);
+  assert.match(summaryHtml, /Explicit sub-agent evidence · lower bound/);
+  assert.equal(document.querySelector("#metric-spend-note")!.textContent, "Activity-dated. Not an invoice.");
+  assert.deepEqual([...summaryHtml.matchAll(/class="chart-note">([^<]+)</g)].map((match) => match[1]), [
+    "Activity-dated. Not an invoice.", "Explicit sub-agent evidence · lower bound", "Activity-dated value · session-start counters",
+  ]);
+  const coverage = html.split('id="coverage-dialog"')[1]!.split("</dialog>")[0]!;
+  assert.match(document.querySelector("#coverage-usage-note")!.textContent, /includes \$10.00 session-dated.*dated by last activity/);
+  assert.match(coverage, /undated value, such as Cursor's provider-reported value/);
+  assert.match(coverage, /rows add up to the Usage value KPI/);
+  assert.match(coverage, /Other columns: sessions started in the window/);
+  assert.match(coverage, /Request input includes repeated context/);
+  assert.match(document.querySelector("#scope-description")!.textContent, /1 repository · 1 with sessions/);
+});
+
+test("snapshot status shows live counts after load and follows the selected window", async () => {
+  const live = withLedger(sample(), [["synthetic", 10]]);
+  live.transcript.snapshotWhileWorking = true;
+  const { context, document, run } = await harness([live]);
+  context["fetch"] = async () => ({ ok: true, json: async () => run("({...fixture, rateCard: {effectiveDate: '2026-10-01', models: []}})") });
+  await run("loadSnapshot()");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 1 live");
+  run("windowPreset = 'custom'; elements.windowStart.value = elements.windowEnd.value = '2026-09-01'; renderView()");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 0 live");
+  run("elements.sync.dataset.state = 'loading'; elements.syncLabel.textContent = 'Refreshing…'; renderView()");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Refreshing…");
+  context["fetch"] = async () => ({ ok: true, json: async () => ({ kind: "shared", sources: [], minimumSessions: 5, summary: { sessions: 0 }, repositories: [] }) });
+  await run("loadSnapshot()");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready", "shared aggregates cannot establish a live count");
 });

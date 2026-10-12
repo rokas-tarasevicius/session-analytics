@@ -101,7 +101,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
   const invalid = sample(undefined, true); invalid.tokens = tokens(999, 0, 0, 999); invalid.metrics.toolCalls = 999; invalid.tools = { Read: 999 };
   for (const sessions of [[activity], [summary], [invalid], [summary, activity]]) {
     h.context["sessions"] = sessions;
-    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={activity:buildVelocity(sessions,{start:"",end:"",group:"repository"}),sessions,dailySessions:sessions,scopeSessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),warnings:[]}; renderSummary(view)');
+    h.run('snapshot={sessions}; renderLine=()=>{}; renderDonut=()=>{}; renderProviderEvidence=()=>{}; constRepo={repository:{id:"example",name:"Example"}}; view={activity:buildVelocity(sessions,{start:"",end:"",group:"repository"}),sessions,dailySessions:sessions,scopeSessions:sessions,repositories:[repositoryAggregate(constRepo,sessions)],summary:{...summarize(sessions),repositories:1,repositoriesWithSessions:1,workingSnapshots:0},topTools:namedTotals(sessions,"tools"),warnings:[]}; renderSummary(view); renderCoverageSummary(view)');
     // Values stay bare; the eligible/selected share moves to the coverage badge beside the value.
     assert.equal(h.elements.get("#metric-input")!.textContent, sessions.includes(summary) ? "100" : "—");
     const selected = `${sessions.length} selected ${sessions.length === 1 ? "session" : "sessions"}`;
@@ -110,7 +110,7 @@ test("review: actual summary and Tools rendering distinguish unavailable, observ
     // activity dates, so the headline is unavailable and its whole-session value is disclosed, not hidden.
     assert.equal(h.elements.get("#metric-spend")!.textContent, "—");
     assert.equal(h.elements.get("#metric-spend-coverage")!.textContent.trim(), "No session in this selection has activity dates");
-    const note = h.elements.get("#metric-spend-note")!.textContent;
+    const note = h.elements.get("#coverage-usage-note")!.textContent;
     if (sessions.includes(summary)) assert.match(note, /\$1\.00 in \d older-snapshot sessions? without activity dates/);
     assert.equal(h.elements.get("#metric-tools")!.textContent, sessions.includes(activity) ? "0" : "—");
     assert.equal(h.elements.get("#metric-tools-coverage")!.textContent.trim(), sessions.includes(activity) ? sessions.length === 2 ? "1/2 1 of 2 selected sessions provide tool evidence" : "" : `No tool evidence in ${selected}`);
@@ -196,7 +196,7 @@ test("Tools daily columns start at zero and unavailable days never present zero 
   h.run("renderTools(view)");
   const trend = descend(container).find((node) => node.className === "tools-trend")!;
   assert.match(trend.textContent, /— No tool evidence/);
-  assert.match(trend.textContent, /10 calls have no known session-start day/);
+  assert.match(trend.textContent, /10 undated calls excluded/);
   assert.doesNotMatch(trend.textContent, /0 calls plotted/);
 });
 
@@ -212,9 +212,10 @@ test("Tools labels providers, explains guarded changes and announces the selecte
   const change = descend(container).find(n => n.dataset["label"] === "Change")!;
   assert.equal(change.textContent, "— small baseline");
   assert.equal(change.attributes["title"], "Previous window: 3 calls, below the 5-call minimum for a percentage");
-  assert.match(container.textContent, /Previous window too small to compare \(3 calls\)/);
+  assert.match(container.textContent, /Small baseline \(3 calls\)/);
   assert.match(container.textContent, /All 10 calls came from Claude\./);
-  assert.match(container.textContent, /100% of calls · Claude/);
+  assert.match(container.textContent, /100% of calls/);
+  assert.equal(descend(container).filter(n => n.className === "kicker").length, 0);
   const button = descend(container).find(n => n.className === "tools-select")!;
   assert.equal(button.attributes["aria-label"], "Show tool profile for Read (Claude)");
   button.listeners["click"]!();

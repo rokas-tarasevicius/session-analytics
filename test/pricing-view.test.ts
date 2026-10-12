@@ -135,7 +135,7 @@ test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selecti
     const panel = new Node("div"); root.append(panel);
     renderPricingPanel(panel, rateCard, sessions, window);
     const rendered = panel.text();
-    assert.match(rendered, /8 days old/); assert.match(rendered, /75\.0%/); assert.match(rendered, /300 \/ 400 eligible tokens · activity-dated, as on Costs/);
+    assert.match(rendered, /8 days old/); assert.match(rendered, /75\.0%/); assert.match(rendered, /300 \/ 400 eligible tokens priced/);
     assert.match(rendered, /Cards add up to \$410\.57 API-equivalent value\. With \$0\.00 provider-reported value, which has no rate card, that is the \$410\.57 usage value/);
     assert.match(rendered, /API-equivalent value is not an invoice/);
     assert.match(rendered, /Cached prices only; no public price requests · reviewed card effective 1 Jan 2026/);
@@ -145,13 +145,15 @@ test("Pricing panel keeps freshness, guarded coverage, privacy and empty-selecti
     assert.equal(panel.all((node) => node.attributes.role === "status").length, 1);
     assert.deepEqual(byClass(panel, "kpi-label").map((node) => node.textContent), ["Pricing coverage", "models.dev prices", "Price updates"]);
     assert.equal(byClass(panel, "kpi")[0]!.className, "kpi accent");
-    assert.match(byClass(panel, "kpi-note")[1]!.textContent, /20 models · stale or missing · fetched /);
+    assert.match(byClass(panel, "kpi-note")[1]!.textContent, /^20 models · stale or missing$/);
     const reconciliation = byClass(panel, "pricing-reconciliation")[0]!;
     assert.equal(reconciliation.tag, "p"); assert.equal(reconciliation.className, "chart-note pricing-reconciliation");
-    assert.equal(reconciliation.textContent, "Cards add up to $410.57 API-equivalent value. With $0.00 provider-reported value, which has no rate card, that is the $410.57 usage value for these dates on Summary and Costs.");
+    assert.equal(reconciliation.textContent, "$410.57 API-equivalent · $0.00 reported · $410.57 total");
     const content = byClass(panel, "pricing-content")[0]!;
     assert.equal(content.children[content.children.indexOf(byClass(panel, "kpi-grid")[0]!) + 1], reconciliation);
-    assert.doesNotMatch(byClass(panel, "evidence")[0]!.text(), /Cards add up to/);
+    assert.match(byClass(panel, "evidence")[0]!.text(), /Cards add up to \$410\.57 API-equivalent value/);
+    assert.match(byClass(panel, "evidence")[0]!.text(), /20 models · stale or missing · fetched /);
+    assert.equal(byClass(panel, "kicker").length, 0);
     const link = panel.all((node) => node.tag === "a")[0]!;
     assert.equal(link.textContent, "Public price list ↗"); assert.equal(link.href, "https://models.dev/api.json");
     assert.equal(link.target, "_blank"); assert.equal(link.rel, "noreferrer");
@@ -415,8 +417,8 @@ test("Snapshot KPIs show human ages, absent snapshots and UTC reviewed dates", a
       assert.equal(byClass(root, "pricing-freshness")[0]!.children[1]!.textContent, label);
       assert.match(root.text(), /reviewed card effective 2 Oct 2026/);
       const freshness = byClass(root, "pricing-freshness")[0]!.text();
-      if (ageDays === null) { assert.match(freshness, /No cached snapshot/); assert.match(freshness, /stale or missing · not cached/); assert.doesNotMatch(freshness, /fetched/); }
-      else assert.match(freshness, /· fetched \d/);
+      if (ageDays === null) { assert.match(freshness, /No cached snapshot/); assert.match(byClass(root, "evidence")[0]!.text(), /stale or missing · not cached/); assert.doesNotMatch(freshness, /fetched/); }
+      else assert.match(byClass(root, "evidence")[0]!.text(), /· fetched \d/);
     }
     renderPricingPanel(root, { ...rateCard, effectiveDate: "undated" }, sessions, window);
     assert.match(root.text(), /reviewed card effective undated/);
@@ -442,7 +444,7 @@ test("pricing freshness and model detail date-times use the snapshot timezone", 
   await withDocument(async (root) => {
     const panel = new Node("div"); root.append(panel);
     renderPricingPanel(panel, rateCard, sessions, { ...window, timeZone: "America/Los_Angeles" });
-    assert.match(byClass(panel, "pricing-freshness")[0]!.text(), /fetched 31 Dec 2025, 16:00/);
+    assert.match(byClass(panel, "evidence")[0]!.text(), /fetched 31 Dec 2025, 16:00/);
     const button = modelButtons(panel)[0]!;
     button.dispatch("click");
     const dialog = root.all((node) => node.attributes.id === "pricing-model-dialog")[0]!;

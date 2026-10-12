@@ -12,7 +12,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - Printed dashboards use static navigation and headers, expand tables, and hide top-bar actions and export controls.
 - Dark trend areas and chart grids are clearer; Other and Unknown lines in both themes and dark Claude/Codex light-model shades meet 3:1 contrast on cards.
 - Refreshes say “Refreshing…” even with reduced motion enabled.
-
+- Summary has clearer panel titles, shorter notes and six key figures; live snapshot counts appear in the status pill, and full explanations remain in Data coverage.
+- History coverage is a collapsed status line; expand it for calibration, estimates and profile details.
+- Velocity groups by provider by default and shows the top six series plus Other, with a two-column inspection readout and an average key only when the average is shown.
 - Pull requests and pushes now check snapshot schemas, synthetic JSON reports and package contents; pull requests run on Ubuntu and pushes to `master` also run on macOS, where the Chrome dashboard checks run separately without blocking CI. Version tags create a GitHub Release from the matching changelog notes after the full checks pass.
 - Dates and money are formatted the same way on every dashboard view; chart axes share day labels and compact dollar amounts, while tables keep cents.
 - The synthetic demo cleans up demo temporary directories older than one day when it starts.
