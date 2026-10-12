@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- README screenshots are regenerated from the synthetic demo at the current dashboard; Velocity's chart subtitle uses the shared date-range format.
 - Focused repositories show provider breakdowns, a sub-agent summary and an All repositories comparator in the fleet table.
 - Windows with one or two active days show daily totals as a list with Show 30d; single-provider session shares use text, quiet repository rows collapse, and pricing cards share one activity-dated subtitle.
 

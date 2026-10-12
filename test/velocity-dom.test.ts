@@ -182,7 +182,7 @@ test("Velocity leads with value cards before filters and keeps them independent 
     const change = (control: Element, value: string) => { control.value = value; control.listeners.get("change")!(); };
     change(metric, "input"); assertLead(total);
     assert.equal(container.querySelector("[data-velocity-total]")!.textContent.trim(), "400");
-    assert.match(container.querySelector(".panel-meta")!.textContent, /Total\s+400\s+· 2026-09-01 → 2026-09-04 · Europe\/London/);
+    assert.match(container.querySelector(".panel-meta")!.textContent, /Total\s+400\s+· 1 Sept – 4 Sept 2026 · Europe\/London/);
     for (const value of ["week", "month", "hour", "day"]) { change(granularity, value); assertLead(total); }
     change(metric, "value");
     for (const value of ["week", "month", "hour", "day"]) { change(granularity, value); assertLead(total); }

@@ -62,7 +62,7 @@ Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI already keep d
 - **Small trust surface.** Node 24 built-ins, zero runtime dependencies, no telemetry and read-only provider access. Analysis reads cached prices; the dashboard can refresh fixed public price feeds (`--offline` disables pricing requests). OTLP delivery requires its own explicit option.
 
 <p align="center">
-  <img alt="Velocity view: priced usage value by agent as a stacked area chart with period-over-period deltas" src="assets/screenshot-velocity.png" width="100%" />
+  <img alt="Velocity view: usage value by provider as a stacked area chart with period-over-period deltas" src="assets/screenshot-velocity.png" width="100%" />
 </p>
 
 ## Quick start
