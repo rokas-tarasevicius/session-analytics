@@ -57,7 +57,7 @@
 flowchart TB
   bin["bin/session-analytics.ts"] --> server["src/server.ts<br/>HTTP on 127.0.0.1"]
   bin --> cli["src/cli.ts<br/>report and JSON"]
-  server -- "options on stdin" --> worker["analysis-worker.ts<br/>child, 256 MiB V8 old-space limit"]
+  server -- "options on stdin" --> worker["analysis-worker.ts<br/>child, 1024 MiB V8 old-space limit"]
   cli -- "options on stdin" --> worker
   worker -- "options on stdin" --> cursor["cursor-worker.ts<br/>child, 192 MB heap cap"]
   cursor -- "serialized sessions" --> worker
@@ -65,11 +65,11 @@ flowchart TB
   worker -- "snapshot JSON on stdout" --> cli
 ```
 
-The server and report never parse transcripts themselves. Each snapshot runs in a fresh worker with `--max-old-space-size=256`; Cursor uses a separate 192 MiB worker. These are V8 old-space caps, not total resident-memory limits. Only serialized, allowlisted results cross the process boundary. Child stderr is discarded; index failures cross as bounded error codes and other failures use fixed messages.
+The server and report never parse transcripts themselves. Each snapshot runs in a fresh worker with `--max-old-space-size=1024`; Cursor uses a separate 192 MiB worker. These are V8 old-space caps, not total resident-memory limits. Only serialized, allowlisted results cross the process boundary. Child stderr is discarded; index failures cross as bounded error codes and other failures use fixed messages.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
 
-The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 256 MiB V8 old-space limit, then caches the allowlisted snapshot for a completion-based TTL. Concurrent calls share the worker. Stdio EOF/signals abort and reap it; scans have a 180-second deadline. Output drains for at most 250 ms, then the CLI exits to release unread standard-pipe writes; the 4 MiB output overflow path skips the drain. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Lifecycle observations are collected during the normal transcript pass in `src/mcp/evidence.ts` and `activity.ts`. The existing pricing pass supplies dated eligible/priced token operands, including unknown prices; provider source-health counts are retained before repository selection; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
+The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 1024 MiB V8 old-space limit, then caches the allowlisted snapshot for a completion-based TTL. Concurrent calls share the worker. Stdio EOF/signals abort and reap it; scans have a 300-second deadline. Output drains for at most 250 ms, then the CLI exits to release unread standard-pipe writes; the 4 MiB output overflow path skips the drain. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Lifecycle observations are collected during the normal transcript pass in `src/mcp/evidence.ts` and `activity.ts`. The existing pricing pass supplies dated eligible/priced token operands, including unknown prices; provider source-health counts are retained before repository selection; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
 
 ## Pipeline
 
@@ -174,7 +174,7 @@ Retained facts use the parser and price card from their last successful ingest. 
 
 ### Verification
 
-`test/index-parity.test.ts` includes streamed Claude composites, Codex counter loss after projection failures, signed stale session/ledger detection, liveness aging and content-free source-generation diagnostics. Four memory regressions complete under a 64 MB test heap: 600,000 broadcast observations, loading 400 dense cached sessions, projecting 5,000 sessions, and serializing a snapshot larger than 128 MiB. The production worker stays capped at 256 MB. `node scripts/parity.ts --machine` compares full, cold and warm analyses against current local evidence under `/tmp/session-analytics-realscan.lock`, using a fresh `.lane/` data directory and offline rates. It emits only aggregates, schema field names and hashed keys. Source-generation diagnostics never read message tables or copy transcript content; unfiltered mismatches still fail the audit even when a separate stable-evidence comparison matches. Other provider stores are explicitly marked unverified by this native-file inventory. The temporary index is removed on normal completion or a caught failure.
+`test/index-parity.test.ts` includes streamed Claude composites, Codex counter loss after projection failures, signed stale session/ledger detection, liveness aging and content-free source-generation diagnostics. Four memory regressions complete under a 64 MB test heap: 600,000 broadcast observations, loading 400 dense cached sessions, projecting 5,000 sessions, and serializing a snapshot larger than 128 MiB. The production worker stays capped at 1024 MB. `node scripts/parity.ts --machine` compares full, cold and warm analyses against current local evidence under `/tmp/session-analytics-realscan.lock`, using a fresh `.lane/` data directory and offline rates. It emits only aggregates, schema field names and hashed keys. Source-generation diagnostics never read message tables or copy transcript content; unfiltered mismatches still fail the audit even when a separate stable-evidence comparison matches. Other provider stores are explicitly marked unverified by this native-file inventory. The temporary index is removed on normal completion or a caught failure.
 
 `test/index-store.test.ts` checks cold/warm/full parity, cross-file ownership changes, streamed/composite invalidation, prefix verification, rotation/truncation, deletion, pruning, migrations, corruption, concurrency, rollback, permissions, and sentinel absence in SQLite and output. To measure the demo: run `node scripts/demo.ts report --keep`, then `node scripts/benchmark-index.ts --demo-root <printed-synthetic-directory>`. `--machine` instead performs one cold ingest and one incremental launch against local defaults, emits only counts/timings, and removes its temporary index on exit.
 
@@ -216,7 +216,7 @@ The roadmap moves parsing toward per-source adapters, a normalized event model, 
 
 ## v0.6.0 integration boundaries
 
-All native metrics attach to the existing Claude/Codex parse streams. The Codex counter ledger establishes ownership before accounting; metrics use the same deduplicated, priced usage. Additional adapters label their fidelity and unavailable metrics. The analysis worker remains capped at 256 MiB.
+All native metrics attach to the existing Claude/Codex parse streams. The Codex counter ledger establishes ownership before accounting; metrics use the same deduplicated, priced usage. Additional adapters label their fidelity and unavailable metrics. The analysis worker remains capped at 1024 MiB.
 
 The published schema supplies the recursive disk allowlist. Cached session facts include velocity, compaction and context-window counters, history profile evidence, MCP evidence and model price provenance. Provider source changes, parser/schema code, pricing policy/history and source options invalidate reuse.
 

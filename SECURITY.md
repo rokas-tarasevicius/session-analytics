@@ -6,8 +6,8 @@
 
 | Version | Supported |
 | --- | --- |
-| 0.5.x | Yes |
-| Earlier than 0.5.0 (before the standalone release) | No |
+| 0.7.x | Yes |
+| Earlier than 0.7.0 | No |
 
 Fixes are released on the latest minor version.
 
@@ -27,10 +27,9 @@ Analytics protects the content of local provider history: prompts, responses, re
 
 ### Design
 
-- **Content stays local.** No telemetry. Automatic pricing requests are plain GETs to fixed public lists and carry no local evidence. Explicit OTLP delivery has a separate documented opt-in. `--offline` / `SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests. Fonts and provider marks are bundled; nothing is loaded from a CDN.
+- **Content stays local.** No telemetry. Automatic pricing requests are plain GETs to fixed public lists and carry no local evidence. The explicit `export --otlp-endpoint` option can POST the saved allowlisted payload; it never follows redirects or activates from environment variables. See [the delivery boundary](docs/interop.md#opentelemetry-mapping). `--offline` / `SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests. Fonts and provider marks are bundled; nothing is loaded from a CDN.
 - **Bounded pricing fetches.** Only two fixed HTTPS endpoints are used: models.dev and GitHub raw for LiteLLM. No authentication, cookies, query parameters, request bodies, or redirects. Responses are capped at 32 MiB with a 15-second deadline per source; unknown fields are discarded and invalid prices rejected. Public services still observe the requesting IP and time. Source payloads are untrusted data, never instructions or executable code.
 - **Pricing cache.** Normalized public rates and reviewed cards are saved atomically in the per-user data directory. Files have checksums and restrictive creation modes. Corrupt snapshots are ignored with a fixed warning; prior snapshots remain available. This cache contains no transcript content or local model inventory.
-- **Offline by default.** No background network requests or telemetry. Fonts and provider marks are bundled; nothing is loaded from a CDN. The explicit `export --otlp-endpoint` option can POST the saved allowlisted payload; it never follows redirects or activates from environment variables. See [the delivery boundary](docs/interop.md#opentelemetry-mapping).
 - **Loopback bind.** The dashboard listens on `127.0.0.1` only.
 - **Host and Origin checks.** Requests whose `Host` header is not `127.0.0.1` or `localhost` (with an optional port) are rejected with `403` before parsing the request target, which blocks DNS-rebinding attacks. Malformed targets get `400` with the fixed message `Bad request.` and do not stop the server. For `/api/*`, a present `Sec-Fetch-Site` must be `same-origin` or `none`, and a present `Origin` must have the same host, including port, as the request's `Host`; otherwise the response is `403`. This blocks browser cross-site refresh triggers and API requests from other loopback ports. Header-less local clients remain supported. Static files retain the loopback Origin check.
 - **Read-only HTTP.** Only `GET` is accepted. There is no endpoint that writes, executes, or accepts uploaded data.
@@ -47,9 +46,7 @@ Analytics protects the content of local provider history: prompts, responses, re
 - Any transcript content, path, raw identifier, credential, or raw error appearing in the dashboard, API, report, JSON snapshot, or skill output.
 - Binding to a non-loopback interface, or bypassing the `Host` or `Origin` checks.
 - Reading files outside the static file map through the HTTP server.
-- Any write to provider stores, transmission of local data to a pricing source, public request while offline, or request outside the documented pricing/export boundaries.
-
-- Any write to provider stores, unrequested outbound network request, or content outside the documented OTLP allowlist being sent by an authorized export.
+- Any write to provider stores, transmission of local data to a pricing source, public pricing request while offline, request outside the documented pricing/export boundaries, or content outside the documented OTLP allowlist being sent by an authorized export.
 - Denial of service through crafted transcript files that crash or hang the server process (rather than the isolated analysis process).
 
 ### Out of scope

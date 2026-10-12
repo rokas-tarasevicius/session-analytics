@@ -51,8 +51,7 @@ Profiles that resolve to the same real path are read once. `--claude-root PATH` 
 
 **Known gaps:**
 
-- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). Retained Conductor assistant metadata can recover usage and tool counts; result receipts remain a summary fallback. Missing response identities make recovery conservative and partial.
-- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). The local index preserves sessions ingested before cleanup, marked `transcript.sourceDeleted`. History deleted before the first ingest requires an independent source such as Conductor; the index alone cannot reconstruct it.
+- Claude Code deletes local transcripts after its `cleanupPeriodDays` setting (30 days by default). The local index preserves sessions ingested before cleanup, marked `transcript.sourceDeleted`. History deleted before the first ingest requires an independent source such as Conductor; the index alone cannot reconstruct it. Retained Conductor assistant metadata can recover usage and tool counts; result receipts remain a summary fallback. Missing response identities make recovery conservative and partial.
 - Profile `stats-cache.json` daily-token version 5 is reconciled against same-profile UTC day/model streamed-block counters, separately from deduplicated session usage; older or unknown versions are labeled unsupported. See [History coverage](metrics.md#history-coverage-and-recovery).
 - Each native Claude session carries its pseudonymous profile key and deduplicated request tokens per UTC day and model as `historyProfile`, the input to machine-wide history coverage. Dashboard views do not expose a profile dimension.
 
@@ -166,7 +165,7 @@ Session titles, workspace names, branches, root paths, and remotes are loaded fo
 - hidden flags for `--exclude-hidden`;
 - live status: sessions marked `working` are flagged as snapshots whose totals may still move;
 - a model fallback when a transcript records none;
-- `--repo-remote` matching, since remotes are only known for registered repositories.
+- registered remote metadata for `--repo-remote` matching, alongside remotes discovered from Git and provider metadata.
 
 **Known gaps:**
 
@@ -192,7 +191,7 @@ Only scalar counters, bounded model IDs, and fixed enums leave the parser. Turn-
 | `runs.ndjson` | `agentId`, `runId` for correlation; `model.id`, `status`, `createdAt`, `updatedAt`, `startedAt`, `endedAt`; `usage.inputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`, `reasoningTokens` |
 | `run_events.ndjson` | `payload.type: sdk_message`, then `message.type: tool_call`, `agent_id`, `run_id`, `call_id`, `name`; no arguments/results |
 
-**Fidelity:** run-level **Reported** token counters; **Estimated** API-equivalent value for exact rate-card matches. Activity dates are **run-level**: each run's value is dated by its own `startedAt` (else `endedAt`, else `createdAt`), tool calls by their event `createdAt` (else their run's time); a run without a time is **session-dated**. Local checks confirmed total tokens equal input + cache read + cache write + output, with reasoning inside output. Tool lifecycle records count once per run/call ID. One started run counts as one observed run turn. Missing tool-event files preserve run summaries with tools labeled unavailable. Requests, assistant-message counts, per-request context sizes, and per-request cost allocation are unavailable. Aggregate long-context uncertainty is carried in the upper estimate. No new model rates or aliases are guessed.
+**Fidelity:** run-level **Reported** token counters; **Estimated** API-equivalent value for exact model matches through the dated pricing resolver (cached public feeds and reviewed rates). Activity dates are **run-level**: each run's value is dated by its own `startedAt` (else `endedAt`, else `createdAt`), tool calls by their event `createdAt` (else their run's time); a run without a time is **session-dated**. Local checks confirmed total tokens equal input + cache read + cache write + output, with reasoning inside output. Tool lifecycle records count once per run/call ID. One started run counts as one observed run turn. Missing tool-event files preserve run summaries with tools labeled unavailable. Requests, assistant-message counts, per-request context sizes, and per-request cost allocation are unavailable. Aggregate long-context uncertainty is carried in the upper estimate. No new model rates or aliases are guessed.
 
 ## Cursor agent transcripts
 
@@ -236,7 +235,7 @@ Encoded project directory names are matched only against known repository/worksp
 
 Project assignment follows the [project registry and ownership markers](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/config/projectRegistry.ts): the sibling `projects.json` maps absolute roots to slugs, and `.project_root` records ownership. The provider project hash must match the proposed root. Known local repository roots can also resolve legacy hashed directories; unresolved projects remain pseudonymous and unassigned. The [storage implementation](https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/config/storage.ts) establishes these locations.
 
-**Fidelity:** reported retained-message counters and observed tool/turn counts. Activity dates are **message-level** from each message's `timestamp`; a message without one is **session-dated**. Input includes cache reads; total output adds separately recorded thought tokens. `kind` distinguishes explicit main/subagent evidence. Removed history is not recoverable. The current rate card has no Gemini entries, so usage is visible but unpriced until a reviewed rate is supplied. Monolithic JSON larger than 32 MiB is skipped; JSONL is streamed. Compaction counts are unavailable.
+**Fidelity:** reported retained-message counters and observed tool/turn counts. Activity dates are **message-level** from each message's `timestamp`; a message without one is **session-dated**. Input includes cache reads; total output adds separately recorded thought tokens. `kind` distinguishes explicit main/subagent evidence. Removed history is not recoverable. The current rate card has no Gemini entries, so usage is visible but unpriced until a reviewed rate is supplied. Monolithic JSON larger than 4 MiB is skipped; JSONL is streamed. Compaction counts are unavailable.
 
 ## Source overrides and isolation
 
@@ -253,11 +252,11 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-provider) for the checklist. A
 
 OpenCode forks copy old messages/parts under fresh IDs. The adapter uses retained message timestamps and compact stable evidence fingerprints to identify inherited ownership before pricing; inherited requests are counted only at their original session/date. If original ownership is missing or timestamps are absent, copied usage is excluded and accounting is partial. New requests after fork creation remain eligible. Namespaced models retain their exact identity for rate lookup.
 
-Gemini partial reorder patches preserve the unmentioned prefix before the explicitly ordered suffix, matching the pinned replay implementation. Legacy JSON is read/projected once. Legacy files larger than **4 MiB**, replays exceeding **20,000 retained messages** or **50,000 tool references**, and oversized individual projections are rejected with fixed warnings. JSONL line buffering is bounded before parsing (4 Mi characters for Gemini); skipped malformed/oversized records mark accounting partial. Large unsupported histories need a streaming/disk-backed replay implementation before these limits can be raised. The synthetic memory probe reserves earlier-provider heap and checks budget rejection under the production 256 MiB cap; this does not establish total-worker heap headroom.
+Gemini partial reorder patches preserve the unmentioned prefix before the explicitly ordered suffix, matching the pinned replay implementation. Legacy JSON is read/projected once. Legacy files larger than **4 MiB**, replays exceeding **20,000 retained messages** or **50,000 tool references**, and oversized individual projections are rejected with fixed warnings. JSONL line buffering is bounded before parsing (4 Mi characters for Gemini); skipped malformed/oversized records mark accounting partial. Large unsupported histories need a streaming/disk-backed replay implementation before these limits can be raised. The synthetic memory probe reserves earlier-provider heap and checks budget rejection under a 256 MiB test cap. The production worker has a 1024 MiB V8 old-space cap; the probe does not establish total-worker heap headroom.
 
 ## Velocity evidence
 
-All three adapters populate compact velocity counters at the same counting points as
+All six providers populate compact velocity counters at the same counting points as
 existing session totals. Claude entrypoint and fixed subagent attribution enums, and
 Codex source/originator enums, provide finer agent groups without exporting custom names.
 Per-request model, effort and execution stay attached to their activity cells, including

@@ -15,7 +15,7 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 
 ## M0: Correctness
 
-**In progress.** 0.5.0 is the first standalone release and ships the first part of this milestone. No new feature work starts before the numbers are right.
+**0.7.0 shipped.** The completed items below are available in the current release; remaining correctness work stays open, with further dashboard and accounting changes under Unreleased.
 
 - [x] Extract into a standalone repository with a single brand module (`src/brand.ts`).
 - [x] Discover every local profile: `~/.claude-*`, `CLAUDE_CONFIG_DIR`, `~/.config/claude`, `~/.codex-*`, and `CODEX_HOME`, deduplicated by real path.
@@ -125,10 +125,6 @@ Content-free coaching would be local (P0/P1); any content review would be **opt-
 - [x] GitHub Copilot CLI persisted activity events, OpenCode SQLite history, and Gemini JSON/JSONL saved chats, verified against primary sources.
 - [ ] Copilot persisted shutdown usage calibration; additional OpenCode schema generations and older JSON-directory storage.
 - [ ] More agents, driven by demand: Pi, Grok, Goose, and Cline.
-- [ ] OpenTelemetry GenAI export (pinned to a specification commit while the specification is in development), so sessions can be sent to existing observability backends.
-- [ ] Team mode, later: content-free aggregates, pseudonymized repositories, k-anonymity thresholds, and a preview of exactly what leaves the machine before anything is shared.
-
-- [ ] More agents, driven by demand: GitHub Copilot CLI, OpenCode, Gemini CLI, Pi, Grok, Goose, and Cline.
 - [x] OpenTelemetry GenAI attributes in OTLP/JSON session aggregate logs, pinned to a Development specification commit, with explicit opt-in collector delivery.
 - [x] Team sharing: aggregate-only preview, keyed repository pseudonyms or aliases, minimum-session suppression, disjoint-source merge, and a snapshot dashboard. Session thresholds do not guarantee person-level anonymity.
 - [x] Versioned JSON Schemas, CSV/NDJSON exports, and browser downloads of the filtered view.
@@ -139,7 +135,6 @@ Content-free coaching would be local (P0/P1); any content review would be **opt-
 - [x] Document [research-grounded metric candidates and an aggregate-only evidence audit](proposals/metrics-research.md), plus a [proposed normalized event model and provider ontology](proposals/schema-v2.md). This completes the design artifact, not the metric implementations above.
 - [ ] Validate detector precision, false-flag burden and coverage on independently labeled, held-out trajectories before promoting experimental flags to coaching or automated interventions.
 
-The analyzer will move from "scan everything on launch and keep a snapshot in memory" to "ingest incrementally into a persistent, content-free index":
 The analyzer now ingests Claude/Codex incrementally into a persistent, content-free index in `src/store/`. Further extraction will move source parsing and metric computation into dedicated modules:
 
 ```text

@@ -40,7 +40,7 @@ Default `reviewed-first`:
 3. Remaining entries in the bundled reviewed card as `fallback`.
 4. No match: visibly unpriced; never an invented zero.
 
-The reviewed exceptions pin **complete model rates**. This keeps cache ratios and long-context premiums internally consistent when a feed changes its base rate. The list includes Opus 5.5's 0.05× cache-read exception, Fable 5.1's 0.025× exception, the zero-rated subscription-only Codex Spark model, and the reviewed OpenAI entries with 2× input/cache and 1.5× output above 272K. Zero-rated Spark means no observable API-equivalent charge, not a free subscription.
+The reviewed exceptions pin **complete model rates**. This keeps cache ratios and long-context premiums internally consistent when a feed changes its base rate. The list includes Opus 5.5's 0.05× cache-read exception, Fable 5.1's 0.025× exception, and the reviewed OpenAI entries with 2× input/cache and 1.5× output above 272K. Codex Spark has no verified bundled API tariff and remains unpriced even if a public feed reports zero rates; an explicit custom card can supply a tariff.
 
 `--pricing-policy api-first` explicitly gives APIs precedence over those exceptions. `--pricing-policy reviewed-only` uses only the current bundled card. `--rate-card PATH` pins that entire reviewed card and bypasses API history and automatic refresh, preserving the existing custom-card behavior. A custom card without `reviewedOverrides` is fully reviewed.
 

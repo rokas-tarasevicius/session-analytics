@@ -1,7 +1,5 @@
 # Privacy contract
 
-The local real-machine verification harness also writes audit-only evidence: hashed session keys, metadata signatures and capture timestamps (P1); exclusion counts and independently reconstructed calibration values (P0, with hashed identities and event timestamps treated as P1). Source generations and calibration pairs stay in `.lane/`; they contain no source paths, raw session IDs or transcript content and add no public snapshot fields. Provider histories are read-only throughout verification.
-
 `session-analytics` reads coding-agent transcripts that already exist on your machine. Those transcripts contain everything you and your agents have written: prompts, responses, reasoning, commands, file paths, diffs, and tool output. This document defines exactly what the tool may return from them, how that boundary is enforced, and what it does not protect against.
 
 The content-free contract covers dashboard/API, reports, pricing commands, MCP, exports/sharing, the agent skill and the persisted index. `index path` deliberately prints only the index location for local management.
@@ -38,6 +36,12 @@ The content-free contract covers dashboard/API, reports, pricing commands, MCP, 
 - **MCP boundary.** Tools accept no paths, commands, URLs, SQL or client roots. Trusted source paths are launch settings. Only projected metrics enter responses; the MCP worker reads no skill or MCP-server configuration, never executes configured commands and never contacts servers.
 
 Raw transcript content is not persisted or logged. Bounded parsing collectors may hold current request/receipt evidence in memory until reconciliation. Public pricing caches contain normalized rates, not raw feed bodies or local inventories.
+
+## Verification
+
+The local real-machine verification harness also writes audit-only evidence: hashed session keys, metadata signatures and capture timestamps (P1); exclusion counts and independently reconstructed calibration values (P0, with hashed identities and event timestamps treated as P1). Source generations and calibration pairs stay in `.lane/`; they contain no source paths, raw session IDs or transcript content and add no public snapshot fields. Provider histories are read-only throughout verification.
+
+See the [verification guide](../verify/README.md) for independent oracles and saved-evidence checks.
 
 ## Local index
 
@@ -115,7 +119,7 @@ No new processing tier or network access is introduced. A consistency fallback u
 
 This manifest lists every field in the public snapshot. It is generated from the types in [`src/types.ts`](../src/types.ts); a change to those types must update this table in the same pull request. Metric semantics are defined in [metrics.md](metrics.md).
 
-The [product strategy proposal](proposals/product-strategy.md) adds **no public fields** and changes no privacy tier or runtime behavior. Its [feature portfolio](proposals/feature-portfolio.md) assigns proposed processing tiers, and its [metric contracts](proposals/metric-contracts.md) require a separate types/manifest/sentinel update before implementation. Future names in those proposals are not part of this manifest. Repository names, precise timestamps and current unkeyed hashes remain identifying metadata; proposed team/export controls are not protections available today.
+The [product strategy proposal](proposals/product-strategy.md) adds **no public fields** and changes no privacy tier or runtime behavior. Its [feature portfolio](proposals/feature-portfolio.md) assigns proposed processing tiers, and its [metric contracts](proposals/metric-contracts.md) require a separate types/manifest/sentinel update before implementation. Future names in those proposals are not part of this manifest. Repository names, precise timestamps and current unkeyed hashes remain identifying metadata; sharing now provides aggregate-only previews, keyed repository pseudonyms or explicit aliases, and minimum-session suppression. These shipped controls do not guarantee anonymity; see [Sharing and optional delivery boundary](#sharing-and-optional-delivery-boundary).
 
 ### Snapshot root (`MachineAnalytics`)
 
@@ -195,27 +199,16 @@ Repository summaries and the machine summary share these fields.
 | `agentIdentity.codexOriginator` | Optional initial originator enum: `cli`, `exec`, `vscode`, `desktop`, `unknown`; arbitrary originator text is excluded | P0 |
 | `velocity` | Optional compact, content-free local-time activity cells; see [Velocity cells](#velocity-cells-sessionvelocity) | P0 |
 | `sessionKey` | First 12 hex characters of SHA-256 of `<provider>:<session ID>` (or of the Conductor session ID for Conductor-registered sessions). It is not keyed with a secret, so it is stable across runs; someone who already holds the raw ID can recompute it, but the key does not reveal the ID | P1 |
-| `provider` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, or `gemini` | P0 |
-| `repositoryId` | Repository key, as in `repository.id` | P1 |
-| `repositoryName` | Repository display name, as in `repository.name` | P1 |
-| `status` | Validated session status label (`unknown`, `working`, `idle`, `completed`, `failed`, `cancelled`, `archived`, `queued`, `running`) | P0 |
-| `createdAt` | Provider session start time; file modification time only when `evidence.timing` is `file-mtime` | P0 |
-| `updatedAt` | Recorded session update/end time when available; otherwise the session start time. File modification time for `file-mtime` evidence | P0 |
-| `status` | Session status label: Conductor's status when registered there, Cursor's composer status, otherwise `idle` | P0 |
-| `createdAt` | Session start time | P0 |
-| `provider` | `claude`, `codex`, `cursor`, or the fixed `unsupported` fallback for unknown agents (raw agent names are omitted) | P0 |
+| `provider` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported` | P0 |
 | `repositoryId` | Repository key, as in `repository.id` | P1 |
 | `repositoryName` | Repository display name, as in `repository.name` | P1 |
 | `status` | Fixed label: `idle`, `working`, `completed`, `failed`, `error`, `interrupted`, `cancelled`, `pending`, or `unknown`; unrecognized source text becomes `unknown` | P0 |
-| `createdAt` | Session start as UTC ISO with milliseconds; offset-free source/database timestamps mean UTC | P0 |
-| `updatedAt` | Conductor's or Cursor's last-updated time when available; otherwise the session start time | P0 |
+| `createdAt` | Provider session start time; file modification time only when `evidence.timing` is `file-mtime` | P0 |
+| `updatedAt` | Recorded session update/end time when available; otherwise the session start time. File modification time for `file-mtime` evidence | P0 |
 | `mcpEvidence` | Optional lifecycle state and daily pricing-coverage operands from the streaming parser; see [MCP fields](#mcp-fields) | P0 |
-| `firstEventAt` | Earliest event timestamp in the evidence, or `null` | P0 |
-| `lastEventAt` | Latest event timestamp in the evidence, or `null` | P0 |
-| `effort` | Validated reasoning-effort enum (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, `auto`, `unknown`), or `null` | P0 |
 | `firstEventAt` | Earliest valid event instant, normalized to UTC, or `null` | P0 |
 | `lastEventAt` | Latest valid event instant, normalized to UTC, or `null` | P0 |
-| `effort` | Reasoning-effort label as recorded, or `null` | P0 |
+| `effort` | Bounded reasoning-effort label, or `null`; adapters use `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, `auto`, or `unknown`, while native evidence may retain other validated labels | P0 |
 | `executionKind` | `top-level`, `subagent`, `mixed`, or `unknown` | P0 |
 | `costBasis` | `api-list-price-equivalent`, `provider-reported`, or `unavailable` | P0 |
 | `costComplete` | For added sources: all owned observed token classes explicitly priced, or supported Conductor accounting intervals with cost for every selected snapshot. Partial accounting forces false. Activity-only evidence is incomplete; this field never proves complete historical retention | P0 |
@@ -235,7 +228,7 @@ Repository summaries and the machine summary share these fields.
 | `historyProfile.days[].day`, `.model`, `.tokens` | UTC request date (`YYYY-MM-DD`), bounded model ID, and deduplicated request input plus output tokens for that day and model; undated requests are omitted | P0 |
 | `transcript.files` | Number of evidence files read for the session (main transcript plus sub-agent files) | P0 |
 | `transcript.status` | `ok`, `missing`, `invalid`, or `unsupported` | P0 |
-| `transcript.snapshotWhileWorking` | `true` for Conductor's explicit `working` status; false does not establish inactivity | P0 |
+| `transcript.snapshotWhileWorking` | `true` when the session was marked working at its last source observation; a retained observation does not establish current activity | P0 |
 | `transcript.completeness` | Optional `complete`, `partial`, `unknown`: parse/file-version completeness of observed evidence, not lifetime retention | P0 |
 | `transcript.liveness` | Optional `active`, `inactive`, `unknown`: observed lifecycle/Conductor state; see [transcript evidence](metrics.md#request-size-and-transcript-evidence) | P0 |
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
@@ -266,12 +259,10 @@ Repository summaries and the machine summary share these fields.
 | `conductor.permissionDenials` | A single receipt's denial-array length; null when absent or multiple receipts; no denial objects escape | P0 |
 | `conductor.errorResults` | Count of results with `is_error === true`; not a task-failure verdict | P0 |
 | `conductor.terminalReasons` | Counts keyed only by `success`, `error_during_execution`, `error_max_turns`, `error_max_budget_usd`, `error_max_structured_output_retries`, `completed`, `cancelled`, `interrupted`, or `unknown`; all other values map to `unknown` | P0 |
-
-Structured metadata is validated before aggregation and warning construction. Model IDs use a separate bounded grammar that preserves namespaces (including `org/model` and `@cf/vendor/model`) and exact rate keys, while rejecting filesystem, URL, whitespace/control, and credential shapes. Tool identifiers exclude prototype keys. Rejected model/tool values become fixed unknown labels; timestamps must parse as bounded ISO date-time forms. Private correlation IDs and ownership fingerprints remain inside the worker.
-| `transcript.snapshotWhileWorking` | `true` when the session was marked working at its last source observation; a retained observation does not establish current activity | P0 |
-| `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
 | `transcript.sourceDeleted` | Optional `true`: these are last-ingested facts whose source was removed; absent for current evidence and `--no-index` output. Prices/parser results are frozen at last ingest | P0 |
 | `transcript.startTimeKnown` | Optional false when the displayed creation date cannot establish a session start; bounded start-date filters exclude it | P0 |
+
+Structured metadata is validated before aggregation and warning construction. Model IDs use a separate bounded grammar that preserves namespaces (including `org/model` and `@cf/vendor/model`) and exact rate keys, while rejecting filesystem, URL, whitespace/control, and credential shapes. Tool identifiers exclude prototype keys. Rejected model/tool values become fixed unknown labels; timestamps must parse as bounded ISO date-time forms. Private correlation IDs and ownership fingerprints remain inside the worker.
 
 ### Session metrics (`SessionMetrics`)
 
@@ -541,7 +532,6 @@ These fields also appear in the existing JSON/API session projection when suppor
 The MCP worker returns `{analytics}`, the allowlisted machine snapshot above, to its parent over an anonymous pipe. It reads no skill directories or MCP-server configuration.
 
 The MCP wrapper contains standard JSON-RPC `jsonrpc`, caller-chosen `id` (protocol correlation only), `result` or `error`; errors use fixed `code`/`message` and, for unsupported versions, `data.supported`/`requested` protocol dates. Tool results contain `isError`, `content[].type`/`.text` (a fixed-template summary and serialized `McpPayload`), and `structuredContent` (the same payload). Modern results add `resultType` and `_meta.io.modelcontextprotocol/serverInfo`. Discovery/initialization contain only static product/version identifiers, protocol versions, tool capability declarations, instructions and catalog cache hints (`ttlMs`, `cacheScope`). `tools/list` returns static names/descriptions, JSON input schemas and read-only/idempotent/closed-world annotations. These are P0 and carry no local-history identifiers; caller request IDs are echoed as required by JSON-RPC, never used to query history.
-The dashboard stores view, theme, density and shortcut preferences in browser `localStorage`. No session data or time window is persisted in browser storage; the address bar carries the view, window and opaque repository ID for reload and Back/Forward. The separate local SQLite index is described above.
 
 ### Index management status (`IndexStatus`)
 
@@ -620,7 +610,7 @@ The HMAC key, alias-file lookup keys, snapshot/input/output paths, collector URL
 
 A private 32-byte random sharing key is the only new persistent secret. Its default location is `$XDG_STATE_HOME/session-analytics/sharing.key` or `~/.local/state/session-analytics/sharing.key`; an explicit file option/environment override is supported. It is created with mode 0600, never exported, and symlink/public-permission keys are rejected. Files are opened exclusively to prevent overwrite. Existing output directories should be private and user-controlled. CSV neutralizes spreadsheet formulas in text cells. Browser downloads use local Blobs, no upload endpoint and no extra browser storage.
 
-Only `export --format otlp-json --otlp-endpoint URL` can POST telemetry. It first saves the exact allowlisted payload locally. It requires HTTPS except loopback HTTP, rejects embedded credentials, does not follow redirects, and does not retry or print collector text. OTLP remains a P0/P1 **session-level** export, not the thresholded sharing format. It includes local pseudonymous session/repository keys and possibly model IDs. The CLI flag authorizes that delivery; normal analysis, sharing previews, merge, the dashboard, and file-only exports never send it. This is a deliberate exception to the default offline guarantee, not background telemetry.
+Only `export --format otlp-json --otlp-endpoint URL` can POST telemetry. It first saves the exact allowlisted payload locally. It requires HTTPS except loopback HTTP, rejects embedded credentials, does not follow redirects, and does not retry or print collector text. OTLP remains a P0/P1 **session-level** export, not the thresholded sharing format. It includes local pseudonymous session/repository keys and possibly model IDs. The CLI flag authorizes that delivery; normal analysis, sharing previews, merge, the dashboard, and file-only exports never send it. This is an explicit delivery boundary independent of pricing: dashboard startup refreshes stale fixed public price feeds unless `--offline` is set. Offline disables pricing requests, not an explicitly requested OTLP delivery.
 
 Shared totals always carry a CLI/dashboard caveat that they are observed lower bounds and may include running and partially parsed sessions. Pricing coverage does not establish evidence completeness. No new completeness flags, rare subgroup counts, or suppressed totals enter shared files. New fixed parser warnings cover omitted malformed metadata and cache-write totals reconciled from recorded TTL buckets.
 

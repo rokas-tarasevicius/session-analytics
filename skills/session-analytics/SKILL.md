@@ -1,13 +1,13 @@
 ---
 name: session-analytics
-description: Open a privacy-safe localhost dashboard, or print a terminal or JSON report, of machine-wide Claude Code, Codex, and Cursor session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, cost, tools, models, compactions, pricing coverage, or API-equivalent usage across repositories.
+description: Open a privacy-safe localhost dashboard, or print a terminal or JSON report, of machine-wide Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, cost, tools, models, compactions, pricing coverage, or API-equivalent usage across repositories.
 ---
 
 # Session analytics
 
 ## Contract
 
-Show content-free session analytics for every locally evidenced Claude Code, Codex, and Cursor session. Group sessions by repository, preserve pricing provenance, and never return transcript content, prompts, reasoning, tool arguments or results, commands, paths, credentials, or raw identifiers.
+Show content-free session analytics for every locally evidenced Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI session. Group sessions by repository, preserve pricing provenance, and never return transcript content, prompts, reasoning, tool arguments or results, commands, paths, credentials, or raw identifiers.
 
 ## Phase 1: launch it
 
@@ -37,6 +37,10 @@ The command reads standard local stores automatically:
 - Claude Desktop local agents: `~/Library/Application Support/Claude/local-agent-mode-sessions/`.
 - Codex: `~/.codex/sessions/` and `~/.codex/archived_sessions/`, every additional `~/.codex-*` profile, and `$CODEX_HOME`.
 - Cursor: `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` plus its workspace mappings.
+- Cursor SDK and activity-only transcripts: Conductor's `cursor-sdk-store` and `~/.cursor/projects/*/agent-transcripts`.
+- Copilot CLI: `~/.copilot/session-state/*/events.jsonl`.
+- OpenCode: `$XDG_DATA_HOME/opencode/opencode.db`, or `~/.local/share/opencode/opencode.db`.
+- Gemini CLI: `~/.gemini/tmp/*/chats/session-*.json` and `.jsonl`.
 - Optional Conductor enrichment: `~/Library/Application Support/com.conductor.app/conductor.db`.
 - Reproducible prices: `data/rate-cards.json` in the project.
 
@@ -49,7 +53,7 @@ The analyzer handles these patterns without manual agent work:
 1. Discover provider-owned active, archived, delegated, and IDE session evidence across every local profile.
 2. Assign sessions through validated working directories, workspace mappings, and canonical Git roots.
 3. Normalize provider schemas and deduplicate broadcast counters, streamed message snapshots, repeated messages, subagent traces, tools, and Cursor bubbles.
-4. Apply the versioned model rate card while keeping unknown models visible and Cursor provider-reported values separate.
+4. Apply dated cached public-feed snapshots and reviewed model rates while keeping unknown models visible and Cursor provider-reported values separate.
 5. Project only allowlisted counters into a read-only dashboard bound to `127.0.0.1`.
 
 Read the project's `docs/metrics.md` before changing a metric or rate, adding a public field, or making an interpretation beyond the dashboard labels.
@@ -73,5 +77,5 @@ After launching, report the dashboard URL, analyzed-session and repository count
 - Do not turn launch into a checklist or ask the user to run the command.
 - Do not run multiple discovery, preprocessing, report, and dashboard commands for the default flow.
 - Do not return transcript content, workspace paths, repository roots or remotes, raw session/provider IDs, tool inputs or results, commands, credentials, or raw local errors.
-- Do not require Conductor, scan unrelated directories, open a metadata database in write mode, bind to a LAN address, add CORS, or fetch live prices at launch.
+- Do not require Conductor, scan unrelated directories, open a metadata database in write mode, bind to a LAN address, or add CORS. Dashboard startup may refresh fixed public price feeds; use `--offline` to disable pricing requests.
 - Do not call API-equivalent usage an invoice or infer success, quality, root cause, or delivered value from activity counters.

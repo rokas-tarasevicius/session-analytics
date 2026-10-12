@@ -107,7 +107,7 @@ Tool names are useful for workload shape. Tool call counts do not prove useful w
 
 The [trajectory metrics research proposal](proposals/metrics-research.md) defines 20 candidate measures with formulas, concrete source fields, observed local coverage, confounders, privacy tiers, validation plans and UI wording. Its companion [normalized event proposal](proposals/schema-v2.md) specifies joins and missing-data semantics. These are research designs, not additional current metrics or a change to the definitions above. Their thresholds are experimental; activity and sequence flags do not establish outcomes.
 
-## Other useful derived indicators
+### Candidate indicators
 
 These can be added without reading content, provided they are labeled as indicators:
 
@@ -163,7 +163,7 @@ New sources populate the optional `evidence` namespace. `source` identifies the 
 
 New activity-only sessions have `costBasis: unavailable`, `costComplete: false`, and `pricedTokenCoverage: null`. They do not become sessions “with an unpriced model.” Conductor API coverage is likewise N/A; `costComplete` requires supported, non-conflicting accounting boundaries and reported cost for every selected snapshot. It never proves complete historical retention. Numeric summary fields remain backward compatible. Evidence counts describe observations, never work quality, success, or value delivered.
 
-The `gpt-5.3-codex-spark` entry uses zero rates because the provider documents the model as a research preview available through a subscription workflow rather than a separately metered API model. Zero here means “no observable API-equivalent charge,” not a claim that the subscription is free.
+`gpt-5.3-codex-spark` has no verified bundled API tariff and remains visibly unpriced, including when a public feed reports zero rates. A subscription preview does not establish a zero-dollar API-equivalent charge; an explicit custom rate card can supply a tariff.
 
 For OpenAI Codex transcripts, cached input is observable but cache writes are not separately identified in the cumulative usage counter. The ordinary estimate prices uncached input at the base rate. The upper estimate applies the configured cache-write premium to every uncached input token. The API-equivalent value should fall between those values when no other pricing modifier applies; neither value proves a subscription invoice or cash charge.
 
@@ -414,7 +414,7 @@ Model/repository charts show the largest seven series plus an exact Other remain
 provider, execution and effort charts retain every evidenced group. This cap changes only
 presentation, never totals. All chart modes share a text readout, pointer inspection, and
 one keyboard focus stop with Left/Right, Home/End navigation.
-All 16 supported agents have fixed identity slots: eight theme-aware colors, each with
+All 19 supported agent categories have fixed identity slots: eight theme-aware colors, each with
 solid/diagonal area fills or solid/dashed lines. Legends reproduce the actual SVG encoding.
 Agent colors and patterns do not change when date/provider filters change spend rankings.
 
@@ -563,7 +563,7 @@ Every `McpRatio` includes `numerator`, `denominator`, `minimumDenominator`, `val
 
 `mcpEvidence.activityState` is an enum derived from recorded lifecycle events. Codex task starts, user-message events/items and tool calls indicate active work; `task_complete`/`turn_aborted` settle the recorded turn. Token broadcasts never establish liveness. Claude user/assistant activity is active until `message.stop_reason: end_turn` or a system `turn_duration` record, tracked independently for main and subagent files by timestamp. Every included file must settle; any active file excludes the composite session. A Conductor `working` flag overrides settled evidence. Missing lifecycle evidence, malformed records, or untimed transitions cannot establish settled state. Cursor currently has unknown lifecycle evidence and its typical-session distributions remain unavailable. Settled describes the last recorded turn, not success, permanent completion, or live process status; a later start makes the next snapshot active again. Standalone discovery's default `idle` is never settlement evidence.
 
-`cacheHitRate` divides cache reads by processed input for Claude/Codex only. `compactionsPerSession` divides their compactions by their valid-transcript session count; Cursor's missing evidence is never a zero compaction rate. `toolMix` is a descending `{name,calls}` counter capped at 20, with `omittedTools`. `compare_agents.agents[]` always contains Claude, Codex and Cursor totals/profiles under identical repository/window selection. It neither normalizes task mix nor ranks quality. Session length includes idle time and needs a same-repository/task baseline.
+`cacheHitRate` divides cache reads by processed input for Claude/Codex only. `compactionsPerSession` divides their compactions by their valid-transcript session count; Cursor's missing evidence is never a zero compaction rate. `toolMix` is a descending `{name,calls}` counter capped at 20, with `omittedTools`. `compare_agents.agents[]` always contains `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported` totals/profiles under identical repository/window selection. It neither normalizes task mix nor ranks quality. Session length includes idle time and needs a same-repository/task baseline.
 
 ### Tool statistics
 
@@ -646,7 +646,7 @@ Repository grouping canonicalizes existing symlinks, resolves Git `commondir`, a
 
 Velocity pricing coverage sums the exact count of explicitly priced token classes. Partial receipts and activity-only sessions are not missing-price sessions; `unpricedSessions` counts positive observed token denominators with nonnull coverage below one. `cacheReadRatio` is null when its input denominator is zero. Saved v1 snapshots with the independently reproducible v0.6.0 coverage/live-count formulas normalize those derived fields on import; session evidence and all other accounting consistency checks remain required.
 
-Summary's daily chart, usage-value KPI (with its sparkline and delta), sidebar repository values and repository value bars use the same local activity-day ledger as Velocity; the other Summary KPIs are labeled session-start cohorts. Models exposes any unallocated value or token balance without inventing a model identity. Unknown starts never contribute Activity heatmap starts. Source-deleted and unavailable historical observations stay outside live counts in filtered exports.
+Summary's daily chart, usage-value KPI (with its sparkline and delta), sidebar repository values and repository value bars use the same local activity-day ledger as Velocity; the other Summary KPIs are labeled session-start cohorts. Costs exposes any unallocated value or token balance without inventing a model identity. Unknown starts never contribute Activity heatmap starts. Source-deleted and unavailable historical observations stay outside live counts in filtered exports.
 
 ### v0.6.1 receipt and pricing corrections
 
