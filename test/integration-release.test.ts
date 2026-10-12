@@ -32,13 +32,13 @@ test("release: CI gates run on both platforms with independent advisory browser 
   const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const [check, browser] = workflow.split("\n  browser:\n");
   assert.ok(check && browser);
-  assert.match(check, /os: \[ubuntu-latest, macos-latest\]/);
+  assert.match(check, /os: \$\{\{ github\.event_name == 'pull_request' && fromJSON\('\["ubuntu-latest"\]'\) \|\| fromJSON\('\["ubuntu-latest","macos-latest"\]'\) \}\}/);
   assert.match(check, /permissions:\n  contents: read/);
   assert.match(check, /concurrency:\n  group: ci-.*\n  cancel-in-progress: true/);
   const commands = ["npm run check", "node scripts/snapshot-schema.ts --check", 'node scripts/demo.ts report --json | node -e \'JSON.parse(require("fs").readFileSync(0, "utf8"))\'', "npm pack --dry-run"];
   const runs = [...check.matchAll(/^        run: (.+)$/gm)].map((match) => match[1]);
   assert.deepEqual(runs, ["npm ci", ...commands]);
-  assert.match(browser, /runs-on: macos-latest\n    continue-on-error: true/);
+  assert.match(browser, /if: github\.event_name != 'pull_request'\n    runs-on: macos-latest\n    continue-on-error: true/);
   assert.doesNotMatch(workflow, /\bneeds:/);
   assert.match(browser, /run: node --test test\/dashboard\.browser\.test\.ts/);
   for (const job of [check, browser]) {
