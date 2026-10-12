@@ -111,7 +111,7 @@ Public pricing fetches belong only in `src/pricing/`; analysis stays network-fre
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time.
 
-Pushing a `vX.Y.Z` tag runs the release workflow on Ubuntu: it installs development dependencies, runs `npm run check`, and creates a GitHub Release using the matching `## [X.Y.Z]` section from `CHANGELOG.md`. A missing section fails the workflow.
+Pushing a `vX.Y.Z` tag runs the release workflow on the self-hosted `agentbox` runner: it installs development dependencies, runs `npm run check`, and creates a GitHub Release through the REST API using the matching `## [X.Y.Z]` section from `CHANGELOG.md`. A missing section fails the workflow. The GitHub-hosted macOS leg of CI is advisory until the account's hosted minutes are restored.
 
 ## Style
 

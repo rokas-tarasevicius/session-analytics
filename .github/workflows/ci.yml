@@ -17,6 +17,9 @@ jobs:
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # GitHub-hosted macOS minutes are blocked until the account's spending limit is restored; that leg is advisory so a
+    # push to master is judged by the self-hosted Linux check. Make it blocking again once hosted jobs start.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
