@@ -8,7 +8,6 @@
 #velocity-view .panel-meta { white-space: normal; overflow-wrap: anywhere; }
 .velocity-chart { min-width: 0; }
 .velocity-chart > svg { display: block; width: 100%; height: auto; max-height: none; touch-action: pan-y; }
-.velocity-chart svg:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: var(--radius-sm); }
 .velocity-line { stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .velocity-area { stroke-width: 1; fill-opacity: .55; stroke-linejoin: round; }
 .velocity-average { fill: none; stroke: var(--text); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }

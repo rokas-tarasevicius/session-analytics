@@ -454,3 +454,36 @@ test("Summary, Velocity and Tools share axis labels while money totals retain ce
   run("renderSharedView(activeView())");
   assert.match(document.querySelector("#scope-description")!.textContent, /America\/Los_Angeles/);
 });
+
+test("refresh status says Refreshing… for full, shared and first-load retries", async () => {
+  for (const mode of ["full", "shared", "retry"]) {
+    const { context, document, run } = await harness([sample()]);
+    if (mode !== "full") run(`snapshot = null; sharedSnapshot = ${mode === "shared" ? "{ kind: 'shared' }" : "null"}`);
+    let reject!: (error: Error) => void;
+    context["fetch"] = () => new Promise((_resolve, rejectRequest) => { reject = rejectRequest; });
+    const pending = run("loadSnapshot(true)");
+    assert.equal(document.querySelector("#sync-label")!.textContent, "Refreshing…", mode);
+    assert.equal(document.querySelector("#sync-context")!.dataset["state"], "loading");
+    reject(new TypeError("Failed to fetch"));
+    await pending;
+    assert.notEqual(document.querySelector("#sync-label")!.textContent, "Refreshing…");
+    assert.equal(document.querySelector("#refresh-button")!.disabled, false);
+  }
+});
+
+test("range adjustments and unavailable KPI reasons are visible without hovering", async () => {
+  const { context, document, run } = await harness([]);
+  context["sampleWithoutLedger"] = sample();
+  context["sampleWithLedger"] = withLedger(sample(), [["synthetic", 3]]);
+  run("showWindowNote(['clamped', 'swapped'])");
+  const note = document.querySelector("#window-note")!;
+  assert.equal(note.getAttribute("title"), null);
+  assert.equal(note.querySelector(".sr-only"), null);
+  assert.match(note.textContent, /Adjusted to the observed history.*dates were swapped/);
+  run("setValue(elements.spend, 0, { eligible: 0, selected: 1 }, money, { reason: 'No activity dates in this selection', slot: elements.spendCoverage })");
+  assert.equal(document.querySelector("#metric-spend-coverage")!.textContent, "No activity dates in this selection");
+  run("fixture.sessions = [sampleWithoutLedger]; sessionsByRepository = groupByRepository(fixture.sessions); renderSummary(activeView()); renderCosts(activeView())");
+  for (const id of ["metric-spend-coverage", "cost-total-coverage", "cost-api-total-coverage", "cost-provider-total-coverage"]) assert.equal(document.querySelector(`#${id}`)!.textContent, "No session in this selection has activity dates", id);
+  run("fixture.sessions = [sampleWithLedger]; sessionsByRepository = groupByRepository(fixture.sessions); renderSummary(activeView()); renderCosts(activeView())");
+  for (const id of ["metric-spend-coverage", "cost-total-coverage", "cost-api-total-coverage", "cost-provider-total-coverage"]) assert.equal(document.querySelector(`#${id}`)!.textContent, "", `${id}: available figures clear the reason`);
+});

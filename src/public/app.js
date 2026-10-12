@@ -129,7 +129,7 @@ function svgNode(tag, attributes = {}) {
   return element;
 }
 
-/** KPI values stay bare numbers; coverage lives in the badge slot and the tooltip, an unavailable value is an em dash with its reason. */
+/** KPI values stay bare numbers; coverage lives in the fraction slot, and an unavailable value is an em dash with a visible reason. */
 function renderMetricValue(element, value, coverage, format, what = "evidence", slot = null) {
   setValue(element, value, coverage, format, { slot, what });
 }
@@ -667,10 +667,10 @@ function renderCosts(view) {
   const range = velocityContext(), ledger = ledgerMoney(view.scopeSessions, range);
   const unavailable = ledgerAvailability(view.scopeSessions).eligible === 0;
   const reason = { reason: "No session in this selection has activity dates" };
-  setValue(elements.costTotal, ledger.total, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
-  setValue(elements.costApiTotal, ledger.api, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
-  setValue(elements.costProviderTotal, ledger.reported, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, reason);
-  for (const [slot, badge] of [[elements.costTotalCoverage, pricedBadge(ledger.evidence)], [elements.costApiCoverage, null], [elements.costProviderCoverage, null]]) { clear(slot); if (badge && !unavailable) slot.append(badge); }
+  setValue(elements.costTotal, ledger.total, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costTotalCoverage });
+  setValue(elements.costApiTotal, ledger.api, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costApiCoverage });
+  setValue(elements.costProviderTotal, ledger.reported, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costProviderCoverage });
+  for (const [slot, badge] of [[elements.costTotalCoverage, pricedBadge(ledger.evidence)], [elements.costApiCoverage, null], [elements.costProviderCoverage, null]]) { if (badge && !unavailable) slot.append(badge); }
   elements.costApiNote.textContent = ledger.upper > ledger.api + 0.005 ? `Upper estimate ${money(ledger.upper)} with the cache-write assumption` : "Rate-card priced usage";
   elements.costCoverage.textContent = pricedPercent(ledger.evidence) === "N/A" ? DASH : pricedPercent(ledger.evidence);
   elements.costCoverageNote.textContent = ledger.evidence.eligible > 0 ? `${compact(ledger.evidence.known)} of ${compact(ledger.evidence.eligible)} eligible tokens priced` : "No eligible tokens in this window";
@@ -1035,8 +1035,8 @@ function renderSummary(view) {
   const previousActivity = previous ? buildVelocity(view.scopeSessions, { start: previous.startDay, end: previous.endDay, metric: "value" }) : null;
   const spendComparison = previousActivity ? comparePeriods(periodFromVelocity(activity), periodFromVelocity(previousActivity), "value", { missingSessions: activity.missingSessions }) : null;
   const unavailable = ledgerAvailability(view.scopeSessions).eligible === 0;
-  setValue(elements.spend, activity.totals[0], unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { reason: "No session in this selection has activity dates" });
   clear(elements.spendCoverage);
+  setValue(elements.spend, activity.totals[0], unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { reason: "No session in this selection has activity dates", slot: elements.spendCoverage });
   if (!unavailable && activity.missingSessions) {
     const badge = node("small", "partial", "coverage");
     badge.title = `${activity.missingSessions} session${activity.missingSessions === 1 ? "" : "s"} need a refresh to collect activity dates`;
@@ -1182,24 +1182,16 @@ const windowNoteText = {
   swapped: "Start was after end, so the dates were swapped.",
 };
 
-/**
- * Says inline how a custom range was adjusted: a short visible word beside the dates, with the full sentence in the
- * tooltip and for screen readers. Hidden when nothing changed.
- */
+/** Says inline how a custom range was adjusted; hidden when nothing changed. */
 function showWindowNote(adjusted) {
   const target = elements.windowNote;
   if (!target) return;
   const notes = adjusted.map((reason) => reason === "clamped"
     ? `Adjusted to the observed history, ${elements.windowStart.min} to ${elements.windowEnd.max}.`
     : windowNoteText[reason]).filter(Boolean);
-  clear(target);
+  target.textContent = notes.join(" ");
   target.hidden = !notes.length;
-  if (!notes.length) { target.removeAttribute("title"); return; }
-  const sentence = notes.join(" ");
-  const label = node("span", adjusted.includes("swapped") && adjusted.length === 1 ? "Swapped" : adjusted.includes("swapped") ? "Swapped · adjusted" : "Adjusted");
-  label.setAttribute("aria-hidden", "true");
-  target.append(label, node("span", sentence, "sr-only"));
-  target.setAttribute("title", sentence);
+  target.removeAttribute("title");
 }
 
 function observedRange() {
@@ -1527,7 +1519,7 @@ function markStale(stale) {
   elements.generated.textContent = stale ? `${dateTime(snapshot.generatedAt, snapshotTimeZone())} · stale` : dateTime(snapshot.generatedAt, snapshotTimeZone());
   if (stale) {
     elements.generated.dataset.stale = "true";
-    elements.generated.title = "The latest refresh failed; these figures come from this earlier snapshot.";
+    elements.generated.removeAttribute("title");
   } else {
     delete elements.generated.dataset.stale;
     elements.generated.removeAttribute("title");
@@ -1568,7 +1560,7 @@ async function loadSnapshot(refresh = false) {
   resetExportMenu();
   const previous = snapshot ?? sharedSnapshot;
   hideError();
-  elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous ? "Refreshing local snapshot" : "Mapping local sessions"; elements.refresh.disabled = true;
+  elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
   elements.main.dataset.state = previous ? "refreshing" : "loading";
   if (!previous) {
     loadFailed = false; renderViewStatus(null); showActivePanel();

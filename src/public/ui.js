@@ -61,12 +61,11 @@ export function el(tag, text, className) {
 
 export const note = (text, className = "chart-note") => el("p", text, className);
 
-/** "87/116" badge with the full sentence for screen readers and in the tooltip; null when every selected session is covered. */
+/** "87/116" badge with the full sentence for screen readers; null when every selected session is covered. */
 export function coverageBadge(coverage, what = "evidence") {
   if (!coverage || !coverage.selected || coverage.eligible >= coverage.selected) return null;
   const badge = el("small", null, "coverage");
   const description = `${coverage.eligible} of ${coverage.selected} selected sessions provide ${what}`;
-  badge.setAttribute("title", description);
   const fraction = el("span", `${coverage.eligible}/${coverage.selected}`); fraction.setAttribute("aria-hidden", "true");
   badge.append(fraction, el("span", description, "sr-only"));
   return badge;
@@ -81,7 +80,7 @@ export function setValue(target, value, coverage, format, { what = "evidence", r
   else { target.title = unavailable; target.setAttribute("aria-label", unavailable); }
   if (slot) {
     slot.replaceChildren();
-    if (!eligible) { const selected = coverage?.selected ?? 0; slot.textContent = `No ${what} in ${selected} selected ${selected === 1 ? "session" : "sessions"}`; slot.className = "kpi-coverage kpi-reason"; }
+    if (!eligible) { const selected = coverage?.selected ?? 0; slot.textContent = reason ?? `No ${what} in ${selected} selected ${selected === 1 ? "session" : "sessions"}`; slot.className = "kpi-coverage kpi-reason"; }
     else { slot.className = "kpi-coverage"; const badge = coverageBadge(coverage, what); if (badge) slot.append(badge); }
   }
   return eligible;
