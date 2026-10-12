@@ -1,3 +1,4 @@
+import { compact, integer } from '../../src/public/format.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
@@ -23,7 +24,7 @@ test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch
   const status = new Element();
   const render = productionFunction('renderActivity', {
     elements, normalizeTimestamp, activityGrid, heatLegend, heatLevel, renderProviderEmptyState: () => false,
-    document: { querySelector: (selector: string) => selector === '#activity-heatmap-key' ? key : status }, integer: new Intl.NumberFormat('en'), snapshotTimeZone: () => 'UTC',
+    document: { querySelector: (selector: string) => selector === '#activity-heatmap-key' ? key : status }, integer, snapshotTimeZone: () => 'UTC',
     $: () => evidence, renderViewProviderFilters() {}, sessionsForProviders: (s: unknown) => s,
     node: (tag: string, text?: string, cls?: string) => { const e = new Element(tag); e.textContent=text??'';e.className=cls??'';return e; },
     clear: (e: Element) => e.replaceChildren(), renderBars() {},
@@ -57,7 +58,7 @@ test('time-ui: priced-value KPI and sparkline follow activity dates like Velocit
     ...ui, ...velocityData, elements, snapshot: {}, $:lookup, windowDays:()=>['2026-09-01'], windowPreset:'all',
     velocityContext:()=>({start:'2026-09-01',end:'2026-09-01',timeZone:'Europe/London'}),repositorySessions:()=>[],spendDelta:()=>null,
     node:(tag:string,text?:string)=>{const e=new Element(tag);e.textContent=text??'';return e;},clear:(e:Element)=>e.replaceChildren(),
-    renderHistoryCoverage(){},renderMetricValue(){},coveredValue:()=>'',money:(v:number)=>`$${v.toFixed(2)}`,percent:String,integer:new Intl.NumberFormat('en'),compact:new Intl.NumberFormat('en'),
+    renderHistoryCoverage(){},renderMetricValue(){},coveredValue:()=>'',money:(v:number)=>`$${v.toFixed(2)}`,percent:String,integer,compact,
     dailyCountSeries,dailySpendSeries,renderDelta(){},renderSparkline:(e:Element,values:number[],_days:string[],options:{label:string})=>{const key=Object.entries(elementMap).find(([,v])=>v===e)![0];series[key]=values;labels[key]=options.label;},
     renderLine(){},dailyProviderSpend(){},renderDonut(){},renderBars(){},renderRepositoryTable(){},renderWarnings(){},renderProviderEvidence(){},selectRepository(){},
     pricedBadge:()=>null,executionBreakdown:()=>'',subagentValue:()=>0,ledgerAvailability,ledgerMoney:()=>({models:[]}),

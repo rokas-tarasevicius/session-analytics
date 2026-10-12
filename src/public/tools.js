@@ -1,19 +1,18 @@
+import { decimal, dayLabel, integer, percent as formatPercent, toolDayLabel } from "./format.js";
 import { providerColor } from "./chart-colors.js";
 import { barPercent } from "./chart-scale.js";
 import { buildToolsView, toolProfile } from "./tools-data.js";
 import { providerMark } from "./providers.js";
 import { DASH, coverageBadge, dataTable, el, evidence, kpi, note } from "./ui.js";
 
-const integer = new Intl.NumberFormat("en", { maximumFractionDigits: 0 });
-const decimal = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
-const percent = (share) => `${decimal.format(share * 100)}%`;
-const calls = (count) => `${integer.format(count)} ${count === 1 ? "call" : "calls"}`;
+const percent = (share) => formatPercent(share, 1, 0);
+const calls = (count) => `${integer(count)} ${count === 1 ? "call" : "calls"}`;
 /** Signs follow the rounded value, so a change that rounds to 0% never reads as "+0%" or "−0%". */
 export function changeLabel(change) {
   if (change === null || change === undefined) return DASH;
   if (change === "new") return "new";
   const rounded = Math.round(Math.abs(change) * 100);
-  return `${rounded === 0 ? "" : change > 0 ? "+" : "−"}${integer.format(rounded)}%`;
+  return `${rounded === 0 ? "" : change > 0 ? "+" : "−"}${integer(rounded)}%`;
 }
 
 function panel(kicker, title, id) {
@@ -40,7 +39,7 @@ function breakdown(title, items, total) {
   const list = el("div", null, "bar-list");
   for (const item of items) {
     const row = el("div", null, "bar-row"), label = el("div", null, "bar-label");
-    label.append(el("span", item.name), el("strong", `${integer.format(item.calls)} · ${percent(item.calls / total)}`));
+    label.append(el("span", item.name), el("strong", `${integer(item.calls)} · ${percent(item.calls / total)}`));
     row.append(label, bar(item.calls, total, `${item.name}: ${calls(item.calls)}, ${percent(item.calls / total)} of this tool’s calls`, item.provider ? providerColor(item.provider) : null));
     list.append(row);
   }
@@ -71,7 +70,7 @@ function providerSplit(profile) {
   if (profile.byProvider.length !== 1) return breakdown("By provider", profile.byProvider.map((row) => ({ name: row.label, calls: row.calls, provider: row.provider })), profile.calls);
   const section = el("section", null, "tools-breakdown"), sentence = el("p", null, "tools-provider-sentence");
   const provider = profile.byProvider[0];
-  sentence.append(providerMark(provider.provider), el("span", `All ${integer.format(profile.calls)} calls came from ${provider.label}.`));
+  sentence.append(providerMark(provider.provider), el("span", `All ${integer(profile.calls)} calls came from ${provider.label}.`));
   section.append(el("h4", "By provider"), sentence); return section;
 }
 
@@ -80,8 +79,8 @@ function trend(profile, timeZone = "UTC") {
   section.append(el("h4", "Calls by session-start day"));
   const days = profile.byDay;
   const exclusions = [];
-  if (profile.outsideDaysCalls) exclusions.push(note(`${integer.format(profile.outsideDaysCalls)} calls fall outside the plotted days; totals above include them.`));
-  if (profile.undatedCalls) exclusions.push(note(`${integer.format(profile.undatedCalls)} calls have no known session-start day and are excluded from the chart.`));
+  if (profile.outsideDaysCalls) exclusions.push(note(`${integer(profile.outsideDaysCalls)} calls fall outside the plotted days; totals above include them.`));
+  if (profile.undatedCalls) exclusions.push(note(`${integer(profile.undatedCalls)} calls have no known session-start day and are excluded from the chart.`));
   if (!days.length || !days.some((row) => row.coverage.eligible > 0)) {
     section.append(note(`${DASH} ${days.length ? "No tool evidence on known session-start days in this range." : "No known session-start days in this selection."}`, "empty-line"), ...exclusions);
     return section;
@@ -89,17 +88,16 @@ function trend(profile, timeZone = "UTC") {
   const peak = days.reduce((best, row) => row.calls > best.calls ? row : best, days[0]);
   const total = days.reduce((sum, row) => sum + row.calls, 0);
   const missing = days.filter((row) => row.coverage.selected > 0 && !row.coverage.eligible).length;
-  const suffix = `${peak.calls ? `peak ${integer.format(peak.calls)} on ${peak.day}` : "no dated calls in this range"} · baseline 0 · ${timeZone}`;
-  const description = `${profile.name}: ${integer.format(total)} calls plotted from ${days[0].day} to ${days.at(-1).day}. ${suffix}.${missing ? ` ${missing} days have session starts but no tool evidence; these are unavailable, not zero.` : ""}`;
+  const suffix = `${peak.calls ? `peak ${integer(peak.calls)} on ${peak.day}` : "no dated calls in this range"} · baseline 0 · ${timeZone}`;
+  const description = `${profile.name}: ${integer(total)} calls plotted from ${days[0].day} to ${days.at(-1).day}. ${suffix}.${missing ? ` ${missing} days have session starts but no tool evidence; these are unavailable, not zero.` : ""}`;
   const plot = el("div", null, "tools-trend-plot"), labels = el("div", null, "tools-trend-labels");
-  labels.setAttribute("aria-hidden", "true"); labels.append(el("span", integer.format(peak.calls)), el("span", "0"));
+  labels.setAttribute("aria-hidden", "true"); labels.append(el("span", integer(peak.calls)), el("span", "0"));
   const scroll = el("div", null, "tools-trend-scroll"), chart = el("div", null, "tools-columns");
   const tooltip = el("div", null, "tools-tooltip"); tooltip.setAttribute("role", "tooltip"); tooltip.hidden = true;
   chart.setAttribute("role", "group"); chart.setAttribute("aria-label", description);
   chart.style.setProperty("grid-template-columns", `repeat(${days.length}, minmax(2px, 1fr))`);
   chart.style.setProperty("min-width", `${days.length * 3}px`);
   const columns = [];
-  const dayFormat = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   for (const [index, row] of days.entries()) {
     const column = el("div", null, "tools-column"), fill = el("i");
     const unavailable = row.coverage.selected > 0 && !row.coverage.eligible;
@@ -107,7 +105,7 @@ function trend(profile, timeZone = "UTC") {
     column.setAttribute("aria-label", `${row.day}: ${unavailable ? `${DASH} no tool evidence` : calls(row.calls)}${row.coverage.selected ? ` (${row.coverage.eligible}/${row.coverage.selected} sessions carry tool evidence)` : " (no session starts)"}`);
     column.setAttribute("tabindex", index === days.length - 1 ? "0" : "-1");
     const showTooltip = () => {
-      tooltip.replaceChildren(el("strong", dayFormat.format(new Date(`${row.day}T00:00:00Z`))),
+      tooltip.replaceChildren(el("strong", toolDayLabel(row.day)),
         el("span", unavailable ? `${DASH} no tool evidence` : calls(row.calls)),
         el("span", row.coverage.selected ? `${row.coverage.eligible} of ${row.coverage.selected} sessions carry tool evidence` : "No session starts"));
       tooltip.hidden = false; tooltip.dataset.side = "above";
@@ -140,8 +138,8 @@ function trend(profile, timeZone = "UTC") {
   }
   scroll.append(chart); plot.append(labels, scroll); section.append(plot, tooltip);
   const axis = el("div", null, "tools-trend-axis");
-  axis.append(el("span", days[0].day), el("span", days.at(-1).day)); section.append(axis);
-  section.append(note(`${integer.format(total)} calls plotted · ${suffix}`));
+  axis.append(el("span", dayLabel(days[0].day)), el("span", dayLabel(days.at(-1).day))); section.append(axis);
+  section.append(note(`${integer(total)} calls plotted · ${suffix}`));
   if (missing) section.append(note(`${missing} days have sessions without tool evidence; their counts are ${DASH}.`));
   section.append(...exclusions);
   return section;
@@ -158,11 +156,11 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   const reason = "No selected sessions carry tool evidence";
   const cards = el("div", null, "kpi-grid compact-metrics tools-metrics");
   cards.append(
-    kpi({ label: "Tool calls", value: available ? integer.format(data.totalCalls) : null, reason,
+    kpi({ label: "Tool calls", value: available ? integer(data.totalCalls) : null, reason,
       coverage: data.coverage, what: "tool evidence",
       note: !available ? null : data.smallBaseline ? `Previous window too small to compare (${calls(data.previousCalls)})` : data.change === null ? "Effective calls in this selection" : `${changeLabel(data.change)} vs previous window` }),
-    kpi({ label: "Distinct tools", value: available ? integer.format(data.distinctTools) : null, reason, note: "Structured tool-call names" }),
-    kpi({ label: "Calls per session", value: available ? decimal.format(data.callsPerSession) : null, reason, note: "Across sessions with tool evidence" }),
+    kpi({ label: "Distinct tools", value: available ? integer(data.distinctTools) : null, reason, note: "Structured tool-call names" }),
+    kpi({ label: "Calls per session", value: available ? decimal(data.callsPerSession) : null, reason, note: "Across sessions with tool evidence" }),
     kpi({ label: "Most used tool", value: top?.name ?? null, reason: available ? "No recorded tool calls" : reason,
       note: top ? `${percent(top.share)} of calls · ${top.providers.map(({ label }) => label).join(", ")}` : null }),
   );
@@ -188,20 +186,20 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
       }
     });
     const callsBar = el("div", null, "tools-calls");
-    callsBar.append(el("span", integer.format(tool.calls)), bar(tool.calls, top.calls, `${tool.name}: ${calls(tool.calls)}; scale 0 to ${integer.format(top.calls)}`));
+    callsBar.append(el("span", integer(tool.calls)), bar(tool.calls, top.calls, `${tool.name}: ${calls(tool.calls)}; scale 0 to ${integer(top.calls)}`));
     const callsCell = labelledCell("Calls", null); callsCell.append(callsBar);
     const change = labelledCell("Change", null); change.append(el("span", changeLabel(tool.change), tool.change === "new" ? "tools-change-word" : null));
     if (tool.smallBaseline) {
       change.append(el("small", "small baseline", "tools-change-detail"));
       change.setAttribute("title", `Previous window: ${calls(tool.previousCalls)}, below the 5-call minimum for a percentage`);
     }
-    return [button, providerCell(tool.providers), callsCell, labelledCell("Share", percent(tool.share)), labelledCell("Sessions", integer.format(tool.sessions)), labelledCell("Repositories", integer.format(tool.repositories)), change];
+    return [button, providerCell(tool.providers), callsCell, labelledCell("Share", percent(tool.share)), labelledCell("Sessions", integer(tool.sessions)), labelledCell("Repositories", integer(tool.repositories)), change];
   });
   ranking.result.append(dataTable(["Tool", { text: "Provider", align: "left" }, "Calls", "Share", "Sessions", "Repositories", "Change"], rows,
     { rowHeader: true, className: "tools-ranking", caption: "Tools ranked by effective calls in the selected window",
       empty: available ? "No recorded tool calls in the selected sessions." : `${DASH} ${reason}.` }));
   if (data.tools.length > 12) {
-    const toggle = el("button", expanded ? "Show fewer" : `Show all ${integer.format(data.tools.length)} tools`, "button tools-toggle");
+    const toggle = el("button", expanded ? "Show fewer" : `Show all ${integer(data.tools.length)} tools`, "button tools-toggle");
     toggle.setAttribute("type", "button"); toggle.dataset.focusKey = "tools:toggle";
     toggle.setAttribute("aria-expanded", String(expanded));
     toggle.addEventListener("click", onToggle); ranking.result.append(toggle);
@@ -214,9 +212,9 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
     const repositoryNames = new Map(repositories.map(({ repository }) => [repository.id, repository.name]));
     const profile = toolProfile(sessions, selected.name, { days, repositoryNames, timeZone });
     const stats = el("dl", null, "tools-profile-stats");
-    for (const [label, value] of [["Calls", integer.format(profile.calls)], ["Share of calls", percent(profile.share)],
-      ["Sessions using it", integer.format(profile.sessions)], ["Repositories", integer.format(profile.repositories)],
-      ["Calls per session using it", decimal.format(profile.callsPerSession)]]) {
+    for (const [label, value] of [["Calls", integer(profile.calls)], ["Share of calls", percent(profile.share)],
+      ["Sessions using it", integer(profile.sessions)], ["Repositories", integer(profile.repositories)],
+      ["Calls per session using it", decimal(profile.callsPerSession)]]) {
       const stat = el("div"); stat.append(el("dt", label), el("dd", value)); stats.append(stat);
     }
     profilePanel.result.append(stats, trend(profile, timeZone));

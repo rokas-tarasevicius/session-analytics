@@ -111,7 +111,7 @@ test("an export download rejects a selection changed since its preview", async (
   assert.ok(menu.querySelectorAll("[data-export]").every((button) => button.disabled));
 });
 
-test("refresh failure composes a sentence", async () => {
+test("refresh failure composes a sentence with snapshot timezone labels to agree across views", async () => {
   const { context, document, run } = await harness([sample()]);
   assert.equal(run("describeLoadError(new TypeError('Failed to fetch'))"), "The local server did not answer (Failed to fetch).");
   assert.equal(run("describeLoadError(new TypeError('Failed to fetch.'))"), "The local server did not answer (Failed to fetch).");
@@ -120,9 +120,9 @@ test("refresh failure composes a sentence", async () => {
   await run("loadSnapshot(true)");
   assert.equal(document.querySelector("#error-banner")!.dataset["tone"], "warn");
   assert.equal(document.querySelector("#error-title")!.textContent, "Couldn't refresh");
-  assert.equal(document.querySelector("#error-message")!.textContent, run("'The local server did not answer (Failed to fetch). You are looking at the snapshot from ' + dateTime(snapshot.generatedAt) + '.'"));
+  assert.equal(document.querySelector("#error-message")!.textContent, "The local server did not answer (Failed to fetch). You are looking at the snapshot from 3 Oct 2026, 13:00.");
   assert.match(document.querySelector("#generated-at")!.textContent, / · stale$/);
-  assert.match(document.querySelector("#sync-label")!.textContent, /^Stale · /);
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Stale · 13:00");
   assert.equal(document.querySelector("#error-retry")!.hidden, false);
   context["fetch"] = async () => ({ ok: false, status: 500, json: async () => ({ error: "Analysis failed." }) });
   await run("loadSnapshot(true)");
@@ -204,14 +204,14 @@ test("custom windows keep a cleared bound, swap a reversed range and clamp to th
   assert.equal(note.hidden, true);
 });
 
-test("a window without sessions or activity routes to the empty state and offers a wider window", async () => {
+test("a window without sessions or activity offers a wider window with shared date labels to agree across views", async () => {
   const session = sample();
   const { document, run } = await harness([session]);
   run("resetExportMenu = () => {}; applyWindowPreset('custom', { render: false }); applyCustomRange('2026-09-05', '2026-09-06')");
   const status = document.querySelector("#view-status")!;
   assert.equal(run("windowEmpty"), true);
   assert.equal(status.hidden, false);
-  assert.match(status.textContent, /No sessions started or were active during 2026-09-05 through 2026-09-06/);
+  assert.match(status.textContent, /No sessions started or were active during 5 Sept – 6 Sept 2026/);
   assert.equal(document.querySelector('[data-view-panel="summary"]')!.hidden, true);
   const action = status.querySelectorAll("button").find((button) => button.textContent.trim() === "Show all time")!;
   action.listeners.get("click")!();
@@ -430,4 +430,27 @@ test("refreshes share one in-flight request and start again once it settles", as
   await assert.rejects(failing(), /analysis failed/);
   await assert.rejects(failing(), /analysis failed/);
   assert.equal(calls, 4, "a rejected load does not block the next attempt");
+});
+
+test("Summary, Velocity and Tools share axis labels while money totals retain cents", async () => {
+  const session = withLedger(sample(), [["model-synthetic", 120]], { day: "2026-09-13" });
+  session.createdAt = "2026-09-13T12:00:00Z";
+  session.evidence!.tools = "observed"; session.tools = { Read: 3 }; session.metrics.toolCalls = 3;
+  const { document, run } = await harness([session], { start: "2026-09-13", end: "2026-10-12", timeZone: "America/Los_Angeles" });
+  run("renderSummary(activeView())");
+  const daily = document.querySelector("#daily-spend")!;
+  const summaryAxis = daily.querySelectorAll("text").map((node) => node.textContent);
+  assert.ok(summaryAxis.includes("13 Sept")); assert.ok(summaryAxis.includes("12 Oct")); assert.ok(summaryAxis.includes("$120"));
+  const legend = daily.querySelector(".chart-legend")!;
+  assert.equal(legend.dataset["layout"], "list");
+  assert.deepEqual(legend.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
+  assert.equal(document.querySelector("#metric-spend")!.textContent, "$120.00");
+  run("currentViewName = () => 'velocity'; renderActiveAnalyticsView(activeView())");
+  const velocityAxis = document.querySelector(".velocity-chart")!.querySelectorAll(".axis-label").map((node) => node.textContent);
+  assert.ok(velocityAxis.includes("13 Sept")); assert.ok(velocityAxis.includes("12 Oct")); assert.ok(velocityAxis.includes("$120"));
+  assert.deepEqual(document.querySelector(".velocity-legend")!.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
+  run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
+  assert.deepEqual(document.querySelector(".tools-trend-axis")!.children.map((node) => node.textContent), ["13 Sept", "12 Oct"]);
+  run("renderSharedView(activeView())");
+  assert.match(document.querySelector("#scope-description")!.textContent, /America\/Los_Angeles/);
 });

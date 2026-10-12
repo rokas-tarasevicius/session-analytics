@@ -275,7 +275,7 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
     retained.warnings.push(deferred);
     const source = (await readFile(join(project, "src/public/app.js"), "utf8"))
       .replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
-    const helpers = { ...await import("../src/public/evidence.js"), ...await import("../src/public/export-data.js"),
+    const helpers = { ...await import("../src/public/format.js"), ...await import("../src/public/evidence.js"), ...await import("../src/public/export-data.js"),
       ...await import("../src/public/timestamps.js"), ...await import(new URL("../src/public/view-model.js", import.meta.url).href),
       ...await import(new URL("../src/public/providers.js", import.meta.url).href),
       ...await import(new URL("../src/public/velocity-data.js", import.meta.url).href),
@@ -288,6 +288,8 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
     } };
     (globalThis as any).document = document;
     const [view, filtered] = runInNewContext(source + `\nsnapshot = fixture; windowPreset = "all";
+      elements.windowStart.value = elements.windowStart.min = "2026-01-01";
+      elements.windowEnd.value = elements.windowEnd.max = snapshot.generatedAt.slice(0, 10);
       const all = activeView();
       renderSparkline = renderLine = renderDonut = renderBars = renderRepositoryTable = renderRepositoryNav = renderProviderEvidence = () => {};
       renderSharedView(all); renderSummary(all);

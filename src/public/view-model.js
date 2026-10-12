@@ -1,3 +1,4 @@
+import { dayLabel, weekdayHourParts } from "./format.js";
 // Pure view-model helpers for the dashboard: aggregation, window math, deltas,
 // sparkline downsampling, sorting, and palette matching. No DOM access, so the
 // same module is exercised by test/dashboard-helpers.test.ts under node:test.
@@ -8,18 +9,7 @@ import { buildVelocity, calendarDays, ledgerCells, localDay } from "./velocity-d
 export const providerOrder = providerIds;
 export { providerLabels };
 
-const compact = new Intl.NumberFormat("en", { maximumFractionDigits: 1, notation: "compact" });
-
-export function shortMoney(value) {
-  const amount = value || 0;
-  if (amount === 0) return "$0";
-  if (Math.round(amount) >= 1000) return `$${compact.format(Math.max(1000, amount))}`;
-  return `$${amount.toFixed(Math.round(amount * 100) >= 1000 ? 0 : 2)}`;
-}
-
-export function percent(value) {
-  return value === null || value === undefined ? "N/A" : `${(value * 100).toFixed(1)}%`;
-}
+export { moneyAxis as shortMoney, percent } from "./format.js";
 
 export function summarize(sessions) {
   const totals = { inputTokens: 0, outputTokens: 0, uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0 };
@@ -344,7 +334,7 @@ export function sparklineSummary(label, values, days, format) {
   let peak = 0;
   for (let index = 1; index < values.length; index += 1) if (values[index] > values[peak]) peak = index;
   const total = values.reduce((sum, value) => sum + value, 0);
-  const peakDay = days[peak] ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(`${days[peak]}T00:00:00`)) : "";
+  const peakDay = days[peak] ? dayLabel(days[peak]) : "";
   return `${label}: ${values.length} day${values.length === 1 ? "" : "s"}, total ${format(total)}, peak ${format(values[peak])}${peakDay ? ` on ${peakDay}` : ""}, latest ${format(values.at(-1))}`;
 }
 
@@ -355,14 +345,13 @@ export function heatLevel(value, maximum) {
 /** Known provider starts by local weekday (Monday first) and hour; file times never count. */
 export function activityGrid(sessions, timeZone = "UTC") {
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
-  const clock = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short", hour: "2-digit", hourCycle: "h23" });
   const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   let counted = 0;
   for (const session of sessions) {
     if (session.transcript?.startTimeKnown === false || session.evidence?.timing === "file-mtime") continue;
     const start = normalizeTimestamp(session.createdAt);
     if (start === null) continue;
-    const parts = clock.formatToParts(new Date(start));
+    const parts = weekdayHourParts(new Date(start), timeZone);
     const day = weekdays.indexOf(parts.find(({ type }) => type === "weekday")?.value);
     const hour = Number(parts.find(({ type }) => type === "hour")?.value);
     if (day >= 0 && hour >= 0 && hour < 24) { grid[day][hour]++; counted++; }

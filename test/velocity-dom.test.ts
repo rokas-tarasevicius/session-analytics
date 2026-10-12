@@ -289,7 +289,7 @@ test("Velocity provider and model groups use shared brand colours and reciprocal
   }
 });
 
-test("Velocity keeps CSS-pixel chart dimensions and fits its axis labels on narrow charts", async () => {
+test("Velocity keeps CSS-pixel chart dimensions and fits shared day labels on narrow charts to agree with Summary", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
   try {
@@ -320,7 +320,7 @@ test("Velocity keeps CSS-pixel chart dimensions and fits its axis labels on narr
         assert.ok(extent(ticks[0]!)[0]! >= left - 1 && extent(ticks.at(-1)!)[1]! <= width, `${label}: ticks stay in the plot`);
         for (let index = 1; index < ticks.length; index += 1) assert.ok(extent(ticks[index - 1]!)[1]! < extent(ticks[index]!)[0]!, `${label}: ticks ${index - 1} and ${index} overlap`);
         if (width >= (granularity === "week" ? 1040 : 800)) assert.equal(ticks.length, 5, label);
-        if (granularity === "day") assert.equal(ticks.at(-1)!.textContent, "2026-09-05", label);
+        if (granularity === "day") assert.equal(ticks.at(-1)!.textContent, "5 Sept", label);
       }
     }
   } finally {

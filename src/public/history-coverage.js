@@ -1,5 +1,4 @@
-const money = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n);
-const count = (n) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+import { compact as count, money, percent } from "./format.js";
 function node(tag, text, className) {
   const result = document.createElement(tag);
   if (text !== undefined) result.textContent = text;
@@ -16,7 +15,6 @@ export function renderHistoryCoverage(container, history, sessions = []) {
   header.append(title); container.append(header);
   container.append(node("p", "Session evidence and unattributed history stay separate. This machine-wide panel is independent of repository and date filters. API-equivalent value is not an invoice.", "chart-note"));
   const calibration = history.recoveryCalibration;
-  const percent = (value) => `${(value * 100).toFixed(1)}%`;
   container.append(node("p", calibration?.aggregateValueRatio != null
     ? `Recovered history remains a lower bound on retained evidence. On ${calibration.comparedSessions} paired sessions it measured ${percent(calibration.aggregateValueRatio)} of native value (${money(calibration.recoveredValueUsd)} / ${money(calibration.nativeValueUsd)}); median ${percent(calibration.medianValueRatio)}, p10–p90 ${percent(calibration.p10ValueRatio)}–${percent(calibration.p90ValueRatio)}. ${calibration.excludedSessions}/${calibration.pairedSessions} pairs were excluded for incomplete, active, unpriced or small native denominators.`
     : "Recovered history remains a lower bound on retained evidence. Calibration is unavailable until at least five complete, fully priced native pairs with no observed active work each have $1 of value.", "chart-note"));

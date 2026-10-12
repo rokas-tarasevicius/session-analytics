@@ -1,3 +1,4 @@
+import { integer, money, percent } from "./format.js";
 import { DASH } from "./ui.js";
 import { modelProvider, providerKey } from "./chart-colors.js";
 import { projectModelId } from "./model-id.js";
@@ -8,14 +9,11 @@ import { ledgerMoney, pricedShare } from "./view-model.js";
 const latest = (entries) => [...entries].sort((a, b) => (b.snapshotDate ?? "").localeCompare(a.snapshotDate ?? ""))[0];
 const rank = (provider) => { const index = providerIds.indexOf(provider); return index < 0 ? providerIds.length : index; };
 
-/** Group counts consistently across pricing cards, KPIs and details. */
-export const integer = (value) => value.toLocaleString("en-GB");
-/** USD values keep two decimals; rates may show up to four. */
-export const money = (value, decimals = 2) => `$${value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: decimals })}`;
+export { integer, money } from "./format.js";
 /** Coverage arrives floored to 0.1%; remove float noise before displaying whole percentages. */
 export function sharePercent(share, digits = 1) {
   const tenths = Math.round(share * 1000) / 10;
-  return digits ? `${tenths.toFixed(1)}%` : `${Math.floor(tenths)}%`;
+  return digits ? percent(tenths / 100) : percent(Math.floor(tenths) / 100, 0);
 }
 
 /** Human snapshot age, rounded down; unavailable ages have no label. */
@@ -138,8 +136,8 @@ export function rateRows(rate) {
 export function contextRows(rate) {
   if (!rate) return [];
   const rows = [];
-  if (rate.longContext) rows.push([`Above ${rate.longContext.thresholdInputTokens.toLocaleString("en-GB")} input tokens`,
+  if (rate.longContext) rows.push([`Above ${integer(rate.longContext.thresholdInputTokens)} input tokens`,
     rate.inputPerMillion * rate.longContext.inputMultiplier, rate.outputPerMillion * rate.longContext.outputMultiplier]);
-  for (const tier of rate.contextTiers ?? []) rows.push([`Above ${tier.aboveInputTokens.toLocaleString("en-GB")} input tokens`, tier.inputPerMillion, tier.outputPerMillion]);
+  for (const tier of rate.contextTiers ?? []) rows.push([`Above ${integer(tier.aboveInputTokens)} input tokens`, tier.inputPerMillion, tier.outputPerMillion]);
   return rows;
 }

@@ -1,3 +1,4 @@
+import { calendarParts } from "./format.js";
 import { providerLabels } from "./providers.js";
 import { normalizeTimestamp } from "./timestamps.js";
 // Pure calendar, aggregation and comparison functions shared by the two charts.
@@ -61,7 +62,6 @@ function metricEvidence(session, values, metric) {
   return { known, eligible, unsupported, complete: known === eligible && unsupported === 0 };
 }
 
-const dayFormatters = new Map();
 export function localDay(timestamp, timeZone = "UTC") {
   // Match the ledger's absolute-timestamp contract before Date can apply the
   // browser's timezone (or turn null into the Unix epoch).
@@ -70,12 +70,7 @@ export function localDay(timestamp, timeZone = "UTC") {
   if (!normalized) return null;
   const date = new Date(normalized);
   if (!Number.isFinite(date.valueOf())) return null;
-  let formatter = dayFormatters.get(timeZone);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
-    dayFormatters.set(timeZone, formatter);
-  }
-  const parts = formatter.formatToParts(date);
+  const parts = calendarParts(date, timeZone);
   const part = (type) => parts.find((item) => item.type === type)?.value;
   return `${part("year")}-${part("month")}-${part("day")}`;
 }

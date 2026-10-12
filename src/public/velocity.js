@@ -1,3 +1,4 @@
+import { compact, dateRange, dayLabel, decimal as number, money, moneyAxis, monthLabel, percent } from "./format.js";
 import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
@@ -17,22 +18,15 @@ const svgElement = (tag, attributes, text) => {
   if (text !== undefined) result.textContent = text;
   return result;
 };
-const number = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 export function formatMetric(value, metric, short = false) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "N/A";
-  if (metric === "value") return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: Math.abs(value) > 0 && Math.abs(value) < 0.01 ? 6 : 2 }).format(value);
-  return (short ? compact : number).format(value);
+  if (metric === "value") return short ? moneyAxis(value) : money(value, Math.abs(value) > 0 && Math.abs(value) < 0.01 ? 6 : 2);
+  return (short ? compact : number)(value);
 }
-const deltaLabel = (value) => value === null ? "N/A" : `${value > 0 ? "+" : ""}${number.format(value * 100)}%`;
+const deltaLabel = (value) => value === null ? "N/A" : `${value > 0 ? "+" : ""}${percent(value, 1, 0)}`;
 /** KPI text for a comparison status; null renders as an em dash with the comparison's reason. */
-export const comparisonValue = (item) => item.status === "change" ? Math.abs(item.delta) < 0.0005 ? "▬ 0%" : `${item.delta > 0 ? "▲" : "▼"} ${number.format(Math.abs(item.delta) * 100)}%` : item.status === "new" ? "New" : item.status === "idle" ? "No activity" : null;
-const periodDate = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" });
-export function span({ start, end }) {
-  const first = periodDate.format(new Date(`${start}T12:00:00Z`));
-  if (start === end) return first;
-  return `${first}–${start.slice(0, 7) === end.slice(0, 7) ? Number(end.slice(-2)) : periodDate.format(new Date(`${end}T12:00:00Z`))}`;
-}
+export const comparisonValue = (item) => item.status === "change" ? Math.abs(item.delta) < 0.0005 ? "▬ 0%" : `${item.delta > 0 ? "▲" : "▼"} ${percent(Math.abs(item.delta), 1, 0)}` : item.status === "new" ? "New" : item.status === "idle" ? "No activity" : null;
+export const span = ({ start, end }) => dateRange(start, end);
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 /** "Mon–Thu": Monday through the weekday of `day` (a calendar date). */
 const weekdaysThrough = (day) => {
@@ -54,8 +48,8 @@ export function comparisonLabels(indicators, today) {
 const evidenceLabels = { value: "priced tokens", reasoning: "output with reasoning detail", uncached: "input with cache-read detail", cacheRead: "input with cache-read detail", cacheWrite: "input with cache-write detail" };
 function evidenceText(evidence, metric) {
   if (!evidenceLabels[metric]) return "Recorded counters";
-  const ratio = evidence.eligible > 0 ? `${number.format(evidence.known)}/${number.format(evidence.eligible)} ${evidenceLabels[metric]} (${number.format(100 * evidence.known / evidence.eligible)}%)` : "N/A · no eligible tokens";
-  return `${ratio}${evidence.unsupported ? `; ${number.format(evidence.unsupported)} without an applicable breakdown` : ""}`;
+  const ratio = evidence.eligible > 0 ? `${number(evidence.known)}/${number(evidence.eligible)} ${evidenceLabels[metric]} (${number(100 * evidence.known / evidence.eligible)}%)` : "N/A · no eligible tokens";
+  return `${ratio}${evidence.unsupported ? `; ${number(evidence.unsupported)} without an applicable breakdown` : ""}`;
 }
 // Slots belong to identity within each provider, never spend rank or visible position.
 const agentSlots = new Map(Object.keys(agentLabels).map((id) => [id, Object.keys(agentLabels).filter((key) => key.split("-")[0] === id.split("-")[0]).indexOf(id)]));
@@ -85,7 +79,7 @@ function seriesEncoding(series, index, group) {
   const repeated = slot >= categorySlotCount;
   return { color: categoryColor(slot), pattern: repeated ? "diagonal" : "solid", dash: repeated ? "6 3" : "none" };
 }
-const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : granularity === "week" ? `Week of ${key}` : key;
+const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : granularity === "week" ? `Week of ${dayLabel(key)}` : granularity === "month" ? monthLabel(key) : dayLabel(key);
 
 /** One focus stop, arrow-key inspection, and a text equivalent for every plotted bucket. */
 export function renderVelocityChart(container, data, { rolling = false, compactView = false, keepInspected = false } = {}) {
@@ -110,7 +104,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   const left = width < 560 ? Math.max(64, Math.ceil(Math.max(...yLabels.map(labelWidth))) + 16) : 86;
   const plotWidth = width - left - right;
   const tickRoom = (captionOf) => Math.floor((plotWidth + 24) / (Math.max(...data.keys.map((key) => labelWidth(captionOf(key)))) + 24));
-  const tickCaption = tickRoom((key) => caption(key, data.granularity)) >= 2 ? (key) => caption(key, data.granularity) : (key) => data.granularity === "hour" ? `${key}:00` : key;
+  const tickCaption = tickRoom((key) => caption(key, data.granularity)) >= 2 ? (key) => caption(key, data.granularity) : (key) => data.granularity === "hour" ? `${key}:00` : data.granularity === "month" ? monthLabel(key) : dayLabel(key);
   const room = tickRoom(tickCaption);
   const x = (index) => left + (data.keys.length === 1 ? plotWidth / 2 : index / (data.keys.length - 1) * plotWidth);
   const y = (value) => top + (1 - value / axisMaximum) * plotHeight;
@@ -157,7 +151,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   const legend = element("div", undefined, "velocity-legend");
   renderLegend(legend, data.series.map((series, index) => ({
     id: series.id, label: series.label, color: encodings[index].color, value: series.total,
-    valueLabel: formatMetric(series.total, data.metric, true), mark: stacked ? "rect" : "line",
+    valueLabel: formatMetric(series.total, data.metric, data.metric !== "value"), mark: stacked ? "rect" : "line",
     pattern: encodings[index].pattern === "solid" ? "solid" : stacked ? "diagonal" : "dashed",
   })), { target: svg });
   if (overlay && data.rolling.some((value) => value !== null)) legend.append(element("span", "Dashed: total · rolling 7-day average", "velocity-average-key"));
@@ -193,7 +187,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
 
 function coverageText(data) {
   const values = data.totals;
-  const ratio = (n, d, label) => `${label}: ${d > 0 ? `${number.format(n)} / ${number.format(d)} (${number.format(100 * n / d)}%)` : "N/A · no eligible tokens"}`;
+  const ratio = (n, d, label) => `${label}: ${d > 0 ? `${number(n)} / ${number(d)} (${number(100 * n / d)}%)` : "N/A · no eligible tokens"}`;
   let detail = "";
   if (data.metric === "value") detail = ratio(values[10], data.coverage.priceTokens, "API pricing coverage, priced-source tokens");
   if (data.metric === "reasoning") detail = ratio(values[11], data.coverage.reasoningOutput, "Separate reasoning coverage, output tokens");
@@ -202,7 +196,7 @@ function coverageText(data) {
   const included = formatMetric(values[metricDefinitions[data.metric].index], data.metric);
   const undated = formatMetric(data.undated[metricDefinitions[data.metric].index], data.metric);
   const sessionDated = data.sessionDated[metricDefinitions[data.metric].index];
-  return `${included} dated · ${number.format(data.contributingSessions)} sessions with dated evidence.${sessionDated > 0 ? ` Includes ${formatMetric(sessionDated, data.metric)} session-dated from ${data.sessionDatedSessions} session${data.sessionDatedSessions === 1 ? "" : "s"} whose source records no request times (placed on the session's last activity).` : ""} ${detail ? `${detail}. ` : ""}${undated} undated across this repository/provider scope, excluded from date filters and charts.${data.unledgered.sessions > 0 ? ` Across all time, ${data.unledgered.sessions} session${data.unledgered.sessions === 1 ? "" : "s"} from older snapshots without activity dates (${formatMetric(data.unledgered.value, "value")} whole-session value) are excluded; refresh to include them.` : ""}${data.missingSessions ? ` ${data.missingSessions} session${data.missingSessions === 1 ? "" : "s"} need a refresh to collect activity buckets.` : ""}`;
+  return `${included} dated · ${number(data.contributingSessions)} sessions with dated evidence.${sessionDated > 0 ? ` Includes ${formatMetric(sessionDated, data.metric)} session-dated from ${data.sessionDatedSessions} session${data.sessionDatedSessions === 1 ? "" : "s"} whose source records no request times (placed on the session's last activity).` : ""} ${detail ? `${detail}. ` : ""}${undated} undated across this repository/provider scope, excluded from date filters and charts.${data.unledgered.sessions > 0 ? ` Across all time, ${data.unledgered.sessions} session${data.unledgered.sessions === 1 ? "" : "s"} from older snapshots without activity dates (${formatMetric(data.unledgered.value, "value")} whole-session value) are excluded; refresh to include them.` : ""}${data.missingSessions ? ` ${data.missingSessions} session${data.missingSessions === 1 ? "" : "s"} need a refresh to collect activity buckets.` : ""}`;
 }
 const controllers = new WeakMap();
 function panelShell(kicker, title) {
@@ -280,7 +274,7 @@ export function renderVelocity(container, sessions, context) {
       totals.replaceChildren(
         kpi({ label: weekLabel, value: comparisonValue(indicators.week), reason: indicators.week.reason, note: shortNote(indicators.week) }),
         kpi({ label: monthLabel, value: comparisonValue(indicators.month), reason: indicators.month.reason, note: shortNote(indicators.month) }),
-        kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number.format(indicators.burn.ratio)}×`, reason: "Needs a 14-day baseline with complete evidence", note: `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered` }),
+        kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number(indicators.burn.ratio)}×`, reason: "Needs a 14-day baseline with complete evidence", note: `${formatMetric(indicators.burn.today, options.metric)} so far / ${formatMetric(indicators.burn.median, options.metric)} per full day · ${indicators.burn.days}/14 days covered` }),
       );
       comparisons.replaceChildren(el("summary", "How the comparisons are built"), (() => { const body = el("div", null, "evidence-body"); for (const text of [
         `${weekLabel}: ${comparisonNote(indicators.week, "week")}`,
