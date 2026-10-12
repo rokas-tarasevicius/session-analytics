@@ -200,20 +200,23 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   }
   const cards = el("div", null, "kpi-grid compact-metrics");
   const data = pricingModelCards(rateCard, sessions, window), { tokens, pricedTokens } = data;
-  cards.append(kpi({ label: "Pricing coverage", value: data.coverage === null ? null : sharePercent(data.coverage), reason: tokens ? null : "No eligible tokens in this selection", note: tokens ? `${integer(pricedTokens)} / ${integer(tokens)} eligible tokens · activity-dated, as on Costs` : "Provider-reported values do not use a rate card", accent: true }));
+  cards.append(kpi({ label: "Pricing coverage", value: data.coverage === null ? null : sharePercent(data.coverage), reason: tokens ? null : "No eligible tokens in this selection", note: tokens ? `${integer(pricedTokens)} / ${integer(tokens)} eligible tokens priced` : "Provider-reported values do not use a rate card", accent: true }));
   for (const source of status.policy === "reviewed-only" ? [] : status.sources) {
     const age = ageLabel(source.ageDays);
-    const card = kpi({ label: `${source.source} prices`, value: age === null ? null : `${age[0].toUpperCase()}${age.slice(1)} old`, reason: age === null ? "No cached snapshot" : null, note: `${source.models} models · ${source.stale ? "stale or missing" : "current"}${source.fetchedAt ? ` · fetched ${date(source.fetchedAt, window.timeZone ?? "UTC")}` : " · not cached"}` });
+    const card = kpi({ label: `${source.source} prices`, value: age === null ? null : `${age[0].toUpperCase()}${age.slice(1)} old`, reason: age === null ? "No cached snapshot" : null, note: `${integer(source.models)} models · ${source.stale ? "stale or missing" : "current"}` });
     card.className += " pricing-freshness";
     const link = el("a", "Public price list ↗");
     link.href = source.url; link.target = "_blank"; link.rel = "noreferrer";
     card.append(link); cards.append(card);
   }
-  const updates = kpi({ label: "Price updates", value: status.policy === "reviewed-only" ? "Pinned" : status.offline ? "Offline" : "Automatic", note: `${mode} · reviewed card effective ${humanDate(rateCard.effectiveDate)}` });
+  const updates = kpi({ label: "Price updates", value: status.policy === "reviewed-only" ? "Pinned" : status.offline ? "Offline" : "Automatic", note: `Reviewed card: ${humanDate(rateCard.effectiveDate)}` });
   updates.className += " pricing-updates"; cards.append(updates);
   container.append(cards);
-  container.append(note(`Cards add up to ${money(data.api)} API-equivalent value. With ${money(data.reported)} provider-reported value, which has no rate card, that is the ${money(data.total)} usage value for these dates on Summary and Costs.`, "chart-note pricing-reconciliation"));
+  container.append(note(`${money(data.api)} API-equivalent · ${money(data.reported)} reported · ${money(data.total)} total`, "chart-note pricing-reconciliation"));
   container.append(evidence([
+    `Cards add up to ${money(data.api)} API-equivalent value. With ${money(data.reported)} provider-reported value, which has no rate card, that is the ${money(data.total)} usage value for these dates on Summary and Costs.`,
+    `${mode} · reviewed card effective ${humanDate(rateCard.effectiveDate)}.`,
+    ...status.sources.map((source) => `${source.source}: ${integer(source.models)} models · ${source.stale ? "stale or missing" : "current"}${source.fetchedAt ? ` · fetched ${date(source.fetchedAt, window.timeZone ?? "UTC")}` : " · not cached"}.`),
     "API-equivalent value is not an invoice. Each request uses the newest snapshot at or before its timestamp; earlier requests use the oldest available evidence, labelled below.",
     "Coverage is the share of eligible ledger tokens with an explicit token-class rate for these dates, the same measure as Costs; substituted cache rates are excluded. Cursor database usage has no eligible tokens.",
     status.policy === "reviewed-only" ? "The selected reviewed card is pinned. Public pricing sources are bypassed."
@@ -223,7 +226,7 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   ]));
   const panel = el("article", null, "panel detail-panel");
   const header = el("header"), block = el("div");
-  block.append(el("p", "Rates used by selected models", "kicker"), el("h3", "Model prices"));
+  block.append(el("h3", "Model prices"));
   header.append(block); panel.append(header);
   if (!data.used.length) {
     panel.append(note("No API-priced model usage in this selection. Provider-reported values do not use a rate card.", "empty-line"));

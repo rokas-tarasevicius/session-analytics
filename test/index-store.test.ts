@@ -292,7 +292,7 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
       elements.windowEnd.value = elements.windowEnd.max = snapshot.generatedAt.slice(0, 10);
       const all = activeView();
       renderSparkline = renderLine = renderDonut = renderBars = renderRepositoryTable = renderRepositoryNav = renderProviderEvidence = () => {};
-      renderSharedView(all); renderSummary(all);
+      renderSharedView(all); renderSummary(all); renderCoverageSummary(all);
       windowPreset = 'custom'; elements.windowStart.value = '2027-01-01';
       [all, activeView()];`, {
       ...helpers, renderHistoryCoverage() {}, fixture: retained, document, window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, URLSearchParams, localStorage: { getItem: () => null, setItem() {} }, fetch: () => new Promise(() => {}),
@@ -301,8 +301,8 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
     assert.ok(view.warnings.includes(deferred));
     assert.equal(view.summary.workingSnapshots, 0);
     assert.equal(view.summary.retainedSessions, 5);
-    assert.match(elements.get("#metric-spend-note")?.textContent ?? "", /last-ingest prices/);
-    assert.match(elements.get("#metric-live-note")?.textContent ?? "", /historical working observations excluded/);
+    assert.match(elements.get("#coverage-usage-note")?.textContent ?? "", /last-ingest prices/);
+    assert.match(elements.get("#coverage-live-note")?.textContent ?? "", /historical working observations excluded/);
     assert.match(elements.get("#retention-note")?.textContent ?? "", /5 source-deleted sessions/);
     assert.equal(filtered.summary.retainedSessions, 0);
     assert.equal(filtered.warnings.some((warning: string) => warning.includes("source-deleted")), false);

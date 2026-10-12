@@ -146,18 +146,16 @@
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
             <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
-            <section class="kpi-grid" aria-label="Machine totals">
-              <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Usage value, not an invoice</small></article>
-              <article class="kpi"><span class="kpi-label">Repositories</span><strong id="metric-repositories">—</strong><small class="kpi-note" id="metric-repository-note">With local evidence</small></article>
+            <section class="kpi-grid summary-metrics" aria-label="Machine totals">
+              <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Activity-dated. Not an invoice.</small></article>
               <article class="kpi"><span class="kpi-label">Sessions analyzed</span><strong id="metric-sessions">—</strong><span class="kpi-delta" id="metric-sessions-delta" hidden></span><svg class="spark" id="metric-sessions-spark"></svg><small class="kpi-note" id="metric-session-note">Matched evidence</small></article>
-              <article class="kpi"><span class="kpi-label">Request input processed</span><strong id="metric-input">—</strong><small class="kpi-coverage" id="metric-input-coverage"></small><span class="kpi-delta" id="metric-input-delta" hidden></span><svg class="spark" id="metric-input-spark"></svg><small class="kpi-note" id="metric-cache">— cached · repeated context included</small></article>
+              <article class="kpi"><span class="kpi-label">Request input processed</span><strong id="metric-input">—</strong><small class="kpi-coverage" id="metric-input-coverage"></small><span class="kpi-delta" id="metric-input-delta" hidden></span><svg class="spark" id="metric-input-spark"></svg><small class="kpi-note" id="metric-cache">— cached</small></article>
               <article class="kpi"><span class="kpi-label">Output tokens</span><strong id="metric-output">—</strong><small class="kpi-coverage" id="metric-output-coverage"></small><span class="kpi-delta" id="metric-output-delta" hidden></span><svg class="spark" id="metric-output-spark"></svg><small class="kpi-note">Reasoning stays included</small></article>
               <article class="kpi"><span class="kpi-label">Effective tools</span><strong id="metric-tools">—</strong><small class="kpi-coverage" id="metric-tools-coverage"></small><span class="kpi-delta" id="metric-tools-delta" hidden></span><svg class="spark" id="metric-tools-spark"></svg><small class="kpi-note">Names only</small></article>
               <article class="kpi"><span class="kpi-label">Compactions</span><strong id="metric-compactions">—</strong><small class="kpi-coverage" id="metric-compactions-coverage"></small><span class="kpi-delta" id="metric-compactions-delta" hidden></span><svg class="spark" id="metric-compactions-spark"></svg><small class="kpi-note">Context boundaries</small></article>
-              <article class="kpi"><span class="kpi-label">Live snapshots</span><strong id="metric-live">—</strong><small class="kpi-note" id="metric-live-note">Present sources; totals may still move</small></article>
             </section>
 
-            <section class="panel comparison-section" id="history-coverage" aria-label="History coverage"></section>
+            <section class="comparison-section" id="history-coverage" aria-label="History coverage"></section>
 
             <section class="dashboard-grid" aria-label="Machine analytics">
               <article class="panel span-8">
@@ -171,10 +169,10 @@
                   <label class="chip" data-provider="unsupported" data-unsupported-provider="true" hidden><input type="checkbox" data-provider-filter="unsupported" checked aria-label="Unsupported provider daily usage" /><span>Unsupported</span></label>
                 </div></header>
                 <div class="line-chart chart-slot" id="daily-spend"></div>
-                <p class="chart-note">Activity dates use the snapshot timezone, as in Velocity. The chart includes dated value, and session-dated value from sources without request times on the session's last activity day; undated value, such as Cursor's provider-reported value, and sessions without velocity evidence remain outside the chart. The usage-value KPI, repository values, the fleet table, Costs, Pricing, Velocity and the daily CSV export all use this same ledger. Not an invoice.</p>
+                <p class="chart-note">Activity-dated. Not an invoice.</p>
               </article>
               <article class="panel span-4">
-                <header><div><p class="kicker">Provider mix</p><h2>Session share</h2></div></header>
+                <header><div><h2>Sessions by provider</h2></div></header>
                 <div class="donut-layout chart-slot"><div class="donut" id="provider-donut"></div><div class="legend" id="provider-legend"></div></div>
               </article>
               <article class="panel span-6">
@@ -186,7 +184,7 @@
                 <div class="bar-list chart-slot" id="repository-tokens"></div>
               </article>
               <article class="panel span-4">
-                <header><div><p class="kicker">Models</p><h2>Usage-value mix</h2></div></header>
+                <header><div><h2>Usage value by model</h2></div></header>
                 <div class="bar-list chart-slot" id="model-spend"></div>
               </article>
               <article class="panel span-4">
@@ -194,14 +192,15 @@
                 <div class="bar-list chart-slot" id="tool-calls"></div>
               </article>
               <article class="panel span-4">
-                <header><div><p class="kicker">Delegation</p><h2>Explicit sub-agent value · lower bound</h2></div></header>
+                <header><div><h2>Sub-agent value</h2></div></header>
                 <div class="bar-list chart-slot" id="repository-subagent-spend"></div>
+                <p class="chart-note">Explicit sub-agent evidence · lower bound</p>
               </article>
             </section>
 
             <section class="panel comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
-              <header class="section-header"><div><p class="kicker">Fleet comparison</p><h2 id="comparison-title">Every repository, one ledger</h2></div><span class="table-hint">Click a column to sort · click a row to focus</span></header>
-              <p class="chart-note">Usage value and Priced: activity-dated ledger for the window, so the rows add up to the Usage value KPI. Other columns: sessions started in the window.</p>
+              <header class="section-header"><div><h2 id="comparison-title">Repositories</h2></div><span class="table-hint">Click a column to sort · click a row to focus</span></header>
+              <p class="chart-note">Activity-dated value · session-start counters</p>
               <div class="table-wrap"><table class="data-table"><thead><tr>
                 <th scope="col"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
                 <th scope="col"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
@@ -219,7 +218,7 @@
             <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <div id="activity-status" class="activity-status" hidden></div>
             <article class="panel activity-panel" id="activity-heatmap-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key" id="activity-heatmap-key"></div></article>
-            <article class="panel activity-repositories" id="activity-repositories-panel"><header><div><p class="kicker">Repositories</p><h2>Sessions in the selected window</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
+            <article class="panel activity-repositories" id="activity-repositories-panel"><header><div><h2>Sessions by repository</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
@@ -227,7 +226,7 @@
             <div class="kpi-grid compact-metrics" aria-label="Cost totals">
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="cost-total">—</strong><small class="kpi-coverage" id="cost-total-coverage"></small><small class="kpi-note">Same total as Summary and Velocity</small></article>
               <article class="kpi"><span class="kpi-label">API-equivalent value</span><strong id="cost-api-total">—</strong><small class="kpi-coverage" id="cost-api-total-coverage"></small><small class="kpi-note" id="cost-api-note">Rate-card priced usage</small></article>
-              <article class="kpi"><span class="kpi-label">Provider-reported value</span><strong id="cost-provider-total">—</strong><small class="kpi-coverage" id="cost-provider-total-coverage"></small><small class="kpi-note">Reported by the provider; no rate card</small></article>
+              <article class="kpi"><span class="kpi-label">Provider-reported value</span><strong id="cost-provider-total">—</strong><small class="kpi-coverage" id="cost-provider-total-coverage"></small><small class="kpi-note">No rate card</small></article>
               <article class="kpi"><span class="kpi-label">Pricing coverage</span><strong id="cost-coverage">—</strong><small class="kpi-note" id="cost-coverage-note">Share of observed tokens with a rate</small></article>
             </div>
             <p class="chart-note" id="cost-reconciliation"></p>
@@ -279,17 +278,24 @@
           <svg class="status-banner-icon" aria-hidden="true"><use href="#i-alert"/></svg>
           <div class="status-banner-body"><strong class="status-banner-title">Coverage notes</strong><ul id="warning-list"></ul></div>
         </section>
-        <p id="retention-note" class="chart-note" hidden></p>
+        <p id="retention-note" hidden></p>
         <section id="provider-evidence" aria-labelledby="provider-evidence-title">
           <h3 id="provider-evidence-title">What the local history can tell you</h3>
-          <p class="chart-note">Coverage is sessions with evidence / selected sessions. Summary and activity-only sources cannot establish all metrics. Unavailable is shown as a dash, never as zero activity. Counts do not prove success or quality.</p>
+          <p>Coverage is sessions with evidence / selected sessions. Summary and activity-only sources cannot establish all metrics. Unavailable is shown as a dash, never as zero activity. Counts do not prove success or quality.</p>
           <div class="table-wrap"><table class="data-table"><thead><tr><th class="align-left">Provider</th><th class="align-left">Source</th><th class="align-left">Fidelity</th><th>Sessions</th><th>Token evidence</th><th>Tool evidence</th><th class="align-left">Time basis</th></tr></thead><tbody id="provider-evidence-rows"></tbody></table></div>
         </section>
         <section class="coverage-footnotes" aria-label="Interpretation notes">
           <h3>How to read these numbers</h3>
           <ul>
+            <li id="coverage-usage-note"></li>
+            <li>Activity dates use the snapshot timezone, as in Velocity. The chart includes dated value, and session-dated value from sources without request times on the session's last activity day; undated value, such as Cursor's provider-reported value, and sessions without velocity evidence remain outside the chart. The usage-value KPI, repository values, the fleet table, Costs, Pricing, Velocity and the daily CSV export all use this same ledger. Not an invoice.</li>
+            <li>Usage value and Priced: activity-dated ledger for the window, so the rows add up to the Usage value KPI. Other columns: sessions started in the window.</li>
+            <li id="coverage-session-note"></li>
+            <li id="coverage-live-note"></li>
+            <li id="coverage-cost-note" hidden></li>
             <li>API-equivalent value is a list-price equivalent of observed tokens, not an invoice. Provider-reported value is kept separate.</li>
             <li>Coverage badges such as <small class="coverage">87/116</small> show how many selected sessions carry the evidence behind a number; hover one for the sentence.</li>
+            <li>Request input includes repeated context; the cached share measures recorded cache reads.</li>
             <li>Ratios with tiny denominators are withheld; a dash means not applicable, never zero.</li>
             <li>Activity counters do not prove success, quality, or value delivered.</li>
           </ul>

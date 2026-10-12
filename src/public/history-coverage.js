@@ -1,4 +1,4 @@
-import { compact as count, money, percent } from "./format.js";
+import { compact as count, integer, money, percent } from "./format.js";
 function node(tag, text, className) {
   const result = document.createElement(tag);
   if (text !== undefined) result.textContent = text;
@@ -10,15 +10,18 @@ export function renderHistoryCoverage(container, history, sessions = []) {
   if (!container) return;
   container.replaceChildren(); container.hidden = !history;
   if (!history) return;
-  const header = node("header", undefined, "section-header"), title = node("div");
-  title.append(node("p", "Evidence · machine-wide · all months", "kicker"), node("h2", "History coverage"));
-  header.append(title); container.append(header);
-  container.append(node("p", "Session evidence and unattributed history stay separate. This machine-wide panel is independent of repository and date filters. API-equivalent value is not an invoice.", "chart-note"));
   const calibration = history.recoveryCalibration;
-  container.append(node("p", calibration?.aggregateValueRatio != null
+  const details = node("details", undefined, "evidence");
+  const status = calibration?.aggregateValueRatio != null
+    ? `${percent(calibration.aggregateValueRatio)} of native value recovered on ${integer(calibration.comparedSessions)} paired sessions`
+    : "recovery calibration unavailable";
+  details.append(node("summary", `History coverage: ${status} · details`));
+  const disclosureBody = node("div", undefined, "evidence-body");
+  disclosureBody.append(node("p", "Session evidence and unattributed history stay separate. This machine-wide panel is independent of repository and date filters. API-equivalent value is not an invoice."));
+  disclosureBody.append(node("p", calibration?.aggregateValueRatio != null
     ? `Recovered history remains a lower bound on retained evidence. On ${calibration.comparedSessions} paired sessions it measured ${percent(calibration.aggregateValueRatio)} of native value (${money(calibration.recoveredValueUsd)} / ${money(calibration.nativeValueUsd)}); median ${percent(calibration.medianValueRatio)}, p10–p90 ${percent(calibration.p10ValueRatio)}–${percent(calibration.p90ValueRatio)}. ${calibration.excludedSessions}/${calibration.pairedSessions} pairs were excluded for incomplete, active, unpriced or small native denominators.`
-    : "Recovered history remains a lower bound on retained evidence. Calibration is unavailable until at least five complete, fully priced native pairs with no observed active work each have $1 of value.", "chart-note"));
-  if (calibration?.aggregateValueRatio != null) container.append(node("p", `${calibration.receiptFloorSessions} pairs retained a higher provider-reported receipt floor; ${calibration.aboveNativeSessions} exceeded native value by more than max($0.01, 1%). Receipt prices can differ from API-equivalent prices. Surviving recent transcripts are a selected sample, not a guarantee for deleted history; no calibration multiplier is applied.`, "chart-note"));
+    : "Recovered history remains a lower bound on retained evidence. Calibration is unavailable until at least five complete, fully priced native pairs with no observed active work each have $1 of value."));
+  if (calibration?.aggregateValueRatio != null) disclosureBody.append(node("p", `${calibration.receiptFloorSessions} pairs retained a higher provider-reported receipt floor; ${calibration.aboveNativeSessions} exceeded native value by more than max($0.01, 1%). Receipt prices can differ from API-equivalent prices. Surviving recent transcripts are a selected sample, not a guarantee for deleted history; no calibration multiplier is applied.`));
   const wrap = node("div", undefined, "table-wrap"), table = node("table", undefined, "data-table"), head = node("thead"), headings = node("tr"), body = node("tbody");
   for (const text of ["UTC month", "Dated session evidence", "Unattributed estimate", "Remainder counters priced", "Possible overlap reserved"]) headings.append(node("th", text));
   head.append(headings);
@@ -28,11 +31,9 @@ export function renderHistoryCoverage(container, history, sessions = []) {
       month.statisticsCells ? `${count(month.pricedUnattributedTokens)} / ${count(month.unattributedTokens)}` : "Unavailable", `${count(month.possibleOverlapTokens)} tokens`]) row.append(node("td", value));
     body.append(row);
   }
-  table.append(head, body); wrap.append(table); container.append(wrap);
+  table.append(head, body); wrap.append(table); disclosureBody.append(wrap);
   const available = history.profiles.filter((p) => p.status === "available").length;
-  container.append(node("p", `${available}/${history.profiles.length} Claude profiles have comparable statistics. ${money(history.undatedSessionValueUsd)} of session value has no request day, including result-only summaries. Missing statistics are unavailable, not zero usage.`, "chart-note"));
-  const details = node("details", undefined, "evidence"), summary = node("summary", "Method, retention and profile coverage"); details.append(summary);
-  const disclosureBody = node("div", undefined, "evidence-body");
+  disclosureBody.append(node("p", `${available}/${history.profiles.length} Claude profiles have comparable statistics. ${money(history.undatedSessionValueUsd)} of session value has no request day, including result-only summaries. Missing statistics are unavailable, not zero usage.`));
   disclosureBody.append(node("p", "We subtract same-profile stream counters from provider totals per UTC day and model, with a zero floor. Unknown-profile Conductor usage reserves possible overlap once across profiles. The remainder is priced using each model’s lifetime token proportions, ordinary rates and default cache-write TTL. Historical mix and request sizes are unknown. Claude v5 statistics repeat input across streamed blocks; remaining counters can overstate missing billable tokens. These estimates are not added to session or repository totals."));
   disclosureBody.append(node("p", "Provider retention can remove older transcripts while aggregate statistics survive. The earliest present transcript date is an evidence boundary, not proof of when work began."));
   for (const profile of history.profiles) {

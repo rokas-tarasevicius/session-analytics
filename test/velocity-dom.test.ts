@@ -88,11 +88,11 @@ test("Velocity repositories use four solid categorical slots, textured repeats a
     const sessions = categorySessions("repository", Array.from({ length: 9 }, (_, i) => `repo-${i}`));
     for (const mode of ["stacked", "lines", "cumulative"]) {
       const data = buildVelocity(sessions, { start: "2026-09-01", end: "2026-09-01", mode, group: "repository" });
-      assert.equal(data.series.length, 8);
-      assert.equal(data.series.at(-1)!.label, "Other (2)");
+      assert.equal(data.series.length, 7);
+      assert.equal(data.series.at(-1)!.label, "Other (3)");
       const container = new Element(); renderVelocityChart(container, data);
       const signatures = assertCategoryEncodings(container, mode, new Map(data.series.map((series, i) => [series.id, series.id === "other" ? null : i])));
-      assert.equal(new Set(signatures.values()).size, 8, "all seven repositories and Other have distinct encodings");
+      assert.equal(new Set(signatures.values()).size, 7, "all six repositories and Other have distinct encodings");
     }
   } finally {
     if (previous) Object.defineProperty(globalThis, "document", previous);
@@ -111,7 +111,8 @@ test("Velocity execution and effort identities keep their categorical colour and
       const sessions = categorySessions(group, [...slots.keys()]);
       for (const mode of ["stacked", "lines", "cumulative"]) {
         const render = (selected: SessionAnalytics[], day: string) => {
-          const data = buildVelocity(selected, { start: day, end: day, mode, group });
+          // Encoding identity is independent of the cap, which is tested separately.
+          const data = buildVelocity(selected, { start: day, end: day, mode, group, limit: 100 });
           const container = new Element(); renderVelocityChart(container, data);
           return assertCategoryEncodings(container, mode, new Map(data.series.map((series) => [series.id, slots.get(series.id)!])));
         };
@@ -162,6 +163,8 @@ test("Velocity leads with value cards before filters and keeps them independent 
     })) as unknown as SessionAnalytics[];
     const container = new Element(), context = { start: "2026-09-01", end: "2026-09-04", generatedAt: "2026-09-04T12:00:00Z", timeZone: "Europe/London" };
     renderVelocity(container, sessions, context);
+    assert.equal(container.querySelector("#velocity-group")!.value, "provider");
+    assert.equal(container.querySelectorAll(".kicker").length, 0);
     const lead = container.querySelector(".velocity-lead")!;
     assert.equal(container.children[0], lead); assert.ok(container.children[1]!.classList.contains("filter-bar"));
     assert.ok(container.children[2]!.classList.contains("panel")); assert.equal(container.children[3], container.querySelector(".velocity-totals"));
@@ -170,8 +173,9 @@ test("Velocity leads with value cards before filters and keeps them independent 
     const total = buildVelocity(sessions, { ...context, metric: "value" }).totals[0]!;
     const assertLead = (value: number) => assert.equal(lead.querySelectorAll("strong")[1]!.textContent.trim(), formatMetric(value, "value"));
     assertLead(total); assert.equal(lead.querySelector("strong")!.textContent.trim(), "$5.00");
-    assert.match(lead.textContent, /per active day · 2 of 4 days active · \$2.50 per calendar day/);
-    assert.match(lead.textContent, /4 calendar days · API-equivalent and provider-reported · partially observed/);
+    assert.match(lead.textContent, /Per active day/);
+    assert.match(container.querySelector(".evidence")!.textContent, /2 active days; \$2.50 per calendar day/);
+    assert.match(container.querySelector(".evidence")!.textContent, /4 calendar days · API-equivalent and provider-reported · partially observed/);
     assert.equal(container.querySelectorAll(".velocity-totals")[0]!.children.length, 3);
     assert.doesNotMatch(container.textContent, /Selected period/);
     const metric = container.querySelector("#velocity-metric")!, granularity = container.querySelector("#velocity-granularity")!;
@@ -185,9 +189,9 @@ test("Velocity leads with value cards before filters and keeps them independent 
     change(container.querySelector("#velocity-mode")!, "cumulative"); assertLead(total);
     const codex = container.querySelector('[data-provider="codex"]')!.querySelector("input")!;
     codex.checked = false; codex.listeners.get("change")!(); assertLead(4);
-    assert.match(lead.textContent, /6 of 7 providers/); assert.doesNotMatch(lead.textContent, /partially observed/);
+    assert.match(container.querySelector(".evidence")!.textContent, /6 of 7 providers/); assert.doesNotMatch(container.querySelector(".evidence")!.textContent, /partially observed/);
     renderVelocity(container, sessions, { ...context, end: "2026-09-02" }); assertLead(2);
-    assert.match(lead.textContent, /1 of 2 days active · \$1.00 per calendar day/);
+    assert.match(container.querySelector(".evidence")!.textContent, /1 active day; \$1.00 per calendar day/);
     const claude = container.querySelector('[data-provider="claude"]')!.querySelector("input")!;
     claude.checked = false; claude.listeners.get("change")!();
     assert.equal(lead.querySelectorAll("strong")[1]!.textContent.trim(), "—");
@@ -216,7 +220,8 @@ test("agent SVG encodings are unique, stable under filtering and reproduced in t
     })) as unknown as SessionAnalytics[];
     for (const mode of ["stacked", "lines", "cumulative"]) {
       const render = (selected: SessionAnalytics[], day: string) => {
-        const data = buildVelocity(selected, { start: day, end: day, mode, group: "agent" });
+        // Exercise every agent encoding independently of the six-series presentation cap.
+        const data = buildVelocity(selected, { start: day, end: day, mode, group: "agent", limit: 100 });
         const container = new Element("div");
         renderVelocityChart(container, data);
         const nodes = descendants(container);
@@ -322,6 +327,38 @@ test("Velocity keeps CSS-pixel chart dimensions and fits shared day labels on na
         if (width >= (granularity === "week" ? 1040 : 800)) assert.equal(ticks.length, 5, label);
         if (granularity === "day") assert.equal(ticks.at(-1)!.textContent, "5 Sept", label);
       }
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("crowded Velocity groupings render a neutral Other series in the chart, legend and inspection", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const providers = ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "unsupported"] as const;
+    const efforts = ["low", "medium", "high", "xhigh", "minimal", "none", "max", "ultra", "unknown"];
+    const sessions = categorySessions("effort", efforts);
+    sessions.forEach((session, i) => {
+      session.provider = providers[i % providers.length]!;
+      session.velocity!.dimensions[0]!.agent = Object.keys(agentLabels)[i] as NonNullable<SessionAnalytics["velocity"]>["dimensions"][number]["agent"];
+      session.velocity!.dimensions[0]!.model = `model-${i}`;
+    });
+    for (const group of ["provider", "agent", "model", "repository", "effort"]) for (const mode of ["lines", "stacked", "cumulative"]) {
+      const data = buildVelocity(sessions, { start: "2026-09-01", end: "2026-09-01", group, mode });
+      const container = new Element(); renderVelocityChart(container, data);
+      const paths = container.querySelectorAll(mode === "stacked" ? ".velocity-area" : ".velocity-line");
+      assert.equal(paths.length, 7, `${group}/${mode}`);
+      const other = paths.find((path) => path.dataset["series"] === "other")!;
+      assert.equal(other.getAttribute("stroke"), "var(--provider-unknown)");
+      assert.equal(other.dataset["pattern"], "solid");
+      const legend = container.querySelector(".velocity-legend")!.children.find((item) => item.dataset["series"] === "other")!;
+      assert.equal(legend.querySelector(".chart-legend-swatch")!.style["--series-color"], "var(--provider-unknown)");
+      assert.ok(legend.textContent.includes(data.series.at(-1)!.label));
+      assert.ok(container.querySelector(".velocity-inspection")!.textContent.includes(data.series.at(-1)!.label));
     }
   } finally {
     if (previous) Object.defineProperty(globalThis, "document", previous);

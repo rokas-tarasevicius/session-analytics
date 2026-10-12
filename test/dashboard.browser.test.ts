@@ -521,12 +521,30 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     })()`;
     for (const theme of ["light", "dark"]) for (const density of ["compact", "comfortable"]) {
       await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.dataset.density = '${density}'`);
-      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) for (const width of [390, 1024, 1440]) {
+      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) for (const width of [390, 1024, 1280, 1440]) {
         await setWidth(width);
         await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
         await delay(150);
         assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, `${view} at ${width}px (${theme}, ${density})`);
         await browser.until(chartAtContainerWidth, true);
+        if (width >= 1280) {
+          assert.equal(await browser.evaluate(`(() => {
+            const panel = document.querySelector('[data-view-panel]:not([hidden])');
+            return [...panel.querySelectorAll('.chart-note, .kpi-note')].every((note) =>
+              note.getBoundingClientRect().height <= parseFloat(getComputedStyle(note).lineHeight) + 1);
+          })()`), true, `${view} notes stay on one line at ${width}px (${theme}, ${density})`);
+          if (view === "summary") {
+            assert.equal(await browser.evaluate(`(() => {
+              const cards = [...document.querySelectorAll('.summary-metrics > .kpi')];
+              return cards.length === 6 && cards.every((card) => cards.every((other) => {
+                const a = card.getBoundingClientRect(), b = other.getBoundingClientRect();
+                return Math.abs(a.top - b.top) > 1 || Math.abs(a.height - b.height) <= 1;
+              }));
+            })()`), true, `Six equal-height Summary KPIs at ${width}px (${theme}, ${density})`);
+            assert.equal(await browser.evaluate(`document.querySelector('[data-view-panel="summary"] .kicker')`), null);
+          }
+          if (view === "velocity") assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.velocity-inspection')).display`), "grid");
+        }
       }
       await setWidth(1024);
       await browser.evaluate(`document.querySelector('[data-window-preset="custom"]').click()`);

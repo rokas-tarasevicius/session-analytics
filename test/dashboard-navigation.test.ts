@@ -86,12 +86,12 @@ test("the 30-day default excludes unknown starts and limits view exports to the 
   recent.createdAt = "2026-10-01T12:00:00Z";
   undated.transcript.startTimeKnown = false;
   const { document, run } = await harness([old, recent, undated]);
-  run("resetExportMenu = () => {}; configureWindow(); renderSummary(activeView())");
+  run("resetExportMenu = () => {}; configureWindow(); renderSummary(activeView()); renderCoverageSummary(activeView())");
   assert.equal(run("windowPreset"), "30");
-  assert.match(document.querySelector("#metric-session-note")!.textContent, /1 unknown starts excluded/);
+  assert.match(document.querySelector("#coverage-session-note")!.textContent, /1 unknown starts excluded/);
   assert.equal(run("filterSnapshot(snapshot, { ...selectedWindow() }).sessions.length"), 1);
-  run("applyWindowPreset('all', { render: false }); renderSummary(activeView())");
-  assert.match(document.querySelector("#metric-session-note")!.textContent, /1 unknown starts included/);
+  run("applyWindowPreset('all', { render: false }); renderSummary(activeView()); renderCoverageSummary(activeView())");
+  assert.match(document.querySelector("#coverage-session-note")!.textContent, /1 unknown starts included/);
   assert.equal(run("filterSnapshot(snapshot, { ...selectedWindow() }).sessions.length"), 3);
 });
 

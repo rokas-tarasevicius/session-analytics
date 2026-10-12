@@ -316,11 +316,13 @@ test("rolling average key is absent when every value is null", async () => {
       assert.ok(short.rolling.every((value) => value === null));
       renderVelocityChart(container, short, { rolling: true });
       assert.equal(container.querySelector(".velocity-average-key"), null);
+      assert.equal(container.querySelector(".velocity-average"), null);
       const complete = buildVelocity([session], { start: "2026-09-01", end: "2026-09-07", mode });
       renderVelocityChart(container, complete, { rolling: true });
       assert.equal(container.querySelector(".velocity-average-key")!.textContent, "Dashed: total · rolling 7-day average");
       renderVelocityChart(container, complete, { rolling: false });
       assert.equal(container.querySelector(".velocity-average-key"), null);
+      assert.equal(container.querySelector(".velocity-average"), null);
     }
   } finally {
     if (previous) Object.defineProperty(globalThis, "document", previous);
@@ -517,4 +519,39 @@ test("Codex cumulative coverage follows the charged counters and requires both e
       assert.equal(values[11], knownOutput, `${tool}: reasoning coverage belongs to the cumulative difference`);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Velocity defaults to Provider and every grouping folds series beyond the top six without losing accounting", () => {
+  const providers = ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "unsupported"] as const;
+  const agents = ["claude-cli", "claude-sdk", "claude-desktop", "claude-explore", "claude-plan", "claude-general-purpose", "codex-cli", "codex-desktop", "codex-exec"];
+  const efforts = ["low", "medium", "high", "xhigh", "minimal", "none", "max", "ultra", "unknown"];
+  const sessions = efforts.map((effort, i) => {
+    const session = synthetic([["2026-10-01", i + 1], ["2026-10-02", 1]], { agent: agents[i], model: `model-${i}`, repository: `repo-${i}` });
+    session.provider = providers[i % providers.length]!;
+    session.velocity!.dimensions[0]!.effort = effort as SessionVelocity["dimensions"][number]["effort"];
+    session.velocity!.dimensions[0]!.executionKind = ["top-level", "subagent", "unknown"][i % 3] as SessionVelocity["dimensions"][number]["executionKind"];
+    return session;
+  });
+  const options = { start: "2026-10-01", end: "2026-10-02" };
+  const defaults = buildVelocity(sessions, options);
+  assert.equal(defaults.group, "provider");
+  assert.deepEqual(defaults.series.map(({ id }) => id), buildVelocity(sessions, { ...options, group: "provider" }).series.map(({ id }) => id));
+  for (const group of ["provider", "agent", "model", "repository", "execution", "effort"]) {
+    for (const mode of ["lines", "stacked", "cumulative"]) {
+      const data = buildVelocity(sessions, { ...options, group, mode });
+      const remainder = data.allSeries.slice(6);
+      assert.equal(data.series.length, Math.min(7, data.allSeries.length), `${group}/${mode}`);
+      assert.deepEqual(data.series.slice(0, 6).map(({ id }) => id), data.allSeries.slice(0, 6).map(({ id }) => id));
+      if (remainder.length) {
+        const other = data.series.at(-1)!;
+        assert.equal(other.id, "other"); assert.equal(other.label, `Other (${remainder.length})`);
+        assert.equal(other.calls, remainder.reduce((n, series) => n + series.calls, 0));
+        assert.equal(other.sessions, remainder.reduce((n, series) => n + series.sessions, 0));
+        for (let index = 0; index < 14; index++) near(other.sums[index]!, remainder.reduce((n, series) => n + series.sums[index]!, 0));
+        for (const key of ["known", "eligible", "unsupported"] as const) near(other.evidence[key], remainder.reduce((n, series) => n + series.evidence[key], 0));
+      }
+      near(data.series.reduce((n, series) => n + series.total, 0), data.totals[0]!);
+      near(data.series.reduce((n, series) => n + (mode === "cumulative" ? series.values.at(-1)! : series.values.reduce((sum, value) => sum + value, 0)), 0), data.totals[0]!);
+    }
+  }
 });
