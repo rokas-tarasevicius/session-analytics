@@ -15,7 +15,7 @@ Read-only. Loopback only. No prompts, messages or file paths in anything it prod
 [![Node >= 24](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-2d6a5a)](package.json)
 [![Privacy: content-free](https://img.shields.io/badge/privacy-content--free-2d6a5a)](docs/privacy.md)
-[![Status: private preview](https://img.shields.io/badge/status-private%20preview-c85b45)](#roadmap)
+[![Status: public preview](https://img.shields.io/badge/status-public%20preview-c85b45)](#roadmap)
 
 </div>
 
@@ -238,7 +238,7 @@ npm run demo
 
 The package is not on npm yet; the [command-line reference](docs/cli.md#install) explains why and what to do instead. The same page lists every option, including ports, offline mode, repository filters and explicit source paths.
 
-The repository is currently a private preview, so cloning requires access until the maintainer makes it public. If `npm link` needs permissions on your machine, run `node bin/session-analytics.ts` from the checkout instead. Start with `npm run demo` to explore the dashboard using synthetic data.
+The source is publicly available. If `npm link` needs permissions on your machine, run `node bin/session-analytics.ts` from the checkout instead. Start with `npm run demo` to explore the dashboard using synthetic data.
 
 ## Beyond the dashboard
 

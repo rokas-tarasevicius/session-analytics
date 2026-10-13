@@ -95,7 +95,9 @@ Initial read-only repository observations on 2026-10-13: visibility `PRIVATE`, M
 - The repository runners API returned zero available runners. `agentbox` exists elsewhere; current workflows use GitHub-hosted runners exclusively. Recheck inherited runner access before changing visibility.
 - `assets/social-preview.png` is ready. GitHub reports no custom social preview yet. Upload is pending because the connected API exposes no setter and the collaborative GitHub browser is signed out.
 
-The README's private-preview badge and access note remain accurate until visibility changes. GitHub's private vulnerability-reporting route and an anonymous public clone cannot be verified while the repository is private.
+At that point the README's private-preview badge and access note remained accurate. GitHub's private vulnerability-reporting route and an anonymous public clone could not be verified while the repository was private.
+
+**Public visibility follow-up.** The maintainer made the repository public on 2026-10-13. The README now describes a public preview; private vulnerability reporting was enabled and read back as enabled through GitHub's API. Branch protection and the release-tag ruleset remain active, and the repository runner inventory remains empty. The earlier hosted jobs never started because of the private-account billing restriction; the public candidate still requires successful hosted checks before merging. The social-preview upload and an ordinary signed-in vulnerability-reporting check remain separate presentation/reporting tasks.
 
 ## Deferred
 
