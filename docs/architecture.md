@@ -12,6 +12,7 @@
 | `src/mcp/` | Stdio protocol, strict tool schemas, bounded snapshot worker, TTL cache, query metrics and structured evidence collector. See [MCP](mcp.md). |
 | `src/analysis-process.ts` | Runs one analysis in a child process and returns the parsed result. |
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
+| `src/remote.ts` | `--remote`: runs `ssh … report --json` on each machine next to the local scan, bounds and validates the reply, and combines the snapshots. |
 | `src/analysis-output.ts` | Streams the same snapshot JSON with pipe backpressure, avoiding a second snapshot-sized string in the worker heap. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
@@ -61,6 +62,8 @@
 The server and report never parse transcripts themselves. Each snapshot runs in a fresh worker with `--max-old-space-size=1024`; Cursor uses a separate 192 MiB worker. These are V8 old-space caps, not total resident-memory limits. Only serialized, allowlisted results cross the process boundary. Child stderr is discarded; index failures cross as bounded error codes and other failures use fixed messages.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
+
+With `--remote`, the dashboard, report or export process also starts one `ssh` per machine while the local worker scans. Each remote machine runs its own worker and returns its snapshot on stdout (at most 256 MiB, within 300 seconds); the parent validates it like an imported file and combines it with the local result. Remote stderr is reduced to its last line and shown only in the terminal; a failed machine becomes a fixed warning.
 
 The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 1024 MiB V8 old-space limit, then caches the allowlisted snapshot for a completion-based TTL. Concurrent calls share the worker. Stdio EOF/signals abort and reap it; scans have a 300-second deadline. Output drains for at most 250 ms, then the CLI exits to release unread standard-pipe writes; the 4 MiB output overflow path skips the drain. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Lifecycle observations are collected during the normal transcript pass in `src/mcp/evidence.ts` and `activity.ts`. The existing pricing pass supplies dated eligible/priced token operands, including unknown prices; provider source-health counts are retained before repository selection; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
 

@@ -5,8 +5,9 @@ import { createServer, type ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, machineHelp, optionErrorMessage, pricingHelp, setting, argument } from "./options.ts";
+import { AnalysisHeapLimitError } from "./analysis-process.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
+import { analyzeMachines } from "./remote.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
 import type { DashboardHealth, MachineAnalytics, SharedSnapshot } from "./types.ts";
@@ -21,8 +22,8 @@ import { readDashboardToken, writeDashboardToken } from "./store/dashboard.ts";
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
-const valueFlags = new Set([...analysisValueFlags, "--port", "--snapshot"]);
-const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline"]);
+const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, "--port", "--snapshot"]);
+const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -45,7 +46,7 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it only with the same analysis options.
-${pricingHelp}${machineHelp}--snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
+${pricingHelp}${machineHelp}${remoteHelp}--snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
 Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
 `);
   process.exit(0);
@@ -177,6 +178,12 @@ try { assertSnapshotOptions(process.argv); } catch {
   process.exit(2);
 }
 const snapshotFile = argument(process.argv, "--snapshot");
+// A saved snapshot never scans, so a remote set in the environment does not apply to it.
+let remote: RemoteOptions = { remotes: [], command: [] };
+if (!snapshotFile) {
+  try { remote = remoteOptionsFrom(process.argv, process.env); assertRemoteAnalysis(analyzeOptions, remote); }
+  catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
+}
 const pricing = pricingConfiguration(analyzeOptions);
 const normalizedOptions = {
   ...analyzeOptions,
@@ -188,6 +195,8 @@ const normalizedOptions = {
   pricingPolicy: pricing.policy,
   pricingSources: pricing.sources,
   pricingMaxAgeDays: pricing.maxAgeDays,
+  // Another set of machines is another dashboard.
+  ...(remote.remotes.length ? { remotes: remote.remotes, remoteCommand: remote.command } : {}),
 };
 const optionsHash = createHash("sha256").update(JSON.stringify(Object.fromEntries(
   Object.entries(normalizedOptions).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) =>
@@ -202,7 +211,7 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
-    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachineSessionsIsolated(analyzeOptions))
+    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line, failed) => (failed ? process.stderr : process.stdout).write(`${line}\n`)))
       .then((result) => {
         snapshotReady = true;
         return result;

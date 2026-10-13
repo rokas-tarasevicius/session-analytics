@@ -45,6 +45,18 @@ Yes. Sibling profile directories such as `~/.claude-work` or `~/.codex-personal`
 </details>
 
 <details>
+<summary><strong>Can it include sessions from another computer?</strong></summary>
+
+Yes. Agents that run on a server or VM write their history there, so a laptop cannot see it directly. Install session-analytics on that machine too, then run `session-analytics --remote server` (any SSH destination, comma-separated for several). Each machine analyzes its own history; only its content-free snapshot comes back over your SSH connection. If agents run under a different account there, add `--remote-command "sudo -n -iu agents session-analytics"`. Snapshot files and `merge` work without SSH. See [combine machines](interop.md#combine-machines).
+</details>
+
+<details>
+<summary><strong>Are T3 Code sessions included?</strong></summary>
+
+Yes, on the machine where T3 Code's server runs. T3 Code drives Claude Code and Codex, which write their usual transcripts there, so its threads appear as Claude (Agent SDK) and Codex sessions in the repository they worked on. Codex reports T3 Code's app-server sessions with the VS Code source label. T3 Code's own thread database is not read. If T3 Code runs on another computer, add it with `--remote`.
+</details>
+
+<details>
 <summary><strong>Which platforms are supported?</strong></summary>
 
 macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Pull requests and pushes require GitHub-hosted Ubuntu, macOS and browser checks. See [release validation](release.md).

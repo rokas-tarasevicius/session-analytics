@@ -1,7 +1,7 @@
 import { InteropError } from "./error.ts";
-import { analyzeMachineSessionsIsolated } from "../analysis-process.ts";
 import { brand } from "../brand.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, OptionError } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, assertRemoteAnalysis, OptionError, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags } from "../options.ts";
+import { analyzeMachines } from "../remote.ts";
 import { readJsonFile, writeNewFile, writeNewFiles } from "./files.ts";
 import { exportFiles, type ExportFormat } from "./exports.ts";
 import { otlpEndpoint, postOtlp } from "./otlp.ts";
@@ -14,7 +14,15 @@ import { sharedEvidenceCaveat } from "../public/evidence.js";
 export const shareValueFlags = ["--snapshot", "--min-sessions", "--share-key-file", "--share-aliases"];
 
 export function assertSnapshotOptions(argv: string[]): void {
-  if (argv.includes("--snapshot") && ([...analysisValueFlags, ...analysisBooleanFlags].some((flag) => argv.includes(flag)) || argv.includes("--exclude-hidden") || argv.includes("--include-hidden"))) throw new InteropError("Snapshot input cannot be combined with analysis flags.");
+  if (argv.includes("--snapshot") && ([...analysisValueFlags, ...analysisBooleanFlags, ...remoteValueFlags].some((flag) => argv.includes(flag)) || argv.includes("--exclude-hidden") || argv.includes("--include-hidden"))) throw new InteropError("Snapshot input cannot be combined with analysis flags.");
+}
+
+/** This machine plus any --remote machines. Progress goes to stderr; stdout stays the payload. */
+async function analyzeFrom(argv: string[]): Promise<MachineAnalytics> {
+  const options = analyzeOptionsFrom(argv, process.env);
+  const remote = remoteOptionsFrom(argv, process.env);
+  assertRemoteAnalysis(options, remote);
+  return await analyzeMachines(options, remote, (line) => process.stderr.write(`${line}\n`));
 }
 
 export async function reportShare(argv: string[]): Promise<void> {
@@ -27,7 +35,7 @@ export async function reportShare(argv: string[]): Promise<void> {
   const aliasPath = argument(argv, "--share-aliases");
   const aliases = aliasPath ? await readAliases(aliasPath) : {};
   const path = argument(argv, "--snapshot");
-  const snapshot = path ? await loadMachineSnapshot(path) : await analyzeMachineSessionsIsolated(analyzeOptionsFrom(argv, process.env));
+  const snapshot = path ? await loadMachineSnapshot(path) : await analyzeFrom(argv);
   const shared = shareSnapshot(snapshot, secret, minimum, aliases);
   process.stderr.write("Share preview: stdout is the entire aggregate payload. No data has been sent. Review aliases and counts before sharing this file.\n");
   process.stderr.write(`${sharedEvidenceCaveat}\n`);
@@ -35,8 +43,8 @@ export async function reportShare(argv: string[]): Promise<void> {
 }
 
 export async function runInterop(command: "export" | "merge", argv: string[]): Promise<void> {
-  const valueFlags = new Set(command === "export" ? [...analysisValueFlags, "--format", "--out", "--snapshot", "--otlp-endpoint"] : ["--out"]);
-  const booleanFlags = new Set(command === "export" ? [...analysisBooleanFlags, "--help", "--exclude-hidden", "--include-hidden"] : ["--help"]);
+  const valueFlags = new Set(command === "export" ? [...analysisValueFlags, ...remoteValueFlags, "--format", "--out", "--snapshot", "--otlp-endpoint"] : ["--out"]);
+  const booleanFlags = new Set(command === "export" ? [...analysisBooleanFlags, ...remoteBooleanFlags, "--help", "--exclude-hidden", "--include-hidden"] : ["--help"]);
   const inputs: string[] = [];
   const seen = new Set<string>();
   for (let index = 0; index < argv.length; index++) {
@@ -50,7 +58,7 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
     }
   }
   if (argv.includes("--help")) {
-    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold, or full snapshots from several machines\n(create each with report --json --portable-ids --time-zone ZONE). stdout is the default. Existing files are never overwritten.\n`);
+    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n${remoteHelp}` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold, or full snapshots from several machines\n(create each with report --json --portable-ids --time-zone ZONE). stdout is the default. Existing files are never overwritten.\n`);
     return;
   }
   if (command === "merge") {
@@ -89,7 +97,7 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
   if (rawEndpoint && format !== "otlp-json") throw new InteropError("--otlp-endpoint requires --format otlp-json.");
   const endpoint = rawEndpoint ? otlpEndpoint(rawEndpoint) : null;
   const input = argument(argv, "--snapshot");
-  const snapshot = input ? await loadMachineSnapshot(input) : await analyzeMachineSessionsIsolated(analyzeOptionsFrom(argv, process.env));
+  const snapshot = input ? await loadMachineSnapshot(input) : await analyzeFrom(argv);
   const files = exportFiles(snapshot, format);
   await writeNewFiles(output, files);
   process.stderr.write(`Saved ${Object.keys(files).join(", ")}. API-equivalent value is not an invoice.\n`);

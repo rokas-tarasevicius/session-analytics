@@ -81,6 +81,48 @@ export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEn
   return options;
 }
 
+export interface RemoteOptions {
+  /** SSH destinations, in the order given. */
+  remotes: string[];
+  /** Words that start session-analytics on each remote machine. */
+  command: string[];
+}
+
+export const remoteValueFlags = ["--remote", "--remote-command"];
+export const remoteBooleanFlags = ["--no-remote"];
+export const remoteHelp = `  --remote HOST[,HOST]   Also read these machines over SSH; session-analytics must be installed there
+  --remote-command CMD   How to start it there (default: session-analytics)
+  --no-remote            Scan only this machine; ignore remote environment settings
+`;
+
+/** Destinations and command words reach ssh and the remote shell, so only plain words pass. */
+export function remoteOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): RemoteOptions {
+  if (argv.includes("--no-remote")) {
+    if (argv.includes("--remote")) throw new OptionError("--no-remote cannot be combined with --remote.");
+    return { remotes: [], command: [] };
+  }
+  const raw = setting(argv, environment, "--remote", "REMOTE");
+  const remotes = raw ? raw.split(",").map((value) => value.trim()).filter(Boolean) : [];
+  if (remotes.some((remote) => !/^[A-Za-z0-9_][A-Za-z0-9._@%:+/-]{0,254}$/.test(remote))) {
+    throw new OptionError("--remote takes SSH destinations such as server or user@server, separated by commas.");
+  }
+  if (new Set(remotes).size !== remotes.length) throw new OptionError("List each --remote machine once.");
+  const command = (setting(argv, environment, "--remote-command", "REMOTE_COMMAND") ?? "session-analytics").trim().split(/\s+/);
+  if (command.join(" ").length > 512 || !command.every((word) => /^[A-Za-z0-9_./~@%+=:,-]+$/.test(word))) {
+    throw new OptionError("--remote-command takes plain words, such as session-analytics or sudo -n -iu agents session-analytics.");
+  }
+  return { remotes, command };
+}
+
+/** Options that describe only this machine cannot be honoured on another one. */
+export function assertRemoteAnalysis(options: AnalyzeOptions, remote: RemoteOptions): void {
+  if (!remote.remotes.length) return;
+  if (options.repositoryId || options.repositoryName || options.repositoryRemote || options.repositoryRoot) {
+    throw new OptionError("Repository filters cannot be combined with --remote; focus a repository in the dashboard instead.");
+  }
+  if (options.rateCardPath) throw new OptionError("--rate-card prices this machine only and cannot be combined with --remote.");
+}
+
 /** Fixed text for a rejected analysis option: the time-zone message, else the pricing one. */
 export function optionErrorMessage(error: unknown): string {
   return error instanceof OptionError ? error.message : "Invalid pricing configuration.";
