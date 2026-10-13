@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-14
+
 ### Added
 
 - `--remote HOST[,HOST]` reads other machines over your own SSH and combines them with this one in the dashboard, `report` and `export`, for example a server where Claude Code, Codex or T3 Code agents run. Each machine analyzes its own history with its own index and returns only its content-free snapshot; fetched reports use `--no-remote` to ignore remote environment settings and prevent further SSH reads. `--no-remote` also scans only this machine when used directly and cannot be combined with `--remote`. A machine that cannot be read leaves a warning instead of failing the scan. `--remote-command` starts session-analytics another way, such as through `sudo` for an agent account. See [combine machines](docs/interop.md#combine-machines).
