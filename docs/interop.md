@@ -107,6 +107,7 @@ Combining full snapshots keeps every session and its details:
 - **Rates**: each machine priced its own sessions with its own cache. The combined rate card lists every model once, first file first.
 - **Time zones** must match by metadata version and zone, independent of JSON property order; two inputs without zone metadata also match. Activity days and hours are local to the analysis zone. Merge refuses files with different zones; create them with the same `--time-zone`.
 - **Generation time** is the latest input timestamp, compared as an instant, so newer machines' activity remains selectable in the dashboard.
+- **Retained history** keeps its local identity. Portable IDs and session keys are derived from live evidence, so once a local-only repository's transcripts or a Conductor registration are deleted, the history the index retains falls back to that machine's local repository ID or session key. Combine snapshots taken at about the same time: an old export merged with a new one from the same machine can show such a repository twice or count such a session twice.
 
 Full snapshots keep repository display names and session keys, so combine only machines you control. Use `report --share` to compare with other people.
 
