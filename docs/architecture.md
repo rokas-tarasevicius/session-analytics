@@ -53,17 +53,10 @@
 
 ## Process model
 
-```mermaid
-flowchart TB
-  bin["bin/session-analytics.ts"] --> server["src/server.ts<br/>HTTP on 127.0.0.1"]
-  bin --> cli["src/cli.ts<br/>report and JSON"]
-  server -- "options on stdin" --> worker["analysis-worker.ts<br/>child, 1024 MiB V8 old-space limit"]
-  cli -- "options on stdin" --> worker
-  worker -- "options on stdin" --> cursor["cursor-worker.ts<br/>child, 192 MB heap cap"]
-  cursor -- "serialized sessions" --> worker
-  worker -- "snapshot JSON on stdout" --> server
-  worker -- "snapshot JSON on stdout" --> cli
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/process-model.dark.svg" />
+  <img alt="The command dispatches to the dashboard or report; each uses a 1024 MiB analysis worker, which uses a separate 192 MiB Cursor parser." src="diagrams/process-model.svg" width="880" />
+</picture>
 
 The server and report never parse transcripts themselves. Each snapshot runs in a fresh worker with `--max-old-space-size=1024`; Cursor uses a separate 192 MiB worker. These are V8 old-space caps, not total resident-memory limits. Only serialized, allowlisted results cross the process boundary. Child stderr is discarded; index failures cross as bounded error codes and other failures use fixed messages.
 

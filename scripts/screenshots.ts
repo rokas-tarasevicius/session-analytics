@@ -39,7 +39,7 @@ const span = (first: string, last: string): string =>
   `(() => { const a = __rect(${first}), b = __rect(${last}); return [a[0], a[1], b[0] + b[2] - a[0], b[1] + b[3] - a[1]]; })()`;
 
 const CAPTURES: Capture[] = [
-  { name: "summary", view: "summary", fitJs: panelBottom("Daily usage value") },
+  { name: "summary", view: "summary", fitJs: "Math.max(...['Window totals', 'Daily usage value', 'Sessions by provider'].map((title) => { const r = __rect(__p(title)); return r[1] + r[3]; }))" },
   { name: "summary-breakdowns", view: "summary", clipJs: span("__p('Usage value by repository')", "__p('Sub-agent value')"), pad: 14 },
   { name: "repository", view: "summary", query: "&repo=data-pipeline", clipJs: span("__p('Usage value by provider')", "document.querySelector('#repository-comparison')"), pad: 14 },
   {

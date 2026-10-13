@@ -163,7 +163,7 @@ test("Velocity leads with value cards before filters and keeps them independent 
     })) as unknown as SessionAnalytics[];
     const container = new Element(), context = { start: "2026-09-01", end: "2026-09-04", generatedAt: "2026-09-04T12:00:00Z", timeZone: "Europe/London" };
     renderVelocity(container, sessions, context);
-    assert.equal(container.querySelector("#velocity-group")!.value, "provider");
+    assert.equal(container.querySelector("#velocity-group")!.value, "model", "Velocity opens grouped by model");
     assert.equal(container.querySelectorAll(".kicker").length, 0);
     const lead = container.querySelector(".velocity-lead")!;
     assert.equal(container.children[0], lead); assert.ok(container.children[1]!.classList.contains("filter-bar"));

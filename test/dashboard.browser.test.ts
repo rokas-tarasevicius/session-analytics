@@ -575,11 +575,19 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
           if (view === "summary") {
             assert.equal(await browser.evaluate(`(() => {
               const cards = [...document.querySelectorAll('.summary-metrics > .kpi')];
-              return cards.length === 6 && cards.every((card) => cards.every((other) => {
-                const a = card.getBoundingClientRect(), b = other.getBoundingClientRect();
-                return Math.abs(a.top - b.top) > 1 || Math.abs(a.height - b.height) <= 1;
-              }));
-            })()`), true, `Six equal-height Summary KPIs at ${width}px (${theme}, ${density})`);
+              const rail = document.querySelector('.summary-metrics').getBoundingClientRect();
+              const charts = document.querySelector('.summary-overview-charts').getBoundingClientRect();
+              const breakdown = document.querySelector('.summary-breakdown').getBoundingClientRect();
+              return cards.length === 6 && charts.right < rail.left && charts.width >= 600
+                && Math.abs(charts.top - rail.top) <= 1 && breakdown.top >= Math.max(rail.bottom, charts.bottom)
+                && breakdown.left <= charts.left && breakdown.right >= rail.right
+                && cards.every((card, index) => {
+                  const bounds = card.getBoundingClientRect(), previous = cards[index - 1]?.getBoundingClientRect();
+                  const figure = card.querySelector('strong').getBoundingClientRect();
+                  return (!previous || (bounds.top >= previous.bottom && Math.abs(bounds.left - previous.left) <= 1))
+                    && figure.left >= bounds.left && figure.right <= bounds.right && figure.bottom <= bounds.bottom;
+                });
+            })()`), true, `Summary has a readable totals rail beside charts and full-width breakdowns at ${width}px (${theme}, ${density})`);
             assert.equal(await browser.evaluate(`document.querySelector('[data-view-panel="summary"] .kicker')`), null);
           }
           if (view === "velocity") assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.velocity-inspection')).display`), "grid");
@@ -611,9 +619,10 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await setWidth(1440);
     await browser.evaluate(`document.querySelector('[data-view-button="summary"]').click()`);
     await browser.until(chartAtContainerWidth, true);
+    const chartWidthBeforeResize = await browser.evaluate<number>(`document.querySelector('#daily-spend svg').viewBox.baseVal.width`);
     await browser.evaluate(`document.querySelector('#daily-spend svg').focus()`);
     await setWidth(1024);
-    await browser.until(`document.querySelector('#daily-spend svg').viewBox.baseVal.width < 900`, true);
+    await browser.until(`document.querySelector('#daily-spend svg').viewBox.baseVal.width !== ${chartWidthBeforeResize}`, true);
     await browser.until(chartAtContainerWidth, true);
     assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#daily-spend svg')`), true);
     await browser.evaluate(`document.activeElement.blur()`);

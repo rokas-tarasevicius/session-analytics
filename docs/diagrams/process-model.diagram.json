@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "kind": "grid",
+  "title": "Analysis runs in isolated workers",
+  "caption": "Parents send options on stdin; workers return allowlisted JSON on stdout. Limits cap V8 old space.",
+  "look": { "nodes": "glyph", "groups": "plane" },
+  "nodes": [
+    { "id": "command", "label": "Command line", "note": "session-analytics", "mono": true, "icon": "infra/terminal", "at": [0, 1] },
+    { "id": "server", "label": "Dashboard server", "note": "127.0.0.1", "mono": true, "icon": "infra/server", "at": [1, 0] },
+    { "id": "report", "label": "Terminal report", "note": "report / report --json", "mono": true, "icon": "business/report", "at": [1, 2] },
+    { "id": "analysis", "label": "Analysis worker", "note": "1024 MiB old space", "icon": "infra/process", "at": [2, 1], "focus": true },
+    { "id": "cursor", "label": "Cursor parser", "note": "192 MiB old space", "icon": "vendors/cursor", "at": [3, 1] }
+  ],
+  "edges": [
+    { "from": "command", "to": "server" },
+    { "from": "command", "to": "report" },
+    { "from": "server", "to": "analysis", "arrow": "both" },
+    { "from": "report", "to": "analysis", "arrow": "both" },
+    { "from": "analysis", "to": "cursor", "arrow": "both" }
+  ]
+}

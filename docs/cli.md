@@ -18,7 +18,7 @@
 
 ## Install
 
-Requirements: **Node.js 24 or newer** and **macOS** (Claude Code and Codex history also works on Linux; see [platform support](../README.md#faq)).
+Requirements: **Node.js 24 or newer** and **macOS** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)).
 
 ```bash
 git clone https://github.com/rokas-tarasevicius/session-analytics.git
