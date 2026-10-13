@@ -40,10 +40,16 @@ test("shared type and status tokens remain readable and distinct from the brand 
   for (const [name, size] of Object.entries({ caps: "11px", xs: "12px", sm: "13px", md: "14px", title: "15px", h1: "18px", lg: "20px", figure: "26px" })) {
     assert.equal(light[`--fs-${name}`], size, name);
   }
-  assert.equal(light["--focus"], "var(--coral)");
   for (const [theme, overrides] of [["light", light], ["dark", dark]] as const) {
     for (const name of ["--danger", "--warn", "--warn-text", "--ok"]) assert.match(overrides[name]!, /^#[0-9a-f]{6}$/i, `${theme}: ${name}`);
     const palette = { ...light, ...overrides };
+    // The Fluxary-style neutral focus ring must remain visible on every working surface.
+    for (const background of ["--bg", "--surface", "--surface-2", "--sidebar-surface"]) {
+      assert.ok(contrast(palette["--focus"]!, palette[background]!) >= 3, `${theme}: focus on ${background}`);
+      for (const foreground of ["--text", "--text-2", "--muted"]) {
+        assert.ok(contrast(palette[foreground]!, palette[background]!) >= 4.5, `${theme}: ${foreground} on ${background}`);
+      }
+    }
     for (const foreground of ["--danger", "--warn-text"]) for (const background of ["--surface", "--bg"]) {
       const ratio = contrast(palette[foreground]!, palette[background]!);
       assert.ok(ratio >= 4.5, `${theme}: ${foreground} on ${background} = ${ratio.toFixed(2)}:1`);
