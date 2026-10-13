@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "kind": "steps",
+  "title": "From local history to usage insights",
+  "caption": "Read agent history locally; keep the numbers and discard the content.",
+  "steps": [
+    { "id": "history", "label": "Read history", "note": "Profiles and archives", "icon": "infra/disk" },
+    { "id": "counters", "label": "Keep counters", "note": "Normalize and dedupe", "icon": "infra/lock", "focus": true },
+    { "id": "price", "label": "Group and price", "note": "Repositories + models", "icon": "business/cost" },
+    { "id": "insights", "label": "Explore usage", "note": "Dashboard, CLI, MCP", "icon": "business/dashboard" }
+  ]
+}

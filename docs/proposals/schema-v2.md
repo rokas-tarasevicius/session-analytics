@@ -92,22 +92,15 @@ Conceptually, `key = prefix + truncate128(HMAC-SHA256(secret, canonicalEncode([k
 - **Tool scope:** one logical invocation, with transport wrappers distinguished from effective calls. Multiple result updates can belong to one call; multiple actual retries are separate calls. Never join child result text to a request by tool name alone.
 - **Allowance scope:** a provider/account/model budget bucket can span many sessions and repositories. A rate-limit sample is profile-scoped, with an optional sampled session link that means “observed here,” not “consumed by this session.”
 
-```mermaid
-erDiagram
-  SESSION ||--o{ TURN : contains
-  SESSION ||--o{ REQUEST : observes
-  TURN o|--o{ REQUEST : may_bound
-  REQUEST o|--o{ TOOL_CALL : may_issue
-  TOOL_CALL ||--o{ TOOL_RESULT : has_updates
-  TOOL_CALL o|--o{ EDIT : may_perform
-  TOOL_CALL o|--o{ COMMAND : may_execute
-  SESSION ||--o{ COMPACTION : observes
-  SESSION ||--o{ PERMISSION : observes
-  SESSION ||--o{ HOOK : observes
-  SESSION ||--o{ SUBAGENT : links
-  SESSION o|--o{ RATE_LIMIT_SAMPLE : may_observe
-  SESSION o|--o{ GIT_EVIDENCE : may_correlate
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../diagrams/proposed-execution-links.dark.svg" />
+  <img alt="Proposed relationships from sessions to turns, requests, tool calls, results, edits and commands, with parent and child cardinalities." src="../diagrams/proposed-execution-links.svg" width="880" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../diagrams/proposed-session-evidence.dark.svg" />
+  <img alt="A proposed session links compactions, permissions, hooks and subagents; rate-limit samples and Git evidence can have no session parent." src="../diagrams/proposed-session-evidence.svg" width="656" />
+</picture>
 
 Foreign keys are typed pseudonyms with link states. Missing parents are allowed during ingest, then reconciled transactionally. Persist unresolved events and count their join failures; do not silently drop them or synthesize a parent with guessed fields. A time-window candidate is not an identity match: retain `method: temporal_join`, an explicit candidate count, and an `ambiguous` link until a declared deterministic rule can choose safely. Never turn proximity, a shared repository, or a branch into proven authorship.
 

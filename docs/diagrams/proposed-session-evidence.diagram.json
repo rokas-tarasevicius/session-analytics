@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "kind": "tree",
+  "title": "Proposed session evidence",
+  "caption": "Session observations and optional correlations. Edge labels give parent : child cardinality.",
+  "nodes": [
+    {
+      "id": "session",
+      "label": "Session",
+      "icon": "infra/log",
+      "focus": true
+    },
+    {
+      "id": "compaction",
+      "label": "Compaction",
+      "icon": "infra/backup",
+      "parent": "session",
+      "branch": "1 : 0..*"
+    },
+    {
+      "id": "permission",
+      "label": "Permission",
+      "icon": "infra/lock",
+      "parent": "session",
+      "branch": "1 : 0..*"
+    },
+    {
+      "id": "hook",
+      "label": "Hook",
+      "icon": "code/hook",
+      "parent": "session",
+      "branch": "1 : 0..*"
+    },
+    {
+      "id": "subagent",
+      "label": "Subagent",
+      "icon": "infra/process",
+      "parent": "session",
+      "branch": "1 : 0..*"
+    },
+    {
+      "id": "rate-limit",
+      "label": "Rate limit sample",
+      "note": "rate_limit_sample",
+      "mono": true,
+      "icon": "business/budget",
+      "parent": "session",
+      "branch": "0..1 : 0..*"
+    },
+    {
+      "id": "git",
+      "label": "Git evidence",
+      "note": "git_evidence",
+      "mono": true,
+      "icon": "code/repository",
+      "parent": "session",
+      "branch": "0..1 : 0..*"
+    }
+  ],
+  "look": {
+    "nodes": "glyph"
+  },
+  "root": "session"
+}

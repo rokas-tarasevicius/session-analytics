@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "kind": "grid",
+  "title": "Proposed execution links",
+  "caption": "Turns, requests and tool activity within a session. Edge labels give parent : child cardinality.",
+  "nodes": [
+    { "id": "session", "label": "Session", "icon": "infra/log", "at": [0, 1], "focus": true },
+    { "id": "turn", "label": "Turn", "icon": "code/event", "at": [1, 0] },
+    { "id": "request", "label": "Request", "icon": "infra/model", "at": [1, 2] },
+    { "id": "call", "label": "Tool call", "note": "tool_call", "mono": true, "icon": "code/function", "at": [2, 2] },
+    { "id": "result", "label": "Tool result", "note": "tool_result", "mono": true, "icon": "code/json", "at": [3, 1] },
+    { "id": "edit", "label": "Edit", "icon": "code/commit", "at": [3, 2] },
+    { "id": "command", "label": "Command", "icon": "infra/terminal", "at": [3, 3] }
+  ],
+  "edges": [
+    { "from": "session", "to": "turn", "label": "1 : 0..*" },
+    { "from": "session", "to": "request", "label": "1 : 0..*" },
+    { "from": "turn", "to": "request", "label": "0..1 : 0..*" },
+    { "from": "request", "to": "call", "label": "0..1 : 0..*" },
+    { "from": "call", "to": "result", "label": "1 : 0..*" },
+    { "from": "call", "to": "edit", "label": "0..1 : 0..*" },
+    { "from": "call", "to": "command", "label": "0..1 : 0..*" }
+  ]
+}
