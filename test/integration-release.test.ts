@@ -11,7 +11,7 @@ import { Element, Option, documentFromHtml } from "./release-dom.ts";
 import { version } from "../src/version.ts";
 import { checkPackageFiles, checkReleaseMetadata, extractReleaseNotes } from "../scripts/release-check.ts";
 
-const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
+const views = ["summary", "velocity", "costs", "pricing", "subscription", "tools", "activity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
 
 test("release: package, lockfile, CLI and latest changelog versions agree", async () => {

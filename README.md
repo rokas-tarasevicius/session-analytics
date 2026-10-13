@@ -58,7 +58,7 @@ Without `npm link`, run `node bin/session-analytics.ts`. See [installation and o
 
 - **Groups work by repository.** Combine agents, profiles, linked worktrees and clones of the same remote in one view. Conductor can enrich the mapping when installed.
 - **Makes accounting inspectable.** Dated price snapshots, deduplicated token records and visible coverage explain each total. Unknown prices stay unpriced; missing evidence stays unavailable.
-- **Shows six views.** Summary for totals, Velocity for trends, Costs for the value breakdown, Pricing for rate provenance, Tools for call patterns, and Activity for session starts. Every view supports repository focus and a shared time window.
+- **Shows seven views.** Summary for totals, Velocity for trends, Costs for the value breakdown, Pricing for rate provenance, Subscription for how much of your Claude and Codex limits you use, Tools for call patterns, and Activity for session starts. Views share a time window and support repository focus.
 - **Includes your other machines.** `--remote server` adds a server or VM where agents run, read over your own SSH. Each machine analyzes its own history and returns only its content-free snapshot. [Combine machines](docs/interop.md#combine-machines).
 - **Works beyond the browser.** Get terminal reports, JSON, CSV/NDJSON/OTLP exports, aggregate team snapshots, and six read-only [MCP tools](docs/mcp.md). A bundled [agent skill](skills/session-analytics/SKILL.md) exposes the same metrics.
 
@@ -101,6 +101,7 @@ Analysis runs in a child process with a capped heap. Only allowlisted results cr
 | [FAQ](docs/faq.md) | [Privacy and public fields](docs/privacy.md) |
 | [MCP and agent setup](docs/mcp.md) | [Pricing and offline use](docs/pricing.md) |
 | [Exports and team sharing](docs/interop.md) | [Architecture](docs/architecture.md) |
+| [Subscription limits and value](docs/subscription.md) | |
 
 See the [changelog](CHANGELOG.md), [roadmap](docs/roadmap.md) and [release gates](docs/release.md) for shipped and planned work. [Competitive research](docs/proposals/competitive-landscape.md) covers related tools.
 

@@ -11,6 +11,7 @@
 - [Exports and team sharing](#exports-and-team-sharing)
 - [Pricing sources and history](#pricing-sources-and-history)
 - [Local index](#local-index)
+- [Subscription limits](#subscription-limits)
 - [MCP server and agent skill](#mcp-server-and-agent-skill)
 - [Options](#options)
 - [Environment variables](#environment-variables)
@@ -123,6 +124,18 @@ Previously indexed sessions survive provider cleanup and carry `transcript.sourc
 
 Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip session parsing; new activity can re-enter. Event extrema are compared as UTC instants. Legacy dates that cannot be verified are kept until their sources can be read again. Key mismatches fail an integrity check before selecting history, and rebuild also repairs damaged writer coordination. The dashboard shows filtered retention counts and frozen-pricing notes and excludes historical working observations from live snapshots. Direct machine and repository analyzer calls share the same visibility default.
 
+## Subscription limits
+
+```sh
+session-analytics limits                 # harvest meters and print each with its reset and projection
+session-analytics limits --json          # content-free limits snapshot
+session-analytics limits --quiet         # harvest only, for cron: */20 * * * * session-analytics limits --quiet
+session-analytics limits statusline      # Claude Code status line: records stdin rate_limits, prints them
+session-analytics limits --no-codex-account  # skip the banked-reset read through the local Codex app-server
+```
+
+Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. They are kept in `limits.json` in the data directory; `--no-index` neither reads nor writes it. See [Subscription limits and value](subscription.md).
+
 ## MCP server and agent skill
 
 ```bash
@@ -188,7 +201,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 
 ## Environment variables
 
-The analysis settings and the dashboard port can also be set with `SESSION_ANALYTICS_*` environment variables, named after the flag; a command-line option wins over the environment. Dashboard: `SESSION_ANALYTICS_PORT`. Source paths: `SESSION_ANALYTICS_CLAUDE_ROOT`, `SESSION_ANALYTICS_CODEX_ROOT`, `SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT`, `SESSION_ANALYTICS_CURSOR_DATABASE`, `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, `SESSION_ANALYTICS_GEMINI_ROOT` and `SESSION_ANALYTICS_CONDUCTOR_DATABASE`. Repository filters: `SESSION_ANALYTICS_REPO_ID`, `SESSION_ANALYTICS_REPO_NAME`, `SESSION_ANALYTICS_REPO_REMOTE` and `SESSION_ANALYTICS_REPO_ROOT`. Machines: `SESSION_ANALYTICS_REMOTE`, `SESSION_ANALYTICS_REMOTE_COMMAND`, `SESSION_ANALYTICS_TIME_ZONE` and `SESSION_ANALYTICS_PORTABLE_IDS=1`; `--snapshot` ignores the remote settings. Pricing and storage: `SESSION_ANALYTICS_RATE_CARD`, `SESSION_ANALYTICS_PRICING_POLICY`, `SESSION_ANALYTICS_PRICING_SOURCES`, `SESSION_ANALYTICS_PRICING_MAX_AGE_DAYS`, `SESSION_ANALYTICS_DATA_DIR`, `SESSION_ANALYTICS_OFFLINE=1` and `SESSION_ANALYTICS_NO_INDEX=1`. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable discovery of the five additional stores. Output flags such as `--no-open`, `--json`, `--share`, `--snapshot` and `--exclude-hidden` are command-line only.
+The analysis settings and the dashboard port can also be set with `SESSION_ANALYTICS_*` environment variables, named after the flag; a command-line option wins over the environment. Dashboard: `SESSION_ANALYTICS_PORT`. Source paths: `SESSION_ANALYTICS_CLAUDE_ROOT`, `SESSION_ANALYTICS_CODEX_ROOT`, `SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT`, `SESSION_ANALYTICS_CURSOR_DATABASE`, `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, `SESSION_ANALYTICS_GEMINI_ROOT` and `SESSION_ANALYTICS_CONDUCTOR_DATABASE`. Repository filters: `SESSION_ANALYTICS_REPO_ID`, `SESSION_ANALYTICS_REPO_NAME`, `SESSION_ANALYTICS_REPO_REMOTE` and `SESSION_ANALYTICS_REPO_ROOT`. Machines: `SESSION_ANALYTICS_REMOTE`, `SESSION_ANALYTICS_REMOTE_COMMAND`, `SESSION_ANALYTICS_TIME_ZONE` and `SESSION_ANALYTICS_PORTABLE_IDS=1`; `--snapshot` ignores the remote settings. Pricing and storage: `SESSION_ANALYTICS_RATE_CARD`, `SESSION_ANALYTICS_PRICING_POLICY`, `SESSION_ANALYTICS_PRICING_SOURCES`, `SESSION_ANALYTICS_PRICING_MAX_AGE_DAYS`, `SESSION_ANALYTICS_DATA_DIR`, `SESSION_ANALYTICS_OFFLINE=1` and `SESSION_ANALYTICS_NO_INDEX=1`. `SESSION_ANALYTICS_CODEX_ACCOUNT=0` turns off the banked-reset read (same as `--no-codex-account` on the dashboard and `limits`; `--offline` also skips it); `SESSION_ANALYTICS_CODEX_BIN` names the Codex binary. `SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` lists directories of Claude Agent SDK event logs for limit meters. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable discovery of the five additional stores. Output flags such as `--no-open`, `--json`, `--share`, `--snapshot` and `--exclude-hidden` are command-line only.
 
 Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`; OpenCode also honors `XDG_DATA_HOME`. Each source override replaces only that source's default; isolated scans should supply all desired paths and disable additional discovery. The demo does this automatically. `--time-zone` (or `TZ`) selects the analysis timezone.
 

@@ -15,3 +15,8 @@ export function dateTime(value: string | null | undefined, timeZone?: string): s
 export function calendarParts(date: Date, timeZone: string): Intl.DateTimeFormatPart[];
 export function weekdayHourParts(date: Date, timeZone: string): Intl.DateTimeFormatPart[];
 export function disjunction(values: string[]): string;
+export function wholeMoney(value: number): string;
+export function weekdayTime(seconds: number, timeZone?: string): string;
+export function dayMonth(seconds: number, timeZone?: string): string;
+export function weekdayDate(seconds: number, timeZone?: string): string;
+export function zonedHourKey(seconds: number, timeZone?: string): string;

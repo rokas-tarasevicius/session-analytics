@@ -186,7 +186,7 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
       await browser.evaluate(`document.documentElement.dataset.density = '${density}'`);
       await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height, mobile: false, width });
       await browser.until(`innerWidth`, width);
-      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) {
+      for (const view of ["summary", "velocity", "costs", "pricing", "subscription", "tools", "activity"]) {
         await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
         await browser.until(`document.querySelector('[data-view-panel="${view}"]').hidden`, false);
         const wraps = await browser.evaluate<Array<{ name: string; scroll: number; client: number }>>(`
@@ -296,7 +296,7 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
 
     // Native Tab order: skip link, wordmark, palette trigger, then every sidebar view button in sidebar order.
     const navOrder = await browser.evaluate<string[]>(`[...document.querySelectorAll('.view-nav [data-view-button]')].map((button) => button.dataset.viewButton)`);
-    assert.deepEqual(navOrder, ["summary", "velocity", "costs", "pricing", "tools", "activity"]);
+    assert.deepEqual(navOrder, ["summary", "velocity", "costs", "pricing", "subscription", "tools", "activity"]);
     const tabbed: string[] = [];
     await browser.evaluate(`document.activeElement?.blur(); window.scrollTo(0, 0)`);
     for (let index = 0; index < 3 + navOrder.length; index += 1) {
@@ -558,7 +558,7 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     })()`;
     for (const theme of ["light", "dark"]) for (const density of ["compact", "comfortable"]) {
       await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.dataset.density = '${density}'`);
-      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) for (const width of [375, 768, 1024, 1280, 1440]) {
+      for (const view of ["summary", "velocity", "costs", "pricing", "subscription", "tools", "activity"]) for (const width of [375, 768, 1024, 1280, 1440]) {
         await setWidth(width);
         await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
         await delay(150);
