@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - The dashboard adopts Fluxary's warm neutral surfaces, Geist typography, ink controls and open analytical sections, with Summary totals in a desktop side rail. Provider and model graphs retain their identity colours; the logo and activity heatmap use neutral tones.
 - Velocity opens grouped by model. Its series ordering is unchanged.
+- README wordmarks and the repository social preview now match the dashboard’s neutral palette and bundled Geist type. Plain metadata links replace coloured badges, and an expandable Velocity preview shows the default model grouping.
 - The README is shorter, with the dashboard tour and FAQ in linked guides. Generated Fluxary diagrams replace Mermaid blocks and include editable JSON plus light and dark SVGs. Synthetic screenshots reflect the new dashboard.
 
 ## [0.8.1] - 2026-10-13

@@ -2,7 +2,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/logo-wordmark-dark.svg" />
-  <img alt="session-analytics" src="assets/logo-wordmark.svg" width="440" />
+  <img alt="Session Analytics" src="assets/logo-wordmark.svg" width="440" />
 </picture>
 
 <h3>Content-free analytics for your coding-agent sessions.</h3>
@@ -10,12 +10,7 @@
 <p>See usage value, models, tools and activity by repository across Claude Code, Codex, Cursor, Copilot CLI, OpenCode and Gemini CLI.<br />
 Local and read-only. No prompts, messages or file paths in its outputs.</p>
 
-[![CI](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Node >= 24](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-2d6a5a)](package.json)
-[![Privacy: content-free](https://img.shields.io/badge/privacy-content--free-2d6a5a)](docs/privacy.md)
-[![Status: public preview](https://img.shields.io/badge/status-public%20preview-18181b)](docs/roadmap.md)
+<p><a href="LICENSE">MIT</a> · <a href="https://nodejs.org/">Node.js 24+</a> · <a href="package.json">Zero runtime dependencies</a> · <a href="docs/roadmap.md">Public preview</a> · <a href="https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml">CI</a></p>
 
 </div>
 
@@ -25,6 +20,18 @@ Local and read-only. No prompts, messages or file paths in its outputs.</p>
 </picture>
 
 *Synthetic demo data. [Full dashboard tour →](docs/dashboard.md)*
+
+<details>
+<summary>Velocity: usage over time, grouped by model</summary>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-velocity-dark.webp" />
+  <img alt="Velocity dashboard grouped by model, with provider-coloured model series" src="assets/screenshot-velocity.webp" width="100%" />
+</picture>
+
+Model is the default grouping. Provider colours keep the series easy to distinguish.
+
+</details>
 
 ## Get started
 

@@ -15,11 +15,11 @@
 | Desktop `assets/screenshot-*.webp` | README screenshots in light and dark pairs (`-dark` suffix), rendered from the synthetic demo only at 1280 CSS pixels, comfortable density, as lossless WebP. |
 | `assets/screenshot-mobile.webp`, `assets/screenshot-mobile-dark.webp` | Synthetic mobile Summary at 375 × 812 CSS pixels, compact density. Capture sources and regeneration commands are in [screenshot provenance](../assets/SCREENSHOTS.md). |
 
-The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
+The wordmarks match the dashboard’s “Session Analytics” name and Geist weights 500/600. The SVGs embed the bundled Geist font so GitHub image rendering does not depend on fonts installed on the reader’s device. The social preview also embeds Geist Mono for its labels; both fonts retain their [OFL license](../src/public/fonts/OFL-1.1.txt). The README uses plain metadata links and theme-aware wordmarks and screenshots.
 
 The dashboard follows Fluxary OS’s [design language](https://github.com/rokas-tarasevicius/fluxary-os/blob/d96e453ffb9ae8bd300e926db8fc61ec9c185e95/docs/decisions/2026-10-12-design-language.md): warm neutral surfaces, ink controls, opaque chrome, hairline borders and locally bundled Geist typography. At desktop widths of 1200px and above, Summary places its daily chart and provider breakdown beside a continuous 260px totals rail. Narrower screens retain totals-first reading order. Analytical sections sit on an open canvas with dividing lines; dialogs, controls and the totals rail retain surface boundaries.
 
-The dashboard mark, favicon, controls and heatmap use a warm ink scale. Provider and model charts retain identity colours so series remain distinguishable. Exported repository logos and social-preview assets retain their original palette. Dashboard type is Geist (text) and Geist Mono (figures and identifiers), both bundled under the OFL.
+The dashboard mark, favicon, controls and heatmap use a warm ink scale. Provider and model charts retain identity colours so series remain distinguishable. Repository logos and the social preview use the same neutral palette, including the activity heatmap. Dashboard type is Geist (text) and Geist Mono (figures and identifiers), both bundled under the OFL.
 
 | Role | Light | Dark |
 | --- | --- | --- |
@@ -75,10 +75,7 @@ Velocity's non-provider groups (repository, execution kind, effort) use the `--c
 
 ### Regenerating images
 
-```bash
-rsvg-convert -w 512 -h 512 assets/logo.svg -o assets/logo.png
-rsvg-convert -w 1280 -h 640 assets/social-preview.svg -o assets/social-preview.png
-```
+The SVGs are the editable brand sources. Keep the mark geometry and palette aligned with `src/public/favicon.svg` and the dashboard wordmark. Text remains editable SVG text; embedded WOFF2 data comes from `src/public/fonts/`. After editing, render `assets/logo.svg` at 512 × 512 and `assets/social-preview.svg` at 1280 × 640 in a browser and save PNGs at those exact dimensions. Wait for `document.fonts.ready` before capturing. Use a transparent background for the mark. Check the light and dark wordmarks at the README’s 440px display width.
 
 Screenshots come from the demo dataset only. In one terminal, start `npm run demo -- --no-open`; in another, run `node scripts/screenshots.ts --url http://127.0.0.1:4175`. The script requires Chrome and `cwebp`, captures desktop views at 1280 CSS pixels and 2x scale in comfortable density, and writes lossless light/dark WebP pairs to `assets/`. The `--only mobile` capture uses 375 × 812 CSS pixels, 2x scale and compact density. Use `--only NAME` for one capture or `--out DIR` for a review artifact directory. See [screenshot provenance](../assets/SCREENSHOTS.md) for the source and capture settings. Never point it at a dashboard reading real history.
 
@@ -88,8 +85,8 @@ Screenshots come from the demo dataset only. In one terminal, start `npm run dem
 2. **`package.json`**: `name`, `description`, the `bin` key, and the `repository`, `homepage`, and `bugs` URLs. Rename `bin/session-analytics.ts` if the file name should match, and update the `start`, `report`, and `demo` scripts.
 3. **Dashboard**: the `<title>`, the wordmark text (`Session <b>Analytics</b>`), and the wordmark's `aria-label` in `src/public/index.html`.
 4. **Agent skill**: the directory `skills/session-analytics/`, its `name` and command in `SKILL.md`, and `skills/session-analytics/agents/openai.yaml`. Users who symlinked the skill need to update the link.
-5. **Assets**: edit the SVG text in both wordmarks and the social preview, regenerate the PNGs, and replace `src/public/favicon.svg` if the mark changes.
-6. **Documentation**: README badges and links, `SECURITY.md` and `CODE_OF_CONDUCT.md` links, `.github/ISSUE_TEMPLATE/config.yml`, and the clone URL.
+5. **Assets**: edit the SVG text and accessible titles in both wordmarks and the social preview, regenerate the PNGs, and replace `src/public/favicon.svg` if the mark changes.
+6. **Documentation**: README metadata and links, `SECURITY.md` and `CODE_OF_CONDUCT.md` links, `.github/ISSUE_TEMPLATE/config.yml`, and the clone URL.
 7. **Tests**: `test/cli.test.ts` and `test/contract.test.ts` assert the command name, help text, and skill name; update them in the same change.
 
 When the repository moves to a new owner or name, GitHub keeps redirects, issues, and pull requests.
