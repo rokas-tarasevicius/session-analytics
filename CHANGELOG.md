@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - `merge` combines full snapshots from several machines into one full snapshot: sessions and repositories are unioned, a session found on two machines is counted once, and every rollup is recomputed. Shared snapshots merge as before; mixed inputs are refused. See [combine machines](docs/interop.md#combine-machines).
-- `--portable-ids` gives every repository with a Git remote the same ID on every machine, including repositories registered in Conductor, so combined snapshots show one row per repository. Only the output changes; the index keeps local IDs and reuses its cache.
+- `--portable-ids` gives every repository with a Git remote the same ID on every machine, including repositories registered in Conductor, so combined snapshots show one row per repository. Discovered local Git repositories use hostname-qualified IDs; known Claude and Codex provider identities give registered and discovered copies the same session key. Only the output changes; the index keeps local IDs and reuses its cache.
 - `--time-zone ZONE` (or `SESSION_ANALYTICS_TIME_ZONE`) sets the IANA time zone for activity days and hours without changing `TZ` for the whole shell. Snapshots combine only when their zones match.
 
 ### Changed

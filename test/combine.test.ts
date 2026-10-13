@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import os, { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
@@ -28,6 +30,11 @@ let local: MachineAnalytics;
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), "combine-fixture-"));
   fixture = await createSessionAnalyticsFixture(directory);
+  await writeFile(join(fixture.claudeRoot, "stats-cache.json"), JSON.stringify({
+    dailyModelTokensVersion: 5, lastComputedDate: "2026-07-20",
+    dailyModelTokens: [{ date: "2026-07-19", tokensByModel: { "claude-opus-5": 1000 } }],
+    modelUsage: { "claude-opus-5": { inputTokens: 100, outputTokens: 200, cacheReadInputTokens: 700, cacheCreationInputTokens: 0 } },
+  }));
   const { repositoryRoot, remote, ...options } = fixture;
   local = await analyzeMachineSessions(options);
 });
@@ -71,7 +78,7 @@ test("a session seen on two machines counts once, from its most complete copy", 
   const same = combineSnapshots([local, local]);
   assert.ok(same.warnings.includes(duplicateMachineWarning));
   for (const key of ["sessions", "repositories", "summary", "spendByDay", "spendByModel", "topTools"] as const) assert.deepEqual(same[key], local[key]);
-  assert.deepEqual(same.historyCoverage!.profiles, local.historyCoverage!.profiles);
+  assert.equal(same.historyCoverage!.profiles.length, local.historyCoverage!.profiles.length * 2);
   const later = structuredClone(local);
   const target = later.sessions[0]!;
   target.lastEventAt = new Date(Date.parse(target.lastEventAt ?? target.updatedAt) + 60_000).toISOString();
@@ -81,6 +88,57 @@ test("a session seen on two machines counts once, from its most complete copy", 
     assert.equal(combined.sessions.length, local.sessions.length);
     assert.equal(combined.sessions.find((session) => identity(session) === identity(target))!.lastEventAt, target.lastEventAt);
   }
+});
+
+test("combined generation time is the latest input instant, regardless of order or offset", () => {
+  const earlier = validateSnapshot({ ...local, generatedAt: "2026-07-21T12:00:00+02:00" });
+  const later = validateSnapshot({ ...otherMachine(), generatedAt: "2026-07-21T11:00:00Z" });
+  for (const order of [[earlier, later], [later, earlier]]) assert.equal(combineSnapshots(order).generatedAt, later.generatedAt);
+});
+
+test("matching profile paths stay independent per input and winning sessions refer to their machine", () => {
+  const other = otherMachine();
+  other.historyCoverage = structuredClone(local.historyCoverage!);
+  validateSnapshot(other);
+  const original = structuredClone([local, other]);
+  const combined = combineSnapshots([local, other]);
+  const count = local.historyCoverage!.profiles.length, profiles = combined.historyCoverage!.profiles;
+  assert.deepEqual(profiles.slice(0, count), local.historyCoverage!.profiles);
+  assert.equal(profiles.length, count * 2);
+  assert.equal(new Set(profiles.map(({ profileKey }) => profileKey)).size, count * 2);
+  assert.deepEqual(profiles.map(({ ordinal }) => ordinal), profiles.map((_, index) => index + 1));
+  for (const profile of profiles) assert.match(profile.profileKey, /^profile-[a-f0-9]{20}$/);
+  for (const session of other.sessions.filter(({ historyProfile }) => historyProfile)) {
+    const merged = combined.sessions.find((row) => identity(row) === identity(session))!;
+    const position = local.historyCoverage!.profiles.findIndex(({ profileKey }) => profileKey === session.historyProfile!.profileKey);
+    assert.equal(merged.historyProfile!.profileKey, profiles[count + position]!.profileKey);
+  }
+  const stats = ["statisticsCells", "unattributedTokens", "pricedUnattributedTokens", "possibleOverlapTokens", "unattributedEstimateUsd"] as const;
+  assert.ok(local.historyCoverage!.months.some(({ unattributedTokens }) => unattributedTokens > 0));
+  for (const row of combined.historyCoverage!.months) for (const key of stats) close(row[key], local.historyCoverage!.months.find(({ month }) => month === row.month)![key] * 2);
+  assert.deepEqual(combineSnapshots([local, other]), combined);
+  assert.deepEqual([local, other], original);
+  const later = structuredClone(local);
+  const target = later.sessions.find(({ historyProfile }) => historyProfile)!;
+  target.lastEventAt = new Date(Date.parse(target.lastEventAt!) + 60_000).toISOString();
+  const repeated = combineSnapshots([local, validateSnapshot(later)]);
+  assert.equal(repeated.sessions.length, local.sessions.length);
+  assert.ok(repeated.warnings.includes(duplicateMachineWarning));
+  assert.equal(repeated.sessions.find((row) => identity(row) === identity(target))!.historyProfile!.profileKey, profiles[count]!.profileKey);
+  for (const row of repeated.historyCoverage!.months) {
+    const source = local.historyCoverage!.months.find(({ month }) => month === row.month)!;
+    for (const key of stats) close(row[key], source[key] * 2);
+    close(row.sessionEvidenceUsd, source.sessionEvidenceUsd);
+  }
+  validateSnapshot(JSON.parse(JSON.stringify(repeated)));
+});
+
+test("time-zone metadata compares fields independently of serialization order", () => {
+  const other = validateSnapshot({ ...otherMachine(), velocity: { timeZone: local.velocity!.timeZone, version: 1 } });
+  assert.equal(combineSnapshots([local, other]).summary.sessions, local.summary.sessions * 2);
+  const { velocity, ...withoutZone } = structuredClone(local);
+  assert.equal(combineSnapshots([validateSnapshot(withoutZone), validateSnapshot(withoutZone)]).velocity, undefined);
+  assert.throws(() => combineSnapshots([local, validateSnapshot(withoutZone)]), /different analysis time zones/);
 });
 
 test("the first machine names a shared repository; other time zones are refused", () => {
@@ -106,7 +164,10 @@ test("portable IDs give remote-backed registrations the ID every machine derives
   assert.match(conductor.repository.id, /^conductor-/);
   assert.deepEqual(portable.repositories.find(({ repository }) => repository.name === "conductor")!.repository, { id: expected, name: "conductor" });
   assert.equal(portable.repositories.filter(({ repository }) => repository.id.startsWith("conductor-")).length, 0);
-  assert.deepEqual(portable.sessions.map(identity).sort(), local.sessions.map(identity).sort());
+  for (const [provider, id] of [["claude", "22222222-2222-4222-8222-222222222222"], ["codex", "11111111-1111-4111-8111-111111111111"]]) {
+    assert.ok(portable.sessions.some((session) => identity(session) === `${provider}:${sessionKey(`${provider}:${id}`)}`));
+  }
+  assert.deepEqual(portable.sessions.filter(({ provider }) => provider === "cursor").map(identity), local.sessions.filter(({ provider }) => provider === "cursor").map(identity));
   assert.ok(portable.sessions.filter(({ repositoryName }) => repositoryName === "conductor").every(({ repositoryId }) => repositoryId === expected));
   close(portable.summary.estimatedSpendUsd, local.summary.estimatedSpendUsd);
   const selected = await analyzeMachineSessions({ ...options, portableIds: true, repositoryId: expected });
@@ -120,6 +181,91 @@ test("portable IDs give remote-backed registrations the ID every machine derives
   assert.equal(indexStatus(indexed).lastScan?.parsedSessions, 0);
   assert.equal(indexStatus(indexed).lastScan?.reusedSessions, parsed);
   assert.deepEqual(warm.repositories.map(({ repository }) => repository.id), portable.repositories.map(({ repository }) => repository.id));
+  assert.deepEqual(warm.sessions.map(identity), portable.sessions.map(identity));
+  const localWarm = await analyzeMachineSessions(indexed);
+  assert.deepEqual(localWarm.sessions.map(identity), local.sessions.map(identity));
+  assert.equal(indexStatus(indexed).lastScan?.parsedSessions, 0);
+});
+
+test("portable session keys deduplicate transcripts copied without Conductor registration", async () => {
+  const { repositoryRoot, remote, ...options } = fixture;
+  const registered = await analyzeMachineSessions({ ...options, portableIds: true });
+  const discovered = await analyzeMachineSessions({ ...options, databasePath: join(directory, "absent-conductor.db"), portableIds: true });
+  assert.deepEqual(discovered.sessions.map(identity).sort(), registered.sessions.map(identity).sort());
+  const combined = combineSnapshots([registered, discovered]);
+  assert.equal(combined.summary.sessions, registered.summary.sessions);
+  close(combined.summary.estimatedSpendUsd, registered.summary.estimatedSpendUsd);
+  assert.equal(combined.summary.totalInputTokens, registered.summary.totalInputTokens);
+  assert.equal(combined.summary.outputTokens, registered.summary.outputTokens);
+  assert.ok(combined.warnings.includes(duplicateMachineWarning));
+  const duplicateFixture = await createSessionAnalyticsFixture(join(directory, "duplicate-registrations"));
+  const db = new DatabaseSync(duplicateFixture.databasePath);
+  db.exec("INSERT INTO sessions SELECT 'duplicate-registration',status,agent_type,title,created_at,updated_at,claude_session_id,model,is_hidden,workspace_id FROM sessions WHERE id='conductor-claude'");
+  db.exec("UPDATE sessions SET claude_session_id=NULL WHERE id='conductor-codex'");
+  db.close();
+  const snapshot = await analyzeMachineSessions({ ...duplicateFixture, repositoryRoot: undefined, portableIds: true });
+  assert.equal(new Set(snapshot.sessions.map(identity)).size, snapshot.sessions.length);
+  assert.equal(snapshot.sessions.length, registered.sessions.length);
+  assert.ok(snapshot.sessions.some(({ sessionKey: key }) => key === sessionKey("conductor-codex")), "legacy registrations retain their local keys");
+  validateSnapshot(snapshot);
+});
+
+test("portable projection resolves colliding session keys before rebuilding rollups", async () => {
+  const fixture = await createSessionAnalyticsFixture(join(directory, "session-key-collision"));
+  const db = new DatabaseSync(fixture.databasePath);
+  db.prepare("INSERT INTO workspaces (id,repository_id,workspace_path) VALUES ('archive-workspace','repository-1',?)").run(fixture.repositoryRoot);
+  db.exec("INSERT INTO sessions SELECT 'codex:11111111-1111-4111-8111-111111111111',status,agent_type,title,'2026-07-18T10:00:00Z',updated_at,NULL,model,is_hidden,'archive-workspace' FROM sessions WHERE id='conductor-codex'");
+  db.close();
+  const options = { ...fixture, repositoryRoot: undefined };
+  const local = await analyzeMachineSessions(options);
+  const portable = await analyzeMachineSessions({ ...options, portableIds: true });
+  const key = sessionKey("codex:11111111-1111-4111-8111-111111111111");
+  assert.equal(local.sessions.filter(({ sessionKey }) => sessionKey === key).length, 1);
+  assert.equal(portable.sessions.length, local.sessions.length - 1);
+  assert.equal(new Set(portable.sessions.map(identity)).size, portable.sessions.length);
+  const winner = portable.sessions.find(({ provider, sessionKey }) => provider === "codex" && sessionKey === key)!;
+  assert.equal(winner.lastEventAt, local.sessions.find(({ sessionKey: key }) => key === sessionKey("conductor-codex"))!.lastEventAt);
+  validateSnapshot(portable);
+});
+
+test("portable local Git IDs depend on the machine, support selection and leave shared groups unchanged", async (t) => {
+  const root = join(directory, "local-git"), fixture = await createSessionAnalyticsFixture(root);
+  await run("git", ["init", "--quiet", fixture.repositoryRoot]);
+  const transcript = join(fixture.codexRoot, "2026/07/20/rollout-2026-07-20T10-00-00-11111111-1111-4111-8111-111111111111.jsonl");
+  await writeFile(transcript, (await readFile(transcript, "utf8")).replaceAll("/fixtures/workspaces/conductor/codex-workspace", fixture.repositoryRoot));
+  const { repositoryRoot, remote, ...options } = fixture;
+  const indexed = { ...options, databasePath: join(root, "absent.db"), noIndex: false };
+  const host = t.mock.method(os, "hostname", () => "machine-a");
+  syncBuiltinESMExports();
+  try {
+    const local = await analyzeMachineSessions(indexed);
+    const parsed = indexStatus(indexed).lastScan!.parsedSessions;
+    const first = await analyzeMachineSessions({ ...indexed, portableIds: true });
+    const id = `discovered-${createHash("sha256").update(JSON.stringify(["local", "machine-a", repositoryRoot])).digest("hex").slice(0, 20)}`;
+    assert.ok(first.repositories.some(({ repository }) => repository.id === id));
+    assert.equal(indexStatus(indexed).lastScan!.parsedSessions, 0);
+    assert.equal(indexStatus(indexed).lastScan!.reusedSessions, parsed);
+    assert.deepEqual((await analyzeMachineSessions({ ...indexed, portableIds: true, repositoryId: id })).repositories.map(({ repository }) => repository.id), [id]);
+    host.mock.mockImplementation(() => "machine-b");
+    const second = await analyzeMachineSessions({ ...indexed, portableIds: true });
+    const localIds = local.repositories.filter(({ repository }) => repository.name !== "repository").map(({ repository }) => repository.id);
+    for (const snapshot of [first, second]) assert.deepEqual(snapshot.repositories.filter(({ repository }) => repository.name !== "repository").map(({ repository }) => repository.id), localIds);
+    const secondId = second.repositories.find(({ repository }) => repository.name === "repository")!.repository.id;
+    assert.notEqual(secondId, id);
+    assert.match(secondId, /^discovered-[a-f0-9]{20}$/);
+    assert.equal(indexStatus(indexed).lastScan!.parsedSessions, 0);
+    assert.deepEqual((await analyzeMachineSessions({ ...indexed, portableIds: true, repositoryId: secondId })).repositories.map(({ repository }) => repository.id), [secondId]);
+    const combined = combineSnapshots([first, { ...second, sessions: second.sessions.map((session) => ({ ...session, sessionKey: sessionKey(`machine-b:${identity(session)}`) })) }]);
+    assert.equal(combined.repositories.filter(({ repository }) => repository.name === "repository").length, 2);
+    const db = new DatabaseSync(fixture.databasePath);
+    db.exec("UPDATE repos SET remote_url=NULL"); db.close();
+    const registered = await analyzeMachineSessions({ ...options, portableIds: true });
+    assert.equal(registered.repositories.find(({ repository }) => repository.name === "conductor")!.repository.id,
+      `conductor-${createHash("sha256").update("conductor:repository-1").digest("hex").slice(0, 20)}`);
+    await run("git", ["-C", repositoryRoot, "remote", "add", "origin", remote]);
+    const remoteSnapshot = await analyzeMachineSessions({ ...options, databasePath: indexed.databasePath, portableIds: true });
+    assert.ok(remoteSnapshot.repositories.some(({ repository }) => repository.id === remoteId("github.com/example/conductor")));
+  } finally { host.mock.restore(); syncBuiltinESMExports(); }
 });
 
 test("--time-zone moves activity cells, reaches the worker and is part of index reuse", async () => {
