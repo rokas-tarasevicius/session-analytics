@@ -60,7 +60,7 @@ const elements = {
   theme: $("#theme-switch"), themeLabel: $("#theme-label"), toolCalls: $("#tool-calls"),
   toolsView: $("#tools-view"), toolsProviderFilters: $("#tools-provider-filters"),
   tools: $("#metric-tools"), viewStatus: $("#view-status"), warning: $("#warning-banner"), warningList: $("#warning-list"),
-  windowEnd: $("#window-end"), windowNote: $("#window-note"), windowSegment: $("#window-segment"), windowStart: $("#window-start"),
+  windowEnd: $("#window-end"), windowNote: $("#window-note"), windowSegment: $("#window-segment"), windowSelect: $("#window-select"), windowStart: $("#window-start"),
   wordmark: $(".wordmark"),
 };
 const providerFilters = [...document.querySelectorAll("[data-provider-filter]")];
@@ -1276,6 +1276,7 @@ function renderView() {
 
 function setWindowPreset(preset) {
   windowPreset = windowPresets.includes(preset) ? preset : "30";
+  elements.windowSelect.value = windowPreset;
   for (const button of windowButtons) button.setAttribute("aria-pressed", String(button.dataset.windowPreset === windowPreset));
   elements.dateRange.hidden = windowPreset !== "custom";
   if (windowPreset !== "custom") showWindowNote([]);
@@ -1719,6 +1720,7 @@ elements.wordmark.addEventListener("click", (event) => {
   switchView("summary");
 });
 for (const button of windowButtons) button.addEventListener("click", () => { applyWindowPreset(button.dataset.windowPreset); if (button.dataset.windowPreset === "custom") elements.windowStart.focus(); });
+elements.windowSelect.addEventListener("change", () => { applyWindowPreset(elements.windowSelect.value); if (elements.windowSelect.value === "custom") elements.windowStart.focus(); });
 for (const input of [elements.windowStart, elements.windowEnd]) {
   input.addEventListener("change", applyCustomWindow);
   input.addEventListener("blur", restoreWindowInputs);

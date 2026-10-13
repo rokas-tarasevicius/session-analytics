@@ -1,15 +1,16 @@
 {
   "name": "session-analytics",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Content-free analytics for local coding-agent sessions: Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI usage, cost, and tools by repository.",
   "license": "MIT",
-  "author": "Rokas Tarasevi\u010dius",
+  "author": "Rokas Tarasevičius",
   "private": true,
   "type": "module",
   "bin": {
     "session-analytics": "bin/session-analytics.ts"
   },
   "files": [
+    "CHANGELOG.md",
     "bin",
     "src",
     "data",
@@ -43,9 +44,11 @@
     "start": "node bin/session-analytics.ts",
     "report": "node bin/session-analytics.ts report",
     "demo": "node scripts/demo.ts",
-    "test": "node --test --test-concurrency=2 test/*.test.ts test/validation/*.test.ts verify/*/*.test.ts verify/*/*.test.mjs",
+    "test": "node scripts/test.ts",
+    "test:browser": "node scripts/test.ts --browser",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
+    "release:check": "npm run check && node scripts/release-check.ts",
     "verify:real": "node scripts/verify-real.ts"
   },
   "devDependencies": {

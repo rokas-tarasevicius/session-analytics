@@ -21,14 +21,16 @@
 Requirements: **Node.js 24 or newer** and **macOS** (Claude Code and Codex history also works on Linux; see [platform support](../README.md#faq)).
 
 ```bash
-git clone git@github.com:rokas-tarasevicius/session-analytics.git
+git clone https://github.com/rokas-tarasevicius/session-analytics.git
 cd session-analytics
-npm install   # development tooling only; the runtime has no dependencies
+npm ci        # development tooling only; the runtime has no dependencies
 npm link      # puts the session-analytics command on your PATH
 session-analytics
 ```
 
 The package is not on npm. `npm install github:rokas-tarasevicius/session-analytics` or a tarball install fails on Node 24 with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` because the executable is a `.ts` file under `node_modules`. Without `npm link`, run `node bin/session-analytics.ts` from the checkout.
+
+The source is publicly available. `npm run demo` explores synthetic history without reading your own sessions. [Source-release validation](release.md) documents the public launch and packaging gates.
 
 ## Dashboard
 

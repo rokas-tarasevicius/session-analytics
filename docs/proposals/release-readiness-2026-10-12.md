@@ -1,6 +1,6 @@
 # Release readiness review and plan (2026-10-12)
 
-Status: findings are being implemented in the pull requests listed in section 6; line numbers refer to commit 8aad1ee.
+Status: historical review of commit `8aad1ee`; its pending-work claims are superseded by the [2026-10-13 readiness plan](open-source-readiness-2026-10-13.md). The section 6 dashboard and release-documentation passes subsequently shipped in 0.8.0. Keep the findings below as dated evidence, and use [the release runbook](../release.md) and [current backlog](../../TODOS.md) for remaining work.
 
 Scope: the localhost dashboard (six views, dialogs, URL state, exports), the release surface (README, CHANGELOG, SECURITY, CI, packaging) and the visual system. Baseline: branch `t3code/de5949d7` at `8aad1ee`, identical to `master`; `npm run check` passes (typecheck clean, 792 tests, 0 failures) after `npm install`.
 

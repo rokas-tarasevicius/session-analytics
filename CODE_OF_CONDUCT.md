@@ -59,11 +59,10 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement through the
-maintainer's contact channel listed on their GitHub profile,
-[@rokas-tarasevicius](https://github.com/rokas-tarasevicius), or through a
-[private security advisory](https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new)
-on this repository.
+reported privately by email to [rokas.tarasevicius@gmail.com](mailto:rokas.tarasevicius@gmail.com).
+Reports are received by the project maintainer, Rokas Tarasevičius
+([@rokas-tarasevicius](https://github.com/rokas-tarasevicius)).
+Please do not post reports in public issues, pull requests or discussions.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

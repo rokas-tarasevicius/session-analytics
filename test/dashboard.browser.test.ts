@@ -1,5 +1,6 @@
 // Real-browser interaction checks through the Chrome DevTools protocol (no dependencies). Skipped when Chrome is
 // unavailable; set SESSION_ANALYTICS_CHROME to a Chrome/Chromium binary to run it elsewhere.
+// SESSION_ANALYTICS_REQUIRE_BROWSER=1 makes missing or unlaunchable Chrome fail the release gate.
 //
 // Hermetic: the dashboard server reads only the synthetic fixture. It gets its own HOME, data directory and
 // explicit source roots, runs offline without the private index or the additional-provider discovery, and inherits
@@ -7,7 +8,6 @@
 // polls for the state it needs instead of sleeping for a fixed time.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -18,11 +18,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
+import { stopBrowserProcess as stop } from "./browser-process.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
 const serverPath = join(testRoot, "../src/server.ts");
 const chromePath = process.env["SESSION_ANALYTICS_CHROME"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const requireBrowser = process.env["SESSION_ANALYTICS_REQUIRE_BROWSER"] === "1";
+const browserSkip = existsSync(chromePath) || requireBrowser ? false : "Chrome is not installed";
 
 async function availablePort(): Promise<number> {
   const probe = createServer();
@@ -31,13 +34,6 @@ async function availablePort(): Promise<number> {
   assert.ok(address && typeof address !== "string");
   await new Promise<void>((resolve, reject) => probe.close((error) => (error ? reject(error) : resolve())));
   return address.port;
-}
-
-async function stop(child: ChildProcess | null): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = once(child, "exit");
-  child.kill("SIGTERM");
-  await Promise.race([exited, delay(3_000, undefined, { ref: false })]);
 }
 
 /** The server's environment: the parent's, minus anything that could point it at real history, plus the fixture. */
@@ -142,10 +138,12 @@ async function connect(port: number): Promise<{ browser: Browser; close: () => v
   return { browser, close: () => socket.close() };
 }
 
-test("laptop tables fit and daily usage chips stay one row tall in both densities", { skip: existsSync(chromePath) ? false : "Chrome is not installed" }, async (t) => {
+test("laptop tables fit and daily usage chips stay one row tall in both densities", { skip: browserSkip }, async (t) => {
+  assert.ok(existsSync(chromePath), `Required browser is missing: ${chromePath}`);
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-layout-"));
   let server: ChildProcess | null = null, chrome: ChildProcess | null = null;
   let close = () => {};
+  let shutdownChrome: (() => Promise<unknown>) | undefined;
   try {
     const fixture = await createSessionAnalyticsFixture(join(temporaryDirectory, "fixture"));
     const home = join(temporaryDirectory, "home"), demoTemp = join(temporaryDirectory, "demo-temp");
@@ -160,7 +158,9 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
     assert.equal(new Set(snapshot.sessions.map((session: { provider: string }) => session.provider)).size, 6);
     assert.ok(snapshot.historyCoverage);
     // Long bounded display names must not force the Repository column wider.
-    snapshot.repositories[0].repository.name = "Synthetic repository with a very long display name";
+    const renamedRepository = snapshot.repositories[0].repository;
+    renamedRepository.name = "Synthetic repository with a very long display name";
+    for (const session of snapshot.sessions) if (session.repositoryId === renamedRepository.id) session.repositoryName = renamedRepository.name;
     const snapshotPath = join(temporaryDirectory, "snapshot.json");
     await writeFile(snapshotPath, JSON.stringify(snapshot));
     const started = await startServer(hermeticEnvironment(fixture, home), ["--snapshot", snapshotPath]);
@@ -171,9 +171,13 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
       if (chrome && (chrome.exitCode !== null || chrome.signalCode !== null)) return null;
       throw error;
     });
-    if (!connection) { t.skip("Chrome is installed but cannot launch in this host sandbox"); return; }
+    if (!connection) {
+      assert.equal(requireBrowser, false, "Required browser cannot launch in this host sandbox");
+      t.skip("Chrome is installed but cannot launch in this host sandbox"); return;
+    }
     close = connection.close;
     const { browser } = connection;
+    shutdownChrome = () => browser.send("Browser.close");
     await browser.send("Page.enable");
     await browser.open(`${started.origin}/?window=all`);
     await browser.evaluate("document.fonts.ready.then(() => true)");
@@ -205,29 +209,46 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
       }
     }
     // Both shared breakpoints must beat per-view defaults, including the later Pricing stylesheet.
-    for (const width of [820, 520]) {
+    for (const width of [820, 520, 375]) {
       await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 900, mobile: false, width });
       await browser.until(`innerWidth`, width);
       for (const view of ["summary", "velocity", "pricing"]) {
         await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
         const columns = await browser.evaluate<number[]>(`[...document.querySelectorAll('[data-view-panel="${view}"] .kpi-grid')].map((grid) => getComputedStyle(grid).gridTemplateColumns.split(' ').length)`);
-        assert.ok(columns.length > 0 && columns.every((count) => count === 2), `${view} has two KPI columns at ${width}px`);
+        assert.ok(columns.length > 0 && columns.every((count) => count === (width < 400 ? 1 : 2)), `${view} has responsive KPI columns at ${width}px`);
       }
     }
   } finally {
-    close(); await stop(chrome); await stop(server);
+    try { await stop(chrome, shutdownChrome); }
+    finally { close(); await stop(server); }
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
 });
 
-test("dashboard interactions in a real browser", { skip: existsSync(chromePath) ? false : "Chrome is not installed" }, async (t) => {
+test("dashboard interactions in a real browser", { skip: browserSkip }, async (t) => {
+  assert.ok(existsSync(chromePath), `Required browser is missing: ${chromePath}`);
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-browser-"));
   let server: ChildProcess | null = null;
   let failing: ChildProcess | null = null;
   let chrome: ChildProcess | null = null;
   let close = () => {};
+  let shutdownChrome: (() => Promise<unknown>) | undefined;
   try {
     const fixture = await createSessionAnalyticsFixture(join(temporaryDirectory, "fixture"));
+    // The Conductor fixture has one priced activity date. Add two native days for chart-specific interactions;
+    // single-day windows below still verify the compact legend that replaced the old one-point chart.
+    for (const [day, chartSession, input] of [
+      ["17", "44444444-4444-4444-8444-444444444444", 100],
+      ["18", "55555555-5555-4555-8555-555555555555", 101],
+    ] as const) {
+      const date = `2026-07-${day}`;
+      const usage = { input_tokens: input, cached_input_tokens: 0, output_tokens: 10 };
+      await writeFile(join(fixture.codexArchiveRoot, `rollout-${date}T10-00-00-${chartSession}.jsonl`), [
+        { type: "session_meta", timestamp: `${date}T10:00:00Z`, payload: { id: chartSession, cwd: "/fixtures/workspaces/conductor/codex-workspace", source: "cli" } },
+        { type: "turn_context", timestamp: `${date}T10:00:01Z`, payload: { model: "gpt-5.6-sol" } },
+        { type: "event_msg", timestamp: `${date}T10:00:02Z`, payload: { type: "token_count", info: { last_token_usage: usage, total_token_usage: usage } } },
+      ].map((record) => JSON.stringify(record)).join("\n") + "\n");
+    }
     const home = join(temporaryDirectory, "home");
     await mkdir(home, { recursive: true });
     const environment = hermeticEnvironment(fixture, home);
@@ -247,11 +268,13 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
       throw error;
     });
     if (!connection) {
+      assert.equal(requireBrowser, false, "Required browser cannot launch in this host sandbox");
       t.skip("Chrome is installed but cannot launch in this host sandbox");
       return;
     }
     close = connection.close;
     const { browser } = connection;
+    shutdownChrome = () => browser.send("Browser.close");
     await browser.send("Page.enable");
     await browser.send("Emulation.setTimezoneOverride", { timezoneId: "UTC" });
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
@@ -311,7 +334,8 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     await browser.until(`document.querySelector('#export-menu').open`, false);
 
     // Sidebar drill-down keeps keyboard focus on the activated row, marks it pressed and records it in the URL.
-    const repositoryId = await browser.evaluate<string>(`document.querySelector('#repository-list [data-repository]:not([data-repository="all"])').dataset.repository`);
+    const repositoryId = snapshot.repositories.find(({ repository }) => repository.name === "conductor")?.repository.id;
+    assert.ok(repositoryId, "the native chart fixture belongs to the Conductor repository");
     await browser.evaluate(`document.querySelector('#repository-list [data-repository="${repositoryId}"]').focus()`);
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#repository-filter').value`, repositoryId);
@@ -404,22 +428,29 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     await browser.key("p", { code: "KeyP", text: "p" });
     await browser.key("1", { code: "Digit1", text: "1" });
     await browser.until(`document.querySelector('#velocity-view [data-provider="codex"] input').checked`, false);
-    assert.match(await browser.evaluate<string>(`document.querySelector('.velocity-lead').textContent`), /2 of 3 providers/);
+    assert.match(await browser.evaluate<string>(`document.querySelector('#velocity-view').textContent`), /2 of 3 providers/);
     await browser.evaluate(`document.querySelector('#velocity-view [data-provider="codex"] input').click()`);
     await browser.evaluate(`document.querySelector('[data-view-button="summary"]').click()`);
     await browser.until(`document.querySelector('[data-view-panel="summary"]').hidden`, false);
 
-    // A single-day custom window draws persistent data points; its dates are in the URL.
+    // A single-day custom window uses the compact provider-value legend; its dates are in the URL.
     const spendDay = Object.keys(snapshot.sessions.find((item) => Object.keys(item.spendByDay).length)?.spendByDay ?? {})[0];
     assert.ok(spendDay, "fixture has a day with priced usage");
     const setDates = (start: string, end: string) => browser.evaluate(`(() => { const s = document.querySelector('#window-start'), e = document.querySelector('#window-end'); s.value = '${start}'; e.value = '${end}'; e.dispatchEvent(new Event('change')); })()`);
     await browser.evaluate(`document.querySelector('[data-window-preset="custom"]').click()`);
     await setDates(spendDay, spendDay);
-    await browser.until(`document.querySelectorAll('#daily-spend .trend-point').length >= 1`, true);
+    await browser.until(`document.querySelectorAll('#daily-spend .chart-legend-value').length >= 1`, true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend svg')`), null);
+    assert.match(await browser.evaluate<string>(`document.querySelector('#daily-spend').textContent`), /Only .* has activity/);
     assert.equal(await browser.evaluate(`location.search`), `?view=summary&window=custom&start=${spendDay}&end=${spendDay}`);
     // Clearing the end date keeps the start, and leaving the field restores the end.
     await browser.evaluate(`(() => { const e = document.querySelector('#window-end'); e.focus(); e.value = ''; e.dispatchEvent(new Event('change')); e.blur(); })()`);
     assert.deepEqual(await browser.evaluate(`[document.querySelector('#window-start').value, document.querySelector('#window-end').value]`), [spendDay, spendDay]);
+    const activityDays = [...new Set(snapshot.sessions.flatMap((session) => Object.keys(session.spendByDay)))].sort();
+    assert.ok(activityDays.length >= 3, "chart fixture has at least three priced activity dates");
+    await setDates(activityDays[0]!, activityDays[1]!);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend svg')`), null);
+    assert.match(await browser.evaluate<string>(`document.querySelector('#daily-spend').textContent`), /Only .* and .* have activity/);
     // A reversed range swaps, a range beyond the history is clamped, and the note says so.
     const minimum = await browser.evaluate<string>(`document.querySelector('#window-start').min`);
     const maximum = await browser.evaluate<string>(`document.querySelector('#window-end').max`);
@@ -462,11 +493,17 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     await browser.evaluate(`document.querySelector('#refresh-button').click()`);
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "error");
     assert.equal(await browser.evaluate(`document.querySelector('#error-banner').hidden`), false);
-    assert.equal(await browser.evaluate(`document.querySelector('#error-title').textContent`), 'Refresh failed');
-    assert.match(await browser.evaluate<string>(`document.querySelector('#error-message').textContent`), / Showing the snapshot from /);
+    assert.equal(await browser.evaluate(`document.querySelector('#error-title').textContent`), "Couldn't refresh");
+    assert.match(await browser.evaluate<string>(`document.querySelector('#error-message').textContent`), / You are looking at the snapshot from /);
     assert.match(await browser.evaluate<string>(`document.querySelector('#generated-at').textContent`), /· stale$/);
     assert.equal(await browser.evaluate(`document.querySelector('#metric-spend').textContent`), headline);
     assert.equal(await browser.evaluate(`document.querySelector('#error-retry').hidden`), false);
+    // Regression: stale snapshot metadata must wrap instead of widening a narrow phone.
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 812, mobile: false, width: 375 });
+    await browser.until(`innerWidth`, 375);
+    assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, "Stale snapshot fits a 375px phone");
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
+    await browser.until(`innerWidth`, 1440);
     await browser.evaluate(`window.__restoreFetch(); document.querySelector('#error-retry').click()`);
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
     assert.equal(await browser.evaluate(`document.querySelector('#error-banner').hidden`), true);
@@ -521,7 +558,7 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     })()`;
     for (const theme of ["light", "dark"]) for (const density of ["compact", "comfortable"]) {
       await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.dataset.density = '${density}'`);
-      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) for (const width of [390, 1024, 1280, 1440]) {
+      for (const view of ["summary", "velocity", "costs", "pricing", "tools", "activity"]) for (const width of [375, 768, 1024, 1280, 1440]) {
         await setWidth(width);
         await browser.evaluate(`document.querySelector('[data-view-button="${view}"]').click()`);
         await delay(150);
@@ -530,9 +567,11 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
         if (width >= 1280) {
           assert.equal(await browser.evaluate(`(() => {
             const panel = document.querySelector('[data-view-panel]:not([hidden])');
+            const maxLines = ${view === "costs" && width === 1280 && density === "comfortable" ? 2 : 1};
             return [...panel.querySelectorAll('.chart-note, .kpi-note')].every((note) =>
-              note.getBoundingClientRect().height <= parseFloat(getComputedStyle(note).lineHeight) + 1);
-          })()`), true, `${view} notes stay on one line at ${width}px (${theme}, ${density})`);
+              note.getBoundingClientRect().height <= maxLines * parseFloat(getComputedStyle(note).lineHeight) + 1
+              && note.scrollHeight <= note.clientHeight + 1);
+          })()`), true, `${view} notes stay readable without clipping at ${width}px (${theme}, ${density})`);
           if (view === "summary") {
             assert.equal(await browser.evaluate(`(() => {
               const cards = [...document.querySelectorAll('.summary-metrics > .kpi')];
@@ -545,6 +584,16 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
           }
           if (view === "velocity") assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.velocity-inspection')).display`), "grid");
         }
+      }
+      await setWidth(375);
+      assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('#window-segment')).display`), "none");
+      assert.notEqual(await browser.evaluate(`getComputedStyle(document.querySelector('.window-select-wrap')).display`), "none");
+      for (const preset of ["7", "90", "all", "custom", "30"]) {
+        await browser.evaluate(`(() => { const select = document.querySelector('#window-select'); select.value = '${preset}'; select.dispatchEvent(new Event('change')); })()`);
+        assert.equal(await browser.evaluate(`document.querySelector('#window-segment [aria-pressed="true"]').dataset.windowPreset`), preset);
+        assert.equal(await browser.evaluate(`document.querySelector('#date-range').hidden`), preset !== "custom");
+        if (preset === "custom") assert.equal(await browser.evaluate(`document.activeElement.id`), "window-start");
+        assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, `Mobile ${preset} window fits (${theme}, ${density})`);
       }
       await setWidth(1024);
       await browser.evaluate(`document.querySelector('[data-window-preset="custom"]').click()`);
@@ -584,9 +633,14 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     // On a touch screen the controls grow to finger size, key hints disappear, and the page still fits.
     await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await browser.until(`matchMedia('(pointer: coarse)').matches`, true);
-    assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-segment button, #refresh-button, #theme-switch, #density-switch')].every((control) => control.getBoundingClientRect().height >= 40)`), true);
+    await setWidth(375);
+    assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-select, #refresh-button, #theme-switch, #density-switch')].every((control) => control.getBoundingClientRect().height >= 40)`), true);
     assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.palette-trigger kbd')).display`), "none");
     assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true);
+    await setWidth(768);
+    assert.notEqual(await browser.evaluate(`getComputedStyle(document.querySelector('#window-segment')).display`), "none");
+    assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-segment button')].every((control) => control.getBoundingClientRect().height >= 40)`), true, "Tablet time-window buttons retain touch targets");
+    assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, "Tablet touch controls fit the page");
     await browser.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await setWidth(1440);
 
@@ -616,10 +670,8 @@ test("dashboard interactions in a real browser", { skip: existsSync(chromePath) 
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "error");
     assert.match(await browser.evaluate<string>(`document.querySelector('#view-status').textContent`), /No snapshot/);
   } finally {
-    close();
-    await stop(chrome);
-    await stop(failing);
-    await stop(server);
+    try { await stop(chrome, shutdownChrome); }
+    finally { close(); await Promise.all([stop(failing), stop(server)]); }
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
 });
