@@ -17,15 +17,11 @@ jobs:
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Only the private preview may treat hosted macOS as advisory. Public releases require both platforms.
-    continue-on-error: ${{ github.event.repository.private && matrix.os == 'macos-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        # Contributor code never runs on the persistent private runner. Disconnect that runner before going public.
-        # Private PRs use hosted Linux even if private hosted minutes are unavailable; do not fall back to agentbox.
-        os: ${{ !github.event.repository.private && fromJSON('["ubuntu-latest","macos-latest"]') || github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["agentbox","macos-latest"]') }}
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -45,9 +41,8 @@ jobs:
         run: npm run release:check
 
   browser:
-    if: ${{ !github.event.repository.private || github.event_name != 'pull_request' }}
-    runs-on: ${{ github.event.repository.private && 'macos-latest' || 'ubuntu-latest' }}
-    continue-on-error: ${{ github.event.repository.private }}
+    name: browser (ubuntu-latest)
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Check out
@@ -67,5 +62,5 @@ jobs:
       - name: Test dashboard in Chrome
         run: npm run test:browser
         env:
-          SESSION_ANALYTICS_CHROME: ${{ github.event.repository.private && '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' || '/usr/bin/google-chrome' }}
+          SESSION_ANALYTICS_CHROME: /usr/bin/google-chrome
           SESSION_ANALYTICS_REQUIRE_BROWSER: '1'

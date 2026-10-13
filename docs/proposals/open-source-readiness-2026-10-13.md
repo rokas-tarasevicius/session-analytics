@@ -2,7 +2,9 @@
 
 Baseline: `origin/master` at `008c121`, release 0.8.0. Working branch: `release/open-source-readiness`. This plan supersedes the pending-work claims in the [2026-10-12 review](release-readiness-2026-10-12.md), which remains a historical audit. Current source installation, six providers, six views, metrics-only MCP and exports are shipped; npm publication is not.
 
-The user authorized fixes and small improvements without intermediate questions and requested parallel GPT-6.1 Sol reviewers. Repository visibility, publication and account settings remain explicit external gates. Local implementation is complete on this branch; entries remain under `Unreleased` until a release version is chosen.
+The user authorized fixes and small improvements without intermediate questions and requested parallel GPT-6.1 Sol reviewers. The follow-up authorized landing this branch and configuring hosted CI, branch protection and reporting contacts. The candidate is version 0.8.1 with a dated changelog; no tag or release has been published. Visibility and publication remain separate launch gates.
+
+**CI policy correction (2026-10-13).** The current candidate requires GitHub-hosted Ubuntu and macOS source validation plus a required Ubuntu Chrome check for CI and tag releases, regardless of repository visibility. This replaces the initial private-preview policy that allowed advisory checks or a self-hosted release fallback. Earlier repository observations and local verification results below remain dated audit evidence; hosted results must still be verified on the final candidate.
 
 ## What already shipped
 
@@ -19,8 +21,8 @@ The user authorized fixes and small improvements without intermediate questions 
 
 | Workstream | Concrete outcome | Verification | Owner |
 | --- | --- | --- | --- |
-| Public contribution CI | Public PRs/pushes require hosted Ubuntu, macOS and browser checks; private PRs use hosted Ubuntu; no advisory public gates | Review event/visibility conditions and actual hosted results before announcement | Release integration |
-| Source release preflight | One local `npm run release:check`; tag/package/source/latest changelog agreement; public tag validation on Ubuntu/macOS plus required Chrome before the publishing job gains write permission | Full suite plus positive/negative metadata regressions, synthetic report validation and hosted platform/browser results | Release integration |
+| Contribution CI | PRs, pushes to `master` and manual CI runs require hosted Ubuntu, macOS and Chrome checks in both private and public repositories | Review workflow conditions and actual hosted results before announcement | Release integration |
+| Source release preflight | One local `npm run release:check`; tag/package/source/latest changelog agreement; every tag requires hosted Ubuntu/macOS validation plus required Chrome before the publishing job gains write permission | Full suite plus positive/negative metadata regressions, synthetic report validation and hosted platform/browser results | Release integration |
 | Reproducible test environment | Node tests use an isolated temp root outside ancestor Git trees; repository oracles use explicit no-filesystem evidence instead of nonexistent hardcoded paths | Targeted discovery/oracle regressions, then the same full suite | Release integration and security/runtime reviewer |
 | Runtime privacy/security | Review parser/index/server/export trust boundaries and repair confirmed defects without adding telemetry or broadening public fields | Targeted regressions, full suite and public-schema parity | Security/runtime reviewer |
 | Design and browser QA | Exercise the synthetic demo in both themes and laptop/narrow viewports; improve evidenced navigation, keyboard, mobile and edge-state issues | DOM regressions plus a real browser; capture any unavailable browser coverage explicitly | Design/QA reviewer |
@@ -67,7 +69,7 @@ Status: **DONE_WITH_CONCERNS** for local preparation. Public launch remains gate
 | `npm run release:check` on Linux, Node 24.21.0 | Passed: type check; 873 tests discovered, 871 passed, zero failed, two optional Chrome tests skipped by default; schema consistency; a validated synthetic report with 461 sessions from all six providers; required assets/notices and the 147-file package allowlist. |
 | Required Chrome suites on the final browser test file | `SESSION_ANALYTICS_CHROME=/usr/bin/google-chrome npm run test:browser`: both suites passed in 80 seconds, zero failures and zero skips. Layout and interaction coverage includes six views, both themes/densities, responsive widths, navigation, dialogs, filters, custom dates and refresh recovery. A separate missing-browser run failed as required, with no skips. |
 | Release integration regressions | Seven passed. Public runner conditions, tag/version mismatch rejection, release notes, package exclusions, all six view renderers and publication dependencies are exercised. |
-| Independent release review | Found and fixed a tag workflow that could bypass macOS/browser checks. Public publication now depends on both platform validation and required Chrome success; failure, cancellation and public skips block publication. |
+| Independent release review | Found and fixed a tag workflow that could bypass macOS/browser checks. Every tag publication now depends on both hosted platform validations and required Chrome success; failure, cancellation and skipped jobs block publication, regardless of repository visibility. |
 | Runtime security and text history | Assessed server/origin/reuse, import/export/sharing, index and MCP boundaries with no supported runtime finding. A separate credential-pattern scan reviewed 2,074 reachable text blobs; flagged candidates were synthetic security fixtures. Binary history (259 blobs), exhaustive provider branches and a full external security audit remain outside this evidence. |
 | Design | Six-view responsive checks and synthetic desktop/mobile light/dark captures completed. Native selector state, URL/preset synchronization, custom-date focus, dialog Escape and error-state overflow were checked; OS-native popup interaction was not independently automated through the collaborative browser. |
 | Documentation | All 255 checked relative links and image targets across 29 selected Markdown files resolve; whitespace checks pass. External routes and every fragment anchor were not certified by the local link check. |
@@ -80,7 +82,20 @@ The gstack health result is **10/10 with partial coverage (2/6 categories)**: ty
 
 Before announcement, complete every gate in [docs/release.md](../release.md#public-launch-gates): self-hosted runner removal/restriction, history and asset review, branch rules, visibility change, verified private vulnerability and conduct-reporting routes, social preview upload, hosted Linux/macOS/browser execution and a fresh public source install.
 
-Read-only repository observations on 2026-10-13: visibility `PRIVATE`, MIT license recognized by GitHub, default branch `master`; private-reporting settings returned `404`; the branch-protection endpoint returned “Branch not protected”; repository rulesets returned an empty list. The reporting API response does not prove reporting is disabled. Actions were enabled with all actions allowed.
+Initial read-only repository observations on 2026-10-13: visibility `PRIVATE`, MIT license recognized by GitHub, default branch `master`; private-reporting settings returned `404`; the branch-protection endpoint returned “Branch not protected”; repository rulesets returned an empty list. The reporting API response does not prove reporting is disabled. Actions were enabled with all actions allowed.
+
+## Follow-up release preparation (2026-10-13)
+
+- Prepared version 0.8.1 consistently in the source, package manifest, lockfile, README and dated changelog. The original design is retained; the Fluxary styling branch is excluded.
+- Re-ran `npm run release:check` at 0.8.1: 873 tests discovered, 871 passed, two optional browser skips, no failures; schemas, the six-provider synthetic report and 147-file package allowlist passed. The separate required Chrome command passed both suites with zero skips in 111 seconds.
+- Configured and read back `master` protection: required hosted Ubuntu, macOS and browser checks, up-to-date branches, pull requests and resolved conversations, including administrators. Force pushes and deletion are disabled. Hosted execution and the protected merge remain outstanding until the PR completes.
+- Configured and read back active [tag ruleset 24996643](https://github.com/rokas-tarasevicius/session-analytics/rules/24996643): updates and deletion of `refs/tags/v*` are blocked with no bypass actors, so an existing release tag cannot move between validation and publication.
+- Published the maintainer's existing public email as the private conduct-reporting contact and security fallback. Ownership/publication was verified in the maintainer's [public website source](https://github.com/rokas-tarasevicius/personal-website/blob/0be0898b1137e674d1447e0d48566fcce6dcdc53/WEBSITE_CONTENT.md#L22). No email was sent and mailbox delivery/monitoring was not tested.
+- Extended the history/privacy review to every fetched remote branch and tag plus local candidate refs. The [history and binary-asset evidence](evidence/public-history-review-2026-10-13.md) records the inventory, image/font review, findings and exclusions, superseding the binary-review gap above.
+- The repository runners API returned zero available runners. `agentbox` exists elsewhere; current workflows use GitHub-hosted runners exclusively. Recheck inherited runner access before changing visibility.
+- `assets/social-preview.png` is ready. GitHub reports no custom social preview yet. Upload is pending because the connected API exposes no setter and the collaborative GitHub browser is signed out.
+
+The README's private-preview badge and access note remain accurate until visibility changes. GitHub's private vulnerability-reporting route and an anonymous public clone cannot be verified while the repository is private.
 
 ## Deferred
 

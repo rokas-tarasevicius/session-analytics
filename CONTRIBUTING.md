@@ -25,7 +25,7 @@ There is no build step. Node runs the TypeScript sources directly.
 | `npm run typecheck` | `tsc --noEmit` over `bin/`, `src/`, `test/`, and `scripts/`. |
 | `npm test` | `node scripts/test.ts` runs the Node test runner with concurrency 2 over `test/`, `test/validation/` and `verify/` suites, using an isolated temporary directory. |
 | `npm run test:browser` | Run the two Chrome suites with isolated fixtures; missing or unlaunchable Chrome fails. Set `SESSION_ANALYTICS_CHROME` to your Chrome/Chromium executable outside the default macOS location. |
-| `npm run check` | Type check, then tests. Public pull requests and pushes require GitHub-hosted Ubuntu and macOS checks; private-preview PRs use hosted Ubuntu, and private pushes retain advisory macOS. |
+| `npm run check` | Type check, then tests. CI requires GitHub-hosted Ubuntu and macOS source checks plus a required Ubuntu Chrome check for pull requests, pushes to `master` and manual runs, in both private and public repositories. |
 | `npm run release:check` | Validate the source release locally: version metadata, type check, tests, snapshot schemas, synthetic JSON report and package contents. Does not publish. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
@@ -115,7 +115,7 @@ Public pricing fetches belong only in `src/pricing/`; analysis stays network-fre
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time.
 
-Pushing a `vX.Y.Z` tag runs the release workflow. Public releases require GitHub-hosted Ubuntu and macOS validation plus the Ubuntu Chrome check before publication; the private preview can use the trusted `agentbox` runner and skip the browser job. Validation checks that the tag, package, source version and latest changelog release agree, then checks types, tests, schemas and a synthetic report. Only the publishing job has write permission. It creates a GitHub Release through the REST API using the matching `## [X.Y.Z]` section from `CHANGELOG.md`; missing or inconsistent metadata fails before publication. See [docs/release.md](docs/release.md) for the preflight and public launch gates.
+Pushing a `vX.Y.Z` tag runs the release workflow. Every release requires GitHub-hosted Ubuntu and macOS validation plus the required Ubuntu Chrome check before publication, regardless of repository visibility. Validation checks that the tag, package, source version and latest changelog release agree, then checks types, tests, schemas and a synthetic report. Only the publishing job has write permission. It creates a GitHub Release through the REST API using the matching `## [X.Y.Z]` section from `CHANGELOG.md`; missing or inconsistent metadata fails before publication. See [docs/release.md](docs/release.md) for the preflight and public launch gates.
 
 ## Style
 

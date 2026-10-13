@@ -1,8 +1,8 @@
 // Intentional failing regressions for v-repos validation. All evidence is synthetic.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, mkdir, writeFile, symlink, rm, realpath, stat } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
@@ -239,7 +239,7 @@ test('R-LOCAL-01: a deleted Conductor workspace of a registered repository is no
   assert.equal(session?.repositoryName, 'project');
 });
 
-test('R-LOCAL-02: both spellings of deleted macOS temporary directories are ephemeral, not repositories', async t => {
+test('R-LOCAL-02: deleted fixture and macOS per-user temporary directories are ephemeral, not repositories', async t => {
   const f = await fixture(t);
   // The fixture temp root has no Git ancestors. Literal /tmp can legitimately
   // belong to a host repository; its spelling aliases are covered by the oracle.
@@ -248,6 +248,62 @@ test('R-LOCAL-02: both spellings of deleted macOS temporary directories are ephe
   const result = await analyzeMachineSessions(f.options);
   assert.equal(result.sessions.length, 4);
   assert.ok(result.sessions.every(s => s.repositoryName === 'Ephemeral automation sessions'));
+});
+
+/** A host Git marker legitimately changes attribution; never remove it to make a test pass. */
+async function temporaryGitMarker(root: string): Promise<string | null> {
+  const roots = new Set([resolve(root)]);
+  try { roots.add(await realpath(root)); } catch (error) {
+    if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+  }
+  for (const spelling of roots) {
+    for (let current = spelling; ; current = dirname(current)) {
+      const marker = join(current, '.git');
+      try {
+        const info = await stat(marker);
+        if (info.isDirectory() || info.isFile()) return marker;
+      } catch (error) {
+        if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      }
+      if (dirname(current) === current) break;
+    }
+  }
+  return null;
+}
+
+for (const temporaryRoot of ['/tmp', '/private/tmp']) test(`R-LOCAL-02: deleted literal ${temporaryRoot} paths are ephemeral through the analyzer`, async t => {
+  const marker = await temporaryGitMarker(temporaryRoot);
+  if (marker) { t.skip(`Existing host Git marker ${marker} changes temporary-path attribution`); return; }
+  const f = await fixture(t);
+  // These unique recorded CWDs are deliberately absent, as after a temporary run is deleted.
+  const deleted = join(temporaryRoot, `session-analytics-deleted-${process.pid}-${Date.now()}`);
+  await assert.rejects(stat(deleted), { code: 'ENOENT' });
+  for (const provider of ['claude', 'codex'] as const) {
+    await f.session(deleted, provider);
+    await f.session(join(deleted, 'orgs/one/workspaces/two'), provider);
+  }
+  const result = await analyzeMachineSessions(f.options);
+  assert.equal(result.sessions.length, 4);
+  assert.ok(result.sessions.every(s => s.repositoryName === 'Ephemeral automation sessions'));
+  assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
+  assert.equal(JSON.stringify(result).includes(deleted), false, 'temporary CWDs stay out of the public snapshot');
+});
+
+test('R-LOCAL-02: the real macOS /tmp alias and its canonical path share one ephemeral group', { skip: process.platform !== 'darwin' }, async t => {
+  for (const temporaryRoot of ['/tmp', '/private/tmp']) {
+    const marker = await temporaryGitMarker(temporaryRoot);
+    if (marker) { t.skip(`Existing host Git marker ${marker} changes temporary-path attribution`); return; }
+  }
+  const f = await fixture(t);
+  const scratch = await mkdtemp('/tmp/session-analytics-alias-');
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const canonical = await realpath(scratch);
+  assert.equal(canonical, join('/private/tmp', scratch.slice('/tmp/'.length)), 'exercise the actual macOS filesystem alias');
+  await f.session(scratch, 'claude'); await f.session(canonical, 'codex');
+  const result = await analyzeMachineSessions(f.options);
+  assert.equal(result.sessions.length, 2);
+  assert.ok(result.sessions.every(s => s.repositoryName === 'Ephemeral automation sessions'));
+  assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
 });
 
 test('R-LOCAL-02: an existing temporary folder is ephemeral through symlink and canonical spellings', async t => {

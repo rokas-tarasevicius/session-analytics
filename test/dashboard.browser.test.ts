@@ -635,9 +635,14 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     // On a touch screen the controls grow to finger size, key hints disappear, and the page still fits.
     await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await browser.until(`matchMedia('(pointer: coarse)').matches`, true);
+    await setWidth(375);
     assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-select, #refresh-button, #theme-switch, #density-switch')].every((control) => control.getBoundingClientRect().height >= 40)`), true);
     assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.palette-trigger kbd')).display`), "none");
     assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true);
+    await setWidth(768);
+    assert.notEqual(await browser.evaluate(`getComputedStyle(document.querySelector('#window-segment')).display`), "none");
+    assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-segment button')].every((control) => control.getBoundingClientRect().height >= 40)`), true, "Tablet time-window buttons retain touch targets");
+    assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, "Tablet touch controls fit the page");
     await browser.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await setWidth(1440);
 

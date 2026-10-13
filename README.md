@@ -279,7 +279,7 @@ Analysis runs in a child process with a capped heap, and Cursor's database is pa
 
 ## Roadmap
 
-The current release is 0.8.0 (see the [changelog](CHANGELOG.md)). The integrated index, six providers, pricing, velocity, MCP and interchange are shipped. Remaining items include additional provider formats, profile dimensions, task-matched baselines, hooks, and packaging/user-research gates. See the checked delivery list in [docs/roadmap.md](docs/roadmap.md); the [product proposals](docs/proposals/) distinguish research from shipped behavior.
+This checkout is version 0.8.1 (see the [changelog](CHANGELOG.md)). The integrated index, six providers, pricing, velocity, MCP and interchange are shipped. Remaining items include additional provider formats, profile dimensions, task-matched baselines, hooks, and packaging/user-research gates. See the checked delivery list in [docs/roadmap.md](docs/roadmap.md); the [product proposals](docs/proposals/) distinguish research from shipped behavior.
 
 ## How it compares
 
@@ -345,7 +345,7 @@ Yes. Sibling profile directories such as `~/.claude-work` or `~/.codex-personal`
 <details>
 <summary><strong>Which platforms are supported?</strong></summary>
 
-macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Public pull requests and pushes require GitHub-hosted Ubuntu, macOS and browser checks. Private-preview PRs use hosted Ubuntu; private pushes retain advisory macOS/browser checks. See [release validation](docs/release.md).
+macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Pull requests, pushes to `master` and manual CI runs require GitHub-hosted Ubuntu and macOS checks plus a required Ubuntu Chrome check, in both private and public repositories. See [release validation](docs/release.md).
 </details>
 
 <details>
