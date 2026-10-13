@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { InteropError } from "./error.ts";
 import { validateSnapshot } from "./snapshot.ts";
 import type { HistoryCoverage, HistoryMonth, HistoryProfile } from "../metrics/history-types.ts";
@@ -20,16 +21,9 @@ function moreComplete(candidate: SessionAnalytics, current: SessionAnalytics): b
 }
 
 /** Profiles stay per machine. Month totals are rebuilt from those profiles and the combined sessions, as the validator does. */
-function combineHistory(snapshots: MachineAnalytics[], sessions: SessionAnalytics[]): HistoryCoverage | undefined {
+function combineHistory(snapshots: MachineAnalytics[], profiles: HistoryProfile[], sessions: SessionAnalytics[]): HistoryCoverage | undefined {
   const sources = snapshots.flatMap(({ historyCoverage }) => historyCoverage ? [historyCoverage] : []);
   if (!sources.length) return undefined;
-  const profiles: HistoryProfile[] = [], keys = new Set<string>();
-  for (const profile of sources.flatMap(({ profiles: rows }) => rows)) {
-    // A profile key hashes its directory: the same key from two inputs is one profile observed twice.
-    if (keys.has(profile.profileKey)) continue;
-    keys.add(profile.profileKey);
-    profiles.push({ ...profile, ordinal: profiles.length + 1 });
-  }
   const months = new Map<string, HistoryMonth>();
   const month = (id: string): HistoryMonth => {
     let row = months.get(id);
@@ -96,17 +90,33 @@ export function combineSnapshots(snapshots: MachineAnalytics[], warnings: string
   const first = snapshots[0];
   if (!first) throw new InteropError("Combining requires at least one full snapshot.");
   // Hourly cells are local to the analysis time zone; mixing zones would misplace activity.
-  const zone = JSON.stringify(first.velocity ?? null);
-  if (snapshots.some(({ velocity }) => JSON.stringify(velocity ?? null) !== zone)) {
+  if (snapshots.some(({ velocity }) => velocity?.version !== first.velocity?.version || velocity?.timeZone !== first.velocity?.timeZone)) {
     throw new InteropError("Snapshots use different analysis time zones; create each with the same --time-zone.");
   }
   const sessions = new Map<string, SessionAnalytics>();
+  const profiles: HistoryProfile[] = [], profileKeys = new Set<string>();
+  let generatedAt = first.generatedAt;
   let duplicates = false;
-  for (const snapshot of snapshots) for (const session of snapshot.sessions) {
-    const key = `${session.provider}:${session.sessionKey}`;
-    const current = sessions.get(key);
-    if (current) duplicates = true;
-    if (!current || moreComplete(session, current)) sessions.set(key, session);
+  for (const [position, snapshot] of snapshots.entries()) {
+    if (timestampMilliseconds(snapshot.generatedAt) > timestampMilliseconds(generatedAt)) generatedAt = snapshot.generatedAt;
+    const remappedProfiles = new Map<string, string>();
+    for (const profile of snapshot.historyCoverage?.profiles ?? []) {
+      let key = profile.profileKey, attempt = 0;
+      // Matching directory hashes do not identify a shared source across machines.
+      while (profileKeys.has(key)) key = `profile-${createHash("sha256").update(`${profile.profileKey}:${position}:${attempt++}`).digest("hex").slice(0, 20)}`;
+      profileKeys.add(key); remappedProfiles.set(profile.profileKey, key);
+      profiles.push({ ...profile, profileKey: key, ordinal: profiles.length + 1 });
+    }
+    for (const session of snapshot.sessions) {
+      const key = `${session.provider}:${session.sessionKey}`;
+      const current = sessions.get(key);
+      if (current) duplicates = true;
+      if (!current || moreComplete(session, current)) {
+        const profileKey = session.historyProfile ? remappedProfiles.get(session.historyProfile.profileKey) : undefined;
+        sessions.set(key, profileKey && profileKey !== session.historyProfile?.profileKey
+          ? { ...session, historyProfile: { profileKey, days: session.historyProfile!.days } } : session);
+      }
+    }
   }
   const repositories = new Map<string, { name: string; warnings: string[]; sessions: SessionAnalytics[] }>();
   const machineWarnings: string[] = [];
@@ -133,11 +143,11 @@ export function combineSnapshots(snapshots: MachineAnalytics[], warnings: string
   const combined = aggregateSessions(selected);
   const models = new Map<string, MachineAnalytics["rateCard"]["models"][number]>();
   for (const snapshot of snapshots) for (const model of snapshot.rateCard.models) if (!models.has(model.model)) models.set(model.model, model);
-  const history = combineHistory(snapshots, selected);
+  const history = combineHistory(snapshots, profiles, selected);
   const health = combineSourceHealth(snapshots);
   return validateSnapshot({
     ...(first.velocity ? { velocity: first.velocity } : {}),
-    generatedAt: first.generatedAt,
+    generatedAt,
     schemaVersion: 1,
     rateCard: { ...first.rateCard, models: [...models.values()] },
     repositories: rollups,
