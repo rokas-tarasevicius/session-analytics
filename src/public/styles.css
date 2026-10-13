@@ -297,10 +297,10 @@ input { caret-color: var(--text); }
 .wordmark .logo { flex: 0 0 auto; stroke: none; border-radius: var(--radius); }
 .wordmark-text { font-size: var(--fs-md); font-weight: 500; letter-spacing: -0.01em; white-space: nowrap; }
 .wordmark-text b { font-weight: 600; }
-.palette-trigger { display: flex; align-items: center; gap: 8px; height: var(--control); padding: 0 8px 0 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); font-size: var(--fs-sm); text-align: left; transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast); }
+.palette-trigger { display: flex; align-items: center; gap: 8px; height: var(--control); padding: 0 8px 0 9px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-sm); text-align: left; transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast); }
 .palette-trigger svg { width: 14px; height: 14px; flex: 0 0 auto; }
 .palette-trigger span { flex: 1; }
-.palette-trigger:hover { border-color: var(--line-strong); color: var(--text-2); }
+.palette-trigger:hover { background: var(--surface-hover); color: var(--text); }
 .nav-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; margin: 0 0 4px; color: var(--muted); }
 .nav-count { font: 500 var(--fs-xs) var(--font-mono); color: var(--muted); letter-spacing: 0; }
 .view-nav { display: flex; flex-direction: column; gap: 1px; }
@@ -406,8 +406,7 @@ main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 .summary-metrics { --kpi-columns: 3; }
 #history-coverage > .evidence { margin: 0; }
 .kpi-grid { display: grid; grid-template-columns: repeat(var(--kpi-columns, 4), minmax(0, 1fr)); gap: var(--gap); }
-.kpi { min-width: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label label" "value spark" "coverage spark" "delta spark" "note note"; align-content: start; gap: 2px 10px; min-height: calc(112px * var(--density)); padding: calc(13px * var(--density)) var(--pad); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); transition: border-color var(--t-fast); }
-.kpi:hover { border-color: var(--line-strong); }
+.kpi { min-width: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label label" "value spark" "coverage spark" "delta spark" "note note"; align-content: start; gap: 2px 10px; min-height: calc(112px * var(--density)); padding: calc(13px * var(--density)) 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
 .kpi-label { grid-area: label; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0; }
 .kpi strong { grid-area: value; margin-top: 6px; font: 500 var(--fs-figure)/1.1 var(--font-mono); letter-spacing: -0.03em; }
 .kpi-delta { grid-area: delta; display: inline-flex; align-items: center; gap: 4px; min-height: 16px; color: var(--text-2); font: 500 var(--fs-xs) var(--font-sans); font-variant-numeric: tabular-nums; }
@@ -419,7 +418,7 @@ main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 .spark circle { fill: currentColor; stroke: var(--surface); stroke-width: 1.5; }
 .spark line.sync { stroke: var(--line-strong); stroke-width: 1; }
 .spark circle.sync { fill: var(--text); r: 2.5; }
-.kpi small { grid-area: note; margin-top: 6px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
+.kpi > small { grid-area: note; margin-top: 6px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
 
 /* KPI card extensions: coverage badge, unavailable reason, caption. */
 .kpi .kpi-coverage { grid-area: coverage; display: flex; align-items: center; gap: 6px; min-height: 0; margin: 0; color: var(--muted); font: 500 var(--fs-xs) var(--font-mono); line-height: 1.3; }
@@ -435,7 +434,7 @@ strong .coverage, td .coverage { margin-left: 6px; }
 /* ---------------------------------------------------------------- panels */
 .dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); margin-top: var(--gap); }
 .span-4 { grid-column: span 4; } .span-6 { grid-column: span 6; } .span-8 { grid-column: span 8; }
-.panel { min-width: 0; min-height: 0; padding: var(--pad); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.panel { min-width: 0; min-height: 0; padding: var(--pad) 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
 .panel > header, .section-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
 .panel > .daily-usage-header { flex-direction: column; gap: 6px; }
 .daily-usage-header .provider-key { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
@@ -843,6 +842,26 @@ dialog::backdrop { background: var(--backdrop); }
 .view-status { margin-bottom: var(--gap); }
 .view-status .status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 
+/* Summary is a workspace: charts lead, totals stay in a narrow reading rail.
+   Smaller screens keep the semantic totals-first order, without boxed cards. */
+.metrics-heading { display: none; }
+@media (min-width: 1200px) {
+  [data-view-panel="summary"] { display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: start; column-gap: 28px; row-gap: 16px; }
+  [data-view-panel="summary"] > .view-header { grid-column: 1 / -1; margin: 0; }
+  [data-view-panel="summary"] > #history-coverage { grid-column: 1 / -1; grid-row: 2; margin: 0; }
+  [data-view-panel="summary"] > .summary-metrics { grid-column: 2; grid-row: 3; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; padding: 16px 20px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--sidebar-surface); }
+  .summary-metrics .metrics-heading { display: block; padding-bottom: 4px; font-size: var(--fs-sm); font-weight: 500; color: var(--text-2); }
+  .summary-metrics > .kpi { grid-template-areas: "label spark" "value value" "coverage coverage" "delta delta" "note note"; min-height: 0; padding: 10px 0; }
+  .summary-metrics > .kpi strong { overflow-wrap: anywhere; }
+  .summary-metrics > .kpi:last-child { border-bottom: 0; padding-bottom: 0; }
+  .summary-metrics > .kpi .spark { width: 60px; height: 20px; }
+  [data-view-panel="summary"] > .summary-overview-charts { grid-column: 1; grid-row: 3; margin: 0; row-gap: 20px; }
+  .summary-overview-charts > .panel { grid-column: 1 / -1; }
+  .summary-overview-charts > .panel:first-child { border-top: 0; padding-top: 0; }
+  [data-view-panel="summary"] > .summary-breakdown { grid-column: 1 / -1; margin: 0; column-gap: 24px; row-gap: 20px; }
+  [data-view-panel="summary"] > #repository-comparison { grid-column: 1 / -1; margin-top: 12px; }
+}
+
 /* ---------------------------------------------------------------- responsive */
 @media (min-width: 761px) {
   .cost-stack-row > strong:last-child, .cost-model-row > strong { display: grid; grid-template-columns: auto 7rem; align-items: center; justify-items: end; column-gap: 6px; }
@@ -873,7 +892,6 @@ dialog::backdrop { background: var(--backdrop); }
   .view-nav button { justify-content: center; padding: 0; }
   .palette-trigger::after, .view-nav button::after { content: attr(data-label); position: absolute; left: calc(100% + 10px); top: 50%; z-index: 30; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); background: var(--raised); color: var(--text); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; box-shadow: var(--shadow-2); transform: translateY(-50%); opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
   .palette-trigger:hover::after, .palette-trigger:focus-within::after, .view-nav button:hover::after, .view-nav button:focus-within::after { opacity: 1; }
-  .view-nav button[aria-current="page"]::before { left: -8px; }
   .sidebar-footer, .display-controls { flex-direction: column; }
   .repository-select-wrap { display: block; }
   .span-4, .span-6 { grid-column: span 6; }
