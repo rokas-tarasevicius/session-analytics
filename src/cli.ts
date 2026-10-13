@@ -1,6 +1,7 @@
 import { historyReport } from "./report/history.ts";
-import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, machineHelp, optionErrorMessage, pricingHelp, argument } from "./options.ts";
+import { AnalysisHeapLimitError } from "./analysis-process.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, argument, remoteHelp, remoteOptionsFrom, remoteValueFlags, type RemoteOptions } from "./options.ts";
+import { analyzeMachines } from "./remote.ts";
 import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
 import { loadMachineSnapshot } from "./interop/snapshot.ts";
 import { InteropError } from "./interop/error.ts";
@@ -8,7 +9,7 @@ import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
 
-const valueFlags = new Set([...analysisValueFlags, ...shareValueFlags]);
+const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, ...shareValueFlags]);
 const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--share", "--version", "--no-additional-providers", "--offline"]);
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 for (let index = 2; index < process.argv.length; index += 1) {
@@ -59,7 +60,7 @@ Options:
   --gemini-root PATH     Override Gemini's tmp directory
   --no-additional-providers Disable new-source discovery (explicit paths still apply)
   --rate-card PATH       Override the reviewed rate card
-${pricingHelp}${machineHelp}  --no-index             Full scan without reading or writing the index
+${pricingHelp}${machineHelp}${remoteHelp}  --no-index             Full scan without reading or writing the index
   --version              Print the version
   --help                 Show this help
 `);
@@ -86,8 +87,12 @@ function dollars(value: number): string {
 }
 
 let analyzeOptions;
-try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
-catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
+// A saved snapshot never scans, so a remote set in the environment does not apply to it.
+let remote: RemoteOptions = { remotes: [], command: [] };
+try {
+  analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
+  if (!argument(process.argv, "--snapshot")) { remote = remoteOptionsFrom(process.argv, process.env); assertRemoteAnalysis(analyzeOptions, remote); }
+} catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
 
 try {
   assertSnapshotOptions(process.argv);
@@ -98,7 +103,7 @@ try {
 } catch (error) { reportInteropFailure(error); process.exit(1); }
 const snapshotFile = argument(process.argv, "--snapshot");
 let analytics;
-try { analytics = process.argv.includes("--share") ? null : await (snapshotFile ? loadMachineSnapshot(snapshotFile) : analyzeMachineSessionsIsolated(analyzeOptions)); }
+try { analytics = process.argv.includes("--share") ? null : await (snapshotFile ? loadMachineSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line) => process.stderr.write(`${line}\n`))); }
 catch (error) {
   process.stderr.write(`${indexErrorMessage(indexErrorCode(error)) ?? (error instanceof AnalysisHeapLimitError ? error.message : "Session analysis could not be completed.")}\n`);
   process.exit(1);
@@ -112,7 +117,7 @@ const metricValue = (value: number, metric: Metric, format = compactNumber, sess
 if (analytics && process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);
 } else if (analytics) {
-  process.stdout.write(`${brand.name} · all locally evidenced repositories\n`);
+  process.stdout.write(`${brand.name} · ${remote.remotes.length ? `this machine and ${remote.remotes.join(", ")}` : "all locally evidenced repositories"}\n`);
   process.stdout.write(`Generated: ${analytics.generatedAt}\n`);
   process.stdout.write(
     `Repositories: ${analytics.summary.repositoriesWithSessions}/${analytics.summary.repositories} with sessions\n`,

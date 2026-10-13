@@ -29,7 +29,7 @@ Analytics protects the content of local provider history: prompts, responses, re
 
 ### Design
 
-- **Content stays local.** No telemetry. Automatic pricing requests are plain GETs to fixed public lists and carry no local evidence. The explicit `export --otlp-endpoint` option can POST the saved allowlisted payload; it never follows redirects or activates from environment variables. See [the delivery boundary](docs/interop.md#opentelemetry-mapping). `--offline` / `SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests. Fonts and provider marks are bundled; nothing is loaded from a CDN.
+- **Content stays local.** No telemetry. Automatic pricing requests are plain GETs to fixed public lists and carry no local evidence. The explicit `export --otlp-endpoint` option can POST the saved allowlisted payload; it never follows redirects or activates from environment variables. See [the delivery boundary](docs/interop.md#opentelemetry-mapping). `--offline` / `SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests. `--remote` reads another machine only through the user's own `ssh` and accepts only a validated content-free snapshot back. Fonts and provider marks are bundled; nothing is loaded from a CDN.
 - **Bounded pricing fetches.** Only two fixed HTTPS endpoints are used: models.dev and GitHub raw for LiteLLM. No authentication, cookies, query parameters, request bodies, or redirects. Responses are capped at 32 MiB with a 15-second deadline per source; unknown fields are discarded and invalid prices rejected. Public services still observe the requesting IP and time. Source payloads are untrusted data, never instructions or executable code.
 - **Pricing cache.** Normalized public rates and reviewed cards are saved atomically in the per-user data directory. Files have checksums and restrictive creation modes. Corrupt snapshots are ignored with a fixed warning; prior snapshots remain available. This cache contains no transcript content or local model inventory.
 - **Loopback bind.** The dashboard listens on `127.0.0.1` only.
@@ -48,7 +48,7 @@ Analytics protects the content of local provider history: prompts, responses, re
 - Any transcript content, path, raw identifier, credential, or raw error appearing in the dashboard, API, report, JSON snapshot, or skill output.
 - Binding to a non-loopback interface, or bypassing the `Host` or `Origin` checks.
 - Reading files outside the static file map through the HTTP server.
-- Any write to provider stores, transmission of local data to a pricing source, public pricing request while offline, request outside the documented pricing/export boundaries, or content outside the documented OTLP allowlist being sent by an authorized export.
+- Any write to provider stores, transmission of local data to a pricing source, public pricing request while offline, request outside the documented pricing/export/remote boundaries, shell syntax reaching a `--remote` command line, or content outside the documented OTLP allowlist being sent by an authorized export.
 - Denial of service through crafted transcript files that crash or hang the server process (rather than the isolated analysis process).
 
 ### Out of scope

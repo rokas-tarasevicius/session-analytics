@@ -1,6 +1,6 @@
 # Snapshots, exports, and sharing
 
-These commands work on the existing allowlisted snapshot. They do not read new kinds of transcript content. CSV, NDJSON, JSON downloads, sharing previews, merges, and snapshot dashboards are local operations. Only an explicit `export --otlp-endpoint URL` sends a network request.
+These commands work on the existing allowlisted snapshot. They do not read new kinds of transcript content. CSV, NDJSON, JSON downloads, sharing previews, merges, and snapshot dashboards are local operations. Only an explicit `export --otlp-endpoint URL` sends a network request, and only an explicit `--remote` runs `ssh` to read another machine's snapshot.
 
 ## Versioned snapshots
 
@@ -85,7 +85,36 @@ Every nonempty contribution includes a domain-separated keyed `sources[]` identi
 
 ## Combine machines
 
-Agents that run on another computer, such as a server or a VM, write their history there. To see your own machines in one dashboard, create a full snapshot on each one and merge them:
+Agents that run on another computer, such as a server, a VM or a T3 Code host, write their history there. `--remote` reads those machines over SSH and shows them with this one; snapshot files do the same without SSH.
+
+### Over SSH
+
+```bash
+session-analytics --remote server                     # dashboard: this machine and server
+session-analytics report --remote server,build-box    # terminal report of all three
+session-analytics --remote server --remote-command "sudo -n -iu agents session-analytics"
+```
+
+Install session-analytics on each remote machine (Node.js 24 and a checkout, as here) so that `ssh server session-analytics --version` works without a prompt. For each machine, this machine runs
+
+```text
+ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -T -- server \
+  session-analytics report --json --portable-ids --time-zone <this machine's zone> [forwarded switches]
+```
+
+and validates the reply like an imported file before combining it with the local scan (see below). The local scan and every remote read run at the same time, and **Refresh snapshot** reads every machine again. `--remote` applies to the dashboard, `report` (including `--share`) and `export`; MCP and index commands stay local.
+
+- **What crosses the network.** The command line goes out: the remote command, fixed report flags, this machine's time zone name and the forwarded switches. Only the remote machine's content-free snapshot comes back. Each machine reads its own transcripts and keeps its own private index, so its history survives provider cleanup there. Remote snapshots stay in memory here; nothing from them enters this machine's index.
+- **Authentication** is your SSH configuration: host aliases, keys, agents and jump hosts all work. `BatchMode` turns password and host-key prompts into failures instead of a hanging dashboard.
+- **Forwarded switches:** `--offline`, `--no-index`, `--exclude-hidden`, `--no-additional-providers` and the pricing policy, sources and age. Source paths, `--data-dir` and `--database` describe this machine and stay here. Repository filters and `--rate-card` cannot be combined with `--remote`.
+- **Another account.** When agents run as a different user on the remote machine, start session-analytics as that user, for example `--remote-command "sudo -n -iu agents session-analytics"` (this needs passwordless sudo for that command). Destinations and command words are limited to letters, digits and `_./~@%+=:,-`, so neither can smuggle shell syntax.
+- **When a machine cannot be read** (no route, refused login, missing command, an older version that rejects the flags, no reply within 300 seconds, or output that is not a snapshot), the dashboard and report still show the other machines. This terminal names the machine with a fixed reason and the last line ssh or the remote printed; the snapshot carries a fixed warning. Run the same session-analytics version on every machine.
+
+`SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND` set the same options for every launch. A saved snapshot (`--snapshot`) never scans, so it ignores them.
+
+### From files
+
+Without SSH, create a full snapshot on each machine and merge them:
 
 ```bash
 # On each machine, in the same time zone:
@@ -95,7 +124,11 @@ session-analytics merge laptop.json server.json --out machines.json
 session-analytics --snapshot machines.json
 ```
 
-Merge decides by content: all shared snapshots merge as above, all full snapshots combine, and a mixture is refused. Combining full snapshots keeps every session and its details:
+Merge decides by content: all shared snapshots merge as above, all full snapshots combine, and a mixture is refused.
+
+### How snapshots combine
+
+Combining full snapshots, over SSH or from files, keeps every session and its details:
 
 - **Sessions** are unioned by provider and session key. A session found on more than one machine (copied history, or the same file twice) is counted once, from the copy with the later last activity, then more model requests, and the snapshot carries a fixed warning.
 - **Repositories** are unioned by ID; the first file that lists an ID names it. `--portable-ids` makes the IDs agree: a repository with a Git remote takes the ID discovery derives from that remote, even when Conductor registered it under its own ID. Without the flag, a Conductor repository on one machine and the same remote on another appear twice. Repositories without a remote keep machine-specific IDs.

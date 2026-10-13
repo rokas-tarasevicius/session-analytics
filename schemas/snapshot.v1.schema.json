@@ -2579,6 +2579,9 @@
                 "const": "The local index failed a consistency check; a full scan of present sources was used. Retained history is unavailable; run index rebuild."
               },
               {
+                "const": "A remote machine could not be read; its sessions are missing from this snapshot."
+              },
+              {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
               },
               {
@@ -3200,6 +3203,9 @@
                 "const": "The local index failed a consistency check; a full scan of present sources was used. Retained history is unavailable; run index rebuild."
               },
               {
+                "const": "A remote machine could not be read; its sessions are missing from this snapshot."
+              },
+              {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
               },
               {
@@ -3565,6 +3571,9 @@
               },
               {
                 "const": "The local index failed a consistency check; a full scan of present sources was used. Retained history is unavailable; run index rebuild."
+              },
+              {
+                "const": "A remote machine could not be read; its sessions are missing from this snapshot."
               },
               {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
@@ -4088,6 +4097,9 @@
               },
               {
                 "const": "The local index failed a consistency check; a full scan of present sources was used. Retained history is unavailable; run index rebuild."
+              },
+              {
+                "const": "A remote machine could not be read; its sessions are missing from this snapshot."
               },
               {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
