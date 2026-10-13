@@ -62,6 +62,7 @@ window.__rect = (el) => { const r = el.getBoundingClientRect(); return [r.x, r.y
 const WIDTH = 1280;
 const SCALE = 2;
 const FIT_PAD = 12;
+const COMMAND_TIMEOUT_MS = 30_000;
 
 function option(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -100,6 +101,9 @@ class Session {
   private readonly socket: WebSocket;
   private constructor(socket: WebSocket) {
     this.socket = socket;
+    const fail = (reason: string) => () => { for (const [id, waiter] of this.pending) { this.pending.delete(id); waiter.reject(new Error(reason)); } };
+    socket.addEventListener("close", fail("DevTools socket closed"));
+    socket.addEventListener("error", fail("DevTools socket error"));
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number; error?: unknown; result?: unknown };
       const waiter = message.id === undefined ? undefined : this.pending.get(message.id);
@@ -119,7 +123,11 @@ class Session {
   send(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = ++this.nextId;
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => { if (this.pending.delete(id)) reject(new Error(`${method} timed out after ${COMMAND_TIMEOUT_MS} ms`)); }, COMMAND_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); },
+      });
       this.socket.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -142,10 +150,12 @@ async function capture(session: Session, base: string, item: Capture, theme: "li
   let height = 1000;
   await session.metrics(WIDTH, height);
   await session.send("Page.navigate", { url });
-  for (let attempt = 0; attempt < 300; attempt += 1) {
+  let live = false;
+  for (let attempt = 0; attempt < 300 && !live; attempt += 1) {
     await sleep(100);
-    if (await session.evaluate<boolean>("document.readyState === 'complete' && document.querySelector('#sync-context')?.dataset.state === 'live' && !document.querySelector('.shimmer')")) break;
+    live = await session.evaluate<boolean>("document.readyState === 'complete' && document.querySelector('#sync-context')?.dataset.state === 'live' && !document.querySelector('.shimmer')");
   }
+  if (!live) throw new Error(`${item.name} (${theme}): the dashboard did not reach a live snapshot within 30 seconds.`);
   await sleep(700);
   await session.evaluate(HELPERS);
   if (item.js) { await session.evaluate(item.js); await sleep(600); }
@@ -185,21 +195,28 @@ async function main(): Promise<void> {
   const health = await fetch(`${base}/api/health`).catch(() => undefined);
   if (!health?.ok) throw new Error(`no dashboard at ${base}; start the demo first: npm run demo -- --no-open --port 4175`);
 
+  const binary = chromePath();
   const port = await freePort();
   const profile = mkdtempSync(join(tmpdir(), "session-analytics-screenshots-"));
-  const chrome = spawn(chromePath(), [
-    "--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-    "--hide-scrollbars", "--disable-gpu", "--force-color-profile=srgb", `--window-size=${WIDTH},1000`, "about:blank",
-  ], { stdio: "ignore" });
+  let chrome: ReturnType<typeof spawn> | undefined;
+  let session: Session | undefined;
   try {
+    let launchError: Error | undefined;
+    chrome = spawn(binary, [
+      "--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
+      "--hide-scrollbars", "--disable-gpu", "--force-color-profile=srgb", `--window-size=${WIDTH},1000`, "about:blank",
+    ], { stdio: "ignore" });
+    chrome.on("error", (error) => { launchError = error; });
+    chrome.on("exit", (code) => { launchError ??= new Error(`Chrome exited early with code ${code}`); });
     let version: { webSocketDebuggerUrl?: string } | undefined;
-    for (let attempt = 0; attempt < 100 && !version; attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !version && !launchError; attempt += 1) {
       await sleep(100);
       version = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) => response.json() as Promise<{ webSocketDebuggerUrl?: string }>).catch(() => undefined);
     }
+    if (launchError) throw launchError;
     if (!version?.webSocketDebuggerUrl) throw new Error("Chrome did not expose DevTools.");
     const target = (await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" })).json()) as { id: string; webSocketDebuggerUrl: string };
-    const session = await Session.open(target.webSocketDebuggerUrl);
+    session = await Session.open(target.webSocketDebuggerUrl);
     await session.send("Page.enable");
     await session.send("Runtime.enable");
     await session.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
@@ -209,9 +226,9 @@ async function main(): Promise<void> {
         console.log(written);
       }
     }
-    session.close();
   } finally {
-    chrome.kill();
+    session?.close();
+    chrome?.kill();
     rmSync(profile, { recursive: true, force: true });
   }
 }

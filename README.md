@@ -112,7 +112,7 @@ Costs answers "where does the value go?" The usage value is the sum of an API-eq
 
 ### Pricing: where the prices come from
 
-Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the share of eligible tokens with an explicit rate), the age of each public price source, whether updates are offline, and the effective date of the reviewed rate card. Each model used in the window gets a card with its input and output rates per million tokens, its value, tokens, calls and share, and a badge when part of its tokens could not be priced. A model with no matching rate is shown as unpriced rather than as free. A stale source raises a warning at the top; the demo seeds one deliberately stale source so that warning is visible.
+Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the share of eligible tokens with an explicit rate), the age of each public price source, whether updates are offline, and the effective date of the reviewed rate card. Each API-priced model used in the window gets a card with its input and output rates per million tokens, its value, tokens, calls and share, and a badge when part of its tokens could not be priced. A model with no matching rate is shown as unpriced rather than as free, and provider-reported value, such as Cursor's own figure, is kept in the totals line rather than given a rate card. A stale source raises a warning at the top; the demo seeds one deliberately stale source so that warning is visible.
 
 <p align="center">
   <picture>
@@ -123,7 +123,7 @@ Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the
 
 ### Tools: what the agents reach for
 
-Tools answers "how do the agents work?" using tool-call names only; arguments and results are never read. The table ranks tools by calls, share, sessions and repositories, with the change against the previous window, and provider chips narrow it to one or more agents. Selecting a tool opens its detail: calls by session-start day, the providers that made them, and the repositories they went into.
+Tools answers "how do the agents work?" using tool-call names only; arguments and results never reach any output. The table ranks tools by calls, share, sessions and repositories, with the change against the previous window, and provider chips narrow it to one or more agents. Selecting a tool opens its detail: calls by session-start day, the providers that made them, and the repositories they went into.
 
 <p align="center">
   <picture>
@@ -197,7 +197,7 @@ The dashboard binds to loopback, rejects requests whose `Host` is not local or w
 
 - **API-equivalent is not an invoice.** Dollar figures price observed tokens at public API list prices. They do not model subscription plans, discounts, batch or priority tiers, regional pricing, taxes or credits. Under a subscription, read them as the value of the usage, not as money spent.
 - **Money follows activity dates.** A session's value is placed on the days its requests happened, even when the session began before the window; sessions, tokens and tools are selected by start date. Sources that record no request times are session-dated on their last activity and say so. Summary, Velocity and Costs share this ledger, and the daily value export adds up to it.
-- **Price evidence is versioned.** Each request is priced with the latest source snapshot at or before its time; snapshots record fetch time, source URL and payload hash, and [`data/rate-cards.json`](data/rate-cards.json) keeps reviewed exceptions and fallback rates. Unknown or ambiguous models remain unpriced.
+- **Price evidence is versioned.** Each request is priced with the latest source snapshot at or before its time; a request older than the cached history uses the oldest snapshot and is labelled as an estimate. Snapshots record fetch time, source URL and payload hash, and [`data/rate-cards.json`](data/rate-cards.json) keeps reviewed exceptions and fallback rates. Unknown or ambiguous models remain unpriced.
 - **Coverage is shown, not hidden.** Pricing coverage is the share of observed tokens with explicit rates for their token classes. Substituted cache prices stay in estimated totals with visible assumptions. Invalid model labels become `<unknown>` without dropping tokens. Sessions without validated evidence are excluded rather than counted as zero.
 - **Processed input repeats context.** Input totals count cached context every time a request processes it; they measure consumption, not unique text. Long-context premiums apply per request, never to a session or repository total.
 - **Sub-agent value is a lower bound.** It counts only usage with explicit sub-agent evidence.

@@ -147,7 +147,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 | --- | --- | --- |
 | `--no-open` | dashboard | Start the server without opening a browser. |
 | `--port PORT` | dashboard | Loopback port, 1024 to 65535. Default `4174`, or `CONDUCTOR_PORT + 4` inside a Conductor workspace. |
-| `--json` | report | Print the versioned content-free snapshot as JSON. |
+| `--json` | report, rates, index status | Print structured JSON instead of text; for `report`, the versioned content-free snapshot. |
 | `--share` | report | Preview aggregate-only JSON with pseudonymized repositories and a minimum of five sessions per bucket. |
 | `--snapshot FILE` | dashboard, report, export | Read a validated snapshot file instead of scanning provider stores. |
 | `--repo-name NAME` | both | Narrow to one uniquely named repository. |
@@ -167,23 +167,21 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 | `--no-additional-providers` | both | Disable discovery of those five additional stores; explicit new-store paths still apply. Conductor result fallback follows `--database`. |
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | dashboard, report, export, rates, index rebuild, mcp | Pin an alternative reviewed rate card; bypass cached API prices and automatic pricing refresh. |
-| `--offline` | all | Disable public pricing requests; retain access to cached prices. |
-| `--data-dir PATH` | all analysis commands | Private index, pricing cache and settings directory. |
-| `--pricing-policy MODE` | all | `reviewed-first` (default), `api-first`, or `reviewed-only`. |
-| `--pricing-sources LIST` | all | Ordered public sources; default `models.dev,litellm`. |
-| `--pricing-max-age-days DAYS` | all | Stale threshold, default `7`; `0` checks on every dashboard startup. |
+| `--offline` | dashboard, report, export, rates, index rebuild, mcp | Disable public pricing requests; retain access to cached prices. |
+| `--data-dir PATH` | dashboard, report, export, rates, index, mcp | Private index, pricing cache and settings directory. |
+| `--pricing-policy MODE` | dashboard, report, export, rates, index rebuild, mcp | `reviewed-first` (default), `api-first`, or `reviewed-only`. |
+| `--pricing-sources LIST` | dashboard, report, export, rates, index rebuild, mcp | Ordered public sources; default `models.dev,litellm`. |
+| `--pricing-max-age-days DAYS` | dashboard, report, export, rates, index rebuild, mcp | Stale threshold, default `7`; `0` checks on every dashboard startup. |
 | `--no-index` | both | Read present provider evidence without accessing the index; also `SESSION_ANALYTICS_NO_INDEX=1`. |
 | `--version`, `--help` | all | Print the version or command help. |
 
-"Both" means the dashboard and `report` commands. Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations.
+"Both" means the dashboard and `report` commands. `export`, `rates` and `mcp` accept the same source, repository and pricing options; `index rebuild` accepts the source and pricing options but not repository filters; `merge` accepts only `--out`. Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations.
 
 ## Environment variables
 
-Every option above can also be set with a `SESSION_ANALYTICS_*` environment variable (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+The analysis settings and the dashboard port can also be set with `SESSION_ANALYTICS_*` environment variables, named after the flag; a command-line option wins over the environment. Dashboard: `SESSION_ANALYTICS_PORT`. Source paths: `SESSION_ANALYTICS_CLAUDE_ROOT`, `SESSION_ANALYTICS_CODEX_ROOT`, `SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT`, `SESSION_ANALYTICS_CURSOR_DATABASE`, `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, `SESSION_ANALYTICS_GEMINI_ROOT` and `SESSION_ANALYTICS_CONDUCTOR_DATABASE`. Repository filters: `SESSION_ANALYTICS_REPO_ID`, `SESSION_ANALYTICS_REPO_NAME`, `SESSION_ANALYTICS_REPO_REMOTE` and `SESSION_ANALYTICS_REPO_ROOT`. Pricing and storage: `SESSION_ANALYTICS_RATE_CARD`, `SESSION_ANALYTICS_PRICING_POLICY`, `SESSION_ANALYTICS_PRICING_SOURCES`, `SESSION_ANALYTICS_PRICING_MAX_AGE_DAYS`, `SESSION_ANALYTICS_DATA_DIR`, `SESSION_ANALYTICS_OFFLINE=1` and `SESSION_ANALYTICS_NO_INDEX=1`. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable discovery of the five additional stores. Output flags such as `--no-open`, `--json`, `--share`, `--snapshot` and `--exclude-hidden` are command-line only.
 
-New-store variables are `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, and `SESSION_ANALYTICS_GEMINI_ROOT`. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable their default discovery. OpenCode also honors `XDG_DATA_HOME`. Each source override replaces only that source's default; isolated scans should supply all desired paths and disable additional discovery. The demo does this automatically.
-
-`SESSION_ANALYTICS_OFFLINE=1` disables public pricing requests in every command, and `SESSION_ANALYTICS_NO_INDEX=1` bypasses the private index. `TZ` selects the analysis timezone.
+Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`; OpenCode also honors `XDG_DATA_HOME`. Each source override replaces only that source's default; isolated scans should supply all desired paths and disable additional discovery. The demo does this automatically. `TZ` selects the analysis timezone.
 
 ## Demo and developer scripts
 
