@@ -30,7 +30,7 @@ session-analytics
 
 The package is not on npm. `npm install github:rokas-tarasevicius/session-analytics` or a tarball install fails on Node 24 with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` because the executable is a `.ts` file under `node_modules`. Without `npm link`, run `node bin/session-analytics.ts` from the checkout.
 
-Cloning requires repository access during the private preview. `npm run demo` explores synthetic history without reading your own sessions. [Source-release validation](release.md) documents the public launch and packaging gates.
+The source is publicly available. `npm run demo` explores synthetic history without reading your own sessions. [Source-release validation](release.md) documents the public launch and packaging gates.
 
 ## Dashboard
 
