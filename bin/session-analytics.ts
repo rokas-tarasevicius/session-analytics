@@ -5,7 +5,7 @@ import { version } from "../src/version.ts";
 
 const [command, ...rawRest] = process.argv.slice(2);
 const rest = rawRest.map((arg) => arg === "-h" ? "--help" : arg);
-const commands = new Set(["dashboard", "report", "rates", "export", "merge", "index", "mcp"]);
+const commands = new Set(["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits"]);
 const forward = (args: string[]): void => {
   process.argv = [process.argv[0] ?? process.execPath, process.argv[1] ?? "", ...args];
 };
@@ -27,6 +27,7 @@ Usage:
   ${brand.command} merge FILE...          Combine shared snapshots, or full snapshots from several machines
   ${brand.command} mcp [options]          Serve metrics-only MCP tools over stdio
   ${brand.command} index <action>         Manage the local index: status, path, rebuild, prune
+  ${brand.command} limits [statusline]    Harvest subscription limit meters (Claude, Codex) and show where they stand
   ${brand.command} <command> --help       Show options for a command
   ${brand.command} --version              Print the version
 `);
@@ -45,6 +46,9 @@ Usage:
 } else if (command === "mcp") {
   forward(rest);
   await import("../src/mcp/cli.ts");
+} else if (command === "limits") {
+  const { runLimits } = await import("../src/limits/cli.ts");
+  process.exitCode = await runLimits(rest);
 } else if (command === "index") {
   forward(rest);
   await import("../src/store/cli.ts");

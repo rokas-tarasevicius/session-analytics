@@ -82,6 +82,10 @@ Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the
   </picture>
 </p>
 
+### Subscription: are you using what you pay for?
+
+Subscription answers "how much of my Claude and Codex allowance turns into work?" Each subscription card shows its live meters: the 5-hour window and weekly limits as used percent, with a tick for linear pace, a hatched projection to the reset, and when it runs out at the current pace. A chart of the current weekly cycle sits beside the value of 1% of the week, weekly capacity and monthly potential, all calibrated from your own meter readings and the activity ledger. Headline figures compare monthly potential, extracted value and plan price. Weekly resets shows how full each allowance was when it reset, and 5-hour windows shows each window's peak and any time locked out. Ranked recommendations come first. Limits are account-wide, so the repository focus does not apply. See [Subscription limits and value](subscription.md).
+
 ### Tools: what the agents reach for
 
 Tools answers "how do the agents work?" using tool-call names only; arguments and results never reach any output. The table ranks tools by calls, share, sessions and repositories, with the change against the previous window, and provider chips narrow it to one or more agents. Selecting a tool opens its detail: calls by session-start day, the providers that made them, and the repositories they went into.

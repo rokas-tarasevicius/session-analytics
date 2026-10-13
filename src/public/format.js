@@ -76,3 +76,16 @@ export function dateTime(value, timeZone = "UTC") {
 export const calendarParts = (date, timeZone) => dateFormatter(`calendar:${timeZone}`, { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }, "en-CA").formatToParts(date);
 export const weekdayHourParts = (date, timeZone) => dateFormatter(`weekdayHour:${timeZone}`, { timeZone, weekday: "short", hour: "2-digit", hourCycle: "h23" }, "en-US").formatToParts(date);
 export const disjunction = (values) => alternatives.format(values);
+
+// Instants (Unix seconds) shown in a named timezone, for limit meters and reset times.
+const wholeDollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+export const wholeMoney = (value) => wholeDollars.format(value || 0);
+const instant = (seconds) => new Date(seconds * 1000);
+export const weekdayTime = (seconds, timeZone = "UTC") => dateFormatter(`weekdayTime:${timeZone}`, { timeZone, weekday: "short", hour: "2-digit", minute: "2-digit" }).format(instant(seconds));
+export const dayMonth = (seconds, timeZone = "UTC") => dateFormatter(`dayMonth:${timeZone}`, { timeZone, day: "numeric", month: "short" }).format(instant(seconds));
+export const weekdayDate = (seconds, timeZone = "UTC") => dateFormatter(`weekdayDate:${timeZone}`, { timeZone, weekday: "short", day: "numeric" }).format(instant(seconds));
+/** The activity-ledger cell key (`YYYY-MM-DD|hour`) for an instant in a timezone. */
+export function zonedHourKey(seconds, timeZone = "UTC") {
+  const parts = Object.fromEntries(dateFormatter(`hourKey:${timeZone}`, { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }, "en-CA").formatToParts(instant(seconds)).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}|${Number(parts.hour)}`;
+}

@@ -18,12 +18,14 @@ import { version } from "./version.ts";
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 import { dataDirectory } from "./store/database.ts";
 import { readDashboardToken, writeDashboardToken } from "./store/dashboard.ts";
+import { collectLimits, emptyLimitsSnapshot } from "./limits/index.ts";
+import type { LimitsSnapshot } from "./limits/types.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, "--port", "--snapshot"]);
-const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline"]);
+const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline", "--no-codex-account"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
@@ -146,6 +148,11 @@ const staticFiles = new Map<string, string>([
   ["/velocity-data.js", join(publicRoot, "velocity-data.js")],
   ["/velocity.css", join(publicRoot, "velocity.css")],
 
+  ["/subscription.js", join(publicRoot, "subscription.js")],
+  ["/subscription-data.js", join(publicRoot, "subscription-data.js")],
+  ["/subscription-plans.js", join(publicRoot, "subscription-plans.js")],
+  ["/subscription.css", join(publicRoot, "subscription.css")],
+
   ["/tools.js", join(publicRoot, "tools.js")],
   ["/tools-data.js", join(publicRoot, "tools-data.js")],
   ["/tools.css", join(publicRoot, "tools.css")],
@@ -223,6 +230,18 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
   return analyticsPromise;
 }
 
+// Limit meters are harvested incrementally in this process (new log tails only) and shared by concurrent requests.
+let limitsPromise: Promise<LimitsSnapshot> | null = null;
+let limitsAt = 0;
+function limits(refresh: boolean): Promise<LimitsSnapshot> {
+  if (snapshotFile) return Promise.resolve(emptyLimitsSnapshot("snapshot"));
+  const age = Date.now() - limitsAt;
+  if (limitsPromise && age < (refresh ? 5_000 : 30_000)) return limitsPromise;
+  limitsAt = Date.now();
+  limitsPromise = collectLimits({ ...analyzeOptions, codexAccount: !process.argv.includes("--no-codex-account") }).catch((error: unknown) => { limitsPromise = null; throw error; });
+  return limitsPromise;
+}
+
 process.on("unhandledRejection", () => {
   process.stderr.write("Session analytics encountered an unexpected asynchronous failure; the server is still running.\n");
 });
@@ -257,6 +276,10 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/api/analytics") {
       sendJson(response, 200, await analytics(url.searchParams.get("refresh") === "1"));
+      return;
+    }
+    if (url.pathname === "/api/limits") {
+      sendJson(response, 200, await limits(url.searchParams.get("refresh") === "1"));
       return;
     }
     const path = staticFiles.get(url.pathname);

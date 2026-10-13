@@ -14,6 +14,7 @@ import { providerMark, renderProviderEvidence, metricCoverage } from "./provider
 
 import { renderPricingPanel } from "./pricing.js";
 import { renderToolsView } from "./tools.js";
+import { renderSubscription, subscriptionRefreshMilliseconds } from "./subscription.js";
 import { toolsDays } from "./tools-data.js";
 import { renderVelocity, velocityProviders } from "./velocity.js";
 import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity } from "./velocity-data.js";
@@ -70,11 +71,11 @@ const viewPanels = [...document.querySelectorAll("[data-view-panel]")];
 const windowButtons = [...elements.windowSegment.querySelectorAll("[data-window-preset]")];
 const sortButtons = [...document.querySelectorAll("th .sort[data-sort]")];
 
-const viewOrder = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
-const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", pricing: "Pricing", tools: "Tools", activity: "Activity" };
+const viewOrder = ["summary", "velocity", "costs", "pricing", "subscription", "tools", "activity"];
+const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", pricing: "Pricing", subscription: "Subscription", tools: "Tools", activity: "Activity" };
 // Retired view names that old links and saved preferences may still carry.
 const viewAliases = { models: "costs" };
-const viewChords = { s: "summary", v: "velocity", c: "costs", p: "pricing", t: "tools", a: "activity" };
+const viewChords = { s: "summary", v: "velocity", c: "costs", p: "pricing", u: "subscription", t: "tools", a: "activity" };
 const providerScopedViews = ["activity", "tools", "velocity"];
 const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
@@ -715,6 +716,42 @@ function clearInactiveAnalyticsViews(activeName) {
   if (activeName !== "activity") elements.activityTooltip.hidden = true;
 }
 
+// Limit meters come from their own endpoint: they are account-wide, cheap to re-harvest, and refresh while the view is open.
+let limits = null;
+let limitsTimer = null;
+async function loadLimitsNow(refresh = false) {
+  try {
+    const response = await fetch(`/api/limits${refresh ? "?refresh=1" : ""}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    limits = await response.json();
+  } catch {
+    limits ??= { schemaVersion: 1, dataSource: "live", persisted: false, plans: { claude: null, codex: null }, sources: [], observations: [], unavailable: true };
+  }
+  if (snapshot && currentViewName() === "subscription") renderSubscriptionView();
+}
+const loadLimits = singleFlight(loadLimitsNow);
+
+function scheduleLimits(active) {
+  if (!active) { if (limitsTimer !== null) clearInterval(limitsTimer); limitsTimer = null; return; }
+  if (!limits) void loadLimits(false);
+  if (typeof setInterval === "function") limitsTimer ??= setInterval(() => { if (document.visibilityState !== "hidden") void loadLimits(false); }, subscriptionRefreshMilliseconds);
+}
+
+/** Subscription is account-wide: it reads every session, ignoring the repository focus, over the selected dates. */
+function renderSubscriptionView() {
+  const restoreFocus = rememberFocus();
+  const context = velocityContext();
+  const totals = buildVelocity(snapshot.sessions, { start: context.start, end: context.end, group: "provider", metric: "value", limit: 50 }).allSeries;
+  renderSubscription($("#subscription-view"), {
+    limits, sessions: snapshot.sessions, timeZone: context.timeZone,
+    days: daysBetween(context.start, context.end).length,
+    extractedByProvider: Object.fromEntries(totals.map((series) => [series.id, series.total])),
+    rangeLabel: dateRange(context.start, context.end),
+    onPlanChange: () => renderSubscriptionView(),
+  });
+  restoreFocus();
+}
+
 function renderActiveAnalyticsView(view) {
   const restoreFocus = rememberFocus();
   resetExportMenu();
@@ -722,6 +759,8 @@ function renderActiveAnalyticsView(view) {
   if (name === "activity") renderActivity(view);
   if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, { ...velocityContext(), providers: snapshotProviders() });
   if (name === "costs") renderCosts(view);
+  if (name === "subscription") renderSubscriptionView();
+  scheduleLimits(name === "subscription");
   if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.scopeSessions, velocityContext(), { onRefresh: () => load(true) });
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
@@ -1709,7 +1748,7 @@ async function loadSnapshot(refresh = false) {
 /** One analysis request at a time: the refresh button, `r`, the palette and Retry share an in-flight load. */
 const load = singleFlight(loadSnapshot);
 
-elements.refresh.addEventListener("click", () => load(true));
+elements.refresh.addEventListener("click", () => { load(true); if (currentViewName() === "subscription") void loadLimits(true); });
 elements.errorRetry.addEventListener("click", () => load(true));
 elements.repositoryFilter.addEventListener("change", () => { if (snapshot) { renderView(); syncUrl(); } });
 elements.scopeChip.addEventListener("click", () => selectRepository("all", { scroll: false }));

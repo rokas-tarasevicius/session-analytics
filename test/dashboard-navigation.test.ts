@@ -3,15 +3,15 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { harness, sample } from "./validation/aggregation-ui-harness.ts";
 
-const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
+const views = ["summary", "velocity", "costs", "pricing", "subscription", "tools", "activity"];
 
-test("dashboard navigation, stepping, palette and shortcut help share the six-view order", async () => {
+test("dashboard navigation, stepping, palette and shortcut help share the seven-view order", async () => {
   const { document, run } = await harness([]);
   run("snapshot = null");
   assert.deepEqual(document.querySelectorAll("[data-view-button]").map((button) => button.dataset.viewButton), views);
   assert.deepEqual([...run("viewOrder")], views);
   assert.deepEqual(document.querySelectorAll(".nav-section").map((group) => [group.getAttribute("aria-label"), group.querySelectorAll("[data-view-button]").map((button) => button.dataset.viewButton)]), [
-    ["Overview", ["summary", "velocity"]], ["Economics", ["costs", "pricing"]], ["Usage", ["tools", "activity"]],
+    ["Overview", ["summary", "velocity"]], ["Economics", ["costs", "pricing", "subscription"]], ["Usage", ["tools", "activity"]],
   ]);
   assert.deepEqual([...run("paletteItems().filter(item => item.group === 'Views').map(item => item.keywords)")], views.map((view) => `view ${view}`));
   const chords = run("viewChords");

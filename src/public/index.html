@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/pricing.css" />
     <link rel="stylesheet" href="/velocity.css" />
     <link rel="stylesheet" href="/tools.css" />
+    <link rel="stylesheet" href="/subscription.css" />
     <script src="/app.js" type="module"></script>
   </head>
   <body>
@@ -24,6 +25,7 @@
         <symbol id="i-costs" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.2v7.6M10.2 6.2c0-.9-1-1.5-2.2-1.5s-2.2.6-2.2 1.4c0 2.1 4.4 1 4.4 3.2 0 .9-1 1.5-2.2 1.5s-2.2-.6-2.2-1.5"/></symbol>
         <symbol id="i-models" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><rect x="6" y="6" width="4" height="4" rx=".75" class="fill"/><path d="M6 1v2.5M10 1v2.5M6 12.5V15M10 12.5V15M1 6h2.5M1 10h2.5M12.5 6H15M12.5 10H15"/></symbol>
         <symbol id="i-pricing" viewBox="0 0 16 16"><path d="M2 8.5V2.8c0-.4.4-.8.8-.8h5.7l5.9 5.9a1 1 0 0 1 0 1.4l-4.9 4.9a1 1 0 0 1-1.4 0z"/><circle cx="5.5" cy="5.5" r="1" class="fill"/></symbol>
+        <symbol id="i-subscription" viewBox="0 0 16 16"><path d="M2.2 11.5a6 6 0 1 1 11.6 0"/><path d="M8 9.5l3-3.5"/><circle cx="8" cy="9.8" r=".9" class="fill"/></symbol>
         <symbol id="i-tools" viewBox="0 0 16 16"><path d="M10.2 2.3a3.4 3.4 0 0 0-3.9 4.5L2 11.1a1.4 1.4 0 0 0 2 2l4.3-4.3a3.4 3.4 0 0 0 4.5-3.9l-2.2 2.2-1.9-.5-.5-1.9z"/></symbol>
         <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.75"/><path d="M10.5 10.5 14 14"/></symbol>
         <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3.3h-3.3"/></symbol>
@@ -70,6 +72,7 @@
             <p class="nav-heading">Economics</p>
             <button type="button" data-view-button="costs" data-label="Costs"><svg aria-hidden="true"><use href="#i-costs"/></svg><span>Costs</span><kbd aria-hidden="true">g c</kbd></button>
             <button type="button" data-view-button="pricing" data-label="Pricing"><svg aria-hidden="true"><use href="#i-pricing"/></svg><span>Pricing</span><kbd aria-hidden="true">g p</kbd></button>
+            <button type="button" data-view-button="subscription" data-label="Subscription"><svg aria-hidden="true"><use href="#i-subscription"/></svg><span>Subscription</span><kbd aria-hidden="true">g u</kbd></button>
           </div>
           <div class="nav-section" role="group" aria-label="Usage">
             <p class="nav-heading">Usage</p>
@@ -253,6 +256,11 @@
             <dialog id="pricing-model-dialog" class="help pricing-dialog" aria-labelledby="pricing-model-title"></dialog>
           </section>
 
+          <section class="analytics-view" data-view-panel="subscription" hidden aria-labelledby="subscription-title">
+            <header class="view-header"><div><h2 class="sr-only" id="subscription-title">Subscription</h2><p>How much of your Claude and Codex subscription limits you turn into work: live meters, every reset, and the value at stake. Account-wide; the repository focus does not apply.</p></div></header>
+            <div id="subscription-view"></div>
+          </section>
+
           <section class="analytics-view" data-view-panel="velocity" hidden aria-labelledby="velocity-title">
             <header class="view-header"><div><h2 class="sr-only" id="velocity-title">Velocity</h2><p>Where usage is moving, by provider, agent, model and every evidenced dimension.</p></div></header>
             <div id="velocity-view"></div>
@@ -317,6 +325,7 @@
           <div><dt>Velocity</dt><dd><kbd>g</kbd><kbd>v</kbd></dd></div>
           <div><dt>Costs</dt><dd><kbd>g</kbd><kbd>c</kbd></dd></div>
           <div><dt>Pricing</dt><dd><kbd>g</kbd><kbd>p</kbd></dd></div>
+          <div><dt>Subscription</dt><dd><kbd>g</kbd><kbd>u</kbd></dd></div>
           <div><dt>Tools</dt><dd><kbd>g</kbd><kbd>t</kbd></dd></div>
           <div><dt>Activity</dt><dd><kbd>g</kbd><kbd>a</kbd></dd></div>
           <div><dt>Previous / next view</dt><dd><kbd>[</kbd><kbd>]</kbd></dd></div>
