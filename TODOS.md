@@ -39,6 +39,13 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | P3 | Remove unused per-repository tools/warnings, avoid full model rebuilds on chip toggles and reduce repository-by-session activity scans. | §2 P3, Performance and dead code |
 | P3 | Consolidate element factories and duplicate warning renders; remove unused Summary Velocity code and review test-only exports. | §2 P3, Performance and dead code |
 
+## Multiple machines
+
+| Priority | Item | Plan reference |
+| --- | --- | --- |
+| P3 | Persist portable repository IDs and session keys with retained index facts, so history whose sources were deleted keeps its portable identity across exports. | #62 review |
+| P3 | Show the machine as a dimension in combined snapshots and the dashboard. | #63 follow-up |
+
 ## Distribution and release metadata
 
 | Priority | Item | Plan reference |
