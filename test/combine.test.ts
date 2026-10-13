@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import os, { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -241,7 +241,8 @@ test("portable local Git IDs depend on the machine, support selection and leave 
     const local = await analyzeMachineSessions(indexed);
     const parsed = indexStatus(indexed).lastScan!.parsedSessions;
     const first = await analyzeMachineSessions({ ...indexed, portableIds: true });
-    const id = `discovered-${createHash("sha256").update(JSON.stringify(["local", "machine-a", repositoryRoot])).digest("hex").slice(0, 20)}`;
+    // Discovery hashes the canonical root; macOS temporary directories resolve through /private.
+    const id = `discovered-${createHash("sha256").update(JSON.stringify(["local", "machine-a", await realpath(repositoryRoot)])).digest("hex").slice(0, 20)}`;
     assert.ok(first.repositories.some(({ repository }) => repository.id === id));
     assert.equal(indexStatus(indexed).lastScan!.parsedSessions, 0);
     assert.equal(indexStatus(indexed).lastScan!.reusedSessions, parsed);
