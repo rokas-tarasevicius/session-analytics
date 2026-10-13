@@ -7,8 +7,8 @@
 
 <h3>Content-free analytics for the coding-agent sessions already on your machine.</h3>
 
-<p>Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI usage: tokens, API-equivalent cost, models, and tools, grouped by Git repository.<br />
-Local only. Read-only analytics. No prompts, messages, or file paths in analytics outputs.</p>
+<p>One local dashboard for Claude Code, Codex, Cursor, Copilot CLI, OpenCode and Gemini CLI: what the work is worth at API prices, which repositories it goes into, which models and tools it uses, how that is changing, and when it happens.<br />
+Read-only. Loopback only. No prompts, messages or file paths in anything it produces.</p>
 
 [![CI](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -20,52 +20,192 @@ Local only. Read-only analytics. No prompts, messages, or file paths in analytic
 </div>
 
 <p align="center">
-  <img alt="The session-analytics Control Room dashboard: sidebar with grouped views and per-repository sparklines, KPI cards, daily usage by provider, and provider mix across six repositories" src="assets/screenshot-dashboard.png" width="100%" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-summary-dark.webp" />
+    <img alt="The Summary view: a sidebar with six views and per-repository sparklines, six KPI cards with coverage fractions and deltas, a daily usage value chart by provider, and a sessions-by-provider donut" src="assets/screenshot-summary.webp" width="100%" />
+  </picture>
   <br />
-  <sub>Every screenshot in this repository is rendered from the synthetic demo dataset (<code>npm run demo</code>), never from real history.</sub>
+  <sub>Every screenshot in this repository is rendered from the synthetic demo dataset (<code>npm run demo</code>), never from real history. The images follow your light or dark theme.</sub>
 </p>
 
 ## Contents
 
-- [Why](#why)
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Usage](#usage)
-- [Supported agents and evidence](#supported-agents-and-evidence)
-- [Privacy model](#privacy-model)
+- [What it does](#what-it-does)
+- [The dashboard](#the-dashboard)
+- [Which agents it reads](#which-agents-it-reads)
+- [Privacy](#privacy)
+- [How the numbers are made](#how-the-numbers-are-made)
+- [Get started](#get-started)
+- [Beyond the dashboard](#beyond-the-dashboard)
 - [How it works](#how-it-works)
-- [Accounting notes](#accounting-notes)
-- [Use it from an agent](#use-it-from-an-agent)
 - [Roadmap](#roadmap)
 - [How it compares](#how-it-compares)
 - [FAQ](#faq)
 - [Contributing](#contributing) · [Security](#security) · [License](#license)
 
-## Why
+## What it does
 
-Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI already keep detailed session history on your disk. That history can tell you which repositories your agent work goes into, which models and tools it uses, and what it would cost at API list prices. It also contains every prompt, file path, command, and tool result you have produced, so most people do not want to hand it to an analytics tool.
+Coding agents keep detailed session history on your disk. That history can tell you which repositories your agent work goes into, which models and tools it relies on, and what it would cost at API list prices. It also contains every prompt, file path, command and tool result you have ever produced, which is why most people do not want to hand it to an analytics tool.
 
-`session-analytics` is built around three commitments:
+`session-analytics` reads that history on your machine and keeps only the numbers. It is built around three commitments:
 
-1. **Content-free by contract.** The parser reads transcripts locally and returns only allowlisted counters, names, validated model IDs, timestamps, and hashed keys. Malformed model metadata becomes `<unknown>`. The contract is written down in [docs/privacy.md](docs/privacy.md), every public field is listed there, and tests plant sentinel strings in fixtures and fail if any of them reaches an output.
-2. **Accounting you can reproduce.** Costs come from immutable snapshots of public pricing feeds, with reviewed exceptions and the versioned repository rate card as an offline fallback. Every priced model carries its source, snapshot date, and payload hash. Streamed and broadcast token records are deduplicated, unknown models stay visibly unpriced, and each figure says whether it is exact, estimated, or unavailable for that provider.
-3. **Repository first, across agents.** Every session is assigned to a Git repository from its recorded working directory, so work from all six providers on the same codebase lands in one row. Linked worktrees and clones with the same complete Git remote fold into one logical repository, and the [Conductor](https://conductor.build) app's workspace database is used as optional enrichment when present.
+1. **Content-free by contract.** The parser returns allowlisted counters, model IDs, tool names, timestamps and hashed keys, and nothing else. Prompts, replies, reasoning, tool arguments, file paths and raw IDs are discarded during parsing. The contract is written down in [docs/privacy.md](docs/privacy.md), every public field is listed there, and tests plant sentinel strings in fixtures and fail if any of them reaches an output.
+2. **Accounting you can reproduce.** Costs come from dated snapshots of public pricing feeds, with reviewed exceptions and a versioned rate card as the offline fallback. Every priced model carries its source, snapshot date and payload hash. Streamed and duplicated token records are deduplicated, unknown models stay visibly unpriced, and every figure says whether it is exact, estimated or unavailable for that source.
+3. **Repository first, across agents.** Each session is assigned to a Git repository from its recorded working directory, so work from all six agents on the same codebase lands in one row. Linked worktrees and clones of the same remote fold into one repository, and the [Conductor](https://conductor.build) workspace database is used as optional enrichment when present.
 
-## Features
+## The dashboard
 
-- **Cross-provider evidence.** Claude Code, Codex, Cursor, Copilot CLI, OpenCode and Gemini CLI, with Conductor recovery when canonical history is missing. Summary and activity-only evidence carry explicit coverage and N/A values.
-- **Six dashboard views.** Overview: Summary, Velocity. Economics: Costs, Pricing. Usage: Tools, Activity. Every view has a sidebar entry, command-palette action, `g` shortcut and `?view=` URL hook.
-- **Control Room.** Shared cards and tables, repository focus, scoped provider chips, keyboard navigation, light/dark themes and compact/comfortable density. Summary provider chips affect its daily chart; Activity and Tools keep independent provider selections.
-- **Measured usage.** API-equivalent value with dated price provenance, token-class coverage, velocity, cache and context-window counters, and history coverage. Value is not an invoice; unknown evidence is never presented as zero.
-- **Private index.** Complete derived session facts survive provider cleanup. Unchanged Claude/Codex sessions replay from a private index; `--no-index` reads present sources directly.
-- **Every surface.** Localhost dashboard, terminal/JSON reports, versioned exports and aggregate-only sharing, six metrics-only MCP tools, and an [agent skill](skills/session-analytics/SKILL.md).
-- **Small trust surface.** Node 24 built-ins, zero runtime dependencies, no telemetry and read-only provider access. Analysis reads cached prices; the dashboard can refresh fixed public price feeds (`--offline` disables pricing requests). OTLP delivery requires its own explicit option.
+The dashboard runs on `127.0.0.1` and has six views in three groups: **Overview** (Summary, Velocity), **Economics** (Costs, Pricing) and **Usage** (Tools, Activity). A window selector at the top switches between the last 7, 30 or 90 days, all history, or a custom range. The sidebar lists every repository with a sparkline and its value, and clicking one focuses every view on that repository. A command palette (<kbd>⌘K</kbd>), `g`-prefixed shortcuts, light and dark themes, two densities and an address bar that follows the view, window and focus make it quick to move around and to share a link to exactly what you are looking at.
+
+### Summary: the state of the machine
+
+Summary answers "what happened in this window?" Six cards show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each card shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. Below them, daily usage value by provider sits beside the session mix, then value and tokens by repository, value by model, top tools, sub-agent value and a sortable fleet table.
 
 <p align="center">
-  <img alt="Velocity view: usage value by provider as a stacked area chart with period-over-period deltas" src="assets/screenshot-velocity.png" width="100%" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-summary-breakdowns-dark.webp" />
+    <img alt="Summary breakdown panels: usage value by repository, request input by repository, usage value by model, top tools and sub-agent value" src="assets/screenshot-summary-breakdowns.webp" width="100%" />
+  </picture>
 </p>
 
-## Quick start
+### Focus on one repository
+
+Click a repository in the sidebar, or pick one from the command palette, and every view narrows to it. Summary adds a provider breakdown for value and request input, a sub-agent summary and a comparison row against the whole fleet. The focus is part of the URL, so a bookmark or a shared link opens the same repository.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-repository-dark.webp" />
+    <img alt="A focused repository: usage value and request input by provider, value by model, top tools, sub-agent value, and a repository-versus-fleet comparison table" src="assets/screenshot-repository.webp" width="100%" />
+  </picture>
+</p>
+
+### Velocity: where usage is moving
+
+Velocity answers "is this going up, and what is driving it?" Group the chart by provider, agent, model, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every percentage, and a **Top movers** table ranks the models, agents and other dimensions whose value changed most over the last seven completed days. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-velocity-dark.webp" />
+    <img alt="Velocity view: usage value by provider as a stacked area chart with a 7-day average, an opened Evidence & limits note, and week-to-date, month-to-date and today comparisons" src="assets/screenshot-velocity.webp" width="100%" />
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-velocity-movers-dark.webp" />
+    <img alt="Top movers table: models and agents ranked by their change over the last seven completed days, with the priced-token evidence behind each comparison" src="assets/screenshot-velocity-movers.webp" width="100%" />
+  </picture>
+</p>
+
+Every panel has an **Evidence & limits** note that states what the number includes, what was excluded, and why a comparison is partial or unavailable. A missing comparison is shown as a dash with its reason, never as zero.
+
+### Costs: one money ledger
+
+Costs answers "where does the value go?" The usage value is the sum of an API-equivalent part, priced from observed tokens, and a provider-reported part for sources such as Cursor that record their own figure and have no rate card. Cost by provider shows each provider's bar segmented by model with its priced share; cost by model lists every model with its provider, sessions, calls, input and output tokens, value and share. Summary, Velocity and Costs read the same activity-dated ledger, so their totals agree for any window.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-costs-dark.webp" />
+    <img alt="Costs view: usage value, API-equivalent value, provider-reported value and pricing coverage cards, cost by provider with model segments, and cost by model with sessions, calls and tokens" src="assets/screenshot-costs.webp" width="100%" />
+  </picture>
+</p>
+
+### Pricing: where the prices come from
+
+Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the share of eligible tokens with an explicit rate), the age of each public price source, whether updates are offline, and the effective date of the reviewed rate card. Each model used in the window gets a card with its input and output rates per million tokens, its value, tokens, calls and share, and a badge when part of its tokens could not be priced. A model with no matching rate is shown as unpriced rather than as free. A stale source raises a warning at the top; the demo seeds one deliberately stale source so that warning is visible.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-pricing-dark.webp" />
+    <img alt="Pricing view: a stale-source warning, pricing coverage and per-source freshness cards, and model price cards with rates, value, tokens and priced share" src="assets/screenshot-pricing.webp" width="100%" />
+  </picture>
+</p>
+
+### Tools: what the agents reach for
+
+Tools answers "how do the agents work?" using tool-call names only; arguments and results are never read. The table ranks tools by calls, share, sessions and repositories, with the change against the previous window, and provider chips narrow it to one or more agents. Selecting a tool opens its detail: calls by session-start day, the providers that made them, and the repositories they went into.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-tools-dark.webp" />
+    <img alt="Tools view: tool calls, distinct tools, calls per session and most-used tool cards, a ranked tool table with provider marks, and a detail panel for Read with calls by day, by provider and by repository" src="assets/screenshot-tools.webp" width="100%" />
+  </picture>
+</p>
+
+### Activity: when the work happens
+
+Activity answers "when do sessions start?" A weekday-by-hour heatmap counts session starts in your local timezone for the selected providers, and a repository list shows where those sessions went. Sessions without a provider-recorded start time are excluded rather than guessed from file dates.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-activity-dark.webp" />
+    <img alt="Activity view: a weekday-by-hour heatmap of session starts and a sessions-by-repository list" src="assets/screenshot-activity.webp" width="100%" />
+  </picture>
+</p>
+
+### Coverage, evidence and the command palette
+
+Every number on the dashboard is a lower bound from local evidence. The **Coverage** button lists, for each source, how many selected sessions carry token evidence, tool evidence and timestamps, and explains how to read the figures on the current view. Unavailable is shown as a dash, never as zero activity, and counts never claim to measure quality or outcome.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-coverage-dark.webp" />
+    <img alt="The Data coverage dialog: coverage notes, a per-source table of fidelity, sessions, token evidence, tool evidence and time basis, and notes on how to read the numbers" src="assets/screenshot-coverage.webp" width="720" />
+  </picture>
+</p>
+
+The command palette jumps to any view or repository, toggles provider chips and switches theme or density. The same actions have keyboard shortcuts: `g` then a letter for views, `[` and `]` for the previous and next view, `1` to `4` for the window presets, `e` for coverage and `t` for the theme.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-palette-dark.webp" />
+    <img alt="The command palette: Go to Summary, Velocity, Costs, Pricing, Tools and Activity with their g-shortcuts, then All repositories and Focus entries for each repository" src="assets/screenshot-palette.webp" width="600" />
+  </picture>
+</p>
+
+## Which agents it reads
+
+| Source | Where it looks | What it can tell you |
+| --- | --- | --- |
+| Claude Code | `~/.claude/projects`, every `~/.claude-*/projects`, `$CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects` | Exact tokens including cache reads and writes, reasoning tokens when recorded, tool calls by name, compactions, sub-agents with their own cost split, and reasoning effort |
+| Claude Desktop local agents | `~/Library/Application Support/Claude/local-agent-mode-sessions` | The same Claude session evidence |
+| Codex | `~/.codex/sessions` and `archived_sessions`, every `~/.codex-*` profile, `$CODEX_HOME` | Exact tokens per request, reasoning tokens, tool calls (code-mode calls expanded to the inner tool), compactions and spawned threads; cache writes are not recorded, so an upper estimate is shown beside the value |
+| Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` and `workspaceStorage`, read-only | Per-session input and output tokens, tool calls, sub-agent composers, and Cursor's own reported value, which is kept separate from API-equivalent value |
+| Cursor SDK through Conductor | `~/Library/Application Support/com.conductor.app/cursor-sdk-store` | Per-run token counters priced at the run's date, and tool events |
+| Cursor agent transcripts | `~/.cursor/projects/*/agent-transcripts` | Activity only; no tokens or value |
+| GitHub Copilot CLI | `~/.copilot/session-state/*/events.jsonl` | Tool calls and turns; tokens are not recorded |
+| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db` | Per-request token counters and tool calls |
+| Gemini CLI | `~/.gemini/tmp/*/chats/session-*.json{,l}` | Per-message token counters (thinking inside output) and tool calls |
+| Conductor (optional) | `~/Library/Application Support/com.conductor.app/conductor.db`, read-only | Workspace-to-repository mapping, hidden flags, live-session status, and result receipts that can recover deleted Claude history |
+
+Every source is opened read-only, and nothing is written to provider directories. Each source has its own fidelity label, so summary-only and activity-only evidence is shown with explicit coverage and **N/A** values rather than folded into exact figures. Per-source matching rules, measure-by-measure fidelity and known gaps are in [docs/providers.md](docs/providers.md); metric definitions are in [docs/metrics.md](docs/metrics.md).
+
+## Privacy
+
+`session-analytics` reads transcripts on your machine and discards their content during parsing. Its outputs (dashboard, API, reports, exports and the agent skill) contain only:
+
+- token counters, cost figures, durations and timestamps;
+- model IDs and tool names;
+- repository display names and pseudonymous keys (a truncated SHA-256 session key and a repository ID);
+- fixed-text warnings and the rate card's model list with source URLs.
+
+They never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages.
+
+The dashboard binds to loopback, rejects requests whose `Host` is not local or whose `Origin` is present and not local, serves a strict Content Security Policy, sends no CORS headers, has no telemetry, and serves all browser assets locally. The only network activity is an optional refresh of fixed public price feeds with plain GETs that carry no local data; `--offline` disables it. Delivering an export to an OpenTelemetry endpoint requires its own explicit option. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers and the [field manifest](docs/privacy.md#field-manifest).
+
+## How the numbers are made
+
+- **API-equivalent is not an invoice.** Dollar figures price observed tokens at public API list prices. They do not model subscription plans, discounts, batch or priority tiers, regional pricing, taxes or credits. Under a subscription, read them as the value of the usage, not as money spent.
+- **Money follows activity dates.** A session's value is placed on the days its requests happened, even when the session began before the window; sessions, tokens and tools are selected by start date. Sources that record no request times are session-dated on their last activity and say so. Summary, Velocity and Costs share this ledger, and the daily value export adds up to it.
+- **Price evidence is versioned.** Each request is priced with the latest source snapshot at or before its time; snapshots record fetch time, source URL and payload hash, and [`data/rate-cards.json`](data/rate-cards.json) keeps reviewed exceptions and fallback rates. Unknown or ambiguous models remain unpriced.
+- **Coverage is shown, not hidden.** Pricing coverage is the share of observed tokens with explicit rates for their token classes. Substituted cache prices stay in estimated totals with visible assumptions. Invalid model labels become `<unknown>` without dropping tokens. Sessions without validated evidence are excluded rather than counted as zero.
+- **Processed input repeats context.** Input totals count cached context every time a request processes it; they measure consumption, not unique text. Long-context premiums apply per request, never to a session or repository total.
+- **Sub-agent value is a lower bound.** It counts only usage with explicit sub-agent evidence.
+- **History coverage is measured, not assumed.** When Claude transcripts have been deleted, Conductor's assistant usage can recover them. The Summary view shows how well that recovery path reproduces native value on the sessions where both survive, and an unattributed monthly estimate from provider statistics stays outside the session and repository totals. [Method and limits](docs/metrics.md#history-coverage-and-recovery).
+
+Accounting details, denominators and attribution rules are in [docs/metrics.md](docs/metrics.md); provider-specific limits are in [docs/providers.md](docs/providers.md#review-hardening-and-resource-limits).
+
+## Get started
 
 Requirements: **Node.js 24 or newer** and **macOS** (Claude Code and Codex history also works on Linux; see [platform support](#faq)).
 
@@ -77,201 +217,24 @@ npm link      # puts the session-analytics command on your PATH
 session-analytics
 ```
 
-The command scans local history, starts the dashboard on `http://127.0.0.1:4174`, and opens it in your browser. Running it again reuses a verified live dashboard on that port only with the same analysis options; otherwise stop it or choose `--port`. Saved-file dashboards are kept separate.
-
-To try it without touching your own history, run the demo. It generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory, and deletes it on exit:
+The command scans local history, starts the dashboard on `http://127.0.0.1:4174` and opens it in your browser. To try it without touching your own history, run the demo: it generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory and deletes them on exit.
 
 ```bash
-npm run demo                      # dashboard on http://127.0.0.1:4175
-npm run demo -- report            # terminal report of the same data
+npm run demo
 ```
 
-The package is not on npm. Install from a checkout with `npm link` as shown above. `npm install github:rokas-tarasevicius/session-analytics` or a tarball install fails on Node 24 with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` because the executable is a `.ts` file under `node_modules`. Without `npm link`, run `node bin/session-analytics.ts` from the checkout.
+The package is not on npm yet; the [command-line reference](docs/cli.md#install) explains why and what to do instead. The same page lists every option, including ports, offline mode, repository filters and explicit source paths.
 
-## Usage
+## Beyond the dashboard
 
-### Dashboard
+Everything the dashboard shows is available without a browser, with the same privacy contract.
 
-```bash
-session-analytics                 # scan, serve on 127.0.0.1:4174, open the browser
-session-analytics --no-open       # serve without opening a browser
-session-analytics --port 4180     # use another loopback port
-```
+- **Terminal report and JSON snapshot.** `session-analytics report` prints repository totals, value by basis, token and cache totals, the highest-value sessions by hashed key and coverage warnings; `report --json` writes the same versioned snapshot the dashboard uses, validated by a [published JSON Schema](schemas/snapshot.v1.schema.json).
+- **Exports and team sharing.** Export sessions, daily value, models and tools as CSV, NDJSON or OTLP JSON, or download the current view from the dashboard. `report --share` produces an aggregate-only snapshot with pseudonymous repositories and a minimum of five sessions per bucket, and `merge` combines shared snapshots from several machines into one dashboard. See [schemas, exports and sharing](docs/interop.md).
+- **Metrics for your agent.** `session-analytics mcp` serves six read-only MCP tools (usage summaries, budget status, repository profiles, tool statistics, recent sessions and same-repository agent comparisons), and the bundled [agent skill](skills/session-analytics/SKILL.md) lets Claude Code, Codex or Cursor open the dashboard or answer "compare agent usage across my repositories". See [docs/mcp.md](docs/mcp.md).
+- **Price lists and the local index.** `rates` fetches, inspects and diffs public price snapshots; `index` reports, prunes or rebuilds the private index that lets indexed sessions survive provider cleanup.
 
-The server binds to `127.0.0.1` only and answers read-only `GET` requests. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`. The dashboard starts with the last 30 days of observed history; `?window=7`, `?window=30`, `?window=90`, or `?window=all` overrides this for the visit, and `?window=custom&start=YYYY-MM-DD&end=YYYY-MM-DD` opens a custom range. The window is not saved in browser storage, but the address bar follows the view, window and repository focus, so reload, bookmarks and Back/Forward return to the same place. Sessions with an unknown start time only count under **All**, and **Export view** downloads cover the selected window, so choose **All** for a whole-history export.
-
-Every money total follows **activity dates**, even when the session began before the selected window. Sessions, tokens and tools select sessions by start date. The analysis timezone is shown in the view; set `TZ` before launching to choose a different one. Cursor's provider-reported value and other activity without timestamps stay undated. Value from sources that record no request times (Conductor result receipts, or a Gemini message or Cursor SDK run without its own time) is **session-dated**: placed on the session's last activity and stated in the Summary and Velocity notes. Projection bands are workload scenarios, not confidence intervals or invoices. See the [velocity definitions](docs/metrics.md#velocity-snapshot-version-1) for denominators and attribution rules.
-
-Missing or timezone-free session starts are counted as undated and excluded from dated session-start totals. Velocity comparisons show current/prior evidence beside each percentage; gaps in pricing or token detail make changes, burn and projections unavailable. Agent colors and patterns stay attached to the same identity as filters change.
-
-### Terminal report
-
-```bash
-session-analytics report
-```
-
-Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, the 15 highest-value sessions by hashed key, and coverage warnings.
-
-### JSON snapshot
-
-```bash
-session-analytics report --json > snapshot.json
-jq '.repositories[] | {name: .repository.name, usd: .summary.estimatedSpendUsd}' snapshot.json
-```
-
-The snapshot has the same shape as the dashboard's `/api/analytics` response and carries `schemaVersion: 1`, validated by the [published JSON Schema](schemas/snapshot.v1.schema.json). Every field is described in the [field manifest](docs/privacy.md#field-manifest).
-
-### Exports and team sharing
-
-```bash
-session-analytics export --format csv --out ./exports
-session-analytics export --format ndjson --out ./ndjson
-session-analytics export --format otlp-json --out ./otlp
-session-analytics report --share > shared.json  # exact local preview; sends nothing
-session-analytics merge alice-shared.json bob-shared.json --out team.json
-session-analytics --snapshot team.json --no-open
-```
-
-CSV exports sessions, daily value, models, and tools. **Export view** in the dashboard downloads the filtered JSON or CSV locally. `report --share` removes session details, uses keyed repository pseudonyms or explicit aliases, and suppresses repository buckets with fewer than five distinct sessions by default. This threshold counts sessions, not people, and does not guarantee anonymity. Merge rejects repeated contributing sources. A full or shared snapshot can be opened without scanning provider history. Imports enforce hashed identifiers, fixed warnings/status labels, and reconciled accounting. Filtered downloads preserve discovery caveats, select whole sessions by start date in the snapshot's timezone, and honour the active view's provider filter; the daily value CSV is the activity-dated ledger for the selected dates, so it adds up to the dashboard's usage value. Shared totals may include running and partially parsed sessions; pricing coverage does not establish evidence completeness.
-
-See [schemas, exports, and sharing](docs/interop.md) for field definitions, aliases, threshold controls, the pinned OpenTelemetry mapping, and optional `--otlp-endpoint` delivery. Export files never overwrite existing files; network delivery happens only with that explicit flag.
-
-### Pricing sources and history
-
-```bash
-session-analytics rates update               # fetch and archive public price lists
-session-analytics rates show gpt-5.4 --json   # inspect rates and provenance
-session-analytics rates diff                 # changes between the last two source snapshots
-session-analytics rates status --offline     # age, sources, and local model coverage
-session-analytics --offline                  # dashboard using only local cached/reviewed prices
-```
-
-Analysis never waits for the network. The dashboard uses the local cache immediately and refreshes stale sources in the background after its first scan; **Refresh snapshot** applies the new evidence. A report only prints an update hint on stderr (including with `--json`). The default stale threshold is seven days. `--offline` or `SESSION_ANALYTICS_OFFLINE=1` prevents public requests in every command.
-
-Each request uses the latest available source snapshot at or before its timestamp. Requests older than the cache use the oldest available snapshot and carry an explicit label; this is an estimate, not reconstructed historical pricing. Every observation is retained, so a later price observation does not overwrite earlier evidence; unchanged rate tables share storage and indexed history keeps request lookup bounded. The dashboard's **Pricing** tab shows freshness, coverage, and the provenance used by selected sessions. [Pricing reference](docs/pricing.md) explains precedence, aliases, cache storage, and limitations.
-
-### Local index
-
-The first launch builds the index; later launches and dashboard refreshes fingerprint evidence and reuse unchanged session facts. Claude main and subagent files form one invalidation group. Codex ownership is recomputed from cached counter evidence so a changed rollout can invalidate another session without re-parsing unrelated files. Cursor's mutable databases and repository assignments are refreshed on every scan.
-
-Each warm scan checks a rotating sample of up to four cached native sessions and one Codex ledger against fresh parsing. A consistency failure rolls back the ingest and runs a full scan with a visible warning; that fallback includes present sources only. Key/MAC corruption still fails closed. `--no-index` remains available on both dashboard and report commands.
-
-```bash
-session-analytics index status             # counts, schema, and last-ingest statistics
-session-analytics index status --json
-session-analytics index path               # local management path, never in analytics output
-session-analytics index prune --before 2026-01-01
-session-analytics index rebuild            # discard old facts, then rescan configured sources
-session-analytics report --no-index        # bypass the index, including retained history
-```
-
-The default data directory is `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (or `~/.local/share/session-analytics/`) on Linux. Override it with `--data-dir PATH` or `SESSION_ANALYTICS_DATA_DIR`. The directory is mode `0700`; the database, SQLite sidecars, and per-machine key are `0600`. The index stores derived facts and keyed fingerprints, never transcript text or raw paths/IDs. See [on-disk privacy](docs/privacy.md#local-index).
-
-Previously indexed sessions survive provider cleanup and carry `transcript.sourceDeleted: true`; their facts and prices remain those of their last successful ingest. Prune removes sessions whose last observed event is **strictly before UTC midnight** on the given date and keeps a retention floor for future indexed scans. It does not delete provider files. Rebuild resets that floor and discards retained history that no longer has source evidence. An unreadable index fails with a fixed error; rebuild recovers it, while `--no-index` bypasses it. A corrupt database is quarantined privately during recovery; quarantine files are not part of the active index.
-
-Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip session parsing; new activity can re-enter. Event extrema are compared as UTC instants. Legacy dates that cannot be verified are kept until their sources can be read again. Key mismatches fail an integrity check before selecting history, and rebuild also repairs damaged writer coordination. The dashboard shows filtered retention counts and frozen-pricing notes and excludes historical working observations from live snapshots. Direct machine and repository analyzer calls share the same visibility default.
-
-Developers can run `node scripts/parity.ts --machine` to compare full, cold-index and warm-index accounting. It uses the 1024 MB analysis worker, offline pricing, a fresh private index under `.lane/`, and the shared real-scan lock. Output contains month/provider totals and differences by hashed session key, never repository names or transcript content. Live source changes are reported separately and do not suppress the unfiltered diff or a failing exit status. Use `--demo-root PATH` with a retained synthetic demo for repeatable local checks.
-
-Release verification uses `node scripts/verify-real.ts`: independent provider, repository, pricing and time oracles, with recorded source generations and explicit live-session exclusions. See the [verification guide](verify/README.md) for evidence files and saved-artifact rechecks.
-
-### Options
-
-| Option | Applies to | Description |
-| --- | --- | --- |
-| `--no-open` | dashboard | Start the server without opening a browser. |
-| `--port PORT` | dashboard | Loopback port, 1024 to 65535. Default `4174`, or `CONDUCTOR_PORT + 4` inside a Conductor workspace. |
-| `--json` | report | Print the versioned content-free snapshot as JSON. |
-| `--share` | report | Preview aggregate-only JSON with pseudonymized repositories and a minimum of five sessions per bucket. |
-| `--snapshot FILE` | dashboard, report, export | Read a validated snapshot file instead of scanning provider stores. |
-| `--repo-name NAME` | both | Narrow to one uniquely named repository. |
-| `--repo-root PATH` | both | Narrow to the repository whose canonical root is `PATH`. |
-| `--repo-remote URL` | both | Narrow by Git remote. Remotes are discovered from Git and provider metadata, with optional Conductor enrichment. |
-| `--repo-id ID` | both | Narrow to one repository ID from a previous snapshot. |
-| `--exclude-hidden` | both | Leave out repositories and sessions hidden in Conductor. Hidden records are included by default. |
-| `--claude-root PATH` | both | Read only this Claude Code `projects` directory instead of discovering profiles. |
-| `--codex-root PATH` | both | Read this Codex `sessions` directory instead of discovering profiles. |
-| `--codex-archive-root PATH` | both | Read this Codex `archived_sessions` directory. Passing either Codex option replaces Codex discovery, so pass both to include archives. |
-| `--cursor-database PATH` | both | Cursor `state.vscdb` to read. |
-| `--cursor-sdk-root PATH` | both | Conductor's Cursor SDK store directory. |
-| `--cursor-transcript-root PATH` | both | Cursor's `projects` directory containing `agent-transcripts`. |
-| `--copilot-root PATH` | both | Copilot CLI's `session-state` directory. |
-| `--opencode-database PATH` | both | OpenCode's `opencode.db`. |
-| `--gemini-root PATH` | both | Gemini CLI's `tmp` directory containing project `chats` directories. |
-| `--no-additional-providers` | both | Disable discovery of those five additional stores; explicit new-store paths still apply. Conductor result fallback follows `--database`. |
-| `--database PATH` | both | Conductor database to use for optional enrichment. |
-| `--rate-card PATH` | dashboard, report, export, rates, index rebuild, mcp | Pin an alternative reviewed rate card; bypass cached API prices and automatic pricing refresh. |
-| `--offline` | all | Disable public pricing requests; retain access to cached prices. |
-| `--data-dir PATH` | all analysis commands | Private index, pricing cache and settings directory. |
-| `--pricing-policy MODE` | all | `reviewed-first` (default), `api-first`, or `reviewed-only`. |
-| `--pricing-sources LIST` | all | Ordered public sources; default `models.dev,litellm`. |
-| `--pricing-max-age-days DAYS` | all | Stale threshold, default `7`; `0` checks on every dashboard startup. |
-| `--no-index` | both | Read present provider evidence without accessing the index; also `SESSION_ANALYTICS_NO_INDEX=1`. |
-| `--version`, `--help` | all | Print the version or command help. |
-
-Both commands also read `SESSION_ANALYTICS_*` environment variables for the same settings (for example `SESSION_ANALYTICS_PORT` or `SESSION_ANALYTICS_CLAUDE_ROOT`); a command-line option wins over the environment. Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
-
-New-store variables are `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, and `SESSION_ANALYTICS_GEMINI_ROOT`. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable their default discovery. OpenCode also honors `XDG_DATA_HOME`. Each source override replaces only that source's default; isolated scans should supply all desired paths and disable additional discovery. The demo does this automatically.
-
-Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations.
-
-## Supported agents and evidence
-
-| Source | Default location | Format |
-| --- | --- | --- |
-| Claude Code | `~/.claude/projects`, every `~/.claude-*/projects`, `$CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects` | JSONL per session, plus `subagents/` transcripts |
-| Claude Desktop local agents | `~/Library/Application Support/Claude/local-agent-mode-sessions` | Claude session files |
-| Codex | `~/.codex/sessions` and `archived_sessions`, every `~/.codex-*` profile, `$CODEX_HOME` | JSONL rollouts |
-| Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` and its `workspaceStorage` | SQLite, opened read-only |
-| Conductor (optional) | `~/Library/Application Support/com.conductor.app/conductor.db` | SQLite, opened read-only |
-| Cursor SDK through Conductor | `~/Library/Application Support/com.conductor.app/cursor-sdk-store` | NDJSON agents, runs, and tool events |
-| Cursor agent transcripts | `~/.cursor/projects/*/agent-transcripts` | JSONL; activity only, file-modification time |
-| GitHub Copilot CLI | `~/.copilot/session-state/*/events.jsonl` | Persisted activity events; tokens unavailable |
-| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db`, or `~/.local/share/opencode/opencode.db` | SQLite session/message/part tables |
-| Gemini CLI | `~/.gemini/tmp/*/chats/session-*.json{,l}` | Saved chats, with project registry/ownership-marker mapping |
-
-What the original native stores support (additional sources have their own fidelity labels below):
-
-| Measure | Claude Code | Codex | Cursor |
-| --- | --- | --- | --- |
-| Input and cache-read tokens | Exact | Exact, per request | Input only, per session |
-| Cache-write tokens | Exact, split by 5-minute and 1-hour TTL when recorded | Not recorded; covered by an upper estimate | Not recorded |
-| Output tokens | Exact (final streamed snapshot of each message) | Exact | Exact, per session |
-| Reasoning tokens | Exact when `thinking_tokens` is recorded; otherwise inside output | Exact | Unavailable |
-| Cost | API list-price equivalent | API list-price equivalent and upper estimate | Cursor's provider-reported local value, kept separate and not plotted by day |
-| Tool calls by name | Exact | Exact; code-mode calls expanded to the inner tool | From tool-call records |
-| Turns and messages | Human turns, assistant messages | User turns, agent messages | User and assistant bubbles |
-| Compactions | Yes | Yes | Unavailable |
-| Sub-agents | `subagents/` transcripts, cost split | Spawned threads, cost split | Sub-agent composers |
-| Reasoning effort | Recorded `effort` | `turn_context` effort | Unavailable |
-
-Per-source details, matching rules, and known gaps are in [docs/providers.md](docs/providers.md). Metric definitions are in [docs/metrics.md](docs/metrics.md).
-
-Cursor SDK runs use the dated pricing resolver for exact model IDs, selecting cached public-feed snapshots or reviewed rates at the run time; unknown models remain unpriced. Conductor result summaries retain reported USD separately and never supplement an existing canonical session. Copilot and Cursor activity-only transcripts have no token or cost evidence. OpenCode uses retained step counters, with assistant snapshots as a fallback. Gemini counters include thinking in output; unknown models remain unpriced. File dates do not establish session starts or durations.
-
-How finely each additional source dates its usage value and tool calls for Summary and Velocity:
-
-| Source | Activity dates |
-| --- | --- |
-| OpenCode | Per request (step or message time) |
-| Gemini CLI | Per message; a message without a time is session-dated |
-| Copilot CLI | Tool calls per event; no usage value is recorded |
-| Cursor SDK through Conductor | Per run (one turn); a run without a time is session-dated |
-| Conductor result receipts | Session-dated at the selected receipt's time; the total is cumulative |
-| Cursor agent transcripts | Undated; no usage value is recorded |
-
-## Privacy model
-
-`session-analytics` reads transcripts on your machine and discards their content during parsing. Its outputs (dashboard, API, report, JSON, and skill) contain only:
-
-- token counters, cost figures, durations, and timestamps;
-- model IDs and tool names;
-- repository display names and pseudonymous keys (a truncated SHA-256 session key, and a repository ID);
-- fixed-text parser warnings and the rate card's model list with source URLs.
-
-Analytics outputs never contain prompts, assistant messages, reasoning text, tool arguments or results, commands, file paths, transcript paths, repository roots or remotes, raw session or provider IDs, branch names, session titles, credentials, or raw local error messages.
-
-The dashboard binds to loopback, rejects requests whose `Host` is not local or whose `Origin` header is present and not local, serves a strict Content Security Policy, sends no CORS headers, has no telemetry, and serves all browser assets locally. The dashboard may refresh fixed public price feeds at startup with plain GETs that carry no user data (no model lists or local values in URLs, headers, or bodies). Explicit `export --otlp-endpoint` delivery can send the selected content-free export payload. `--offline` disables public pricing requests. Read [docs/privacy.md](docs/privacy.md) for the full contract, the privacy tiers, and the [field manifest](docs/privacy.md#field-manifest).
+The [command-line reference](docs/cli.md) documents every command, option and environment variable.
 
 ## How it works
 
@@ -297,48 +260,7 @@ flowchart TB
   project --> skill["Agent skill"]
 ```
 
-Analysis runs in a child process with a capped heap, and Cursor's database is parsed in a further child process, so a machine-wide scan does not grow the server's memory and only serialized, allowlisted results cross the process boundary. [docs/architecture.md](docs/architecture.md) covers the modules, the process model, and the deduplication strategies.
-
-## Accounting notes
-
-- **API-equivalent is not an invoice.** Dollar figures price observed tokens at public API list prices. They do not model subscription plans, discounts, batch or priority tiers, regional pricing, taxes, or credits. Under a subscription, read them as the value of the usage, not as money spent.
-- **Price evidence is versioned.** API snapshots record fetch time, public source URL and payload SHA-256; [`data/rate-cards.json`](data/rate-cards.json) keeps reviewed exceptions and fallback rates. Unknown or ambiguous models remain unpriced. Preserve the pricing directory and reviewed card to reproduce results, or use `--rate-card` to pin a reviewed card.
-- **Coverage is shown, not hidden.** Pricing coverage is the share of observed tokens with explicit rates for their token classes. Substituted cache prices stay in estimated totals with visible assumptions, and their tokens are excluded from the coverage numerator. Invalid model labels become `<unknown>` without dropping tokens. Sessions without validated provider evidence are excluded rather than counted as zero.
-- **Codex cache writes are not recorded.** Its upper estimate applies an additional write premium only where an explicit model tariff establishes one; legacy models without a write fee receive no invented surcharge.
-- **Processed input repeats context.** Input totals count cached context every time a request processes it. They measure consumption, not unique text.
-- **Long-context premiums apply per request**, using the input size of that request, never the session or repository total.
-- **Cost basis follows the evidence source.** Cursor's composer database and Conductor results retain provider-reported values. Cursor SDK run counters use dated resolved API rates, with aggregate-context uncertainty labeled. Summary values are not allocated to days; activity-only evidence has no usage value.
-- **Sub-agent value is a lower bound.** It counts only usage with explicit sub-agent evidence.
-
-The 0.8.0 release includes independent raw-data oracles under `verify/`. On the maintainer's machine, `npm run verify:real` compares a full scan with cold and warm disposable indexes, runs all ten oracle areas, and writes a monthly before/after table. It uses offline prices from a copied local pricing cache, reads provider history without modifying it, and emits content-free diagnostics. A shared lock serializes real scans. Exact source changes are identified separately; unexplained differences fail the command. The retained reference snapshot and platform-specific provider stores are required for this release audit.
-
-Provider evidence has metric-specific coverage: unavailable observations display **N/A**, partial totals show eligible/selected session counts. Conductor recovery groups cumulative Claude SDK receipts and labels uncertain accounting partial; reported USD is not an invoice. OpenCode forks exclude inherited requests. See [provider fidelity and resource limits](docs/providers.md#review-hardening-and-resource-limits).
-
-### History coverage
-
-The Summary panel and terminal report show dated session evidence beside an **unattributed history estimate** for each UTC month. Missing Claude transcripts can be recovered from Conductor assistant usage, with message timestamps, tool names, subagent accounting and comparison to retained SDK receipts. Stripped response IDs use conservative input-counter groups and remain partial. Query receipts supply finalized output only with exact main-loop input agreement and one known model. A higher cumulative receipt value remains a provider-reported floor; native transcripts take precedence.
-
-History coverage measures the recovery path against surviving native/SDK pairs on this machine, showing the aggregate value ratio, median, p10–p90 and eligible/excluded counts. Recovered history remains incomplete, especially for subagents. Receipt prices can differ from native API prices, and recent surviving transcripts are a selected sample. The measurement never scales or invents usage.
-
-Claude profile statistics are reconciled per day and model using their streamed-block counting convention. These counters can repeat requests, so the remainder is not an exact measure of missing billable usage. Estimates reserve possible overlap for recovered Conductor sessions whose profile is unknown, use the lifetime model token mix, and remain outside session/repository totals. Provider retention may remove transcripts while aggregate statistics survive. Missing statistics and unknown prices stay explicit. The panel covers the entire machine independently of dashboard filters; filtered exports omit it. [Method and limits](docs/metrics.md#history-coverage-and-recovery).
-
-## Use it from an agent
-
-For direct metric queries, run `session-analytics mcp`. Its six read-only tools cover usage summaries, budget status, repository profiles, tool statistics, recent sessions, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes source health and interpretation notes; budget periods carry their own pricing coverage, and typical-session baselines exclude active or unknown lifecycle evidence. No transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](docs/mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
-
-The repository ships an agent skill at [`skills/session-analytics`](skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
-
-```bash
-# Claude Code
-mkdir -p ~/.claude/skills
-ln -s "$PWD/skills/session-analytics" ~/.claude/skills/session-analytics
-
-# Codex and other agents that read .agents/skills
-mkdir -p ~/.agents/skills
-ln -s "$PWD/skills/session-analytics" ~/.agents/skills/session-analytics
-```
-
-Then ask, for example, "open my session analytics" or "compare agent usage across my repositories". The skill runs `session-analytics` (or `node <checkout>/bin/session-analytics.ts` when the command is not on `PATH`), reports the dashboard URL, session and repository counts, pricing coverage, and warnings, and keeps API-equivalent and provider-reported values separate. It uses `report` or `report --json` only when you ask for terminal or machine-readable output.
+Analysis runs in a child process with a capped heap, and Cursor's database is parsed in a further child process, so a machine-wide scan does not grow the server's memory and only serialized, allowlisted results cross the process boundary. The first launch builds a private index of derived facts; later launches fingerprint the evidence and reuse unchanged sessions, and a rotating sample is re-parsed on every warm scan to confirm the cache still agrees with the files. [docs/architecture.md](docs/architecture.md) covers the modules, the process model and the deduplication strategies.
 
 ## Roadmap
 
@@ -378,7 +300,7 @@ There is no telemetry. Analysis reads cached prices; dashboard startup may refre
 <details>
 <summary><strong>Why does the dollar figure differ from my bill?</strong></summary>
 
-It is an API list-price equivalent, not an invoice. Subscriptions, discounts, credits, and pricing tiers are not modeled. See [Accounting notes](#accounting-notes).
+It is an API list-price equivalent, not an invoice. Subscriptions, discounts, credits, and pricing tiers are not modeled. See [How the numbers are made](#how-the-numbers-are-made).
 </details>
 
 <details>

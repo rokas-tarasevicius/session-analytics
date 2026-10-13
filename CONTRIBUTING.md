@@ -86,7 +86,7 @@ Provider adapters live in `src/providers/`. Implement `ProviderAdapter` (`discov
 5. **Evidence labels.** Set `executionKind` and fidelity honestly. Missing data is `unavailable`, not zero.
 6. **Types and UI.** Extend `SessionProvider` and the dashboard provider registry. Prefer text labels for new providers; a vendor mark requires a license/provenance note in `src/public/brands/NOTICE.md`.
 7. **Fixtures and tests.** Add records in the provider's real shape to `test/fixtures.ts`, including sentinel content, and test counts, dedupe, cost, and the absence of content. Preserve native-provider outputs with parity fixtures when migrating a parser. Extend `scripts/demo-providers.ts` so visual QA stays synthetic.
-8. **Docs.** Add a section to [docs/providers.md](docs/providers.md) and a column or row to the README's evidence table.
+8. **Docs.** Add a section to [docs/providers.md](docs/providers.md) and a row to the README's "Which agents it reads" table.
 
 Open a [provider support issue](https://github.com/rokas-tarasevicius/session-analytics/issues/new?template=provider_support.yml) first so the record format can be discussed with redacted samples.
 

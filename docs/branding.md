@@ -12,7 +12,7 @@
 | `assets/logo-wordmark-dark.svg` | Mark and wordmark for dark backgrounds. |
 | `assets/social-preview.svg`, `.png` | 1280 × 640 repository social preview (upload the PNG in the GitHub repository settings). |
 | `src/public/favicon.svg` | Dashboard favicon; a copy of the mark without the title element. |
-| `assets/screenshot-*.png` | Dashboard screenshots, rendered from the synthetic demo only. |
+| `assets/screenshot-*.webp` | README screenshots in light and dark pairs (`-dark` suffix), rendered from the synthetic demo only by `node scripts/screenshots.ts` at 1280 CSS pixels, 2x, comfortable density, as lossless WebP. |
 
 The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
 
