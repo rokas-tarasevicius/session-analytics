@@ -24,7 +24,7 @@ Usage:
   ${brand.command} report [options]       Print a terminal report (add --json for a snapshot)
   ${brand.command} rates <command>        Update, show, diff, or inspect cached pricing
   ${brand.command} export [options]       Write CSV, NDJSON, or OTLP/JSON files
-  ${brand.command} merge FILE...          Combine aggregate-only shared snapshots
+  ${brand.command} merge FILE...          Combine shared snapshots, or full snapshots from several machines
   ${brand.command} mcp [options]          Serve metrics-only MCP tools over stdio
   ${brand.command} index <action>         Manage the local index: status, path, rebuild, prune
   ${brand.command} <command> --help       Show options for a command

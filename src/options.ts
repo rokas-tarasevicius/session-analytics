@@ -19,6 +19,7 @@ const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
   ["repositoryName", "--repo-name", "REPO_NAME"],
   ["repositoryRemote", "--repo-remote", "REPO_REMOTE"],
   ["repositoryRoot", "--repo-root", "REPO_ROOT"],
+  ["timeZone", "--time-zone", "TIME_ZONE"],
 ];
 
 export const analysisValueFlags = [...analysisSettings.map(([, flag]) => flag), "--pricing-policy", "--pricing-sources", "--pricing-max-age-days"];
@@ -28,7 +29,13 @@ export const pricingHelp = `  --offline              Disable public pricing requ
   --pricing-sources LIST Ordered sources: models.dev,litellm (default)
   --pricing-max-age-days DAYS  Refresh threshold, default 7
 `;
-export const analysisBooleanFlags = ["--no-index", "--no-additional-providers", "--offline"];
+export const machineHelp = `  --time-zone ZONE       IANA time zone for activity days and hours (default: TZ, then the system zone)
+  --portable-ids         Give repositories with a Git remote the same ID on every machine
+`;
+export const analysisBooleanFlags = ["--no-index", "--no-additional-providers", "--offline", "--portable-ids"];
+
+/** A rejected option value; the message is fixed and safe to print. */
+export class OptionError extends Error {}
 
 export function argument(argv: string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -45,14 +52,24 @@ export function setting(
   return argument(argv, flag) ?? (environment[`SESSION_ANALYTICS_${variable}`] || undefined);
 }
 
+/** The canonical IANA name, e.g. `Europe/London`. The name also travels to other machines, so only zone characters pass. */
+export function canonicalTimeZone(value: string): string {
+  const invalid = (): never => { throw new OptionError("--time-zone must be an IANA time zone such as Europe/London or UTC."); };
+  if (value.length > 64 || !/^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(value)) invalid();
+  try { return new Intl.DateTimeFormat("en-US", { timeZone: value }).resolvedOptions().timeZone; }
+  catch { return invalid(); }
+}
+
 export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): AnalyzeOptions {
   const options: AnalyzeOptions = { includeHidden: !argv.includes("--exclude-hidden") };
   if (argv.includes("--no-additional-providers") || environment["SESSION_ANALYTICS_ADDITIONAL_PROVIDERS"] === "0") options.additionalProviders = false;
   if (argv.includes("--no-index") || environment["SESSION_ANALYTICS_NO_INDEX"] === "1") options.noIndex = true;
+  if (argv.includes("--portable-ids") || environment["SESSION_ANALYTICS_PORTABLE_IDS"] === "1") options.portableIds = true;
   for (const [property, flag, variable] of analysisSettings) {
     const value = setting(argv, environment, flag, variable);
     if (value) options[property] = value as never;
   }
+  if (options.timeZone) options.timeZone = canonicalTimeZone(options.timeZone);
   options.offline = argv.includes("--offline") || environment.SESSION_ANALYTICS_OFFLINE === "1";
   const policy = setting(argv, environment, "--pricing-policy", "PRICING_POLICY");
   const sources = setting(argv, environment, "--pricing-sources", "PRICING_SOURCES");
@@ -62,4 +79,14 @@ export function analyzeOptionsFrom(argv: string[], environment: NodeJS.ProcessEn
   if (age !== undefined) options.pricingMaxAgeDays = Number(age);
   pricingConfiguration(options);
   return options;
+}
+
+/** Fixed text for a rejected analysis option: the time-zone message, else the pricing one. */
+export function optionErrorMessage(error: unknown): string {
+  return error instanceof OptionError ? error.message : "Invalid pricing configuration.";
+}
+
+/** The worker environment for an analysis: `TZ` carries an explicit time zone. */
+export function analysisEnvironment(options: Pick<AnalyzeOptions, "timeZone">): NodeJS.ProcessEnv {
+  return options.timeZone ? { ...process.env, TZ: options.timeZone } : process.env;
 }

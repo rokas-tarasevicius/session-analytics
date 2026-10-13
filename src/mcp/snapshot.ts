@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AnalysisHeapLimitError, analysisHeapLimitMegabytes } from "../analysis-process.ts";
 import type { AnalyzeOptions } from "../types.ts";
+import { analysisEnvironment } from "../options.ts";
 import type { McpSnapshot } from "./types.ts";
 
 /** Only the tail of the worker's stderr is kept: enough to recognise a V8 heap abort, never forwarded. */
@@ -20,7 +21,7 @@ export async function loadSnapshot(options: AnalyzeOptions, signal: AbortSignal,
   return await new Promise((resolve, reject) => {
     const script = worker.script ?? new URL("./worker.ts", import.meta.url);
     const child = spawn(process.execPath, [`--max-old-space-size=${worker.heapLimitMegabytes ?? analysisHeapLimitMegabytes}`, fileURLToPath(script)], {
-      stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32",
+      stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32", env: analysisEnvironment(options),
     });
     const chunks: Buffer[] = [];
     let bytes = 0, failed = false, stderrTail = "";

@@ -83,6 +83,28 @@ Merge accepts shared snapshots only, requires the same minimum threshold, sums a
 
 Every nonempty contribution includes a domain-separated keyed `sources[]` identifier. Merge rejects any repeated source, including one already present in a previous merge. This conservatively rejects repeated scans from the same key even when their periods are disjoint: without session identifiers or times, overlap cannot be established safely. Do not use key rotation to bypass the check. Source IDs are linkable pseudonyms, not authenticated identities. The merger cannot detect dishonest files, independently copied transcripts on different machines, or regenerated keys. Empty contributions reveal no source identity and have all-zero totals. `--out FILE` creates a new private file; without it JSON goes to stdout. Merge never uploads.
 
+## Combine machines
+
+Agents that run on another computer, such as a server or a VM, write their history there. To see your own machines in one dashboard, create a full snapshot on each one and merge them:
+
+```bash
+# On each machine, in the same time zone:
+session-analytics report --json --portable-ids --time-zone Europe/London > laptop.json
+# Copy the files to one place, then:
+session-analytics merge laptop.json server.json --out machines.json
+session-analytics --snapshot machines.json
+```
+
+Merge decides by content: all shared snapshots merge as above, all full snapshots combine, and a mixture is refused. Combining full snapshots keeps every session and its details:
+
+- **Sessions** are unioned by provider and session key. A session found on more than one machine (copied history, or the same file twice) is counted once, from the copy with the later last activity, then more model requests, and the snapshot carries a fixed warning.
+- **Repositories** are unioned by ID; the first file that lists an ID names it. `--portable-ids` makes the IDs agree: a repository with a Git remote takes the ID discovery derives from that remote, even when Conductor registered it under its own ID. Without the flag, a Conductor repository on one machine and the same remote on another appear twice. Repositories without a remote keep machine-specific IDs.
+- **Rollups**, coverage warnings, and history-coverage months are recomputed from the combined sessions; nothing is added twice. Claude profiles stay per machine; a profile key seen twice (the same profile directory) is kept once. Recovery calibration comes from the first file that has one, because its ratios cannot be pooled.
+- **Rates**: each machine priced its own sessions with its own cache. The combined rate card lists every model once, first file first.
+- **Time zones** must match, because activity days and hours are local to the analysis zone. Merge refuses files with different zones; create them with the same `--time-zone`.
+
+Full snapshots keep repository display names and session keys, so combine only machines you control. Use `report --share` to compare with other people.
+
 ## OpenTelemetry mapping
 
 The GenAI attribute mapping is pinned to **semantic-conventions 1.37.0**, commit [`aec6e9d3e86754683dab7c707655d69d953b2768`](https://github.com/open-telemetry/semantic-conventions/tree/aec6e9d3e86754683dab7c707655d69d953b2768/docs/gen-ai). That revision labels GenAI conventions Development. The pin is intentional; it is not a claim to track the latest evolving convention. The wire envelope follows [OTLP JSON Protobuf encoding](https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding).

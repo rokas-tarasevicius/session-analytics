@@ -268,7 +268,7 @@ The chart header shows the selected metric's period total.
   combine agent, model, execution kind and effort. Provider and repository come from the
   containing session, so the payload does not duplicate their identifying metadata.
 - Absolute provider timestamps are converted in the analysis process's local timezone,
-  honoring `TZ`. The browser uses the declared timezone for dates and global session-start
+  honoring `--time-zone` or `TZ`. The browser uses the declared timezone for dates and global session-start
   filtering even when its own timezone differs. Existing `spendByDay` fields retain their
   UTC semantics for compatibility; new charts use `velocity`, not those legacy fields.
 - Missing, invalid or timezone-free timestamps go to `undated`. No cost or activity is

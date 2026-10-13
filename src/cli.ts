@@ -1,6 +1,6 @@
 import { historyReport } from "./report/history.ts";
 import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, argument } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, machineHelp, optionErrorMessage, pricingHelp, argument } from "./options.ts";
 import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
 import { loadMachineSnapshot } from "./interop/snapshot.ts";
 import { InteropError } from "./interop/error.ts";
@@ -59,7 +59,7 @@ Options:
   --gemini-root PATH     Override Gemini's tmp directory
   --no-additional-providers Disable new-source discovery (explicit paths still apply)
   --rate-card PATH       Override the reviewed rate card
-${pricingHelp}  --no-index             Full scan without reading or writing the index
+${pricingHelp}${machineHelp}  --no-index             Full scan without reading or writing the index
   --version              Print the version
   --help                 Show this help
 `);
@@ -87,7 +87,7 @@ function dollars(value: number): string {
 
 let analyzeOptions;
 try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
-catch { process.stderr.write("Invalid pricing configuration.\n"); process.exit(2); }
+catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
 
 try {
   assertSnapshotOptions(process.argv);

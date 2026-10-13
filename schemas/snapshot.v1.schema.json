@@ -2582,6 +2582,9 @@
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
               },
               {
+                "const": "Some sessions appeared on more than one machine; each is counted once."
+              },
+              {
                 "const": "Source availability could not be checked; showing the last indexed facts."
               },
               {
@@ -3200,6 +3203,9 @@
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
               },
               {
+                "const": "Some sessions appeared on more than one machine; each is counted once."
+              },
+              {
                 "const": "Source availability could not be checked; showing the last indexed facts."
               },
               {
@@ -3562,6 +3568,9 @@
               },
               {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
+              },
+              {
+                "const": "Some sessions appeared on more than one machine; each is counted once."
               },
               {
                 "const": "Source availability could not be checked; showing the last indexed facts."
@@ -4082,6 +4091,9 @@
               },
               {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
+              },
+              {
+                "const": "Some sessions appeared on more than one machine; each is counted once."
               },
               {
                 "const": "Source availability could not be checked; showing the last indexed facts."

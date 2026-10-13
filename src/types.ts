@@ -414,6 +414,10 @@ export interface AnalyzeOptions extends PricingOptions {
   cursorDatabasePath?: string;
   databasePath?: string;
   includeHidden?: boolean;
+  /** Give registered repositories with a Git remote the remote-derived ID every machine computes. */
+  portableIds?: boolean;
+  /** IANA zone for local day/hour activity cells; the analysis worker runs with it as `TZ`. */
+  timeZone?: string;
   rateCardPath?: string;
   repositoryId?: string;
   repositoryName?: string;

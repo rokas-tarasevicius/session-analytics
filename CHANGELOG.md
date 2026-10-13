@@ -4,12 +4,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `merge` combines full snapshots from several machines into one full snapshot: sessions and repositories are unioned, a session found on two machines is counted once, and every rollup is recomputed. Shared snapshots merge as before; mixed inputs are refused. See [combine machines](docs/interop.md#combine-machines).
+- `--portable-ids` gives every repository with a Git remote the same ID on every machine, including repositories registered in Conductor, so combined snapshots show one row per repository. Only the output changes; the index keeps local IDs and reuses its cache.
+- `--time-zone ZONE` (or `SESSION_ANALYTICS_TIME_ZONE`) sets the IANA time zone for activity days and hours without changing `TZ` for the whole shell. Snapshots combine only when their zones match.
+
 ### Changed
 
 - The dashboard adopts Fluxary's warm neutral surfaces, Geist typography, ink controls and open analytical sections, with Summary totals in a desktop side rail. Provider and model graphs retain their identity colours; the logo and activity heatmap use neutral tones.
 - Velocity opens grouped by model. Its series ordering is unchanged.
 - README wordmarks and the repository social preview now match the dashboard’s neutral palette and bundled Geist type. Plain metadata links replace coloured badges, and an expandable Velocity preview shows the default model grouping.
 - The README is shorter, with the dashboard tour and FAQ in linked guides. Generated Fluxary diagrams replace Mermaid blocks and include editable JSON plus light and dark SVGs. Synthetic screenshots reflect the new dashboard.
+
+### Fixed
+
+- Changing the analysis time zone (`TZ`) between scans no longer fails the index consistency check on every later launch, which fell back to a full scan without retained history until `index rebuild`. Sessions cached under another zone are parsed again; totals are unchanged.
 
 ## [0.8.1] - 2026-10-13
 

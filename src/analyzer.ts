@@ -1462,9 +1462,14 @@ function isTemporaryPath(path: string): boolean {
     temporaryDirectoryRoots().some((root) => pathInside(comparable, root));
 }
 
+/** Discovered IDs hash the grouping root. A remote root (`remote:<identity>`) gives every machine the same ID. */
+function discoveredRepositoryId(groupingRoot: string): string {
+  return `discovered-${createHash("sha256").update(groupingRoot).digest("hex").slice(0, 20)}`;
+}
+
 /** One shared group for working directories without any repository evidence. */
 const NO_REPOSITORY_NAME = "No repository detected";
-const NO_REPOSITORY_ID = `discovered-${createHash("sha256").update("no-repository").digest("hex").slice(0, 20)}`;
+const NO_REPOSITORY_ID = discoveredRepositoryId("no-repository");
 /** Earlier releases named every non-Git directory `<basename> · <hash> (local directory)`. */
 const LEGACY_LOCAL_DIRECTORY_SUFFIX = " (local directory)";
 /** Rows without a root directory are keyed by ID in a scan's discovered map. */
@@ -1568,7 +1573,7 @@ async function resolveRepositoryForPath(
   if (existing) return existing;
   const repository: RepositoryRow = {
     default_branch: "",
-    id: `discovered-${createHash("sha256").update(groupingRoot).digest("hex").slice(0, 20)}`,
+    id: discoveredRepositoryId(groupingRoot),
     name: remoteIdentity ? basename(remoteIdentity) : gitRoot ? basename(gitRoot) : "Ephemeral automation sessions",
     remote_url: repositoryRemote,
     root_path: ephemeral ? ephemeralRoot : gitRoot ?? resolvedCwd,
@@ -2114,11 +2119,13 @@ async function selectRepositories(
   repositories: RepositoryRow[],
   options: AnalyzeOptions,
   index: IndexScan | null = null,
+  portableIds: Map<string, string> = new Map(),
 ): Promise<RepositoryRow[]> {
   if (options.repositoryId) {
-    const repository = repositories.find(({ id }) => id === options.repositoryId);
-    if (!repository) throw new Error("No evidenced repository has the requested ID.");
-    return [repository];
+    // A portable ID can stand for several local registrations of one remote; they are reported together.
+    const matches = repositories.filter(({ id }) => id === options.repositoryId || portableIds.get(id) === options.repositoryId);
+    if (!matches.length) throw new Error("No evidenced repository has the requested ID.");
+    return matches;
   }
   if (options.repositoryName) {
     return [chooseRepository(repositories, options.repositoryName, options.repositoryRemote ?? "")];
@@ -2477,7 +2484,17 @@ async function analyzeSelectedRepositories(
     allSessions.push(...retainedSessions);
     const retainedPopulation = allSessions.filter((session) => !index || index.inRetention(session));
     const allRepositories = [...availableRepositories, ...discovered.values()].sort((left, right) => left.name.localeCompare(right.name));
-    const selectedRepositories = await selectRepositories(allRepositories, options, index);
+    // Conductor IDs belong to one installation. Portable output gives a registered repository with a Git
+    // remote the remote-derived ID discovery uses on every machine. Only the projection changes, after the
+    // index commit, so cached sessions and their signatures keep the local IDs.
+    const portableIds = new Map<string, string>();
+    if (options.portableIds) {
+      for (const { id, remote_url } of availableRepositories) {
+        const remote = remote_url ? normalizeRemote(remote_url) : "";
+        if (remote) portableIds.set(id, discoveredRepositoryId(`remote:${remote}`));
+      }
+    }
+    const selectedRepositories = await selectRepositories(allRepositories, options, index, portableIds);
     // Resolve launch context after all provider adapters assigned repositories.
     let mcpContext: MachineAnalytics["mcpContext"];
     if (options.mcpCwd) {
@@ -2486,7 +2503,7 @@ async function analyzeSelectedRepositories(
         workspaceRepositories.has(resolve(options.mcpCwd));
       const current = explicitRepositoryFilter ? selectedRepositories[0] : inRepository
         ? await repositoryForPath(options.mcpCwd, availableRepositories, workspaceRepositories, discovered) : null;
-      mcpContext = { repositoryId: current?.id ?? null };
+      mcpContext = { repositoryId: current ? portableIds.get(current.id) ?? current.id : null };
     }
     const selectedIds = new Set(selectedRepositories.map(({ id }) => id));
     const sessions = explicitRepositoryFilter
@@ -2498,8 +2515,19 @@ async function analyzeSelectedRepositories(
       repositorySessions.push(session);
       sessionsByRepository.set(session.repositoryId, repositorySessions);
     }
-    const repositoriesForOutput = selectedRepositories;
     const stableIndex = await index?.commit();
+    // Committed facts keep local IDs; registrations sharing a portable ID become one repository.
+    const repositoriesForOutput = new Map<string, { repository: RepositoryRow; sessions: SessionAnalytics[] }>();
+    for (const repository of selectedRepositories) {
+      const id = portableIds.get(repository.id) ?? repository.id;
+      const output = repositoriesForOutput.get(id) ?? { repository: id === repository.id ? repository : { ...repository, id }, sessions: [] };
+      for (const session of sessionsByRepository.get(repository.id) ?? []) {
+        session.repositoryId = id;
+        session.repositoryName = output.repository.name;
+        output.sessions.push(session);
+      }
+      repositoriesForOutput.set(id, output);
+    }
     return {
       ...(!explicitRepositoryFilter ? { historyCoverage: {
         ...await collectHistoryCoverage(claudeRoots, retainedPopulation, rateCard, options.claudeRoot ? undefined : { home: homedir(), override: process.env["CLAUDE_CONFIG_DIR"] }),
@@ -2510,8 +2538,8 @@ async function analyzeSelectedRepositories(
         sourceHealth("codex", codexIndexes.map((item) => item.warning)), sourceHealth("cursor", [cursorResult.warning])],
       rateCard,
       providerWarnings: [...new Set(additional.warnings)],
-      repositories: repositoriesForOutput.map((repository) => {
-        const result = aggregate(repository, sessionsByRepository.get(repository.id) ?? [], rateCard);
+      repositories: [...repositoriesForOutput.values()].map(({ repository, sessions: repositorySessions }) => {
+        const result = aggregate(repository, repositorySessions, rateCard);
         result.warnings.push(
           ...[codexIndex.warning, claudeIndex.warning, cursorResult.warning, ...additional.warnings].filter(
             (warning): warning is string => Boolean(warning),

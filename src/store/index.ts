@@ -14,6 +14,7 @@ import { readCodexLedger, type CodexLedgerEvidence } from "./codex-ledger.ts";
 import { mapConcurrent } from "../concurrency.ts";
 import { projectSession, sessionForIndex } from "./projection.ts";
 import { assertIndexParity, IndexParityError, rotatingSample } from "./parity.ts";
+import { velocityMetadata } from "../metrics/velocity.ts";
 
 interface StoredSession {
   identity_key: string;
@@ -52,6 +53,8 @@ export class IndexScan {
   private connection: IndexConnection;
   private scope: string;
   private revision: string;
+  // Hourly activity cells are local to the worker's zone; a cached session from another zone is parsed again.
+  private timeZone = velocityMetadata().timeZone;
   private started = performance.now();
   private fingerprints = new Map<string, { path: string; value: FileFingerprint }>();
   private sessions = new Map<string, PreviousSession>();
@@ -409,7 +412,7 @@ export class IndexScan {
       this.seen.add(identity);
       const sources = await Promise.all(paths.map(async (path) => [this.sourceKey(path), await this.file(path)]));
       const signature = this.hash(JSON.stringify([
-        this.revision, sources, warnings, paths.map(path => this.dependencies.get(path) ?? null), parseDependencies,
+        this.revision, this.timeZone, sources, warnings, paths.map(path => this.dependencies.get(path) ?? null), parseDependencies,
         // Private correlation metadata only influences the keyed signature, never a payload.
         row.conductor_session_id, row.database_model, row.created_at, row.updated_at, row.status,
         row.repository_id, row.repository_name, row.root_path, row.repository_remote, row,

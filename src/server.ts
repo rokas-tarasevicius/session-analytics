@@ -6,7 +6,7 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp, setting, argument } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, machineHelp, optionErrorMessage, pricingHelp, setting, argument } from "./options.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
 import type { DashboardHealth, MachineAnalytics, SharedSnapshot } from "./types.ts";
@@ -45,8 +45,7 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a compatible dashboard already uses the port, the command reuses it only with the same analysis options.
-${pricingHelp}
---snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
+${pricingHelp}${machineHelp}--snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
 Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
 `);
   process.exit(0);
@@ -172,7 +171,7 @@ const staticFiles = new Map<string, string>([
 
 let analyzeOptions: import("./types.ts").AnalyzeOptions;
 try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
-catch { process.stderr.write("Invalid pricing configuration.\n"); process.exit(2); }
+catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
 try { assertSnapshotOptions(process.argv); } catch {
   process.stderr.write("Snapshot input cannot be combined with analysis flags.\n");
   process.exit(2);

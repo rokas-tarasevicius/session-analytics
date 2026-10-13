@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { brand } from "../brand.ts";
 import { version } from "../version.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, setting } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, optionErrorMessage, setting } from "../options.ts";
 import { serveMcp } from "./server.ts";
 
 const argv = process.argv.slice(2);
@@ -57,7 +57,9 @@ Allow up to 300 seconds for the first scan on large histories. Later calls reuse
     process.stderr.write("MCP cache TTL must be an integer from 1 through 3600 seconds.\n");
     process.exitCode = 2;
   } else {
-    const analysis = analyzeOptionsFrom(argv, process.env);
+    let analysis;
+    try { analysis = analyzeOptionsFrom(argv, process.env); }
+    catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
     analysis.mcpCwd = resolve(setting(argv, process.env, "--mcp-cwd", "MCP_CWD") ?? process.env["CLAUDE_PROJECT_DIR"] ?? process.cwd());
     const server = serveMcp({ analysis, ttlSeconds: ttl });
     const close = (): void => server.close();
