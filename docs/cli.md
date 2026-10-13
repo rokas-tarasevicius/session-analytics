@@ -180,6 +180,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 | `--time-zone ZONE` | dashboard, report, export, index rebuild, mcp | IANA time zone for activity days and hours, such as `Europe/London`. Default: `TZ`, then the system zone. |
 | `--remote HOST[,HOST]` | dashboard, report, export | Also read these machines over SSH and combine them with this one. Each needs session-analytics installed; see [combine machines](interop.md#combine-machines). Cannot be combined with `--snapshot`, repository filters or `--rate-card`. |
 | `--remote-command CMD` | dashboard, report, export | Words that start session-analytics on the remote machines. Default `session-analytics`; for example `sudo -n -iu agents session-analytics`. |
+| `--no-remote` | dashboard, report, export | Scan only this machine, ignoring `SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND`. Cannot be combined with `--remote`; always used for fetched reports. |
 | `--portable-ids` | dashboard, report, export, mcp | Give every repository with a Git remote the remote-derived ID, including repositories registered in Conductor, so snapshots from several machines name the same repository identically. Output only; the index keeps local IDs. |
 | `--version`, `--help` | all | Print the version or command help. |
 

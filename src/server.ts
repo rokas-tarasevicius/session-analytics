@@ -6,7 +6,7 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteHelp, remoteOptionsFrom, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
 import { analyzeMachines } from "./remote.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
@@ -23,7 +23,7 @@ const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, "--port", "--snapshot"]);
-const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline"]);
+const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline"]);
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {

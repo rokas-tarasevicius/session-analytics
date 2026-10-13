@@ -99,7 +99,7 @@ Install session-analytics on each remote machine (Node.js 24 and a checkout, as 
 
 ```text
 ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -T -- server \
-  session-analytics report --json --portable-ids --time-zone <this machine's zone> [forwarded switches]
+  session-analytics report --json --no-remote --portable-ids --time-zone <this machine's zone> [forwarded switches]
 ```
 
 and validates the reply like an imported file before combining it with the local scan (see below). The local scan and every remote read run at the same time, and **Refresh snapshot** reads every machine again. `--remote` applies to the dashboard, `report` (including `--share`) and `export`; MCP and index commands stay local.
@@ -110,7 +110,7 @@ and validates the reply like an imported file before combining it with the local
 - **Another account.** When agents run as a different user on the remote machine, start session-analytics as that user, for example `--remote-command "sudo -n -iu agents session-analytics"` (this needs passwordless sudo for that command). Destinations and command words are limited to letters, digits and `_./~@%+=:,-`, so neither can smuggle shell syntax.
 - **When a machine cannot be read** (no route, refused login, missing command, an older version that rejects the flags, no reply within 300 seconds, or output that is not a snapshot), the dashboard and report still show the other machines. This terminal names the machine with a fixed reason and the last line ssh or the remote printed; the snapshot carries a fixed warning. Run the same session-analytics version on every machine.
 
-`SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND` set the same options for every launch. A saved snapshot (`--snapshot`) never scans, so it ignores them.
+`SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND` set the same options for every launch. `--no-remote` ignores both and scans only this machine; it cannot be combined with `--remote`. Every fetched report uses `--no-remote`, so a destination's environment cannot trigger reads of further machines. A saved snapshot (`--snapshot`) never scans, so it ignores them.
 
 ### From files
 

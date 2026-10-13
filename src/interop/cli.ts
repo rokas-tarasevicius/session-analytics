@@ -1,6 +1,6 @@
 import { InteropError } from "./error.ts";
 import { brand } from "../brand.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, assertRemoteAnalysis, OptionError, remoteOptionsFrom, remoteValueFlags } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, assertRemoteAnalysis, OptionError, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags } from "../options.ts";
 import { analyzeMachines } from "../remote.ts";
 import { readJsonFile, writeNewFile, writeNewFiles } from "./files.ts";
 import { exportFiles, type ExportFormat } from "./exports.ts";
@@ -44,7 +44,7 @@ export async function reportShare(argv: string[]): Promise<void> {
 
 export async function runInterop(command: "export" | "merge", argv: string[]): Promise<void> {
   const valueFlags = new Set(command === "export" ? [...analysisValueFlags, ...remoteValueFlags, "--format", "--out", "--snapshot", "--otlp-endpoint"] : ["--out"]);
-  const booleanFlags = new Set(command === "export" ? [...analysisBooleanFlags, "--help", "--exclude-hidden", "--include-hidden"] : ["--help"]);
+  const booleanFlags = new Set(command === "export" ? [...analysisBooleanFlags, ...remoteBooleanFlags, "--help", "--exclude-hidden", "--include-hidden"] : ["--help"]);
   const inputs: string[] = [];
   const seen = new Set<string>();
   for (let index = 0; index < argv.length; index++) {
@@ -58,7 +58,7 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
     }
   }
   if (argv.includes("--help")) {
-    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n  --remote HOST[,HOST] Also export these machines, read over SSH (see the report help)\n` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold, or full snapshots from several machines\n(create each with report --json --portable-ids --time-zone ZONE). stdout is the default. Existing files are never overwritten.\n`);
+    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n${remoteHelp}` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold, or full snapshots from several machines\n(create each with report --json --portable-ids --time-zone ZONE). stdout is the default. Existing files are never overwritten.\n`);
     return;
   }
   if (command === "merge") {

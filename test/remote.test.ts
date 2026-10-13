@@ -34,7 +34,7 @@ const [destination, ...command] = args.slice(at + 1);
 appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ options: args.slice(0, at), destination, command }) + "\\n");
 const report = command.indexOf("report");
 if (destination === "down") { process.stderr.write("ssh: connect to host down port 22: Connection refused\\n"); process.exit(255); }
-if (destination === "old") { process.stderr.write("Unknown session analytics argument: --portable-ids\\n"); process.exit(2); }
+if (destination === "old") { process.stderr.write("Unknown session analytics argument: --no-remote\\n"); process.exit(2); }
 if (destination === "missing") { process.stderr.write("bash: line 1: session-analytics: command not found\\n"); process.exit(127); }
 if (destination === "noisy") { process.stdout.write("Welcome to noisy!\\n" + readFileSync(process.env.FAKE_SSH_COPIED, "utf8")); process.exit(0); }
 if (destination === "copied" || destination === "elsewhere") { process.stdout.write(readFileSync(destination === "copied" ? process.env.FAKE_SSH_COPIED : process.env.FAKE_SSH_ELSEWHERE, "utf8")); process.exit(0); }
@@ -70,6 +70,7 @@ before(async () => {
     ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}`, TZ: "UTC",
     FAKE_SSH_LOG: sshLog, FAKE_SSH_COPIED: copiedPath, FAKE_SSH_ELSEWHERE: elsewherePath, FAKE_SSH_BIN: new URL("../bin/session-analytics.ts", import.meta.url).pathname,
     FAKE_SSH_REMOTE_ENV: JSON.stringify({
+      SESSION_ANALYTICS_REMOTE: "elsewhere", SESSION_ANALYTICS_REMOTE_COMMAND: "session-analytics",
       SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0", SESSION_ANALYTICS_DATA_DIR: join(directory, "remote", "data"),
       SESSION_ANALYTICS_CLAUDE_ROOT: remote.claudeRoot, SESSION_ANALYTICS_CODEX_ROOT: remote.codexRoot, SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: remote.codexArchiveRoot,
       SESSION_ANALYTICS_CONDUCTOR_DATABASE: remote.databasePath, SESSION_ANALYTICS_CURSOR_DATABASE: remote.cursorDatabasePath,
@@ -110,6 +111,7 @@ test("--remote combines this machine with others read over the user's ssh", asyn
   assert.match(stderr, /Read 5 sessions across 3 repositories from server\./);
   assert.match(stderr, /from copied\./);
   const recorded = await calls();
+  // The server's configured remote must not trigger a second-level SSH call.
   assert.deepEqual(recorded.map(({ destination }) => destination).sort(), ["copied", "server"]);
   for (const call of recorded) {
     assert.deepEqual(call.options, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-T"]);
@@ -117,7 +119,39 @@ test("--remote combines this machine with others read over the user's ssh", asyn
     // This machine's paths and switches that describe it stay here.
     assert.doesNotMatch(JSON.stringify(call), new RegExp(directory.replaceAll("/", "\\/")));
   }
-  assert.deepEqual(recorded[0]!.command.slice(1, 6), ["report", "--json", "--portable-ids", "--time-zone", "UTC"]);
+  assert.deepEqual(recorded[0]!.command.slice(1, 7), ["report", "--json", "--no-remote", "--portable-ids", "--time-zone", "UTC"]);
+});
+
+test("--no-remote ignores remote environment settings and conflicts with explicit --remote", () => {
+  assert.deepEqual(remoteOptionsFrom(["--no-remote"], {}), { remotes: [], command: [] });
+  for (const environment of [
+    { SESSION_ANALYTICS_REMOTE: "server", SESSION_ANALYTICS_REMOTE_COMMAND: "node ~/sa/bin/session-analytics.ts" },
+    { SESSION_ANALYTICS_REMOTE: "invalid host", SESSION_ANALYTICS_REMOTE_COMMAND: "$(touch x)" },
+  ]) assert.deepEqual(remoteOptionsFrom(["--no-remote"], environment), { remotes: [], command: [] });
+  for (const argv of [["--no-remote", "--remote", "server"], ["--remote", "server", "--no-remote"]]) {
+    assert.throws(() => remoteOptionsFrom(argv, {}), (error) => error instanceof OptionError && error.message === "--no-remote cannot be combined with --remote.");
+  }
+});
+
+test("report, export and dashboard accept --no-remote and report its conflict safely", async () => {
+  await rm(sshLog, { force: true });
+  const env = { ...environment, SESSION_ANALYTICS_REMOTE: "copied", SESSION_ANALYTICS_REMOTE_COMMAND: "invalid command;" };
+  const own = await run(process.execPath, [bin, "report", "--json", ...localFlags, "--no-remote"], { env, maxBuffer: 1 << 28 });
+  assert.equal(validateSnapshot(JSON.parse(own.stdout)).summary.sessions, localSnapshot.summary.sessions);
+  const output = join(directory, "local-export");
+  await run(process.execPath, [bin, "export", "--format", "csv", "--out", output, ...localFlags, "--no-remote"], { env });
+  assert.equal((await readFile(join(output, "sessions.csv"), "utf8")).trim().split("\r\n").length - 1, localSnapshot.summary.sessions);
+  assert.deepEqual(await calls(), []);
+  for (const [command, args, status] of [
+    ["report", [], 2], ["dashboard", ["--no-open"], 2], ["export", ["--format", "csv", "--out", output], 1],
+  ] as const) {
+    const help = await run(process.execPath, [bin, command, "--no-remote", "--help"], { env });
+    assert.match(help.stdout, /--no-remote/);
+    const refused = spawnSync(process.execPath, [bin, command, ...args, ...localFlags, "--no-remote", "--remote", "copied"], { env, encoding: "utf8" });
+    assert.equal(refused.status, status);
+    assert.equal(refused.stdout, "");
+    assert.equal(refused.stderr, "--no-remote cannot be combined with --remote.\n");
+  }
 });
 
 test("unreachable, outdated and noisy machines leave a warning and the rest of the snapshot", async () => {

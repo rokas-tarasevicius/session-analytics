@@ -89,12 +89,18 @@ export interface RemoteOptions {
 }
 
 export const remoteValueFlags = ["--remote", "--remote-command"];
+export const remoteBooleanFlags = ["--no-remote"];
 export const remoteHelp = `  --remote HOST[,HOST]   Also read these machines over SSH; session-analytics must be installed there
   --remote-command CMD   How to start it there (default: session-analytics)
+  --no-remote            Scan only this machine; ignore remote environment settings
 `;
 
 /** Destinations and command words reach ssh and the remote shell, so only plain words pass. */
 export function remoteOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv): RemoteOptions {
+  if (argv.includes("--no-remote")) {
+    if (argv.includes("--remote")) throw new OptionError("--no-remote cannot be combined with --remote.");
+    return { remotes: [], command: [] };
+  }
   const raw = setting(argv, environment, "--remote", "REMOTE");
   const remotes = raw ? raw.split(",").map((value) => value.trim()).filter(Boolean) : [];
   if (remotes.some((remote) => !/^[A-Za-z0-9_][A-Za-z0-9._@%:+/-]{0,254}$/.test(remote))) {

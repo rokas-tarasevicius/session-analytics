@@ -14,7 +14,7 @@ const STDERR_TAIL_BYTES = 4096;
 /** The request every remote machine runs: a full snapshot in this machine's zone, with portable repository IDs. */
 export function remoteArguments(options: AnalyzeOptions & { timeZone: string }): string[] {
   return [
-    "report", "--json", "--portable-ids", "--time-zone", options.timeZone,
+    "report", "--json", "--no-remote", "--portable-ids", "--time-zone", options.timeZone,
     ...(options.offline ? ["--offline"] : []),
     ...(options.noIndex ? ["--no-index"] : []),
     ...(options.includeHidden === false ? ["--exclude-hidden"] : []),

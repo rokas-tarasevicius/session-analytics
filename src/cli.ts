@@ -1,6 +1,6 @@
 import { historyReport } from "./report/history.ts";
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, argument, remoteHelp, remoteOptionsFrom, remoteValueFlags, type RemoteOptions } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, argument, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags, type RemoteOptions } from "./options.ts";
 import { analyzeMachines } from "./remote.ts";
 import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
 import { loadMachineSnapshot } from "./interop/snapshot.ts";
@@ -10,7 +10,7 @@ import { version } from "./version.ts";
 import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, ...shareValueFlags]);
-const booleanFlags = new Set([...analysisBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--share", "--version", "--no-additional-providers", "--offline"]);
+const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--share", "--version", "--no-additional-providers", "--offline"]);
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
