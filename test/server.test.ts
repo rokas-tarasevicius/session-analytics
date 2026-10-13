@@ -242,7 +242,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.equal(page.status, 200);
     const pageText = await page.text();
     assert.match(pageText, /class="wordmark-text">Session <b>Analytics<\/b>/);
-    assert.match(pageText, /<svg class="logo"[\s\S]*fill="#d66b55"[\s\S]*fill="#7eb7a7"[\s\S]*fill="#d4aa70"/);
+    assert.match(pageText, /<svg class="logo"[\s\S]*fill="#ececea"[\s\S]*fill="#b3b3ad"[\s\S]*fill="#858580"/);
     assert.match(pageText, /data-view-button="pricing"/);
     assert.match(pageText, /id="pricing-panel"/);
 
@@ -302,10 +302,10 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.match(pageText, /data-view-button="costs" data-label="Costs"/);
     const stylesheet = await fetch(`${origin}/styles.css`);
     const stylesheetText = await stylesheet.text();
-    assert.match(stylesheetText, /--heat-7:\s*#005742/);
-    assert.match(stylesheetText, /:root\[data-theme="dark"\][\s\S]*--heat-7:\s*#7eddc0/);
+    assert.match(stylesheetText, /--heat-7:\s*#28282a/);
+    assert.match(stylesheetText, /:root\[data-theme="dark"\][\s\S]*--heat-7:\s*#ececea/);
     assert.doesNotMatch(stylesheetText, /--heat-[1-7]:\s*#(?:9a7736|c85b45|c69a5d|d66b55)/);
-    assert.match(stylesheetText, /--coral: #d66b55;[\s\S]*--sage: #7eb7a7;[\s\S]*--ochre: #d4aa70;/);
+    assert.match(stylesheetText, /--coral: #18181b;[\s\S]*--sage: #4f4f55;[\s\S]*--ochre: #858580;/);
     assert.match(stylesheetText, /prefers-reduced-motion: reduce/);
     assert.match(stylesheetText, /url\("\/fonts\/geist-latin\.woff2"\)/);
     assert.doesNotMatch(stylesheetText, /url\((?!"\/)/);

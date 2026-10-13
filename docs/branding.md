@@ -11,35 +11,31 @@
 | `assets/logo-wordmark.svg` | Mark and wordmark for light backgrounds. |
 | `assets/logo-wordmark-dark.svg` | Mark and wordmark for dark backgrounds. |
 | `assets/social-preview.svg`, `.png` | 1280 × 640 repository social preview (upload the PNG in the GitHub repository settings). |
-| `src/public/favicon.svg` | Dashboard favicon; a copy of the mark without the title element. |
-| Desktop `assets/screenshot-*.webp` | README screenshots in light and dark pairs (`-dark` suffix), rendered from the synthetic demo only at 1280 CSS pixels, 2x, comfortable density, as lossless WebP. |
-| `assets/screenshot-mobile.webp`, `assets/screenshot-mobile-dark.webp` | Synthetic mobile Summary at 375 × 812 CSS pixels, 2x, compact density. Capture sources and regeneration commands are in [screenshot provenance](../assets/SCREENSHOTS.md). |
+| `src/public/favicon.svg` | Dashboard favicon; the session-span mark in neutral ink tones. |
+| Desktop `assets/screenshot-*.webp` | README screenshots in light and dark pairs (`-dark` suffix), rendered from the synthetic demo only at 1280 CSS pixels, comfortable density, as lossless WebP. |
+| `assets/screenshot-mobile.webp`, `assets/screenshot-mobile-dark.webp` | Synthetic mobile Summary at 375 × 812 CSS pixels, compact density. Capture sources and regeneration commands are in [screenshot provenance](../assets/SCREENSHOTS.md). |
 
 The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
 
-The `design/fluxary-style` branch trials the visual language in Fluxary OS’s `DESIGN.md` at commit `ee217e008fbbae39c57f494546ea777f50db8ec7`: warm neutral surfaces, ink controls, opaque chrome, hairline borders and Geist typography. At desktop widths of 1200px and above, Summary puts the daily chart and provider breakdown beside a continuous 260px totals rail. The remaining breakdowns and repository table use the full content width. Narrower screens retain totals-first reading order. Metrics and analytical sections sit on the open canvas with dividing lines; dialogs, controls and the totals rail retain their surface boundaries. The Session Analytics mark and provider identities stay distinct. Existing README screenshots represent the readiness baseline while this styling trial is under review.
+The dashboard follows Fluxary OS’s [design language](https://github.com/rokas-tarasevicius/fluxary-os/blob/d96e453ffb9ae8bd300e926db8fc61ec9c185e95/docs/decisions/2026-10-12-design-language.md): warm neutral surfaces, ink controls, opaque chrome, hairline borders and locally bundled Geist typography. At desktop widths of 1200px and above, Summary places its daily chart and provider breakdown beside a continuous 260px totals rail. Narrower screens retain totals-first reading order. Analytical sections sit on an open canvas with dividing lines; dialogs, controls and the totals rail retain surface boundaries.
 
-The logo keeps its original palette. Dashboard controls and selection use the neutral ink scale; provider charts use the identity palette below, and other categorical charts retain their separate ramp. Dashboard type is Geist (text) and Geist Mono (figures), both bundled under the OFL:
+The dashboard mark, favicon, controls and heatmap use a warm ink scale. Provider and model charts retain identity colours so series remain distinguishable. Exported repository logos and social-preview assets retain their original palette. Dashboard type is Geist (text) and Geist Mono (figures and identifiers), both bundled under the OFL.
 
-| Role | Color |
-| --- | --- |
-| Logo ink (tile) | `#181a16` |
-| Paper (light background) | `#efeee7` |
-| Coral (top-level span) | `#d66b55` |
-| Sage (sub-agent span) | `#7eb7a7` |
-| Ochre (sub-agent span) | `#d4aa70` |
-| Connector | `#62665c` |
-| Heatmap ramp (light) | `#eef2ef` to `#005742` (sage, light to dark) |
-| Heatmap ramp (dark) | `#1a1c18` to `#7eddc0` (sage, dark to light) |
-| Dark surfaces | page `#141413`, sidebar `#181817`, card `#1d1d1b`, secondary `#2a2a27`, border `#2f2f2d` |
-| Light surfaces | page `#fbfbfa`, sidebar `#f6f6f4`, card `#ffffff`, secondary `#efefec`, border `#e7e7e4` |
-| Ink | light `#18181b`, dark `#ececea` |
-| Secondary text | light `#4f4f55`, dark `#b3b3ad` |
-| Small captions | light `#696970`, dark `#979791`; strengthened from the reference for secondary fills |
+| Role | Light | Dark |
+| --- | --- | --- |
+| Page | `#fbfbfa` | `#141413` |
+| Sidebar | `#f6f6f4` | `#181817` |
+| Surface | `#ffffff` | `#1d1d1b` |
+| Secondary surface | `#efefec` | `#2a2a27` |
+| Border | `#e7e7e4` | `#2f2f2d` |
+| Ink | `#18181b` | `#ececea` |
+| Secondary text | `#4f4f55` | `#b3b3ad` |
+| Small captions | `#696970` | `#979791` |
+| Heatmap, empty to highest | `#efefec` → `#28282a` | `#222220` → `#ececea` |
 
 ### Status and typography
 
-Status always accompanies an icon or dot and text. Normal and warning states use ink and secondary text; red is reserved for errors (`#9a2018` light / `#ff8a8a` dark). Banners use subtle surface and border mixes. Panels have no ambient shadow; floating dialogs and menus use one restrained shadow level. Headers and dialogs are opaque, without backdrop blur.
+Status always accompanies an icon or dot and text. Normal and warning states use ink and secondary text; red is reserved for errors (`#b3261e` light / `#ff6b6b` dark). Banners use subtle surface and border mixes. Panels have no ambient shadow; floating dialogs and menus use one restrained shadow level. Headers and dialogs are opaque, without backdrop blur.
 
 The shared type roles are `--fs-caps` 11px (mono uppercase labels), `--fs-xs` 12px (notes, legends, deltas and coverage), `--fs-sm` 13px (body and tables), `--fs-md` 14px (controls), `--fs-title` 15px (panel titles), `--fs-h1` 18px (view and dialog titles), `--fs-lg` 20px (secondary figures) and `--fs-figure` 26px (KPI figures). Comfortable density uses explicit values of 11.5 / 12.5 / 13.5 / 15 / 16 / 19 / 21 / 28px in the same order. Figures do not change with viewport width, apart from the existing small-screen KPI size. Geist Mono is for figures and identifiers, plus uppercase labels and table headers; `.caps` shares `--track-caps: .06em`. Sentences use Geist Sans, with tabular numerals where they contain numbers. Boxed provider marks use an 18px tile with 10px text. Coverage fractions are plain muted text; unavailable reasons and range adjustments are visible, and stale-snapshot reasons appear in the warning banner.
 
@@ -75,7 +71,7 @@ Model shades belong to the family, never its rank or value: flagship tier 0, sta
 | GPT / Codex | Light | `#262624` | `#5c5c59` | `#8a8a86` | `#b5b5b0` |
 | GPT / Codex | Dark | `#e6e6e1` | `#9a9a96` | `#73736f` | `#6a6a66` |
 
-Velocity's non-provider groups (repository, execution kind, effort) use the `--category-0..3` ramp from `src/public/chart-colors.js`: green `#008719`, orchid `#dc6bc4`, lime `#9ac32b`, plum `#8a0e82` in light; `#357101`, `#df58aa`, `#56aa14`, `#9a4680` in dark. Greens and orchids are the hue families no provider uses. Every slot is at least OKLab ΔE 15 from every other slot and from every provider hue in both themes (all pairs, not only adjacent ones), and both themes pass the data-viz validator. Light lime is below 3:1 contrast on white, so these charts always carry a labelled legend and a text equivalent. A greens-only ramp was not used: within the dark-theme lightness band, four greens cannot get further apart than ΔE 9. Series past the fourth slot repeat the ramp with texture (stacked) or dashes (lines). Execution kinds and effort levels keep fixed slots, so their colours do not change with filters. Other and unknown series use the neutral `--provider-unknown` grey, which has at least 3:1 contrast on `--surface` in both themes. `--heat-*` remains the sage ramp for the activity heatmap. The provider hues pass the data-viz validator's adjacent-pair checks in provider order (worst adjacent CVD ΔE 10.7 light, 9.9 dark); with all six on screen at once, Gemini blue and Copilot purple are close under deuteranopia, so provider charts always carry a labelled legend. Cost components use shades of the provider hue (or neutral ink for repositories), with stripes for provider-reported value. Legends use readable neutral text and support pointer highlighting; they are list items, not tab stops (charts have their own keyboard readout). Cost, model and tool bars share the maximum across their panel, with no minimum fill width.
+Velocity's non-provider groups (repository, execution kind, effort) use the `--category-0..3` ramp from `src/public/chart-colors.js`: green `#008719`, orchid `#dc6bc4`, lime `#9ac32b`, plum `#8a0e82` in light; `#357101`, `#df58aa`, `#56aa14`, `#9a4680` in dark. Greens and orchids are the hue families no provider uses. Every slot is at least OKLab ΔE 15 from every other slot and from every provider hue in both themes (all pairs, not only adjacent ones), and both themes pass the data-viz validator. Light lime is below 3:1 contrast on white, so these charts always carry a labelled legend and a text equivalent. A greens-only ramp was not used: within the dark-theme lightness band, four greens cannot get further apart than ΔE 9. Series past the fourth slot repeat the ramp with texture (stacked) or dashes (lines). Execution kinds and effort levels keep fixed slots, so their colours do not change with filters. Other and unknown series use the neutral `--provider-unknown` grey, which has at least 3:1 contrast on `--surface` in both themes. `--heat-*` uses a neutral intensity ramp for the activity heatmap. The provider hues pass the data-viz validator's adjacent-pair checks in provider order (worst adjacent CVD ΔE 10.7 light, 9.9 dark); with all six on screen at once, Gemini blue and Copilot purple are close under deuteranopia, so provider charts always carry a labelled legend. Cost components use shades of the provider hue (or neutral ink for repositories), with stripes for provider-reported value. Legends use readable neutral text and support pointer highlighting; they are list items, not tab stops (charts have their own keyboard readout). Cost, model and tool bars share the maximum across their panel, with no minimum fill width.
 
 ### Regenerating images
 
@@ -90,7 +86,7 @@ Screenshots come from the demo dataset only. In one terminal, start `npm run dem
 
 1. **`src/brand.ts`**: `brand.name` (display name in help text, logs, and the dashboard) and `brand.command` (the command name shown in help).
 2. **`package.json`**: `name`, `description`, the `bin` key, and the `repository`, `homepage`, and `bugs` URLs. Rename `bin/session-analytics.ts` if the file name should match, and update the `start`, `report`, and `demo` scripts.
-3. **Dashboard**: the `<title>`, the wordmark text (`SESSION <b>ANALYTICS</b>`), and the wordmark's `aria-label` in `src/public/index.html`.
+3. **Dashboard**: the `<title>`, the wordmark text (`Session <b>Analytics</b>`), and the wordmark's `aria-label` in `src/public/index.html`.
 4. **Agent skill**: the directory `skills/session-analytics/`, its `name` and command in `SKILL.md`, and `skills/session-analytics/agents/openai.yaml`. Users who symlinked the skill need to update the link.
 5. **Assets**: edit the SVG text in both wordmarks and the social preview, regenerate the PNGs, and replace `src/public/favicon.svg` if the mark changes.
 6. **Documentation**: README badges and links, `SECURITY.md` and `CODE_OF_CONDUCT.md` links, `.github/ISSUE_TEMPLATE/config.yml`, and the clone URL.

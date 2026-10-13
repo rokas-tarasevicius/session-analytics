@@ -47,7 +47,7 @@ Yes. Sibling profile directories such as `~/.claude-work` or `~/.codex-personal`
 <details>
 <summary><strong>Which platforms are supported?</strong></summary>
 
-macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Public pull requests and pushes require GitHub-hosted Ubuntu, macOS and browser checks. Private-preview PRs use hosted Ubuntu; private pushes retain advisory macOS/browser checks. See [release validation](release.md).
+macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Pull requests and pushes require GitHub-hosted Ubuntu, macOS and browser checks. See [release validation](release.md).
 </details>
 
 <details>

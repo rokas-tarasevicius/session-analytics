@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "kind": "grid",
+  "title": "Restyle the dashboard and docs with Fluxary",
+  "caption": "Fluxary typography and surfaces frame provider-coloured charts, a shorter README and generated diagrams.",
+  "nodes": [
+    {
+      "id": "language",
+      "label": "Fluxary language",
+      "note": "Warm ink \u00b7 Geist",
+      "icon": "business/decision",
+      "at": [
+        0,
+        1
+      ],
+      "focus": true
+    },
+    {
+      "id": "dashboard",
+      "label": "Dashboard",
+      "note": "Canvas \u00b7 totals rail",
+      "icon": "infra/browser",
+      "at": [
+        1,
+        0
+      ],
+      "status": "changed"
+    },
+    {
+      "id": "charts",
+      "label": "Charts and controls",
+      "note": "Provider colours",
+      "icon": "business/cost",
+      "at": [
+        2,
+        0
+      ],
+      "status": "changed"
+    },
+    {
+      "id": "docs",
+      "label": "Shorter README",
+      "note": "Linked tour and FAQ",
+      "icon": "code/markdown",
+      "at": [
+        1,
+        2
+      ],
+      "status": "changed"
+    },
+    {
+      "id": "diagrams",
+      "label": "Generated diagrams",
+      "note": "JSON \u00b7 themed SVGs",
+      "icon": "code/json",
+      "at": [
+        2,
+        2
+      ],
+      "status": "new"
+    }
+  ],
+  "edges": [
+    {
+      "from": "language",
+      "to": "dashboard"
+    },
+    {
+      "from": "dashboard",
+      "to": "charts"
+    },
+    {
+      "from": "language",
+      "to": "docs"
+    },
+    {
+      "from": "docs",
+      "to": "diagrams",
+      "status": "new"
+    }
+  ]
+}

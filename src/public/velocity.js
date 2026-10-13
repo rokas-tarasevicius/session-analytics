@@ -210,6 +210,7 @@ export function renderVelocity(container, sessions, context) {
   let controller = controllers.get(container);
   if (!controller) {
     const group = selectField("velocity-group", "Group by", [["provider", "Provider"], ["agent", "Agent"], ["model", "Model"], ["repository", "Repository"], ["execution", "Execution kind"], ["effort", "Effort"]]);
+    group.select.value = "model";
     const metric = selectField("velocity-metric", "Metric", Object.entries(metricDefinitions).map(([key, value]) => [key, value.label]));
     const granularity = selectField("velocity-granularity", "Granularity", [["day", "Day"], ["week", "Week · Monday start"], ["month", "Month"], ["hour", "Hour-of-day profile"]]);
     const mode = selectField("velocity-mode", "Chart", [["stacked", "Stacked area"], ["lines", "Lines"], ["cumulative", "Cumulative"]]);

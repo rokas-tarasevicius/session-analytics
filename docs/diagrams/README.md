@@ -10,6 +10,7 @@ These diagrams use the `fluxary-diagram` skill and renderer from
 | [Process model](process-model.diagram.json) | [Architecture](../architecture.md#process-model) |
 | [Proposed execution links](proposed-execution-links.diagram.json) | [Event-model proposal](../proposals/schema-v2.md) |
 | [Proposed session evidence](proposed-session-evidence.diagram.json) | [Event-model proposal](../proposals/schema-v2.md) |
+| [Dashboard and docs changes](changes/fluxary-dashboard.diagram.json) | Pull request change diagram |
 
 Edit the `.diagram.json` documents, then regenerate both SVGs. The proposal diagrams describe future work, not the shipped schema.
 
@@ -20,6 +21,8 @@ FLUXARY_OS=/path/to/fluxary-os
 cat "$FLUXARY_OS/.claude/skills/fluxary-diagram/SKILL.md"
 bun "$FLUXARY_OS/diagrams/render.ts" docs/diagrams/*.diagram.json
 bun "$FLUXARY_OS/diagrams/render.ts" check docs/diagrams/*.diagram.json
+bun "$FLUXARY_OS/diagrams/render.ts" docs/diagrams/changes/*.diagram.json
+bun "$FLUXARY_OS/diagrams/render.ts" check docs/diagrams/changes/*.diagram.json
 ```
 
 The check validates layout and compares both SVGs with a fresh render. Keep the JSON and light/dark SVGs together; do not edit generated SVGs. Rendering requires the other checkout; viewing the committed images requires no tooling.

@@ -4,24 +4,23 @@
 
 All screenshots use synthetic demo data and follow your light or dark theme.
 
-
 The dashboard runs on `127.0.0.1` and has six views in three groups: **Overview** (Summary, Velocity), **Economics** (Costs, Pricing) and **Usage** (Tools, Activity). A window selector at the top switches between the last 7, 30 or 90 days, all history, or a custom range. The sidebar lists every repository with a sparkline and its value, and clicking one focuses every view on that repository. A command palette (<kbd>⌘K</kbd>), `g`-prefixed shortcuts, light and dark themes, two densities and an address bar that follows the view, window and focus make it quick to move around and to share a link to exactly what you are looking at.
 
 ### Summary: the state of the machine
 
-On narrow screens, repository and time-window selectors share the header, and KPI cards stack into one column below 400 pixels. Custom ranges keep the native date inputs.
+On narrow screens, repository and time-window selectors share the header, and metrics stack into one column below 400 pixels. Custom ranges keep the native date inputs.
 
 <details>
 <summary>Phone layout</summary>
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-mobile-dark.webp" />
-    <img alt="Summary at 375 pixels: repository and time-window selectors above a single column of usage and session cards" src="../assets/screenshot-mobile.webp" width="375" />
+    <img alt="Summary at 375 pixels: repository and time-window selectors above a single column of usage and session metrics" src="../assets/screenshot-mobile.webp" width="375" />
   </picture>
 </p>
 </details>
 
-Summary answers "what happened in this window?" Six cards show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each card shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. Below them, daily usage value by provider sits beside the session mix, then value and tokens by repository, value by model, top tools, sub-agent value and a sortable fleet table.
+Summary answers "what happened in this window?" Six metrics show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each metric shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. On wide desktops, the metrics form a totals rail beside the daily usage chart and session mix; narrower layouts put totals first. Repository and model breakdowns, top tools, sub-agent value and a sortable fleet table follow below.
 
 <p align="center">
   <picture>
@@ -43,12 +42,12 @@ Click a repository in the sidebar, or pick one from the command palette, and eve
 
 ### Velocity: where usage is moving
 
-Velocity answers "is this going up, and what is driving it?" Group the chart by provider, agent, model, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every percentage, and a **Top movers** table ranks the models, agents and other dimensions whose value changed most over the last seven completed days. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
+Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every percentage, and a **Top movers** table ranks the models, agents and other dimensions whose value changed most over the last seven completed days. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-velocity-dark.webp" />
-    <img alt="Velocity view: usage value by provider as a stacked area chart with a 7-day average, an opened Evidence & limits note, and week-to-date, month-to-date and today comparisons" src="../assets/screenshot-velocity.webp" width="100%" />
+    <img alt="Velocity view: usage value by model as a stacked area chart with a 7-day average, an opened Evidence & limits note, and week-to-date, month-to-date and today comparisons" src="../assets/screenshot-velocity.webp" width="100%" />
   </picture>
 </p>
 
@@ -68,7 +67,7 @@ Costs answers "where does the value go?" The usage value is the sum of an API-eq
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-costs-dark.webp" />
-    <img alt="Costs view: usage value, API-equivalent value, provider-reported value and pricing coverage cards, cost by provider with model segments, and cost by model with sessions, calls and tokens" src="../assets/screenshot-costs.webp" width="100%" />
+    <img alt="Costs view: usage value, API-equivalent value, provider-reported value and pricing coverage metrics, cost by provider with model segments, and cost by model with sessions, calls and tokens" src="../assets/screenshot-costs.webp" width="100%" />
   </picture>
 </p>
 
@@ -90,7 +89,7 @@ Tools answers "how do the agents work?" using tool-call names only; arguments an
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-tools-dark.webp" />
-    <img alt="Tools view: tool calls, distinct tools, calls per session and most-used tool cards, a ranked tool table with provider marks, and a detail panel for Read with calls by day, by provider and by repository" src="../assets/screenshot-tools.webp" width="100%" />
+    <img alt="Tools view: tool calls, distinct tools, calls per session and most-used tool metrics, a ranked tool table with provider marks, and the start of the Read detail panel with call totals and a daily chart" src="../assets/screenshot-tools.webp" width="100%" />
   </picture>
 </p>
 

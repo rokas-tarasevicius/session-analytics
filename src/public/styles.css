@@ -1,6 +1,6 @@
 /* Session Analytics · Fluxary-inspired workspace
    Warm ink surfaces, opaque chrome, quiet hairlines and Geist typography.
-   Provider colors identify data; navigation and controls stay on the ink scale. */
+   Neutral controls frame provider-coloured data with labels and interactive readouts. */
 
 @font-face {
   font-family: "Geist Variable";
@@ -85,20 +85,20 @@
   --shadow-2: 0 1px 2px rgb(24 24 27 / 4%), 0 12px 32px rgb(24 24 27 / 8%);
   --shadow-pop: var(--shadow-2);
   --backdrop: rgb(251 251 250 / 70%);
-  /* logo accents (exact) */
-  --coral: #d66b55;
-  --sage: #7eb7a7;
-  --ochre: #d4aa70;
-  --ink: #181a16;
-  --connector: #62665c;
-  /* AA text steps of the accents */
-  --coral-text: #a0412e;
-  --sage-text: #006855;
-  --ochre-text: #8d5e00;
+  /* Ink-only dashboard mark; exported brand assets remain separate. */
+  --coral: #18181b;
+  --sage: #4f4f55;
+  --ochre: #858580;
+  --ink: #18181b;
+  --connector: #696970;
+  /* Readable text steps. */
+  --coral-text: #18181b;
+  --sage-text: #4f4f55;
+  --ochre-text: #696970;
   --accent: var(--text);
   --accent-text: var(--text);
   --accent-soft: color-mix(in srgb, var(--text) 6%, transparent);
-  /* categorical series: lightness-tiered steps of the logo hues (validated) */
+  /* Stable neutral series for legacy chart consumers. */
   --series-1: #c15f4b;
   --series-2: #006855;
   --series-3: #daa75d;
@@ -108,21 +108,21 @@
   --codex: var(--provider-codex);
   --claude: var(--provider-claude);
   --cursor: var(--provider-cursor);
-  --neutral-mark: #aeb0a9;
-  --spark: #777a72;
-  /* sequential sage ramp (activity heatmap) */
-  --heat-0: #eef2ef;
-  --heat-1: #c8e6db;
-  --heat-2: #a4d3c3;
-  --heat-3: #7bbea8;
-  --heat-4: #51a48c;
-  --heat-5: #238a71;
-  --heat-6: #006f57;
-  --heat-7: #005742;
+  --neutral-mark: #b3b3ad;
+  --spark: #696970;
+  /* Sequential ink ramp (activity heatmap). */
+  --heat-0: #efefec;
+  --heat-1: #deded8;
+  --heat-2: #c6c6c0;
+  --heat-3: #aeaea7;
+  --heat-4: #91918b;
+  --heat-5: #73736e;
+  --heat-6: #505052;
+  --heat-7: #28282a;
   /* status (icon + label always accompany) */
   --ok: #18181b;
   --warn: #4f4f55;
-  --danger: #9a2018;
+  --danger: #b3261e;
   --danger-soft: color-mix(in srgb, var(--danger) 7%, var(--surface));
   --danger-line: color-mix(in srgb, var(--danger) 40%, var(--line));
   --warn-text: #4f4f55;
@@ -158,9 +158,9 @@
   --gap: calc(12px * var(--density));
   --row: calc(34px * var(--density));
   --control: 32px;
-  --ease: cubic-bezier(.2, .7, .2, 1);
-  --t-fast: 120ms;
-  --t-base: 240ms;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+  --t-fast: 150ms;
+  --t-base: 200ms;
   --t-slow: 420ms;
   font-family: var(--font-sans);
   font-size: var(--fs-sm);
@@ -236,9 +236,9 @@
   --shadow-2: 0 1px 2px rgb(0 0 0 / 40%), 0 16px 40px rgb(0 0 0 / 50%);
   --shadow-pop: var(--shadow-2);
   --backdrop: rgb(20 20 19 / 70%);
-  --coral-text: #ec8d79;
-  --sage-text: #7ec9b4;
-  --ochre-text: #e0b67b;
+  --coral-text: #ececea;
+  --sage-text: #b3b3ad;
+  --ochre-text: #979791;
   --accent-soft: color-mix(in srgb, var(--text) 7%, transparent);
   --focus: #a1a19b;
   --series-1: #cf6b57;
@@ -247,19 +247,19 @@
   --series-4: #2c7866;
   --series-5: #edab9d;
   --series-6: #62665c;
-  --neutral-mark: #45483f;
-  --spark: #8f928a;
-  --heat-0: #1a1c18;
-  --heat-1: #162b25;
-  --heat-2: #1b4337;
-  --heat-3: #205f4e;
-  --heat-4: #2b7c66;
-  --heat-5: #3e9980;
-  --heat-6: #5ab99d;
-  --heat-7: #7eddc0;
+  --neutral-mark: #454543;
+  --spark: #979791;
+  --heat-0: #222220;
+  --heat-1: #353532;
+  --heat-2: #4c4c47;
+  --heat-3: #676761;
+  --heat-4: #85857f;
+  --heat-5: #a5a59f;
+  --heat-6: #c7c7c0;
+  --heat-7: #ececea;
   --ok: #ececea;
   --warn: #b3b3ad;
-  --danger: #ff8a8a;
+  --danger: #ff6b6b;
   --warn-text: #b3b3ad;
 }
 :root[data-density="comfortable"] { --density: 1.3; --row: 40px; --fs-caps: 11.5px; --fs-xs: 12.5px; --fs-sm: 13.5px; --fs-md: 15px; --fs-title: 16px; --fs-h1: 19px; --fs-lg: 21px; --fs-figure: 28px; }
@@ -361,7 +361,7 @@ select:hover { border-color: var(--line-strong); }
 .chip { position: relative; display: inline-flex; align-items: center; gap: 6px; height: var(--control); padding: 0 9px 0 7px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font-size: var(--fs-sm); font-weight: 500; transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast), opacity var(--t-fast); }
 .chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .chip img { width: 14px; height: 14px; object-fit: contain; }
-.chip::before { content: ""; width: 6px; height: 6px; border-radius: var(--radius-round); background: var(--chip-color, var(--muted)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--chip-color, var(--muted)) 25%, transparent); }
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: var(--radius-round); background: var(--text); box-shadow: none; }
 .provider-key { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .chip:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .chip:has(input:not(:checked)) { color: var(--text-2); background: transparent; border-color: var(--line); }
