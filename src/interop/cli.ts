@@ -1,13 +1,14 @@
 import { InteropError } from "./error.ts";
 import { analyzeMachineSessionsIsolated } from "../analysis-process.ts";
 import { brand } from "../brand.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, OptionError } from "../options.ts";
 import { readJsonFile, writeNewFile, writeNewFiles } from "./files.ts";
 import { exportFiles, type ExportFormat } from "./exports.ts";
 import { otlpEndpoint, postOtlp } from "./otlp.ts";
-import { loadMachineSnapshot } from "./snapshot.ts";
+import { loadMachineSnapshot, validateSnapshot } from "./snapshot.ts";
+import { combineSnapshots } from "./combine.ts";
 import { defaultShareKeyPath, loadShareKey, mergeSharedSnapshots, readAliases, shareSnapshot } from "./sharing.ts";
-import type { SharedSnapshot } from "../types.ts";
+import type { MachineAnalytics, SharedSnapshot } from "../types.ts";
 import { sharedEvidenceCaveat } from "../public/evidence.js";
 
 export const shareValueFlags = ["--snapshot", "--min-sessions", "--share-key-file", "--share-aliases"];
@@ -49,16 +50,31 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
     }
   }
   if (argv.includes("--help")) {
-    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold; stdout is the default. Existing files are never overwritten.\n`);
+    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold, or full snapshots from several machines\n(create each with report --json --portable-ids --time-zone ZONE). stdout is the default. Existing files are never overwritten.\n`);
     return;
   }
   if (command === "merge") {
-    if (!inputs.length) throw new InteropError("Merge requires shared snapshot files.");
-    let result: SharedSnapshot | undefined;
-    // Release each input after folding it, rather than retaining every file at once.
-    for (const path of inputs) {
-      const next = await readJsonFile(path);
-      result = mergeSharedSnapshots(result ? [result, next] : [next]);
+    if (!inputs.length) throw new InteropError("Merge requires snapshot files.");
+    const shared = (value: unknown): boolean => Boolean(value && typeof value === "object" && "kind" in value);
+    const mixed = (): never => { throw new InteropError("Merge inputs must be all full snapshots or all shared snapshots."); };
+    let result: SharedSnapshot | MachineAnalytics | undefined;
+    const first = await readJsonFile(inputs[0]!);
+    if (shared(first)) {
+      // Release each input after folding it, rather than retaining every file at once.
+      for (const [index, path] of inputs.entries()) {
+        const next = index ? await readJsonFile(path) : first;
+        if (!shared(next)) mixed();
+        result = mergeSharedSnapshots(result ? [result, next] : [next]);
+      }
+    } else {
+      // Full snapshots keep their sessions, which deduplicate only against the complete union.
+      const snapshots = [validateSnapshot(first)];
+      for (const path of inputs.slice(1)) {
+        const next = await readJsonFile(path);
+        if (shared(next)) mixed();
+        snapshots.push(validateSnapshot(next));
+      }
+      result = combineSnapshots(snapshots);
     }
     const serialized = `${JSON.stringify(result, null, 2)}\n`;
     const output = argument(argv, "--out");
@@ -85,6 +101,6 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
 
 /** Fixed error text only; filesystem and remote errors may contain private data. */
 export function reportInteropFailure(error?: unknown): void {
-  process.stderr.write(error instanceof InteropError && error.message ? `${error.message}\n` : "Interchange failed: the input or output file could not be accessed safely.\n");
+  process.stderr.write((error instanceof InteropError || error instanceof OptionError) && error.message ? `${error.message}\n` : "Interchange failed: the input or output file could not be accessed safely.\n");
   process.exitCode = 1;
 }

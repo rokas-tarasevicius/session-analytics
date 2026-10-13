@@ -9,6 +9,7 @@ export const sessionStatuses = ["idle", "working", "completed", "failed", "error
 export const filteredWarning = "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice.";
 export const sharedEvidenceCaveat = "Totals are observed lower bounds and may include running and partially parsed sessions. Pricing coverage measures rates for observed tokens, not evidence completeness.";
 export const indexParityWarning = "The local index failed a consistency check; a full scan of present sources was used. Retained history is unavailable; run index rebuild.";
+export const duplicateMachineWarning = "Some sessions appeared on more than one machine; each is counted once.";
 export const discoveryWarnings = [
   "A provider evidence store could not be fully read; identified sessions were retained.",
   "A provider evidence directory could not be read; sibling directories were retained.",
@@ -38,7 +39,7 @@ export const fixedWarnings = [
   "Final output was recovered only from single-model query receipts with exactly matching main-loop input counters. No input or request count was added; uncertain day, hour and reasoning splits remain unavailable.",
   "A higher cumulative receipt lower bound was retained instead of message prices. Tokens and request counts retain message evidence; provider-reported value and model cost allocations can cover a different retained interval and have no request dates.",
   "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial.",
-  ...discoveryWarnings, filteredWarning,
+  ...discoveryWarnings, filteredWarning, duplicateMachineWarning,
   "Source availability could not be checked; showing the last indexed facts.",
   "Source-deleted history retains the pricing and parser results from its last successful ingest.",
   "Legacy activity dates could not be verified; history is kept until its source can be read again.",

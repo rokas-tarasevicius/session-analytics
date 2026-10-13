@@ -1,6 +1,6 @@
 import { analyzeMachineSessionsIsolated } from "../analysis-process.ts";
 import { brand } from "../brand.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, optionErrorMessage } from "../options.ts";
 import { indexPath, indexStatus, pruneIndex, resetIndex } from "./database.ts";
 
 const [action, ...args] = process.argv.slice(2);
@@ -31,7 +31,9 @@ for (let i = 0; i < args.length; i += 1) {
     i += 1;
   } else if (!booleanFlags.has(flag)) fail("Unknown index option. Use index --help.");
 }
-const options = analyzeOptionsFrom(args, process.env);
+let options;
+try { options = analyzeOptionsFrom(args, process.env); }
+catch (error) { fail(optionErrorMessage(error)); }
 try {
   if (action === "path") process.stdout.write(`${indexPath(options)}\n`);
   else if (action === "prune") {

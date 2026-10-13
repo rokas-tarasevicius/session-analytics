@@ -1,6 +1,6 @@
 import { analyzeMachineSessionsIsolated } from "../analysis-process.ts";
 import { brand } from "../brand.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, pricingHelp } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, optionErrorMessage, pricingHelp } from "../options.ts";
 import { latestDiff, loadPricingCatalog, pricingCoverage, resolveRate } from "./catalog.ts";
 import { updatePricing } from "./update.ts";
 import { validModelId } from "./aliases.ts";
@@ -45,7 +45,7 @@ No command sends local model IDs, usage, paths or other local values to a pricin
   }
   let options;
   try { options = analyzeOptionsFrom(args, environment); }
-  catch { process.stderr.write("Invalid pricing configuration.\n"); return 2; }
+  catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); return 2; }
   const json = args.includes("--json");
   try {
     if (command === "update") {

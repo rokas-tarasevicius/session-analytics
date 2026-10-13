@@ -322,7 +322,7 @@ test("CLI preview, export, merge and snapshot report stay offline and use fixed 
   const regular = await run(process.execPath, [bin, "report", "--json", "--snapshot", input]); assert.deepEqual(JSON.parse(regular.stdout), snapshot);
   const output = join(directory, "cli-csv"); await run(process.execPath, [bin, "export", "--snapshot", input, "--format", "csv", "--out", output]);
   assert.equal(await readFile(join(output, "sessions.csv"), "utf8"), csvTables(snapshot)["sessions.csv"]);
-  for (const args of [["export", "--format", "bad", "--out", output], ["export", "--format", "csv", "--out", output, "--otlp-endpoint", "https://example.test/"], ["report", "--share", "--min-sessions", "1"], ["report", "--snapshot", input, "--claude-root", "secret-path"], ["merge", input], ["merge", sharedPath, sharedPath], ["report", "--snapshot", "secret-path", "--json"]]) {
+  for (const args of [["export", "--format", "bad", "--out", output], ["export", "--format", "csv", "--out", output, "--otlp-endpoint", "https://example.test/"], ["report", "--share", "--min-sessions", "1"], ["report", "--snapshot", input, "--claude-root", "secret-path"], ["merge", input, sharedPath], ["merge", sharedPath, input], ["merge", sharedPath, sharedPath], ["report", "--snapshot", "secret-path", "--json"]]) {
     const invalid = spawnSync(process.execPath, [bin, ...args], { encoding: "utf8" });
     assert.notEqual(invalid.status, 0); assert.equal(invalid.stdout, ""); assert.doesNotMatch(invalid.stderr, sentinels);
   }

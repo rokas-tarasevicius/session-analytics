@@ -130,7 +130,7 @@ Returned by `/api/analytics` and `report --json`.
 | `schemaVersion` | Snapshot interchange version, currently `1` (also present in single-repository results) | P0 |
 | `generatedAt` | ISO time the snapshot was computed | P0 |
 | `velocity.version` | Optional velocity payload version; currently `1` (also on single-repository analysis results) | P0 |
-| `velocity.timeZone` | IANA timezone used to bucket activity; analysis process local zone, including `TZ` override | P1 |
+| `velocity.timeZone` | IANA timezone used to bucket activity; analysis process local zone, including a `--time-zone` or `TZ` override | P1 |
 | `rateCard.currency` | Always `USD` | P0 |
 | `rateCard.effectiveDate` | Effective date of the rate card used | P0 |
 | `rateCard.models[].model` | Model ID with a currently resolved rate | P0 |
