@@ -13,11 +13,12 @@ concurrency:
 
 jobs:
   validate:
+    name: release validation (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event.repository.private && fromJSON('["agentbox"]') || fromJSON('["ubuntu-latest","macos-latest"]') }}
+        os: [ubuntu-latest, macos-latest]
     timeout-minutes: 15
     steps:
       - name: Check out
@@ -41,7 +42,7 @@ jobs:
         run: npm run release:check
 
   browser:
-    if: ${{ !github.event.repository.private }}
+    name: release browser (ubuntu-latest)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -66,10 +67,11 @@ jobs:
           SESSION_ANALYTICS_REQUIRE_BROWSER: '1'
 
   release:
+    name: publish release
     needs: [validate, browser]
-    # A public tag cannot bypass platform or browser checks. Only private previews may omit the browser job.
-    if: ${{ !cancelled() && needs.validate.result == 'success' && (needs.browser.result == 'success' || (github.event.repository.private && needs.browser.result == 'skipped')) }}
-    runs-on: ${{ github.event.repository.private && 'agentbox' || 'ubuntu-latest' }}
+    # No tag can bypass platform or browser checks, including skipped or cancelled jobs.
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.browser.result == 'success' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     timeout-minutes: 5

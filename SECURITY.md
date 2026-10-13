@@ -13,9 +13,9 @@ Fixes are released on the latest minor version.
 
 ## Reporting a vulnerability
 
-When GitHub private vulnerability reporting is available, open the repository's **Security** tab and choose **Report a vulnerability**, or go directly to [private vulnerability reporting](https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new). Please do not open a public issue, pull request, or discussion for a suspected vulnerability.
+Open the repository's **Security** tab and choose **Report a vulnerability**, or go directly to [private vulnerability reporting](https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new). Please do not open a public issue, pull request, or discussion for a suspected vulnerability.
 
-The repository is currently private. Reporting availability is unverified: the reporting-settings API returned `404` during the 2026-10-13 readiness review. This does not establish that the feature is disabled. The maintainer must enable and verify a working private reporting route before public announcement; see [the release checklist](docs/release.md#public-launch-gates). During the private preview, use an already-established private maintainer contact channel.
+Private vulnerability reporting was enabled after the repository became public on 2026-10-13, and GitHub's settings API confirmed it is enabled. If that route is unavailable, email the project maintainer, Rokas Tarasevičius, at [rokas.tarasevicius@gmail.com](mailto:rokas.tarasevicius@gmail.com).
 
 Include the version (`session-analytics --version`), your OS and Node.js version, the steps to reproduce, and the impact you observed. Reproduce with the synthetic demo (`npm run demo`) or minimal hand-written fixtures. Never attach real transcripts, snapshots of your own history, or credentials.
 

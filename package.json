@@ -1,9 +1,9 @@
 {
   "name": "session-analytics",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Content-free analytics for local coding-agent sessions: Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI usage, cost, and tools by repository.",
   "license": "MIT",
-  "author": "Rokas Tarasevi\u010dius",
+  "author": "Rokas Tarasevičius",
   "private": true,
   "type": "module",
   "bin": {

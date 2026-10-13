@@ -15,7 +15,7 @@ Local and read-only. No prompts, messages or file paths in its outputs.</p>
 [![Node >= 24](https://img.shields.io/badge/node-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-2d6a5a)](package.json)
 [![Privacy: content-free](https://img.shields.io/badge/privacy-content--free-2d6a5a)](docs/privacy.md)
-[![Status: private preview](https://img.shields.io/badge/status-private%20preview-c85b45)](docs/roadmap.md)
+[![Status: public preview](https://img.shields.io/badge/status-public%20preview-18181b)](docs/roadmap.md)
 
 </div>
 
@@ -28,7 +28,7 @@ Local and read-only. No prompts, messages or file paths in its outputs.</p>
 
 ## Get started
 
-Requires **Node.js 24+**. macOS is the primary platform; Claude Code and Codex sources also work on Linux. This is a private preview: cloning requires repository access, and the package is not on npm.
+Requires **Node.js 24+**. macOS is the primary platform; Claude Code and Codex sources also work on Linux. The source is public; install from a checkout. The package is not on npm.
 
 ```bash
 git clone https://github.com/rokas-tarasevicius/session-analytics.git

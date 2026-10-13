@@ -8,7 +8,6 @@
 // polls for the state it needs instead of sleeping for a fixed time.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -19,6 +18,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
+import { stopBrowserProcess as stop } from "./browser-process.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -34,13 +34,6 @@ async function availablePort(): Promise<number> {
   assert.ok(address && typeof address !== "string");
   await new Promise<void>((resolve, reject) => probe.close((error) => (error ? reject(error) : resolve())));
   return address.port;
-}
-
-async function stop(child: ChildProcess | null): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = once(child, "exit");
-  child.kill("SIGTERM");
-  await Promise.race([exited, delay(3_000, undefined, { ref: false })]);
 }
 
 /** The server's environment: the parent's, minus anything that could point it at real history, plus the fixture. */
@@ -150,6 +143,7 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-layout-"));
   let server: ChildProcess | null = null, chrome: ChildProcess | null = null;
   let close = () => {};
+  let shutdownChrome: (() => Promise<unknown>) | undefined;
   try {
     const fixture = await createSessionAnalyticsFixture(join(temporaryDirectory, "fixture"));
     const home = join(temporaryDirectory, "home"), demoTemp = join(temporaryDirectory, "demo-temp");
@@ -183,6 +177,7 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
     }
     close = connection.close;
     const { browser } = connection;
+    shutdownChrome = () => browser.send("Browser.close");
     await browser.send("Page.enable");
     await browser.open(`${started.origin}/?window=all`);
     await browser.evaluate("document.fonts.ready.then(() => true)");
@@ -224,7 +219,8 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
       }
     }
   } finally {
-    close(); await stop(chrome); await stop(server);
+    try { await stop(chrome, shutdownChrome); }
+    finally { close(); await stop(server); }
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
 });
@@ -236,6 +232,7 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
   let failing: ChildProcess | null = null;
   let chrome: ChildProcess | null = null;
   let close = () => {};
+  let shutdownChrome: (() => Promise<unknown>) | undefined;
   try {
     const fixture = await createSessionAnalyticsFixture(join(temporaryDirectory, "fixture"));
     // The Conductor fixture has one priced activity date. Add two native days for chart-specific interactions;
@@ -277,6 +274,7 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     }
     close = connection.close;
     const { browser } = connection;
+    shutdownChrome = () => browser.send("Browser.close");
     await browser.send("Page.enable");
     await browser.send("Emulation.setTimezoneOverride", { timezoneId: "UTC" });
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
@@ -644,9 +642,14 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     // On a touch screen the controls grow to finger size, key hints disappear, and the page still fits.
     await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await browser.until(`matchMedia('(pointer: coarse)').matches`, true);
+    await setWidth(375);
     assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-select, #refresh-button, #theme-switch, #density-switch')].every((control) => control.getBoundingClientRect().height >= 40)`), true);
     assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.palette-trigger kbd')).display`), "none");
     assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true);
+    await setWidth(768);
+    assert.notEqual(await browser.evaluate(`getComputedStyle(document.querySelector('#window-segment')).display`), "none");
+    assert.equal(await browser.evaluate(`[...document.querySelectorAll('#window-segment button')].every((control) => control.getBoundingClientRect().height >= 40)`), true, "Tablet time-window buttons retain touch targets");
+    assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, "Tablet touch controls fit the page");
     await browser.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await setWidth(1440);
 
@@ -676,10 +679,8 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "error");
     assert.match(await browser.evaluate<string>(`document.querySelector('#view-status').textContent`), /No snapshot/);
   } finally {
-    close();
-    await stop(chrome);
-    await stop(failing);
-    await stop(server);
+    try { await stop(chrome, shutdownChrome); }
+    finally { close(); await Promise.all([stop(failing), stop(server)]); }
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
 });

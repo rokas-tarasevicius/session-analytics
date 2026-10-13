@@ -27,27 +27,26 @@ test("release: package, lockfile, CLI and latest changelog versions agree", asyn
   assert.equal(latest[1], version, "latest CHANGELOG.md release matches src/version.ts");
 });
 
-test("release: public CI and all pull requests use hosted runners with required browser checks", async () => {
+test("release: every CI event uses hosted Linux and macOS with required browser checks", async () => {
   const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const [check, browser] = workflow.split("\n  browser:\n");
   assert.ok(check && browser);
-  const matrix = /^        os: \$\{\{ (.*) \}\}$/m.exec(check)?.[1];
-  assert.ok(matrix, "runner matrix is explicit");
-  const evaluate = new Function("github", "fromJSON", `return ${matrix};`);
-  for (const privateRepo of [false, true]) for (const event of ["pull_request", "push", "workflow_dispatch"]) {
-    const runners = evaluate({ event: { repository: { private: privateRepo } }, event_name: event }, JSON.parse);
-    if (!privateRepo || event === "pull_request") assert.ok(!runners.includes("agentbox"), "untrusted code never selects the persistent runner");
-    assert.deepEqual(runners, !privateRepo ? ["ubuntu-latest", "macos-latest"] : event === "pull_request" ? ["ubuntu-latest"] : ["agentbox", "macos-latest"]);
-  }
-  assert.match(check, /continue-on-error: \$\{\{ github.event.repository.private && matrix.os == 'macos-latest' \}\}/);
+  const matrix = /^        os: \[([^\]]+)\]$/m.exec(check)?.[1];
+  assert.ok(matrix, "all events share a fixed hosted runner matrix");
+  assert.deepEqual(matrix.split(",").map((runner) => runner.trim()), ["ubuntu-latest", "macos-latest"]);
+  assert.match(check, /name: check \(\$\{\{ matrix.os \}\}\)/);
+  assert.match(workflow, /on:\n  push:\n    branches: \[master\]\n  pull_request:\n  workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /agentbox|self-hosted|repository\.private|continue-on-error/);
+  assert.doesNotMatch(check, /^    if:/m, "platform checks cannot skip any supported event");
   assert.match(check, /permissions:\n  contents: read/);
   assert.match(check, /concurrency:\n  group: ci-.*\n  cancel-in-progress: true/);
   assert.match(check, /run: npm run release:check/);
-  assert.match(browser, /if: \$\{\{ !github.event.repository.private \|\| github.event_name != 'pull_request' \}\}/);
-  assert.match(browser, /continue-on-error: \$\{\{ github.event.repository.private \}\}/);
+  assert.match(browser, /name: browser \(ubuntu-latest\)/);
+  assert.match(browser, /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(browser, /^    if:/m, "browser checks cannot skip private repositories or pull requests");
   assert.match(browser, /SESSION_ANALYTICS_REQUIRE_BROWSER: '1'/);
   assert.match(browser, /run: npm run test:browser/);
-  assert.match(browser, /\/usr\/bin\/google-chrome/);
+  assert.match(browser, /SESSION_ANALYTICS_CHROME: \/usr\/bin\/google-chrome/);
   for (const job of [check, browser]) {
     assert.match(job, /persist-credentials: false/);
     assert.match(job, /node-version: 24/);
@@ -69,22 +68,27 @@ test("release: tag publication follows a read-only validation job", async () => 
   assert.match(publishing, /permissions:\n      contents: write/);
   assert.match(publishing, /run: node scripts\/release-check.ts --notes "\$GITHUB_REF_NAME"/);
   assert.doesNotMatch(publishing, /npm ci|npm run/);
-  assert.match(publishing, /runs-on: \$\{\{ github.event.repository.private && 'agentbox' \|\| 'ubuntu-latest' \}\}/);
-  const matrix = /^        os: \$\{\{ (.*) \}\}$/m.exec(validation)?.[1];
+  assert.match(publishing, /runs-on: ubuntu-latest/);
+  assert.match(publishing, /name: publish release/);
+  assert.doesNotMatch(workflow, /agentbox|self-hosted|repository\.private|continue-on-error/);
+  const matrix = /^        os: \[([^\]]+)\]$/m.exec(validation)?.[1];
   assert.ok(matrix);
-  const runners = new Function("github", "fromJSON", `return ${matrix};`);
-  assert.deepEqual(runners({ event: { repository: { private: false } } }, JSON.parse), ["ubuntu-latest", "macos-latest"]);
+  assert.deepEqual(matrix.split(",").map((runner) => runner.trim()), ["ubuntu-latest", "macos-latest"]);
+  assert.match(validation, /name: release validation \(\$\{\{ matrix.os \}\}\)/);
+  const browser = validation.split("\n  browser:\n")[1];
+  assert.ok(browser);
+  assert.match(browser, /name: release browser \(ubuntu-latest\)/);
+  assert.match(browser, /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(browser, /^    if:/m, "tag browser checks cannot be skipped for private previews");
   assert.match(validation, /SESSION_ANALYTICS_REQUIRE_BROWSER: '1'/);
   assert.doesNotMatch(validation, /continue-on-error/);
   const gate = /^    if: \$\{\{ (.*) \}\}$/m.exec(publishing)?.[1];
   assert.ok(gate);
-  const canPublish = new Function("github", "needs", "cancelled", `return ${gate};`);
-  for (const privateRepo of [false, true]) for (const result of ["success", "failure", "skipped", "cancelled"]) {
-    const github = { event: { repository: { private: privateRepo } } };
-    const needs = { validate: { result: "success" }, browser: { result } };
-    assert.equal(canPublish(github, needs, () => false), result === "success" || (privateRepo && result === "skipped"));
-    assert.equal(canPublish(github, { ...needs, validate: { result: "failure" } }, () => false), false);
-    assert.equal(canPublish(github, needs, () => true), false);
+  const canPublish = new Function("needs", "cancelled", `return ${gate};`);
+  for (const platformResult of ["success", "failure", "skipped", "cancelled"]) for (const browserResult of ["success", "failure", "skipped", "cancelled"]) {
+    const needs = { validate: { result: platformResult }, browser: { result: browserResult } };
+    assert.equal(canPublish(needs, () => false), platformResult === "success" && browserResult === "success", `validate=${platformResult}, browser=${browserResult}`);
+    assert.equal(canPublish(needs, () => true), false, "cancelled workflow never publishes");
   }
   assert.match(publishing, /GH_TOKEN: \$\{\{ github.token \}\}/);
 });
