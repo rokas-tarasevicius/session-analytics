@@ -12,7 +12,8 @@
 | `assets/logo-wordmark-dark.svg` | Mark and wordmark for dark backgrounds. |
 | `assets/social-preview.svg`, `.png` | 1280 × 640 repository social preview (upload the PNG in the GitHub repository settings). |
 | `src/public/favicon.svg` | Dashboard favicon; a copy of the mark without the title element. |
-| `assets/screenshot-*.webp` | README screenshots in light and dark pairs (`-dark` suffix), rendered from the synthetic demo only by `node scripts/screenshots.ts` at 1280 CSS pixels, 2x, comfortable density, as lossless WebP. |
+| Desktop `assets/screenshot-*.webp` | README screenshots in light and dark pairs (`-dark` suffix), rendered from the synthetic demo only at 1280 CSS pixels, 2x, comfortable density, as lossless WebP. |
+| `assets/screenshot-mobile.webp`, `assets/screenshot-mobile-dark.webp` | Synthetic mobile Summary at 375 × 812 CSS pixels, 2x, compact density. Capture sources and regeneration commands are in [screenshot provenance](../assets/SCREENSHOTS.md). |
 
 The wordmarks use a system font stack (`ui-sans-serif, -apple-system, Segoe UI, Helvetica Neue, Helvetica, Arial, sans-serif`) at weight 600, with `textLength` set so wider fallback fonts compress instead of clipping.
 
@@ -78,7 +79,7 @@ rsvg-convert -w 512 -h 512 assets/logo.svg -o assets/logo.png
 rsvg-convert -w 1280 -h 640 assets/social-preview.svg -o assets/social-preview.png
 ```
 
-Screenshots come from the demo dataset only. Start it with `npm run demo -- --no-open`, then capture `http://127.0.0.1:4175` at 1440 × 1100 in a headless browser. Never capture a dashboard that is reading real history.
+Screenshots come from the demo dataset only. In one terminal, start `npm run demo -- --no-open`; in another, run `node scripts/screenshots.ts --url http://127.0.0.1:4175`. The script requires Chrome and `cwebp`, captures desktop views at 1280 CSS pixels and 2x scale in comfortable density, and writes lossless light/dark WebP pairs to `assets/`. The `--only mobile` capture uses 375 × 812 CSS pixels, 2x scale and compact density. Use `--only NAME` for one capture or `--out DIR` for a review artifact directory. See [screenshot provenance](../assets/SCREENSHOTS.md) for the source and capture settings. Never point it at a dashboard reading real history.
 
 ## Renaming the product
 
@@ -104,4 +105,4 @@ These do not follow the brand. Changing them breaks something that already depen
 | Session key and repository ID derivation | `src/analyzer.ts` | Keys must match across snapshots for comparisons. This includes the fixed grouping root used for ephemeral sessions, which is part of that group's repository ID hash. |
 | `SESSION_ANALYTICS_*` environment variables | `src/options.ts` | Existing shell profiles and run scripts set them. If a new prefix is added, keep these as aliases. |
 
-Planned identifiers follow the same rule: MCP tool names will be generic (`budget_status`, `tool_stats`), telemetry attributes will use the standard `gen_ai.*` namespace, and the JSON output will carry a `schemaVersion`. The data directory will be brand-derived, with a one-time migration when the brand changes.
+The shipped MCP tool names (`budget_status`, `tool_stats` and the other tools), exported `gen_ai.*` attributes and JSON `schemaVersion` follow the same rule. The current data directory uses `session-analytics`; any future rename needs an explicit migration so the existing index and pricing history remain usable.

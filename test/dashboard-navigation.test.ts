@@ -71,6 +71,7 @@ test("dashboard defaults to 30 observed days and URL windows override without pe
     context.query = query;
     run(`{ const initialUrl = parseUrlState(query, { views: viewOrder, presets: windowPresets, aliases: viewAliases }); ${startup} } configureWindow();`);
     assert.equal(run("windowPreset"), preset);
+    assert.equal(document.querySelector("#window-select")!.value, preset);
     assert.equal(document.querySelector(`[data-window-preset="${preset}"]`)!.getAttribute("aria-pressed"), "true");
     assert.equal(document.querySelector("#window-start")!.value, start);
     assert.equal(document.querySelector("#window-end")!.value, "2026-10-01");
@@ -78,6 +79,22 @@ test("dashboard defaults to 30 observed days and URL windows override without pe
   run("setWindowPreset('invalid')");
   assert.equal(run("windowPreset"), "30");
   assert.deepEqual(stored, []);
+});
+
+test("mobile window selector uses the shared window and focuses custom dates", async () => {
+  const { document, run } = await harness([sample()]);
+  run("resetExportMenu = () => {}; configureWindow()");
+  const select = document.querySelector("#window-select")!;
+  let focused = false;
+  document.querySelector("#window-start")!.focus = () => { focused = true; };
+  for (const preset of ["7", "90", "all", "custom", "30"]) {
+    select.value = preset;
+    select.listeners.get("change")!();
+    assert.equal(run("windowPreset"), preset);
+    assert.equal(document.querySelector(`[data-window-preset="${preset}"]`)!.getAttribute("aria-pressed"), "true");
+    assert.equal(document.querySelector("#date-range")!.hidden, preset !== "custom");
+    if (preset === "custom") assert.equal(focused, true);
+  }
 });
 
 test("the 30-day default excludes unknown starts and limits view exports to the window", async () => {

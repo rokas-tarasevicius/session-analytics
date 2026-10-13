@@ -8,6 +8,7 @@
  * --only NAME (one capture, both themes), --chrome PATH (or the CHROME environment variable).
  * Requires Google Chrome and `cwebp` on PATH. Captures are 1280 CSS pixels wide at 2x, comfortable
  * density, in light and dark themes, written as lossless WebP to assets/screenshot-<name>[-dark].webp.
+ * The mobile capture uses 375 × 812 CSS pixels, compact density, at the same 2x scale.
  * Point --url at the demo only: the captured page content is written to the repository.
  */
 import { spawn } from "node:child_process";
@@ -28,6 +29,9 @@ type Capture = {
   /** Expression returning [x, y, w, h] to clip, in CSS px, with the whole page laid out. */
   clipJs?: string;
   pad?: number;
+  width?: number;
+  height?: number;
+  density?: "compact" | "comfortable";
 };
 
 const panelBottom = (title: string): string => `(() => { const r = __rect(__p(${JSON.stringify(title)})); return r[1] + r[3]; })()`;
@@ -50,6 +54,7 @@ const CAPTURES: Capture[] = [
   { name: "activity", view: "activity", fitJs: "document.querySelector('#activity-repositories-panel').getBoundingClientRect().bottom" },
   { name: "coverage", view: "summary", js: "document.querySelector('#coverage-button').click()", clipJs: "__rect(document.querySelector('#coverage-dialog'))", pad: 28 },
   { name: "palette", view: "summary", js: "document.querySelector('#command-button').click()", clipJs: "__rect(document.querySelector('#command-palette'))", pad: 28 },
+  { name: "mobile", view: "summary", width: 375, height: 812, density: "compact" },
 ];
 
 const HELPERS = `window.__p = (title) => {
@@ -146,9 +151,10 @@ class Session {
 }
 
 async function capture(session: Session, base: string, item: Capture, theme: "light" | "dark", outDir: string): Promise<string> {
-  const url = `${base}/?density=comfortable&view=${item.view}&theme=${theme}${item.query ?? ""}`;
-  let height = 1000;
-  await session.metrics(WIDTH, height);
+  const url = `${base}/?density=${item.density ?? "comfortable"}&view=${item.view}&theme=${theme}${item.query ?? ""}`;
+  const width = item.width ?? WIDTH;
+  let height = item.height ?? 1000;
+  await session.metrics(width, height);
   await session.send("Page.navigate", { url });
   let live = false;
   for (let attempt = 0; attempt < 300 && !live; attempt += 1) {
@@ -160,12 +166,12 @@ async function capture(session: Session, base: string, item: Capture, theme: "li
   await session.evaluate(HELPERS);
   if (item.js) { await session.evaluate(item.js); await sleep(600); }
   const full = await session.evaluate<number>("Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)");
-  height = Math.min(Math.max(full, 600), 5000);
-  await session.metrics(WIDTH, height);
+  height = item.height ?? Math.min(Math.max(full, 600), 5000);
+  await session.metrics(width, height);
   await sleep(400);
   if (item.fitJs) {
     height = Math.ceil((await session.evaluate<number>(item.fitJs)) + FIT_PAD);
-    await session.metrics(WIDTH, height);
+    await session.metrics(width, height);
     await sleep(400);
   }
   const params: Record<string, unknown> = { format: "png", captureBeyondViewport: false };

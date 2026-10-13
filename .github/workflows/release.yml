@@ -5,12 +5,19 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    # Self-hosted Linux runner, like the check job: GitHub-hosted jobs cannot start until the spending limit is restored.
-    runs-on: agentbox
+  validate:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event.repository.private && fromJSON('["agentbox"]') || fromJSON('["ubuntu-latest","macos-latest"]') }}
     timeout-minutes: 15
     steps:
       - name: Check out
@@ -27,24 +34,58 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Type check and test
-        run: npm run check
+      - name: Verify tag and release notes
+        run: node scripts/release-check.ts --notes "$GITHUB_REF_NAME"
+
+      - name: Check source release readiness
+        run: npm run release:check
+
+  browser:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test dashboard in Chrome
+        run: npm run test:browser
+        env:
+          SESSION_ANALYTICS_CHROME: /usr/bin/google-chrome
+          SESSION_ANALYTICS_REQUIRE_BROWSER: '1'
+
+  release:
+    needs: [validate, browser]
+    # A public tag cannot bypass platform or browser checks. Only private previews may omit the browser job.
+    if: ${{ !cancelled() && needs.validate.result == 'success' && (needs.browser.result == 'success' || (github.event.repository.private && needs.browser.result == 'skipped')) }}
+    runs-on: ${{ github.event.repository.private && 'agentbox' || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+    timeout-minutes: 5
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
 
       - name: Extract release notes
-        run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const tag = process.env.GITHUB_REF_NAME;
-          const heading = `## [${tag.slice(1)}]`;
-          const lines = readFileSync('CHANGELOG.md', 'utf8').split('\n');
-          const start = lines.findIndex((line) => line === heading || line.startsWith(`${heading} - `));
-          if (start === -1) {
-            console.error(`No CHANGELOG.md section found for ${tag} (${heading}).`);
-            process.exit(1);
-          }
-          const end = lines.findIndex((line, index) => index > start && line.startsWith('## '));
-          writeFileSync('notes.md', lines.slice(start + 1, end === -1 ? undefined : end).join('\n').trim() + '\n');
-          NODE
+        run: node scripts/release-check.ts --notes "$GITHUB_REF_NAME"
 
       - name: Create GitHub Release
         # REST call with the workflow token: no gh CLI dependency on the runner. Re-running for an existing tag updates nothing and fails loudly.

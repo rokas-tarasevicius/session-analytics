@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { Element, Option, documentFromHtml } from "./release-dom.ts";
 import { version } from "../src/version.ts";
+import { checkPackageFiles, checkReleaseMetadata, extractReleaseNotes } from "../scripts/release-check.ts";
 
 const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
@@ -28,55 +27,89 @@ test("release: package, lockfile, CLI and latest changelog versions agree", asyn
   assert.equal(latest[1], version, "latest CHANGELOG.md release matches src/version.ts");
 });
 
-test("release: CI gates run on both platforms with independent advisory browser checks", async () => {
+test("release: public CI and all pull requests use hosted runners with required browser checks", async () => {
   const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const [check, browser] = workflow.split("\n  browser:\n");
   assert.ok(check && browser);
-  assert.match(check, /os: \$\{\{ github\.event_name == 'pull_request' && fromJSON\('\["agentbox"\]'\) \|\| fromJSON\('\["agentbox","macos-latest"\]'\) \}\}/);
-  assert.match(check, /runs-on: \$\{\{ matrix\.os \}\}\n(?:\s*#[^\n]*\n)*\s*continue-on-error: \$\{\{ matrix\.os == 'macos-latest' \}\}/, "the hosted macOS leg is advisory while hosted minutes are blocked");
+  const matrix = /^        os: \$\{\{ (.*) \}\}$/m.exec(check)?.[1];
+  assert.ok(matrix, "runner matrix is explicit");
+  const evaluate = new Function("github", "fromJSON", `return ${matrix};`);
+  for (const privateRepo of [false, true]) for (const event of ["pull_request", "push", "workflow_dispatch"]) {
+    const runners = evaluate({ event: { repository: { private: privateRepo } }, event_name: event }, JSON.parse);
+    if (!privateRepo || event === "pull_request") assert.ok(!runners.includes("agentbox"), "untrusted code never selects the persistent runner");
+    assert.deepEqual(runners, !privateRepo ? ["ubuntu-latest", "macos-latest"] : event === "pull_request" ? ["ubuntu-latest"] : ["agentbox", "macos-latest"]);
+  }
+  assert.match(check, /continue-on-error: \$\{\{ github.event.repository.private && matrix.os == 'macos-latest' \}\}/);
   assert.match(check, /permissions:\n  contents: read/);
   assert.match(check, /concurrency:\n  group: ci-.*\n  cancel-in-progress: true/);
-  const commands = ["npm run check", "node scripts/snapshot-schema.ts --check", 'node scripts/demo.ts report --json | node -e \'JSON.parse(require("fs").readFileSync(0, "utf8"))\'', "npm pack --dry-run"];
-  const runs = [...check.matchAll(/^        run: (.+)$/gm)].map((match) => match[1]);
-  assert.deepEqual(runs, ["npm ci", ...commands]);
-  assert.match(browser, /if: github\.event_name != 'pull_request'\n    runs-on: macos-latest\n    continue-on-error: true/);
-  assert.doesNotMatch(workflow, /\bneeds:/);
-  assert.match(browser, /run: node --test test\/dashboard\.browser\.test\.ts/);
+  assert.match(check, /run: npm run release:check/);
+  assert.match(browser, /if: \$\{\{ !github.event.repository.private \|\| github.event_name != 'pull_request' \}\}/);
+  assert.match(browser, /continue-on-error: \$\{\{ github.event.repository.private \}\}/);
+  assert.match(browser, /SESSION_ANALYTICS_REQUIRE_BROWSER: '1'/);
+  assert.match(browser, /run: npm run test:browser/);
+  assert.match(browser, /\/usr\/bin\/google-chrome/);
   for (const job of [check, browser]) {
-    assert.match(job, /uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n        with:\n          persist-credentials: false/);
-    assert.match(job, /uses: actions\/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7\n        with:\n          node-version: 24/);
+    assert.match(job, /persist-credentials: false/);
+    assert.match(job, /node-version: 24/);
     assert.match(job, /run: npm ci/);
   }
+  assert.doesNotMatch(workflow, /pull_request_target/);
 });
 
-test("release: tag workflow extracts only matching changelog notes and rejects missing sections", async () => {
+test("release: tag publication follows a read-only validation job", async () => {
   const workflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   assert.match(workflow, /on:\n  push:\n    tags: \['v\*'\]/);
-  assert.match(workflow, /permissions:\n  contents: write/);
-  assert.match(workflow, /runs-on: agentbox/);
-  assert.match(workflow, /run: npm ci[\s\S]*run: npm run check[\s\S]*name: Extract release notes[\s\S]*name: Create GitHub Release/);
-  assert.match(workflow, /name: Create GitHub Release[\s\S]*?fetch\(`https:\/\/api\.github\.com\/repos\/\$\{process\.env\.GITHUB_REPOSITORY\}\/releases`[\s\S]*?GH_TOKEN: \$\{\{ github.token \}\}/);
-  assert.doesNotMatch(workflow, /gh release create/, "the runner has no gh dependency");
-  const block = /      - name: Extract release notes\n        run: \|\n([\s\S]*?)\n      - name: Create GitHub Release/.exec(workflow);
-  assert.ok(block, "release workflow has an extraction script");
-  const script = block[1]!.split("\n").map((line) => line.replace(/^          /, "")).join("\n");
-  const root = await mkdtemp(join(tmpdir(), "session-analytics-release-"));
-  try {
-    await writeFile(join(root, "CHANGELOG.md"), "# Changelog\n\n## [Unreleased]\n\nPending.\n\n## [1.2.3] - 2026-10-12\n\n### Changed\n\n- Current notes.\n\n## [1.2.2]\n\n- Older notes.\n");
-    for (const [tag, notes] of [["v1.2.3", "### Changed\n\n- Current notes.\n"], ["v1.2.2", "- Older notes.\n"]]) {
-      const result = spawnSync("bash", ["-e", "-o", "pipefail", "-c", script], { cwd: root, env: { ...process.env, GITHUB_REF_NAME: tag }, encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(await readFile(join(root, "notes.md"), "utf8"), notes);
-    }
-    for (const tag of ["v9.9.9", "v1.2"]) {
-      const result = spawnSync("bash", ["-e", "-o", "pipefail", "-c", script], { cwd: root, env: { ...process.env, GITHUB_REF_NAME: tag }, encoding: "utf8" });
-      assert.equal(result.status, 1, result.stderr);
-      assert.match(result.stderr, /No CHANGELOG\.md section found for/);
-      assert.equal(await readFile(join(root, "notes.md"), "utf8"), "- Older notes.\n", "missing section does not overwrite notes");
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
+  assert.match(workflow, /permissions:\n  contents: read/);
+  const [validation, publishing] = workflow.split("\n  release:\n");
+  assert.ok(validation && publishing);
+  assert.doesNotMatch(validation, /contents: write/);
+  assert.match(validation, /run: npm run release:check/);
+  assert.match(validation, /run: node scripts\/release-check.ts --notes "\$GITHUB_REF_NAME"/);
+  assert.match(publishing, /needs: \[validate, browser\]/);
+  assert.match(publishing, /permissions:\n      contents: write/);
+  assert.match(publishing, /run: node scripts\/release-check.ts --notes "\$GITHUB_REF_NAME"/);
+  assert.doesNotMatch(publishing, /npm ci|npm run/);
+  assert.match(publishing, /runs-on: \$\{\{ github.event.repository.private && 'agentbox' \|\| 'ubuntu-latest' \}\}/);
+  const matrix = /^        os: \$\{\{ (.*) \}\}$/m.exec(validation)?.[1];
+  assert.ok(matrix);
+  const runners = new Function("github", "fromJSON", `return ${matrix};`);
+  assert.deepEqual(runners({ event: { repository: { private: false } } }, JSON.parse), ["ubuntu-latest", "macos-latest"]);
+  assert.match(validation, /SESSION_ANALYTICS_REQUIRE_BROWSER: '1'/);
+  assert.doesNotMatch(validation, /continue-on-error/);
+  const gate = /^    if: \$\{\{ (.*) \}\}$/m.exec(publishing)?.[1];
+  assert.ok(gate);
+  const canPublish = new Function("github", "needs", "cancelled", `return ${gate};`);
+  for (const privateRepo of [false, true]) for (const result of ["success", "failure", "skipped", "cancelled"]) {
+    const github = { event: { repository: { private: privateRepo } } };
+    const needs = { validate: { result: "success" }, browser: { result } };
+    assert.equal(canPublish(github, needs, () => false), result === "success" || (privateRepo && result === "skipped"));
+    assert.equal(canPublish(github, { ...needs, validate: { result: "failure" } }, () => false), false);
+    assert.equal(canPublish(github, needs, () => true), false);
   }
+  assert.match(publishing, /GH_TOKEN: \$\{\{ github.token \}\}/);
+});
+
+test("release: notes exclude unreleased and older changes; mismatched tags and metadata fail", () => {
+  const metadata = {
+    packageVersion: "1.2.3", lockVersion: "1.2.3", lockRootVersion: "1.2.3", sourceVersion: "1.2.3",
+    changelog: "# Changelog\n\n## [Unreleased]\n\n- Pending.\n\n## [1.2.3] - 2026-10-13\n\n### Changed\n\n- Current notes.\n\n## [1.2.2]\n\n- Older notes.\n",
+  };
+  assert.equal(extractReleaseNotes(metadata, "v1.2.3"), "### Changed\n\n- Current notes.\n");
+  for (const tag of ["v1.2.2", "v9.9.9", "v1.2", "1.2.3", "v1.2.3-beta.1"]) assert.throws(() => extractReleaseNotes(metadata, tag), /Release tag must be/);
+  for (const field of ["packageVersion", "lockVersion", "lockRootVersion"] as const) assert.throws(() => checkReleaseMetadata({ ...metadata, [field]: "1.2.2" }), /does not match source/);
+  assert.throws(() => checkReleaseMetadata({ ...metadata, changelog: "## [1.2.2]\n- Old" }), /Latest changelog/);
+  assert.throws(() => extractReleaseNotes({ ...metadata, changelog: "## [1.2.3]\n\n### Changed\n" }, "v1.2.3"), /no release notes/);
+});
+
+test("release: package excludes accidental local data and includes worker and font assets", async () => {
+  const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(result.status, 0, result.stderr);
+  const files: string[] = JSON.parse(result.stdout)[0].files.map((file: { path: string }) => file.path);
+  checkPackageFiles(files);
+  for (const extra of [".env", "src/.env", "data/sessions.jsonl", "data/local.sqlite", "test/fixtures.ts", "assets/private.png", "src/../secret.ts"]) {
+    assert.throws(() => checkPackageFiles([...files, extra]), /Unexpected package file/);
+  }
+  for (const missing of ["src/analysis-worker.ts", "src/public/fonts/OFL-1.1.txt", "CHANGELOG.md"]) assert.throws(() => checkPackageFiles(files.filter((path) => path !== missing)), /Package is missing/);
 });
 
 test("release: every dispatcher command shares help and version without scanning", () => {

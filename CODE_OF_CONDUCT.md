@@ -59,11 +59,12 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement through the
-maintainer's contact channel listed on their GitHub profile,
-[@rokas-tarasevicius](https://github.com/rokas-tarasevicius), or through a
-[private security advisory](https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new)
-on this repository.
+reported privately to the maintainer,
+[@rokas-tarasevicius](https://github.com/rokas-tarasevicius), through an
+already-established private contact channel during the private preview.
+The maintainer must publish and verify a private conduct-reporting channel
+before the public announcement; this is a [public launch gate](docs/release.md#public-launch-gates).
+The GitHub profile identifies the maintainer; GitHub does not offer direct messaging.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

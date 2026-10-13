@@ -679,6 +679,9 @@ test("permissions are repaired and symlink targets are never modified", async ()
     assert.equal((await stat(fixture.dataDir)).mode & 0o777, 0o700);
     assert.equal((await stat(indexPath(opts))).mode & 0o777, 0o600);
     const target = join(root, "private-target"); await writeFile(target, "unchanged", { mode: 0o644 });
+    // Creation modes are filtered by the caller's umask. Start from an explicit
+    // mode so this assertion still catches an accidental chmod of the target.
+    await chmod(target, 0o644);
     await rm(indexPath(opts)); await symlink(target, indexPath(opts));
     assert.throws(() => openIndexDatabase(opts), /index is unavailable/);
     assert.equal(await readFile(target, "utf8"), "unchanged");

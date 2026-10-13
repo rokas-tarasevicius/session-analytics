@@ -21,13 +21,19 @@ test('oracle groups existing, deleted and symlinked OS temporary directories wit
   const ephemeral = '/private/var/folders/session-analytics-ephemeral';
   // Both macOS spellings of a deleted temporary directory (/tmp vs /private/tmp,
   // /var/folders vs /private/var/folders) are temporary, whatever the current temp root is.
-  for (const cwd of [root, nested, alias, join(root, 'deleted'), '/tmp/synthetic-deleted-session', '/private/tmp/synthetic-deleted-session',
-    '/private/var/folders/xx/synthetic/T/deleted', '/var/folders/xx/synthetic/T/deleted', '/var/folders/xx/synthetic/T']) {
+  for (const cwd of [root, nested, alias, join(root, 'deleted')]) {
     assert.deepEqual(localDirectoryAttribution(cwd, resolveRepository(cwd)), { root: ephemeral, route: 'ephemeral' }, cwd);
+  }
+  // Synthetic deleted paths carry no filesystem evidence. The host's /tmp may
+  // itself contain a Git marker, which belongs to the host rather than this case.
+  const withoutFilesystemEvidence = resolveRepository(null);
+  for (const cwd of ['/tmp/synthetic-deleted-session', '/private/tmp/synthetic-deleted-session',
+    '/private/var/folders/xx/synthetic/T/deleted', '/var/folders/xx/synthetic/T/deleted', '/var/folders/xx/synthetic/T']) {
+    assert.deepEqual(localDirectoryAttribution(cwd, withoutFilesystemEvidence), { root: ephemeral, route: 'ephemeral' }, cwd);
   }
   // Every other directory without repository evidence shares one bucket instead of becoming its own repository.
   for (const cwd of ['/tmp-neighbor/synthetic', '/opt/synthetic-local', '/var/synthetic-deleted-session', '/var/folders/xx/synthetic/not-temp', '/private/tmpfoo/synthetic']) {
-    assert.deepEqual(localDirectoryAttribution(cwd, resolveRepository(cwd)), { root: NO_REPOSITORY_GROUP, route: 'no-repository' }, cwd);
+    assert.deepEqual(localDirectoryAttribution(cwd, withoutFilesystemEvidence), { root: NO_REPOSITORY_GROUP, route: 'no-repository' }, cwd);
   }
   const checkout = join(root, 'checkout'); repo(checkout);
   assert.notEqual(localDirectoryAttribution(checkout, resolveRepository(checkout)).route, 'ephemeral');

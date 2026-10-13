@@ -17,16 +17,15 @@ jobs:
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # GitHub-hosted macOS minutes are blocked until the account's spending limit is restored; that leg is advisory so a
-    # push to master is judged by the self-hosted Linux check. Make it blocking again once hosted jobs start.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    # Only the private preview may treat hosted macOS as advisory. Public releases require both platforms.
+    continue-on-error: ${{ github.event.repository.private && matrix.os == 'macos-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        # Pull requests run on Linux only while the repository is private (macOS minutes bill at 10x and
-        # exhausted the spending limit on 2026-10-12). macOS runs on pushes to master and manual runs.
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["agentbox"]') || fromJSON('["agentbox","macos-latest"]') }}
+        # Contributor code never runs on the persistent private runner. Disconnect that runner before going public.
+        # Private PRs use hosted Linux even if private hosted minutes are unavailable; do not fall back to agentbox.
+        os: ${{ !github.event.repository.private && fromJSON('["ubuntu-latest","macos-latest"]') || github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["agentbox","macos-latest"]') }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -42,22 +41,13 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Type check and test
-        run: npm run check
-
-      - name: Check snapshot schemas
-        run: node scripts/snapshot-schema.ts --check
-
-      - name: Smoke test synthetic JSON report
-        run: node scripts/demo.ts report --json | node -e 'JSON.parse(require("fs").readFileSync(0, "utf8"))'
-
-      - name: Check package contents
-        run: npm pack --dry-run
+      - name: Check source release readiness
+        run: npm run release:check
 
   browser:
-    if: github.event_name != 'pull_request'
-    runs-on: macos-latest
-    continue-on-error: true
+    if: ${{ !github.event.repository.private || github.event_name != 'pull_request' }}
+    runs-on: ${{ github.event.repository.private && 'macos-latest' || 'ubuntu-latest' }}
+    continue-on-error: ${{ github.event.repository.private }}
     timeout-minutes: 15
     steps:
       - name: Check out
@@ -75,4 +65,7 @@ jobs:
         run: npm ci
 
       - name: Test dashboard in Chrome
-        run: node --test test/dashboard.browser.test.ts
+        run: npm run test:browser
+        env:
+          SESSION_ANALYTICS_CHROME: ${{ github.event.repository.private && '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' || '/usr/bin/google-chrome' }}
+          SESSION_ANALYTICS_REQUIRE_BROWSER: '1'

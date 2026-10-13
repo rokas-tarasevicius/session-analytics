@@ -42,6 +42,7 @@ Read-only. Loopback only. No prompts, messages or file paths in anything it prod
 - [How it compares](#how-it-compares)
 - [FAQ](#faq)
 - [Contributing](#contributing) · [Security](#security) · [License](#license)
+- [Documentation](#documentation)
 
 ## What it does
 
@@ -58,6 +59,18 @@ Coding agents keep detailed session history on your disk. That history can tell 
 The dashboard runs on `127.0.0.1` and has six views in three groups: **Overview** (Summary, Velocity), **Economics** (Costs, Pricing) and **Usage** (Tools, Activity). A window selector at the top switches between the last 7, 30 or 90 days, all history, or a custom range. The sidebar lists every repository with a sparkline and its value, and clicking one focuses every view on that repository. A command palette (<kbd>⌘K</kbd>), `g`-prefixed shortcuts, light and dark themes, two densities and an address bar that follows the view, window and focus make it quick to move around and to share a link to exactly what you are looking at.
 
 ### Summary: the state of the machine
+
+On narrow screens, repository and time-window selectors share the header, and KPI cards stack into one column below 400 pixels. Custom ranges keep the native date inputs.
+
+<details>
+<summary>Phone layout</summary>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-mobile-dark.webp" />
+    <img alt="Summary at 375 pixels: repository and time-window selectors above a single column of usage and session cards" src="assets/screenshot-mobile.webp" width="375" />
+  </picture>
+</p>
+</details>
 
 Summary answers "what happened in this window?" Six cards show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each card shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. Below them, daily usage value by provider sits beside the session mix, then value and tokens by repository, value by model, top tools, sub-agent value and a sortable fleet table.
 
@@ -210,9 +223,9 @@ Accounting details, denominators and attribution rules are in [docs/metrics.md](
 Requirements: **Node.js 24 or newer** and **macOS** (Claude Code and Codex history also works on Linux; see [platform support](#faq)).
 
 ```bash
-git clone git@github.com:rokas-tarasevicius/session-analytics.git
+git clone https://github.com/rokas-tarasevicius/session-analytics.git
 cd session-analytics
-npm install   # development tooling only; the runtime has no dependencies
+npm ci        # development tooling only; the runtime has no dependencies
 npm link      # puts the session-analytics command on your PATH
 session-analytics
 ```
@@ -224,6 +237,8 @@ npm run demo
 ```
 
 The package is not on npm yet; the [command-line reference](docs/cli.md#install) explains why and what to do instead. The same page lists every option, including ports, offline mode, repository filters and explicit source paths.
+
+The repository is currently a private preview, so cloning requires access until the maintainer makes it public. If `npm link` needs permissions on your machine, run `node bin/session-analytics.ts` from the checkout instead. Start with `npm run demo` to explore the dashboard using synthetic data.
 
 ## Beyond the dashboard
 
@@ -330,7 +345,7 @@ Yes. Sibling profile directories such as `~/.claude-work` or `~/.codex-personal`
 <details>
 <summary><strong>Which platforms are supported?</strong></summary>
 
-macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. CI runs pull requests on Ubuntu and pushes to `master` on Ubuntu and macOS while the repository is private.
+macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Public pull requests and pushes require GitHub-hosted Ubuntu, macOS and browser checks. Private-preview PRs use hosted Ubuntu; private pushes retain advisory macOS/browser checks. See [release validation](docs/release.md).
 </details>
 
 <details>
@@ -351,7 +366,20 @@ Contributions are welcome, especially provider adapters, rate-card reviews, and 
 
 ## Security
 
-Please report vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/rokas-tarasevicius/session-analytics/security/advisories/new), not in public issues. [SECURITY.md](SECURITY.md) describes supported versions and the threat model.
+Please report vulnerabilities privately. [SECURITY.md](SECURITY.md) describes reporting availability, supported versions and the threat model.
+
+## Documentation
+
+- [CLI commands and source installation](docs/cli.md)
+- [Provider formats and fidelity](docs/providers.md)
+- [Metric definitions and evidence limits](docs/metrics.md)
+- [Privacy contract and public field manifest](docs/privacy.md)
+- [Pricing sources and offline operation](docs/pricing.md)
+- [Exports, sharing and schemas](docs/interop.md)
+- [Metrics-only MCP setup](docs/mcp.md)
+- [Architecture](docs/architecture.md) and [branding](docs/branding.md)
+- [Release validation and public launch gates](docs/release.md)
+- [Current open-source readiness plan](docs/proposals/open-source-readiness-2026-10-13.md) and [deferred work](TODOS.md)
 
 ## License
 

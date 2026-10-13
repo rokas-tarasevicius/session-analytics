@@ -1,7 +1,7 @@
 // Intentional failing regressions for v-repos validation. All evidence is synthetic.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -241,21 +241,24 @@ test('R-LOCAL-01: a deleted Conductor workspace of a registered repository is no
 
 test('R-LOCAL-02: both spellings of deleted macOS temporary directories are ephemeral, not repositories', async t => {
   const f = await fixture(t);
-  for (const cwd of ['/tmp/synthetic-run.AAAA', '/private/tmp/synthetic-run.BBBB/orgs/one/workspaces/two',
+  // The fixture temp root has no Git ancestors. Literal /tmp can legitimately
+  // belong to a host repository; its spelling aliases are covered by the oracle.
+  for (const cwd of [join(f.root, 'deleted-run.AAAA'), join(f.root, 'deleted-run.BBBB/orgs/one/workspaces/two'),
     '/var/folders/zz/synthetic000/T/tmp.CCCC', '/private/var/folders/zz/synthetic000/T/tool-DDDD/workspace']) await f.session(cwd, 'codex');
   const result = await analyzeMachineSessions(f.options);
   assert.equal(result.sessions.length, 4);
   assert.ok(result.sessions.every(s => s.repositoryName === 'Ephemeral automation sessions'));
 });
 
-test('R-LOCAL-02: an existing folder under /tmp is ephemeral through its canonical spelling', async t => {
-  let scratch: string;
-  try { scratch = await mkdtemp('/tmp/session-analytics-tmp-alias-'); } catch { t.skip('/tmp is not writable'); return; }
-  t.after(() => rm(scratch, { recursive: true, force: true }));
+test('R-LOCAL-02: an existing temporary folder is ephemeral through symlink and canonical spellings', async t => {
   const f = await fixture(t);
-  await f.session(scratch, 'claude');
+  const scratch = join(f.root, 'scratch'), alias = join(f.root, 'scratch-alias');
+  await mkdir(scratch); await symlink(scratch, alias);
+  await f.session(alias, 'claude'); await f.session(await realpath(scratch), 'claude');
   const result = await analyzeMachineSessions(f.options);
-  assert.equal(result.sessions[0]?.repositoryName, 'Ephemeral automation sessions');
+  assert.equal(result.sessions.length, 2);
+  assert.ok(result.sessions.every(s => s.repositoryName === 'Ephemeral automation sessions'));
+  assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
 });
 
 for (const keptFirst of [true, false]) test(`R-LOCAL-03: retained sessions from retired per-folder groups and the shared group form one group (${keptFirst ? 'shared group first' : 'legacy first'})`, async t => {

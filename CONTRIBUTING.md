@@ -9,9 +9,9 @@ By participating you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). 
 Requirements: Node.js 24 or newer (see `.nvmrc`) and Git. macOS is the primary platform; Linux works for Claude Code and Codex sources.
 
 ```bash
-git clone git@github.com:rokas-tarasevicius/session-analytics.git
+git clone https://github.com/rokas-tarasevicius/session-analytics.git
 cd session-analytics
-npm install         # TypeScript and Node type definitions only
+npm ci              # TypeScript and Node type definitions only
 npm run check       # type check and the full test suite
 ```
 
@@ -23,10 +23,14 @@ There is no build step. Node runs the TypeScript sources directly.
 | `npm run report` | Print the terminal report for your local history. |
 | `npm run demo` | Generate synthetic sessions in a temporary directory and open the dashboard on port 4175 against that data only. `npm run demo -- report` prints the report; `-- --keep` keeps the generated files. |
 | `npm run typecheck` | `tsc --noEmit` over `bin/`, `src/`, `test/`, and `scripts/`. |
-| `npm test` | `node --test --test-concurrency=2 test/*.test.ts test/validation/*.test.ts verify/*/*.test.ts verify/*/*.test.mjs` |
-| `npm run check` | Type check, then tests. CI runs this on Linux (the self-hosted `agentbox` runner) for pull requests, and on Linux and macOS (GitHub-hosted) for pushes to `master` while the repository is private. |
+| `npm test` | `node scripts/test.ts` runs the Node test runner with concurrency 2 over `test/`, `test/validation/` and `verify/` suites, using an isolated temporary directory. |
+| `npm run test:browser` | Run the two Chrome suites with isolated fixtures; missing or unlaunchable Chrome fails. Set `SESSION_ANALYTICS_CHROME` to your Chrome/Chromium executable outside the default macOS location. |
+| `npm run check` | Type check, then tests. Public pull requests and pushes require GitHub-hosted Ubuntu and macOS checks; private-preview PRs use hosted Ubuntu, and private pushes retain advisory macOS. |
+| `npm run release:check` | Validate the source release locally: version metadata, type check, tests, snapshot schemas, synthetic JSON report and package contents. Does not publish. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
+
+The test wrapper chooses a writable temporary directory outside ancestor Git repositories and passes it to fixtures through `TMPDIR`, `TMP` and `TEMP`. This prevents repository-discovery tests from inheriting an unrelated parent Git root. It removes only its own run directory on exit. If neither the system temp directory nor `/var/tmp` is usable, set `TMPDIR` to a writable directory outside any Git checkout.
 
 ## Project layout
 
@@ -111,7 +115,7 @@ Public pricing fetches belong only in `src/pricing/`; analysis stays network-fre
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time.
 
-Pushing a `vX.Y.Z` tag runs the release workflow on the self-hosted `agentbox` runner: it installs development dependencies, runs `npm run check`, and creates a GitHub Release through the REST API using the matching `## [X.Y.Z]` section from `CHANGELOG.md`. A missing section fails the workflow. The GitHub-hosted macOS leg of CI is advisory until the account's hosted minutes are restored.
+Pushing a `vX.Y.Z` tag runs the release workflow. Public releases require GitHub-hosted Ubuntu and macOS validation plus the Ubuntu Chrome check before publication; the private preview can use the trusted `agentbox` runner and skip the browser job. Validation checks that the tag, package, source version and latest changelog release agree, then checks types, tests, schemas and a synthetic report. Only the publishing job has write permission. It creates a GitHub Release through the REST API using the matching `## [X.Y.Z]` section from `CHANGELOG.md`; missing or inconsistent metadata fails before publication. See [docs/release.md](docs/release.md) for the preflight and public launch gates.
 
 ## Style
 
