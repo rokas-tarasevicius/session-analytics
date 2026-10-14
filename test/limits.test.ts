@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { readClaudeProfile } from "../src/limits/accounts.ts";
 import { collectLimits } from "../src/limits/index.ts";
 import { compactObservations, readLedger } from "../src/limits/ledger.ts";
 import { codexAccountState } from "../src/limits/codex-account.ts";
-import { claudePlanFrom, claudeSdkAccount, claudeSdkLimitRecord, codexLimitRecord, resetCursors, statuslineObservations } from "../src/limits/sources.ts";
-import type { LimitObservation } from "../src/limits/types.ts";
+import { claudeSdkAccount, claudeSdkLimitRecord, codexLimitRecord, statuslineObservations } from "../src/limits/sources.ts";
+import type { LimitObservation, LimitsSnapshot } from "../src/limits/types.ts";
 
 const root = new URL("..", import.meta.url).pathname;
 const at = (iso: string) => Math.floor(Date.parse(iso) / 1000);
@@ -63,30 +64,34 @@ test("statusline rate_limits are percentages with Unix reset times; expired wind
 });
 
 test("compaction keeps one row per meter, cycle and bucket: the highest reading, its earliest time, the worst status", () => {
-  const base: LimitObservation = { provider: "claude", meter: "five_hour", windowMinutes: 300, resetsAt: now + 3600, observedAt: now - 600, usedPercent: 40, status: "allowed", source: "claude-sdk-log" };
+  const base: LimitObservation = { provider: "claude", account: "", meter: "five_hour", windowMinutes: 300, resetsAt: now + 3600, observedAt: now - 600, usedPercent: 40, status: "allowed", source: "claude-sdk-log" };
   const rows = compactObservations([
     base,
     { ...base, observedAt: now - 500, usedPercent: 90, status: "warning" },
     { ...base, observedAt: now - 400, usedPercent: 90, status: "unknown" },
     { ...base, observedAt: now - 300, usedPercent: 70, status: "rejected" },
+    { ...base, observedAt: now - 250, usedPercent: 95, status: "rejected" },
     { ...base, meter: "../../etc", usedPercent: 1 },
+    { ...base, account: "claude-../etc", usedPercent: 1 },
     { ...base, observedAt: now - 200 * 86_400 },
   ], now);
-  assert.equal(rows.length, 1);
-  assert.deepEqual([rows[0]!.usedPercent, rows[0]!.observedAt, rows[0]!.status], [90, now - 500, "rejected"]);
+  // The cap keeps its own row and time: merging it into the earlier peak would move the lockout start earlier.
+  assert.deepEqual(rows.map((row) => [row.usedPercent, row.observedAt, row.status]), [[90, now - 500, "warning"], [70, now - 300, "rejected"]]);
 });
 
-test("the Claude plan is read from the OAuth record as a fixed enum only", async () => {
+test("without .claude.json, the Claude plan is read from the OAuth record as a fixed enum only", async () => {
   const directory = mkdtempSync(join(tmpdir(), "limits-plan-"));
   const path = join(directory, ".credentials.json");
   writeFileSync(path, JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat-SECRET", subscriptionType: "max", rateLimitTier: "default_claude_max_20x" } }));
-  assert.equal(await claudePlanFrom([join(directory, "missing.json"), path]), "max-20x");
+  const profile = await readClaudeProfile({ directory, isDefault: false }, directory);
+  assert.deepEqual([profile.key, profile.plan, profile.planSource], [null, "max-20x", "claude-credentials"]);
   writeFileSync(path, JSON.stringify({ claudeAiOauth: { subscriptionType: "sk-ant-oat-SECRET" } }));
-  assert.equal(await claudePlanFrom([path]), null);
+  assert.equal((await readClaudeProfile({ directory, isDefault: false }, directory)).plan, null);
+  writeFileSync(path, JSON.stringify({ claudeAiOauth: { subscriptionType: "team", rateLimitTier: "default_claude_max_5x" } }));
+  assert.equal((await readClaudeProfile({ directory, isDefault: false }, directory)).plan, "team", "the subscription type wins over a Max-like tier");
 });
 
 test("harvest is incremental, persists a private ledger, and returns no paths, ids or credentials", async () => {
-  resetCursors();
   const home = mkdtempSync(join(tmpdir(), "limits-home-"));
   const codexRoot = join(home, "codex", "sessions", "2026", "10", "13");
   const logs = join(home, "t3-logs");
@@ -102,7 +107,7 @@ test("harvest is incremental, persists a private ledger, and returns no paths, i
   assert.equal(first.persisted, true);
   assert.equal(first.plans.codex, "plus");
   assert.deepEqual(first.observations.map((item) => `${item.provider}:${item.meter}:${item.usedPercent}`).sort(), ["claude:five_hour:30", "codex:seven_day:50"]);
-  assert.equal(statSync(join(dataDir, "limits.json")).mode & 0o777, 0o600);
+  assert.equal(statSync(join(dataDir, "limits-v2.json")).mode & 0o777, 0o600);
   const serialized = JSON.stringify(first) + JSON.stringify(readLedger(dataDir));
   for (const secret of ["SECRET", home, "rollout", "session_id"]) assert.equal(serialized.includes(secret), false, secret);
 
@@ -116,7 +121,6 @@ test("harvest is incremental, persists a private ledger, and returns no paths, i
 });
 
 test("--no-index harvests without writing the ledger", async () => {
-  resetCursors();
   const home = mkdtempSync(join(tmpdir(), "limits-noindex-"));
   const dataDir = join(home, "data");
   const snapshot = await collectLimits({ dataDir, noIndex: true, codexRoot: join(home, "none") }, { SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: join(home, "none") }, now);
@@ -134,7 +138,7 @@ test("limits statusline records readings once per change and prints them", () =>
   assert.equal(first.status, 0);
   assert.match(first.stdout, /^5h 46% ↻[23]h/);
   run();
-  const inbox = join(dataDir, "limits-inbox.jsonl");
+  const inbox = join(dataDir, "limits-inbox-v2.jsonl");
   assert.equal(statSync(inbox).mode & 0o777, 0o600);
   assert.equal(spawnSync("wc", ["-l", inbox], { encoding: "utf8" }).stdout.trim().split(" ")[0], "1");
   const garbage = spawnSync(process.execPath, [join(root, "bin/session-analytics.ts"), "limits", "statusline", "--data-dir", dataDir], { input: "not json", encoding: "utf8" });
@@ -163,7 +167,6 @@ test("Claude extra-usage state comes from SDK events as fixed enums", () => {
 });
 
 test("banked resets are read through the Codex app-server by default, throttled, and never redeemed", async () => {
-  resetCursors();
   const home = mkdtempSync(join(tmpdir(), "limits-account-"));
   const methods = join(home, "methods.log");
   const fake = join(home, "codex");
@@ -192,14 +195,16 @@ process.stdin.on("data", (chunk) => {
   assert.equal(offline.codexAccount, "off");
   assert.throws(() => statSync(methods), "no app-server when turned off or offline");
 
+  const codex = (snapshot: LimitsSnapshot) => snapshot.accounts.find((account) => account.provider === "codex");
   const first = await collectLimits({ dataDir }, environment, now);
   assert.equal(first.codexAccount, "ok");
-  assert.deepEqual(first.accounts.codex?.resetCredits?.available, 2);
-  assert.equal(first.accounts.codex?.resetCredits?.credits?.[0]?.expiresAt, now + 2 * 86_400);
-  assert.deepEqual(first.resetCreditHistory, [["codex", now, 2]]);
-  assert.ok(first.observations.some((item) => item.source === "codex-account" && item.usedPercent === 92));
+  assert.deepEqual(codex(first)?.codex?.resetCredits?.available, 2);
+  assert.equal(codex(first)?.codex?.resetCredits?.credits?.[0]?.expiresAt, now + 2 * 86_400);
+  assert.equal(codex(first)?.plan, "pro");
+  assert.deepEqual(first.resetCreditHistory, [["codex", codex(first)!.key, now, 2]]);
+  assert.ok(first.observations.some((item) => item.source === "codex-account" && item.usedPercent === 92 && item.account === codex(first)!.key));
   const second = await collectLimits({ dataDir }, environment, now + 60);
-  assert.equal(second.accounts.codex?.resetCredits?.available, 2, "throttled reads keep the last account state");
+  assert.equal(codex(second)?.codex?.resetCredits?.available, 2, "throttled reads keep the last account state");
   const sent = readFileSync(methods, "utf8").trim().split("\n");
   assert.deepEqual(sent, ["initialize", "initialized", "account/rateLimits/read"], "one read, and never account/rateLimitResetCredit/consume");
 });

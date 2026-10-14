@@ -10,7 +10,8 @@ import { priceUsage } from "../pricing/usage.ts";
 
 const key = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 20);
 const profileDirectory = (root: string): string => basename(root) === "projects" ? dirname(root) : root;
-const profileKeyFor = (canonical: string): string => `profile-${key(`claude:directory:${canonical}`)}`;
+/** Pseudonymous key of a Claude profile directory; the limits ledger uses the same key to join sessions to accounts. */
+export const profileKeyFor = (canonical: string): string => `profile-${key(`claude:directory:${canonical}`)}`;
 
 /** Maps a native Claude transcript to the profile whose statistics describe it; the longest root wins. */
 export async function claudeProfileResolver(roots: string[]): Promise<(path: string) => string | null> {

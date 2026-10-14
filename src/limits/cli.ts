@@ -6,20 +6,21 @@ import { argument, setting } from "../options.ts";
 import { dataDirectory, secureDirectory, secureFile } from "../store/database.ts";
 import { buildMeters, formatDuration, latestReading, liveMeter, providerNames, type LiveMeter } from "../public/subscription-data.js";
 import { planFor } from "../public/subscription-plans.js";
-import { collectLimits, type LimitsOptions } from "./index.ts";
+import { collectLimits, statuslineAccount, type LimitsOptions } from "./index.ts";
 import { appendInbox } from "./ledger.ts";
 import { statuslineObservations } from "./sources.ts";
-import type { LimitObservation } from "./types.ts";
+import type { LimitAccount, LimitMeterInfo, LimitObservation, LimitsSnapshot } from "./types.ts";
 
 const help = `${brand.name} limits
 
 Usage:
-  ${brand.command} limits [--json] [--quiet]   Harvest subscription limit meters and print where each stands
+  ${brand.command} limits [--json] [--quiet]   Harvest subscription limit meters and print where each account stands
   ${brand.command} limits statusline            Claude Code status line: records rate_limits from stdin, prints them
 
 Sources (read-only): Codex session rate_limits records, Claude Agent SDK rate_limit_event records in host
 event logs (T3 Code by default; SESSION_ANALYTICS_CLAUDE_EVENT_LOGS overrides), and statusline readings.
-Readings are kept in a private ledger in the data directory so reset history survives log rotation.
+Readings are attributed to accounts (a Claude profile's login, a Codex rollout's account) and kept in a private
+ledger in the data directory so reset history survives log rotation.
 Run it on a schedule to keep history continuous, e.g. cron: */20 * * * * ${brand.command} limits --quiet
 
 Options:
@@ -52,17 +53,40 @@ function options(args: string[]): LimitsOptions {
 
 const clock = (seconds: number): string => new Date(seconds * 1000).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
-function describe(live: LiveMeter, now: number): string {
-  const label = live.meter.label.padEnd(28);
-  if (!live.cycle) return `  ${label} idle · the next request starts a new window`;
+function describe(live: LiveMeter, info: LimitMeterInfo | undefined, now: number): string {
+  const label = (info?.label ?? live.meter.label).padEnd(28);
+  if (info?.retired) return `  ${label} not reported since ${clock(info.lastObservedAt)}`;
+  if (!live.cycle || live.cycle.last.status === "idle") return `  ${label} idle · the next request starts a new window`;
   const parts = [`${live.used.toFixed(0).padStart(3)}% used`, `resets ${clock(live.cycle.resetsAt)} (in ${formatDuration(Math.max(0, live.cycle.resetsAt - now))})`];
   if (live.state === "unreported") return `  ${label} ${live.used.toFixed(0).padStart(3)}% at last report ${clock(live.observedAt ?? now)} · no longer reported by the provider`;
-  if (live.state === "capped") parts.push(`capped since ${clock(live.capAt ?? live.cycle.last.t)}`);
-  else if (live.capsEarly && live.capAt) parts.push(`at this pace runs out ${clock(live.capAt)}`);
+  if (live.cycle.last.status === "overage") parts.push("past the included allowance, on extra usage");
+  else if (live.state === "capped") parts.push(`capped since ${clock(live.capAt ?? live.cycle.last.t)}`);
+  else if (live.capsEarly && live.capAt && live.capAt > now) parts.push(`at this pace runs out ${clock(live.capAt)}`);
   else if (live.projected === null) parts.push("too early in the window to project");
   else if (live.projected !== undefined && live.elapsed !== null && (live.elapsed ?? 0) > 0.05) parts.push(`on pace for ${Math.min(100, live.projected).toFixed(0)}% at reset`);
   if (live.stale) parts.push(`last reading ${formatDuration(now - (live.observedAt ?? now))} ago`);
   return `  ${label} ${parts.join(" · ")}`;
+}
+
+/** Facts that belong to one account: plan evidence, Claude extra usage, Codex credits and banked resets. */
+function accountFacts(account: LimitAccount, codexAccount: LimitsSnapshot["codexAccount"], now: number): string[] {
+  const lines: string[] = [];
+  const evidence = account.planEvidence;
+  if (account.plan === "team" && (evidence?.seatTier || evidence?.userRateLimitTier)) lines.push(`  Seat: ${[evidence.seatTier, evidence.userRateLimitTier].filter(Boolean).join(", ").replace(/_/g, " ")}`);
+  if (account.attribution === "unattributed") lines.push("  Readings that could not be tied to an account; left out of pace and value.");
+  if (account.attribution === "weekly-phase") lines.push("  Readings whose session was not found in any profile; grouped by weekly reset time.");
+  const extra = account.extraUsage;
+  if (extra) lines.push(`  Extra usage: ${extra.extraUsage}${extra.disabledReason ? ` (${extra.disabledReason.replace(/_/g, " ")})` : ""}`);
+  if (account.provider !== "codex" || account.attribution === "unattributed") return lines;
+  const resets = account.codex?.resetCredits;
+  if (resets) {
+    const next = (resets.credits ?? []).filter((credit) => credit.status === "available" && credit.expiresAt).sort((a, b) => a.expiresAt! - b.expiresAt!)[0];
+    lines.push(`  Banked resets: ${resets.available} available${next?.expiresAt ? `, next expires ${clock(next.expiresAt)} (in ${formatDuration(Math.max(0, next.expiresAt - now))})` : ""}`);
+  } else if (codexAccount === "off") lines.push("  Banked resets: not read (turned off)");
+  else if (codexAccount === "unavailable") lines.push("  Banked resets: the local Codex app-server did not answer");
+  const balance = account.codex?.credits?.balance;
+  if (balance !== null && balance !== undefined) lines.push(`  Credit balance: ${Math.round(balance).toLocaleString("en")} credits`);
+  return lines;
 }
 
 async function report(args: string[]): Promise<number> {
@@ -70,36 +94,35 @@ async function report(args: string[]): Promise<number> {
   if (args.includes("--quiet")) return 0;
   if (args.includes("--json")) { process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`); return 0; }
   const now = Date.now() / 1000;
-  const meters = buildMeters(snapshot.observations, now);
   const lines = [`${brand.name} · subscription limits`, ""];
   for (const provider of ["claude", "codex"] as const) {
-    const plan = planFor(provider, snapshot.plans[provider]);
-    const own = meters.filter((meter) => meter.provider === provider);
-    lines.push(`${providerNames[provider]}${plan ? ` · ${plan.label}${plan.monthlyUsd ? ` ($${plan.monthlyUsd}/mo)` : ""}` : ""}`);
-    if (!own.length) lines.push("  No meter readings yet.");
-    for (const meter of own) lines.push(describe(liveMeter(meter, now, latestReading(own)), now));
-    lines.push("");
+    const accounts = snapshot.accounts.filter((account) => account.provider === provider);
+    if (!accounts.length) lines.push(providerNames[provider], "  No meter readings yet.", "");
+    for (const account of accounts) {
+      const plan = account.plan && account.plan !== "team" ? planFor(provider, account.plan) : null;
+      lines.push(`${account.label}${plan?.monthlyUsd ? ` ($${plan.monthlyUsd}/mo)` : ""}`);
+      // Each account is its own series: cycles, pace and "no longer reported" never mix two accounts.
+      const own = buildMeters(snapshot.observations.filter((row) => row.provider === provider && row.account === account.key), now);
+      if (!own.length) lines.push("  No meter readings yet.");
+      for (const meter of own) {
+        const info = snapshot.meters.find((item) => item.provider === provider && item.account === account.key && item.meter === meter.meter);
+        lines.push(describe(liveMeter(meter, now, latestReading(own)), info, now));
+      }
+      lines.push(...accountFacts(account, snapshot.codexAccount, now), "");
+    }
   }
-  const resets = snapshot.accounts.codex?.resetCredits;
-  if (resets) {
-    const next = (resets.credits ?? []).filter((credit) => credit.status === "available" && credit.expiresAt).sort((a, b) => a.expiresAt! - b.expiresAt!)[0];
-    lines.push(`Codex banked resets: ${resets.available} available${next?.expiresAt ? `, next expires ${clock(next.expiresAt)} (in ${formatDuration(next.expiresAt - now)})` : ""}`);
-  } else if (snapshot.codexAccount === "off") lines.push("Codex banked resets: not read (turned off)");
-  else if (snapshot.codexAccount === "unavailable") lines.push("Codex banked resets: the local Codex app-server did not answer");
-  const balance = snapshot.accounts.codex?.credits;
-  if (balance?.balance !== null && balance?.balance !== undefined) lines.push(`Codex credit balance: ${Math.round(balance.balance).toLocaleString("en")} credits`);
-  const extra = snapshot.accounts.claude;
-  if (extra) lines.push(`Claude extra usage: ${extra.extraUsage}${extra.disabledReason ? ` (${extra.disabledReason.replace(/_/g, " ")})` : ""}`);
-  lines.push("");
   for (const source of snapshot.sources) lines.push(`Source ${source.source}: ${source.status}${source.latest ? `, latest ${clock(source.latest)}` : ""}`);
-  lines.push(snapshot.persisted ? "History is kept in the private ledger. Value, capacity and reset history: open the dashboard's Subscription view." : "History is not persisted (--no-index).");
+  lines.push(snapshot.persisted ? "History is kept in the private ledger. Value, capacity and reset history: open the dashboard's Subscription view."
+    : snapshot.ledger === "unreadable" ? "History is not kept: the ledger was written by another version of session-analytics and was left untouched."
+    : snapshot.ledger === "unwritable" ? "History could not be saved this time; the next harvest reads the same records again."
+    : "History is not persisted (--no-index).");
   process.stdout.write(`${lines.join("\n")}\n`);
   return 0;
 }
 
-/** Skip appending when nothing changed since the last statusline refresh; status lines redraw many times a minute. */
-function changedSinceLast(directory: string, observations: LimitObservation[]): boolean {
-  const path = join(directory, "limits-statusline.last");
+/** Skip appending when nothing changed since the account's last statusline refresh; status lines redraw many times a minute. */
+function changedSinceLast(directory: string, account: string, observations: LimitObservation[]): boolean {
+  const path = join(directory, `limits-statusline-${account || "unattributed"}.last`);
   const signature = JSON.stringify(observations.map((item) => [item.meter, item.resetsAt, Math.round(item.usedPercent * 10)]));
   let previous = "";
   try { previous = readFileSync(path, "utf8"); } catch { /* First run. */ }
@@ -124,7 +147,9 @@ async function statusline(args: string[]): Promise<number> {
   if (observations.length && !settings.noIndex) {
     try {
       const directory = dataDirectory(settings);
-      if (changedSinceLast(directory, observations)) appendInbox(directory, observations);
+      const account = await statuslineAccount(value);
+      const attributed = observations.map((item) => ({ ...item, account }));
+      if (changedSinceLast(directory, account, attributed)) appendInbox(directory, attributed);
     } catch { /* Recording is best-effort; the status line still prints. */ }
   }
   const short: Record<string, string> = { five_hour: "5h", seven_day: "week" };

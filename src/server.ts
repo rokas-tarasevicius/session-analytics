@@ -233,12 +233,16 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
 // Limit meters are harvested incrementally in this process (new log tails only) and shared by concurrent requests.
 let limitsPromise: Promise<LimitsSnapshot> | null = null;
 let limitsAt = 0;
+let limitsPending = false;
+/** A harvest still running is always shared, however old: a second one would only re-read the same tails. */
 function limits(refresh: boolean): Promise<LimitsSnapshot> {
   if (snapshotFile) return Promise.resolve(emptyLimitsSnapshot("snapshot"));
-  const age = Date.now() - limitsAt;
-  if (limitsPromise && age < (refresh ? 5_000 : 30_000)) return limitsPromise;
+  if (limitsPromise && (limitsPending || Date.now() - limitsAt < (refresh ? 5_000 : 30_000))) return limitsPromise;
   limitsAt = Date.now();
-  limitsPromise = collectLimits({ ...analyzeOptions, codexAccount: !process.argv.includes("--no-codex-account") }).catch((error: unknown) => { limitsPromise = null; throw error; });
+  limitsPending = true;
+  limitsPromise = collectLimits({ ...analyzeOptions, codexAccount: !process.argv.includes("--no-codex-account") })
+    .finally(() => { limitsPending = false; })
+    .catch((error: unknown) => { limitsPromise = null; throw error; });
   return limitsPromise;
 }
 

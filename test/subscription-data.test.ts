@@ -10,7 +10,7 @@ const start = Date.parse("2026-10-05T00:00:00Z") / 1000;
 const week = 7 * DAY;
 
 function reading(provider: "claude" | "codex", meter: string, resetsAt: number, observedAt: number, usedPercent: number, status: LimitObservation["status"] = "allowed"): LimitObservation {
-  return { provider, meter, windowMinutes: meter === "five_hour" ? 300 : 10_080, resetsAt, observedAt, usedPercent, status, source: provider === "codex" ? "codex-session" : "claude-sdk-log" };
+  return { provider, account: "", meter, windowMinutes: meter === "five_hour" ? 300 : 10_080, resetsAt, observedAt, usedPercent, status, source: provider === "codex" ? "codex-session" : "claude-sdk-log" };
 }
 
 /** A session whose activity ledger spends `perHour` dollars in each UTC hour of [from, to). */
