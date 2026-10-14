@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
 import { indexErrorMessage } from "./store/errors.ts";
 import { analysisEnvironment } from "./options.ts";
+import { track } from "./processes.ts";
 
 /** Machine-wide history with thousands of indexed sessions peaks well above 256 MB. */
 export const analysisHeapLimitMegabytes = 1024;
@@ -20,11 +21,11 @@ export async function analyzeMachineSessionsIsolated(
   options: AnalyzeOptions,
 ): Promise<MachineAnalytics> {
   return await new Promise<MachineAnalytics>((resolve, reject) => {
-    const child = spawn(
+    const child = track(spawn(
       process.execPath,
       [`--max-old-space-size=${analysisHeapLimitMegabytes}`, fileURLToPath(new URL("./analysis-worker.ts", import.meta.url))],
       { stdio: ["pipe", "pipe", "pipe"], env: analysisEnvironment(options) },
-    );
+    ));
     let output = "";
     let errorOutput = "";
     child.stdout.setEncoding("utf8");

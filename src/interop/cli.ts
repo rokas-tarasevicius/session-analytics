@@ -1,7 +1,10 @@
 import { InteropError } from "./error.ts";
 import { brand } from "../brand.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, assertRemoteAnalysis, OptionError, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, assertRemoteAnalysis, OptionError, remoteBooleanFlags, remoteHelp, remoteValueFlags } from "../options.ts";
+import { remoteFor } from "../machines/config.ts";
+import { stopOnSignals } from "../processes.ts";
 import { analyzeMachines } from "../remote.ts";
+import { analyzeMachineSessionsIsolated } from "../analysis-process.ts";
 import { readJsonFile, writeNewFile, writeNewFiles } from "./files.ts";
 import { exportFiles, type ExportFormat } from "./exports.ts";
 import { otlpEndpoint, postOtlp } from "./otlp.ts";
@@ -17,11 +20,13 @@ export function assertSnapshotOptions(argv: string[]): void {
   if (argv.includes("--snapshot") && ([...analysisValueFlags, ...analysisBooleanFlags, ...remoteValueFlags].some((flag) => argv.includes(flag)) || argv.includes("--exclude-hidden") || argv.includes("--include-hidden"))) throw new InteropError("Snapshot input cannot be combined with analysis flags.");
 }
 
-/** This machine plus any --remote machines. Progress goes to stderr; stdout stays the payload. */
-async function analyzeFrom(argv: string[]): Promise<MachineAnalytics> {
+/** This machine plus other machines, unless the result describes this machine alone. Progress goes to stderr; stdout stays the payload. */
+async function analyzeFrom(argv: string[], thisMachineOnly = false): Promise<MachineAnalytics> {
   const options = analyzeOptionsFrom(argv, process.env);
-  const remote = remoteOptionsFrom(argv, process.env);
+  if (thisMachineOnly) return await analyzeMachineSessionsIsolated(options);
+  const remote = remoteFor(argv, process.env, options, (line) => process.stderr.write(`${line}\n`));
   assertRemoteAnalysis(options, remote);
+  stopOnSignals();
   return await analyzeMachines(options, remote, (line) => process.stderr.write(`${line}\n`));
 }
 
@@ -35,7 +40,8 @@ export async function reportShare(argv: string[]): Promise<void> {
   const aliasPath = argument(argv, "--share-aliases");
   const aliases = aliasPath ? await readAliases(aliasPath) : {};
   const path = argument(argv, "--snapshot");
-  const snapshot = path ? await loadMachineSnapshot(path) : await analyzeFrom(argv);
+  // One source ID covers what is shared, so other machines share their own and merge detects overlap.
+  const snapshot = path ? await loadMachineSnapshot(path) : await analyzeFrom(argv, true);
   const shared = shareSnapshot(snapshot, secret, minimum, aliases);
   process.stderr.write("Share preview: stdout is the entire aggregate payload. No data has been sent. Review aliases and counts before sharing this file.\n");
   process.stderr.write(`${sharedEvidenceCaveat}\n`);
@@ -50,7 +56,7 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index]!;
     if (command === "merge" && !flag.startsWith("-")) { inputs.push(flag); continue; }
-    if ((!valueFlags.has(flag) && !booleanFlags.has(flag)) || seen.has(flag)) throw new InteropError("Unknown or repeated interchange argument.");
+    if ((!valueFlags.has(flag) && !booleanFlags.has(flag)) || (seen.has(flag) && flag !== "--remote")) throw new InteropError("Unknown or repeated interchange argument.");
     seen.add(flag);
     if (valueFlags.has(flag)) {
       if (!argv[index + 1] || argv[index + 1]!.startsWith("--")) throw new InteropError("An interchange argument requires a value.");

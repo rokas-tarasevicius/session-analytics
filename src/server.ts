@@ -6,7 +6,9 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
+import { remoteFor } from "./machines/config.ts";
+import { stopOnSignals } from "./processes.ts";
 import { analyzeMachines } from "./remote.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
@@ -185,10 +187,10 @@ try { assertSnapshotOptions(process.argv); } catch {
   process.exit(2);
 }
 const snapshotFile = argument(process.argv, "--snapshot");
-// A saved snapshot never scans, so a remote set in the environment does not apply to it.
-let remote: RemoteOptions = { remotes: [], command: [] };
+// A saved snapshot never scans, so saved machines and remote settings do not apply to it.
+let remote: RemoteOptions = { machines: [], timeoutMs: 0, digest: null, local: "this machine" };
 if (!snapshotFile) {
-  try { remote = remoteOptionsFrom(process.argv, process.env); assertRemoteAnalysis(analyzeOptions, remote); }
+  try { remote = remoteFor(process.argv, process.env, analyzeOptions, (line) => process.stderr.write(`${line}\n`)); assertRemoteAnalysis(analyzeOptions, remote); }
   catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
 }
 const pricing = pricingConfiguration(analyzeOptions);
@@ -202,8 +204,8 @@ const normalizedOptions = {
   pricingPolicy: pricing.policy,
   pricingSources: pricing.sources,
   pricingMaxAgeDays: pricing.maxAgeDays,
-  // Another set of machines is another dashboard.
-  ...(remote.remotes.length ? { remotes: remote.remotes, remoteCommand: remote.command } : {}),
+  // Another set of machines is another dashboard; the same saved machines match a plain launch.
+  ...(remote.digest ? { machines: remote.digest } : {}),
 };
 const optionsHash = createHash("sha256").update(JSON.stringify(Object.fromEntries(
   Object.entries(normalizedOptions).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) =>
@@ -211,6 +213,7 @@ const optionsHash = createHash("sha256").update(JSON.stringify(Object.fromEntrie
 ))).digest("hex");
 const instanceToken = randomBytes(32).toString("hex");
 
+const shutdown = new AbortController();
 let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
 let snapshotReady = false;
@@ -218,7 +221,7 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
-    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line, failed) => (failed ? process.stderr : process.stdout).write(`${line}\n`)))
+    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line, failed) => (failed ? process.stderr : process.stdout).write(`${line}\n`), shutdown.signal))
       .then((result) => {
         snapshotReady = true;
         return result;
@@ -385,13 +388,16 @@ server.listen(port, "127.0.0.1", () => {
       }).catch(() => process.stderr.write("Background pricing update unavailable; cached rates remain in use.\n"));
     })
     .catch((error) => {
-      process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);
+      if (!shutdown.signal.aborted) process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);
     });
   if (process.argv.includes("--open")) {
     void warmup.then(openDashboard, openDashboard);
   }
 });
 
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.on(signal, () => server.close(() => process.exit(0)));
-}
+// In-flight requests are not awaited: remote reads, workers and connections stop at once.
+stopOnSignals(() => {
+  shutdown.abort();
+  server.close();
+  server.closeAllConnections();
+}, 0);

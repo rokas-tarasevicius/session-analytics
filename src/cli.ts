@@ -1,7 +1,9 @@
 import { historyReport } from "./report/history.ts";
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, argument, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags, type RemoteOptions } from "./options.ts";
-import { analyzeMachines } from "./remote.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, OptionError, optionErrorMessage, pricingHelp, argument, remoteBooleanFlags, remoteHelp, remoteValueFlags, type RemoteOptions } from "./options.ts";
+import { remoteFor } from "./machines/config.ts";
+import { stopOnSignals } from "./processes.ts";
+import { analyzeMachines, type MachineRead } from "./remote.ts";
 import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
 import { loadMachineSnapshot } from "./interop/snapshot.ts";
 import { InteropError } from "./interop/error.ts";
@@ -86,12 +88,19 @@ function dollars(value: number): string {
   }).format(value);
 }
 
+stopOnSignals();
 let analyzeOptions;
-// A saved snapshot never scans, so a remote set in the environment does not apply to it.
-let remote: RemoteOptions = { remotes: [], command: [] };
+// A saved snapshot never scans, and a share describes this machine alone, so neither reads other machines.
+let remote: RemoteOptions = { machines: [], timeoutMs: 0, digest: null, local: "this machine" };
 try {
   analyzeOptions = analyzeOptionsFrom(process.argv, process.env);
-  if (!argument(process.argv, "--snapshot")) { remote = remoteOptionsFrom(process.argv, process.env); assertRemoteAnalysis(analyzeOptions, remote); }
+  if (process.argv.includes("--share") && (process.argv.includes("--remote") || process.argv.includes("--machines"))) {
+    throw new OptionError("report --share describes this machine only; share from each machine and merge the files.");
+  }
+  if (!argument(process.argv, "--snapshot") && !process.argv.includes("--share")) {
+    remote = remoteFor(process.argv, process.env, analyzeOptions, (line) => process.stderr.write(`${line}\n`));
+    assertRemoteAnalysis(analyzeOptions, remote);
+  }
 } catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
 
 try {
@@ -103,7 +112,8 @@ try {
 } catch (error) { reportInteropFailure(error); process.exit(1); }
 const snapshotFile = argument(process.argv, "--snapshot");
 let analytics;
-try { analytics = process.argv.includes("--share") ? null : await (snapshotFile ? loadMachineSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line) => process.stderr.write(`${line}\n`))); }
+const reads: MachineRead[] = [];
+try { analytics = process.argv.includes("--share") ? null : await (snapshotFile ? loadMachineSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line, _failed, read) => { if (read) reads.push(read); process.stderr.write(`${line}\n`); })); }
 catch (error) {
   process.stderr.write(`${indexErrorMessage(indexErrorCode(error)) ?? (error instanceof AnalysisHeapLimitError ? error.message : "Session analysis could not be completed.")}\n`);
   process.exit(1);
@@ -117,7 +127,11 @@ const metricValue = (value: number, metric: Metric, format = compactNumber, sess
 if (analytics && process.argv.includes("--json")) {
   process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);
 } else if (analytics) {
-  process.stdout.write(`${brand.name} · ${remote.remotes.length ? `this machine and ${remote.remotes.join(", ")}` : "all locally evidenced repositories"}\n`);
+  const state = (name: string): MachineRead["state"] | undefined => reads.find((read) => read.name === name)?.state;
+  const read = remote.machines.filter(({ name }) => state(name) && state(name) !== "failed").map(({ name }) => name);
+  const missing = remote.machines.filter(({ name }) => state(name) === "failed").map(({ name }) => name);
+  const names = [remote.local, ...read], machines = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+  process.stdout.write(`${brand.name} · ${remote.machines.length ? `${machines}${missing.length ? ` (not read: ${missing.join(", ")})` : ""}` : "all locally evidenced repositories"}\n`);
   process.stdout.write(`Generated: ${analytics.generatedAt}\n`);
   process.stdout.write(
     `Repositories: ${analytics.summary.repositoriesWithSessions}/${analytics.summary.repositories} with sessions\n`,
