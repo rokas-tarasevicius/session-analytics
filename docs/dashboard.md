@@ -40,6 +40,12 @@ Click a repository in the sidebar, or pick one from the command palette, and eve
   </picture>
 </p>
 
+### Machines: more than one computer
+
+With [other machines](interop.md#combine-machines) saved, a **Machines** strip above the scope line lists each machine with its session count, such as `laptop 6,398 · agentbox 722 · read 11:44`. Each chip switches that machine's sessions in or out of every view, total and export, as the provider chips do for a chart. A machine that could not be read is marked with its reason: a stale one (`agentbox 722 unreachable · showing 2 h ago`) still counts its last good snapshot, and a failed one is a button that opens **Machine details**. That dialog, also in the command palette, lists every machine's state, sessions, repositories, read time, duration and version, and the command that fixes a failure. The sync label says how many machines are ready and names the others, such as `1 of 2 machines ready · agentbox stale` (or `not read` when nothing of it is shown), Summary adds **Usage value by machine**, and Coverage notes name the machine they came from. History coverage spans every machine whichever are switched on, and labels each Claude profile with its machine.
+
+The dashboard shows this machine's sessions as soon as its own scan is done, rather than waiting for the slowest machine: a machine still reading appears from its last good snapshot (or without its sessions), with a pulsing dot, and its sessions join the views when it answers. **Refresh snapshot** reads each machine again unless it is still reading.
+
 ### Velocity: where usage is moving
 
 Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every percentage, and a **Top movers** table ranks the models, agents and other dimensions whose value changed most over the last seven completed days. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.

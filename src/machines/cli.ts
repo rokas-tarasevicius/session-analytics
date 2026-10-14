@@ -4,6 +4,8 @@ import {
 } from "../options.ts";
 import { stopOnSignals, stopping } from "../processes.ts";
 import { runtimePayload } from "../remote/runtime.ts";
+import { machineKey } from "../remote.ts";
+import { forgetLastGood, renameLastGood } from "./cache.ts";
 import { checkHeading, checkLine, checkMachine, type MachineCheck } from "./check.ts";
 import { machineProblem, machinesPath, readMachines, writeMachines, type MachinesConfig, type SavedMachine } from "./config.ts";
 
@@ -195,9 +197,12 @@ async function run(subcommand: string, args: string[]): Promise<number> {
     if (words) next.command = commandWords(words, next.user);
     if (args.includes("--enable")) next.enabled = true;
     if (args.includes("--disable")) next.enabled = false;
-    if (next.ssh !== previous.ssh || next.user !== previous.user) delete next.identity;
+    const moved = next.ssh !== previous.ssh || next.user !== previous.user;
+    if (moved) delete next.identity;
     config.machines[config.machines.indexOf(previous)] = validMachine(next, config, previous);
     writeMachines(options, config);
+    // Its last good snapshot describes another host or account.
+    if (moved) forgetLastGood(options, machineKey(next.name));
     write(`Updated ${next.name}${next.enabled ? "" : " (disabled)"}. Test it with ${command} machines check ${next.name}.`);
     return 0;
   }
@@ -211,14 +216,17 @@ async function run(subcommand: string, args: string[]): Promise<number> {
     else {
       const previous = named(config, name);
       config.machines[config.machines.indexOf(previous)] = validMachine({ ...previous, name: label }, config, previous);
+      writeMachines(options, config);
+      if (machineKey(previous.name) !== machineKey(label)) renameLastGood(options, machineKey(previous.name), machineKey(label));
     }
-    writeMachines(options, config);
+    if (name.toLowerCase() === "local") writeMachines(options, config);
     write(name.toLowerCase() === "local" ? `This machine is now labelled ${label}.` : `Renamed ${name} to ${label}.`);
     return 0;
   }
   const removed = named(config, positional[0]!);
   config.machines = config.machines.filter((machine) => machine !== removed);
   writeMachines(options, config);
+  forgetLastGood(options, machineKey(removed.name));
   write(`Removed ${removed.name}.${removed.runtime === "bundled" ? ` Its bundled runtime stays in ${removed.user ?? "your"}${removed.user ? "'s" : ""} ~/.cache/session-analytics/runtime on ${removed.ssh}; delete that directory there to reclaim the space.` : ""}`);
   return 0;
 }

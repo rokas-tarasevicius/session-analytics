@@ -15,6 +15,7 @@ import { remoteArguments } from "../src/remote.ts";
 import { duplicateMachineWarning, filteredWarning, remoteUnavailableWarning } from "../src/public/evidence.js";
 import { filterSnapshot } from "../src/public/export-data.js";
 import type { MachineAnalytics } from "../src/types.ts";
+import { version } from "../src/version.ts";
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
 
 const run = promisify(execFile);
@@ -169,6 +170,42 @@ test("unreachable, outdated and noisy machines leave a warning and the rest of t
   const noSsh = spawnSync(process.execPath, [bin, "report", "--json", ...localFlags, "--remote", "copied"], { env: { ...environment, PATH: join(directory, "local") }, encoding: "utf8" });
   assert.equal(noSsh.status, 0, noSsh.stderr);
   assert.match(noSsh.stderr, /Could not read copied: ssh is not available on this machine/);
+  // Each machine is listed with its state; an ad-hoc destination has no last good snapshot to fall back on.
+  assert.deepEqual(snapshot.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [
+    ["local", "ok", null], ["down", "failed", "connection"], ["old", "failed", "rejected"], ["missing", "failed", "missing-command"],
+    ["noisy", "failed", "invalid"], ["elsewhere", "failed", "time-zone"], ["copied", "ok", null],
+  ]);
+  assert.equal(snapshot.machines!.find(({ key }) => key === "copied")!.sessions, copiedSessions);
+  // --strict turns a machine not read into exit 3, once the output is complete.
+  const strict = spawnSync(process.execPath, [bin, "report", ...localFlags, "--remote", "down,copied", "--strict"], { env: environment, encoding: "utf8" });
+  assert.equal(strict.status, 3, strict.stderr);
+  assert.match(strict.stdout, /^Session Analytics · this machine and copied \(not read: down\)\n/);
+  assert.match(strict.stdout, /\n {2}down {10}not read: unreachable\n {4}Fix: run ssh down true once/);
+  assert.match(strict.stdout, /\nWarnings\n/);
+  const output = join(directory, "strict-export");
+  const exported = spawnSync(process.execPath, [bin, "export", "--format", "csv", "--out", output, ...localFlags, "--remote", "down", "--strict"], { env: environment, encoding: "utf8" });
+  assert.equal(exported.status, 3, exported.stderr);
+  assert.match(exported.stderr, /Saved sessions\.csv.*\n--strict: down was not read now; exiting with 3\.\n$/);
+  assert.equal((await readFile(join(output, "sessions.csv"), "utf8")).trim().split("\r\n").length - 1, localSnapshot.summary.sessions);
+  const plain = spawnSync(process.execPath, [bin, "report", "--json", ...localFlags, "--remote", "copied", "--strict"], { env: environment, encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(plain.status, 0, plain.stderr);
+});
+
+test("--identify-machine lists this machine with a hash of its machine ID and account, for a reading machine only", async () => {
+  const own = spawnSync(process.execPath, [bin, "report", "--json", "--identify-machine", ...localFlags, "--no-remote"], { env: { ...environment, SESSION_ANALYTICS_MACHINE_ID: "fixture-machine" }, encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(own.status, 0, own.stderr);
+  const snapshot = validateSnapshot(JSON.parse(own.stdout));
+  assert.equal(snapshot.machines!.length, 1);
+  const [self] = snapshot.machines!;
+  assert.deepEqual([self!.key, self!.state, self!.sessions, self!.version], ["local", "ok", localSnapshot.summary.sessions, version]);
+  assert.match(self!.identity!, /^[0-9a-f]{16}$/);
+  assert.ok(snapshot.sessions.every(({ machine }) => machine === undefined));
+  assert.doesNotMatch(own.stdout, /fixture-machine/);
+  for (const args of [["--json", "--identify-machine"], ["--identify-machine", "--no-remote"], ["--json", "--identify-machine", "--no-remote", "--share"]]) {
+    const refused = spawnSync(process.execPath, [bin, "report", ...args, ...localFlags], { env: environment, encoding: "utf8" });
+    assert.equal(refused.status, 2, args.join(" "));
+    assert.equal(refused.stderr, "--identify-machine describes this machine's own scan; use it with --json --no-remote.\n");
+  }
 });
 
 test("--remote-command and forwarded switches reach the remote command line; local-only options are refused", async () => {

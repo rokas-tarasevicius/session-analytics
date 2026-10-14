@@ -32,7 +32,7 @@ The content-free contract covers dashboard/API, reports, pricing commands, MCP, 
 - **Sentinel coverage.** Synthetic tests plant content, credentials, paths, IDs and commands in provider records. Analyzer, API, schemas, cache replay, reports, exports, MCP and rendering tests reject those strings at their output boundaries.
 - **Fixed failures.** Worker stderr is discarded. The only index errors crossing the worker are allowlisted codes/messages; all other analysis failures are generic. Raw fetch errors are not returned.
 - **Read-only provider access.** Transcripts are streamed and provider SQLite stores opened read-only. The separate private data directory contains derived index facts, public price history, preferences/configuration and private keys; provider directories are untouched.
-- **Explicit network boundaries.** Analysis reads cached prices; dashboard startup can refresh fixed public price feeds without local metadata, credentials or redirects. `--offline` disables pricing requests. `export --otlp-endpoint` permits selected content-free export delivery; it is independent of the pricing setting. Reading another machine (one saved with `machines add`, or `--remote`) runs the user's own `ssh` to start a `report --json` there: the command line carries validated words (account, Node.js path, protocol words, version and digest), fixed flags, forwarded switches and this machine's time zone name. With the bundled runtime, a fixed bootstrap and, once per version, this install's own code travel on stdin, and the tool writes only that account's `~/.cache/session-analytics/runtime` (mode `0700`) and its own private data directory there. Only that machine's content-free snapshot returns, validated like an imported file, and its stderr is reduced to one sanitized line shown only in this terminal. `machines check` also reads that account's Node.js version and its machine ID and UID, which are hashed inside the check and never stored or printed raw. There is no telemetry. The loopback dashboard uses same-origin CSP, bundled fonts and marks.
+- **Explicit network boundaries.** Analysis reads cached prices; dashboard startup can refresh fixed public price feeds without local metadata, credentials or redirects. `--offline` disables pricing requests. `export --otlp-endpoint` permits selected content-free export delivery; it is independent of the pricing setting. Reading another machine (one saved with `machines add`, or `--remote`) runs the user's own `ssh` to start a `report --json` there: the command line carries validated words (account, Node.js path, protocol words, version and digest), fixed flags, forwarded switches and this machine's time zone name. With the bundled runtime, a fixed bootstrap and, once per version, this install's own code travel on stdin, and the tool writes only that account's `~/.cache/session-analytics/runtime` (mode `0700`) and its own private data directory there. Only that machine's content-free snapshot returns, validated like an imported file, and its stderr is reduced to one sanitized line shown only in this terminal. `machines check` also reads that account's Node.js version and its machine ID and UID, which are hashed inside the check and never stored or printed raw; with the bundled runtime, the remote report hashes its own machine ID and UID the same way and returns only that hash, which is compared and dropped. A saved machine's last good snapshot is kept in this machine's private data directory. There is no telemetry. The loopback dashboard uses same-origin CSP, bundled fonts and marks.
 - **Limit meters.** `limits` and the Subscription view read provider-reported usage percentages, reset instants and plan names from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` host logs and status-line input. Lines are decoded only when they contain those markers. From Claude Code's OAuth record, only `subscriptionType` and `rateLimitTier` are inspected and mapped to a fixed plan enum; no token is returned or stored. Claude extra-usage state is kept as enums only. No Anthropic endpoint is contacted. Unless `--no-codex-account` or `--offline` is set, the tool starts the local `codex app-server` (at most every 10 minutes) and sends only `initialize` and `account/rateLimits/read`; Codex makes the request to OpenAI with its own login. Reset credit IDs, titles, the account ID and upsell banners are dropped, and reset credits are never redeemed.
 - **MCP boundary.** Tools accept no paths, commands, URLs, SQL or client roots. Trusted source paths are launch settings. Only projected metrics enter responses; the MCP worker reads no skill or MCP-server configuration, never executes configured commands and never contacts servers.
 
@@ -88,6 +88,8 @@ The following is the complete disk field manifest. Index source keys and integri
 | `writer-ticket-*` / `.next` | Transient process ID, random nonce, and numeric mutex order; no provider data, paths, or session IDs; removed on release or dead-process recovery | P0 |
 | `dashboard-PORT.token` / `.next` | Random 32-byte per-launch dashboard token encoded as 64 hex characters; mode `0600` inside the private mode `0700` data directory; no local evidence or option values | P0 |
 | `machines.json` | Saved machines, as typed by the user: format version, this machine's label, and per machine a label, SSH destination, account name, Node.js path, runtime enum, command words for an installed runtime, enabled flag and time added, plus a 16-hex SHA-256 of that machine's ID and account UID recorded by `machines check`. Mode `0600`, replaced atomically, validated strictly on every read. No credentials, keys or analytics | P1 |
+| `machines/<name>.snapshot.json` | A saved machine's last good snapshot: the same content-free, validated full snapshot that machine returned, kept to show it as stale when a later read fails. Mode `0600` inside a `0700` directory, replaced atomically, validated again before use, and deleted by `machines remove` or a new destination or account | P0/P1 as the snapshot fields |
+| `machines/<name>.json` | What that snapshot answers: format version, the session-analytics version that stored it, a SHA-256 digest of the request (time zone, pricing and scan switches), read time and duration, the remote version, session and repository counts, and the 16-hex machine and account hash the remote reported. Mode `0600` | P0/P1 |
 
 The index retains previously observed history after provider deletion. `index prune --before YYYY-MM-DD` removes old verified session facts, clears reusable evidence, vacuums the active database, and keeps a retention floor, minimal keyed exclusion checkpoints, and keyed anti-rebilling reservations. Subsequent scans may rebuild ledger evidence from surviving provider files; unchanged exclusion checkpoints skip session parsing without restoring session facts. The cutoff is exclusive UTC midnight; provider files are untouched. Unverified legacy dates are kept until the source can be reparsed. Rebuild discards retained history and resets the floor. Corruption recovery places unreadable main or writer databases in private `.rebuild-*` quarantine files, which are excluded from analysis, status, and prune; remove those separately when no longer needed. Retention is of derived facts, never a raw transcript archive. Index payloads written by earlier versions may still contain removed analysis namespaces; they are dropped when read and never returned, except that a Claude session's stored profile key and per-day model tokens are carried forward as `historyProfile`.
 
@@ -149,9 +151,27 @@ Returned by `/api/analytics` and `report --json`.
 | `summary` | Machine totals; see [Summary](#summary) | P0 |
 | `topTools[]` | `{ name, value }`, effective tool calls by tool name, descending | P0 |
 | `warnings[]` | Fixed-text coverage notes (unpriced models, missing or unmatched transcripts, unreadable roots) | P0 |
+| `machines[]` | Optional; present when the snapshot combines machines. One entry per machine, this machine first; see [Machine status](#machine-status-machinestatus) | P0/P1 |
 | `mcpContext.repositoryId` | Optional launch-context repository key, or null outside a repository; requested internally by the MCP worker, never a path | P1 |
 | `mcpSourceHealth[].provider`, `.status` | Provider and available/incomplete/unavailable discovery enum, independent of sessions | P0 |
 | `mcpSourceHealth[].sourcesRead`, `.missingSources`, `.unreadableSources` | Discovery source counts; no paths or error text | P0 |
+
+### Machine status (`MachineStatus`)
+
+Present in snapshots that combine machines, in `/api/machines` (the same entries as they stand while the dashboard reads), and, for one entry with `identity`, in a remote machine's `report --json --identify-machine` answer.
+
+| Field | Meaning | Tier |
+| --- | --- | --- |
+| `key` | `local` for this machine, otherwise the lower-case saved name or a plain form of the `--remote` destination; referenced by session `machine` and history profile `machine` | P1 |
+| `label` | This machine's label (`machines rename local LABEL`, default `this machine`) or the saved name or destination the user typed; merged files use `machine-1`, `machine-2` | P1 |
+| `state` | `ok`, `stale`, `failed`, or `reading` (dashboard only, before that machine answers) | P0 |
+| `reason` | Optional fixed enum (`connection`, `sudo`, `timeout`, `same-machine`, `no-history` and the others listed in [interop.md](interop.md#machine-status)); never remote text | P0 |
+| `fix` | Optional command that fixes the reason, built from fixed text and the saved configuration (machine name, SSH destination, account name, Node.js path) | P1 |
+| `sessions`, `repositories` | Counts read from that machine | P0 |
+| `readAt`, `durationMs` | When the snapshot in use was read, and how long the read took; null when none is used | P0 |
+| `version` | The session-analytics version that produced it, when the machine said | P0 |
+| `identity` | Only in a single machine's own answer to `--identify-machine`: 16-hex SHA-256 of its machine ID (or host name) and account UID, used to recognise the same machine read twice, then dropped; never in a combined snapshot | P1 |
+| `warnings[]` | Optional fixed discovery warnings that came from that machine | P0 |
 
 ### Repository rollup (`RepositoryRollup`)
 
@@ -202,6 +222,7 @@ Repository summaries and the machine summary share these fields.
 | `agentIdentity.codexSource` | Optional initial source enum: `cli`, `exec`, `vscode`, `subagent`, `review`, `unknown` | P0 |
 | `agentIdentity.codexOriginator` | Optional initial originator enum: `cli`, `exec`, `vscode`, `desktop`, `unknown`; arbitrary originator text is excluded | P0 |
 | `velocity` | Optional compact, content-free local-time activity cells; see [Velocity cells](#velocity-cells-sessionvelocity) | P0 |
+| `machine` | Optional, in snapshots that combine machines: the `key` of the machine whose copy of the session was kept | P1 |
 | `sessionKey` | First 12 hex characters of SHA-256 of `<provider>:<session ID>` (or of the Conductor session ID for Conductor-registered sessions). It is not keyed with a secret, so it is stable across runs; someone who already holds the raw ID can recompute it, but the key does not reveal the ID | P1 |
 | `provider` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported` | P0 |
 | `repositoryId` | Repository key, as in `repository.id` | P1 |
@@ -593,6 +614,7 @@ All formats retain only the declared P0/P1 fields; no content is exported. These
 | `/api/health.service`, `.snapshot`, `.status` | Fixed service ID, readiness enum and `ok` status; no local evidence | P0 |
 | `/api/health.instanceToken` | Random per-launch 32-byte token encoded as hex, checked against the private per-port token file for reuse; no local evidence | P0 |
 | `/api/health.optionsHash` | SHA-256 of normalized analysis options; only the digest, with no paths, option values or local evidence | P0 |
+| `/api/machines` | `{ machines: MachineStatus[] }`, each machine's current state for a dashboard reading other machines; an empty list otherwise. The same fields as [Machine status](#machine-status-machinestatus), without `identity` | P0/P1 |
 | Shared JSON `kind`, `minimumSessions` | `shared`; minimum distinct session count required for every released bucket | P0 |
 | Shared `sources[]` | Domain-separated HMAC installation identities, 128 bits; used to reject repeated contributions | P1 |
 | Shared `repositories[].repository` | `repo-<128-bit HMAC>` or `alias-<explicit user alias>`; no original ID/name | P1 |
@@ -638,6 +660,7 @@ All new data is P0 counters/enums/model IDs/timestamps except the existing-style
 | `historyCoverage.profiles[]` | Discovered/deduplicated Claude statistics profile projections | P0/P1 |
 | `historyCoverage.profiles[].profileKey` | `profile-` plus 20 hex characters derived from the canonical profile directory, the same key as session `historyProfile.profileKey`; no raw profile name/path | P1 |
 | `historyCoverage.profiles[].ordinal` | Scan-local profile number used for a neutral display label | P0 |
+| `historyCoverage.profiles[].machine` | Optional, in snapshots that combine machines: the `key` of the machine holding the profile | P1 |
 | `historyCoverage.profiles[].status` | available/missing/unsupported/unreadable statistics status | P0 |
 | `historyCoverage.profiles[].dailyTokensVersion` | Numeric daily statistics format version, or null | P0 |
 | `historyCoverage.profiles[].statisticsThrough` | Valid UTC-day cache watermark, or null | P0 |

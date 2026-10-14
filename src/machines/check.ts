@@ -1,13 +1,10 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { hostname } from "node:os";
-
 import { brand } from "../brand.ts";
 import { accountPattern, type RemoteMachine } from "../options.ts";
 import { accountPrefix, classifyRemote, fetchRemoteSnapshot, localTimeZone, RemoteError, remoteArguments, runRemote, runSsh } from "../remote.ts";
 import { runtimePayload } from "../remote/runtime.ts";
 import { version } from "../version.ts";
 import type { SavedMachine } from "./config.ts";
+import { identityOf, localIdentity } from "./identity.ts";
 
 export type CheckName = "ssh" | "sudo" | "node" | "machine" | "runtime" | "command" | "history" | "accounts";
 
@@ -35,20 +32,9 @@ export interface MachineCheck {
 const probeDeadline = (): number => Date.now() + 30_000;
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`;
 
-/** A machine and account as a 16-digit hash: the raw machine ID never leaves this function. */
-function identityOf(machineId: string, uid: string): string {
-  return createHash("sha256").update(`session-analytics machine v1\0${machineId.trim()}\0${uid.trim()}`).digest("hex").slice(0, 16);
-}
-
-export function localIdentity(): string {
-  let id: string;
-  try { id = readFileSync("/etc/machine-id", "utf8"); } catch { id = hostname(); }
-  return identityOf(id, String(process.getuid?.() ?? ""));
-}
-
 // Fixed scripts, sent on stdin to `sh -s`; only a validated node word is substituted.
 const probeScript = (node: string): string => `if command -v ${node} >/dev/null 2>&1; then ${node} --version; else echo none; fi
-cat /etc/machine-id 2>/dev/null || hostname
+machine="\${SESSION_ANALYTICS_MACHINE_ID:-$(cat /etc/machine-id 2>/dev/null)}"; [ -n "$machine" ] || machine=$(hostname); echo "$machine"
 id -u
 `;
 const findUsersScript = `{ getent passwd 2>/dev/null || cat /etc/passwd; } | while IFS=: read -r name _ _ _ _ home shell; do

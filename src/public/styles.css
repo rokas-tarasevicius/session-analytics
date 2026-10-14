@@ -284,7 +284,7 @@ kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; 
 img[src$="codex.svg"], img[src$="cursor.svg"] { filter: none; }
 :root[data-theme="dark"] img[src$="codex.svg"], :root[data-theme="dark"] img[src$="cursor.svg"] { filter: invert(1) brightness(.95); }
 
-.caps, .nav-heading, .kicker, thead th, .pill:not(.mark), .evidence-pill, .palette-group, .help h3, .field-label { font: 500 var(--fs-caps)/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; }
+.caps, .nav-heading, .kicker, .machine-strip-title, thead th, .pill:not(.mark), .evidence-pill, .palette-group, .help h3, .field-label { font: 500 var(--fs-caps)/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; }
 
 ::selection { background: color-mix(in srgb, var(--text) 18%, var(--surface)); color: var(--text); }
 * { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
@@ -372,6 +372,8 @@ select:hover { border-color: var(--line-strong); }
 .status i { width: 7px; height: 7px; border-radius: var(--radius-round); background: var(--muted); }
 .status[data-state="live"] i { background: var(--ok); }
 .status[data-state="error"] i { background: var(--danger); }
+.status[data-state="warn"] i { background: var(--warn); }
+.status[data-state="reading"] i { animation: pulse 1.4s ease-in-out infinite; }
 #sync-label { display: inline-block; min-width: 13em; }
 .status[data-state="loading"] i { animation: pulse 1.4s ease-in-out infinite; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: var(--control); height: var(--control); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast); }
@@ -388,6 +390,17 @@ main { flex: 1; width: 100%; max-width: 1520px; margin: 0 auto; padding: 18px 20
 main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 .scope-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin: 0 0 8px; color: var(--muted); font-size: var(--fs-xs); }
 .snapshot-meta { display: inline-flex; gap: 6px; margin-left: auto; white-space: nowrap; font: 500 var(--fs-xs) var(--font-sans); font-variant-numeric: tabular-nums; }
+/* Machines strip: one chip per machine behind a combined snapshot; a chip filters every view, a button opens the reason and fix. */
+.machine-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; color: var(--muted); font-size: var(--fs-xs); }
+.machine-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.machine-chip small { color: var(--muted); font: 500 var(--fs-xs) var(--font-mono); font-variant-numeric: tabular-nums; }
+.machine-chip .machine-note { font-family: var(--font-sans); }
+.machine-chip[data-state="failed"], .machine-chip[data-state="stale"] { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn-text); }
+.machine-chip[data-state="failed"]::before, .machine-chip[data-state="stale"]::before { background: var(--warn); }
+.machine-chip[data-state="reading"]::before { animation: pulse 1.4s ease-in-out infinite; }
+.machine-strip-meta { font-variant-numeric: tabular-nums; }
+.machine-fix td { color: var(--text-2); }
+.machine-fix code { font: 500 var(--fs-xs) var(--font-mono); overflow-wrap: anywhere; user-select: all; }
 
 /* ---------------------------------------------------------------- banners */
 /* Status banners: a reserved status hue, an icon and a title. In #error-banner app.js fills #error-message and shows Retry. */
@@ -433,7 +446,7 @@ strong .coverage, td .coverage { margin-left: 6px; }
 
 /* ---------------------------------------------------------------- panels */
 .dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--gap); margin-top: var(--gap); }
-.span-4 { grid-column: span 4; } .span-6 { grid-column: span 6; } .span-8 { grid-column: span 8; }
+.span-4 { grid-column: span 4; } .span-6 { grid-column: span 6; } .span-8 { grid-column: span 8; } .span-12 { grid-column: 1 / -1; }
 .panel { min-width: 0; min-height: 0; padding: var(--pad) 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
 .panel > header, .section-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
 .panel > .daily-usage-header { flex-direction: column; gap: 6px; }

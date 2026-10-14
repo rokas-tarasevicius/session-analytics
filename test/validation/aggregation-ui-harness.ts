@@ -40,7 +40,7 @@ export async function harness(sessions: SessionAnalytics[], { repositories = [{ 
  // ui.js helpers create nodes through the module-global document, as in the browser.
  (globalThis as any).document=document;
  const source=await readFile(new URL('../../src/public/app.js',import.meta.url),'utf8');
- const modules=['format','chart-colors','chart-scale','chart-legend','ui','view-model','url-state','providers','timestamps','export-data','evidence','velocity-data','history-coverage','tools-data','tools','velocity','pricing','export-menu','shared-view'];
+ const modules=['format','chart-colors','chart-scale','chart-legend','ui','view-model','url-state','providers','timestamps','export-data','evidence','machines','velocity-data','history-coverage','tools-data','tools','velocity','pricing','export-menu','shared-view'];
  const helpers: Record<string,unknown>={};
  for(const name of modules) Object.assign(helpers,await import(new URL(`../../src/public/${name}.js`,import.meta.url).href));
  // The app deliberately imports this name from view-model, not evidence.

@@ -19,7 +19,8 @@ import { toolsDays } from "./tools-data.js";
 import { renderVelocity, velocityProviders } from "./velocity.js";
 import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity } from "./velocity-data.js";
 import { normalizeTimestamp } from "./timestamps.js";
-import { scanWarnings } from "./evidence.js";
+import { duplicateMachineWarning, scanWarnings } from "./evidence.js";
+import { machineAge, machineNote, machineReasons, machineTally, machineView, machineWarnings, sessionMachine } from "./machines.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
@@ -41,6 +42,9 @@ const elements = {
   dateRange: $("#date-range"), density: $("#density-switch"),
   error: $("#error-banner"), errorMessage: $("#error-message"), errorRetry: $("#error-retry"), errorTitle: $("#error-title"),
   generated: $("#generated-at"), help: $("#help-overlay"), helpButton: $("#help-button"), helpClose: $("#help-close"),
+  machineChips: $("#machine-chips"), machineDetails: $("#machine-details"), machineSpend: $("#machine-spend"), machineSpendPanel: $("#machine-spend-panel"),
+  machineStrip: $("#machine-strip"), machineStripMeta: $("#machine-strip-meta"), machinesClose: $("#machines-close"), machinesDialog: $("#machines-dialog"),
+  machinesRows: $("#machines-rows"), machinesSummary: $("#machines-summary"),
   input: $("#metric-input"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
   coverageUsageNote: $("#coverage-usage-note"), coverageSessionNote: $("#coverage-session-note"), coverageLiveNote: $("#coverage-live-note"), coverageCostNote: $("#coverage-cost-note"), retentionNote: $("#retention-note"),
@@ -82,6 +86,10 @@ const windowPresets = ["7", "30", "90", "all", "custom"];
 const windowLabels = { 7: "Last 7 days", 30: "Last 30 days", 90: "Last 90 days", all: "All observed time", custom: "Custom range" };
 
 let snapshot = null;
+// The snapshot as served; `snapshot` is it narrowed to the machines switched on in the Machines strip.
+let fullSnapshot = null;
+const hiddenMachines = new Set();
+let machinePoll = null;
 let sharedSnapshot = null;
 let sessionsByRepository = new Map();
 // Providers present in the snapshot: every provider chip row lists these, and `p 1`… counts through them.
@@ -232,7 +240,8 @@ function activeView() {
   const summary = summarize(sessions);
   return {
     undatedStarts, activity,
-    dailySessions: scopeSessions, repositories, scopeSessions, sessions, topTools: namedTotals(sessions, "tools"), warnings: [...new Set([...scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]), ...coverageWarnings(sessions)])],
+    dailySessions: scopeSessions, repositories, scopeSessions, sessions, topTools: namedTotals(sessions, "tools"),
+    warnings: machineWarnings(fullSnapshot?.machines, [...new Set([...scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]), ...snapshot.warnings.filter((warning) => warning === duplicateMachineWarning), ...coverageWarnings(sessions)])]),
     summary: { ...summary, repositories: repositories.length, repositoriesWithSessions: repositories.filter(({ summary: item }) => item.sessions > 0).length, retainedSessions: sessions.filter(({ transcript }) => transcript.sourceDeleted).length, historicalWorkingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking && historicalSnapshot(s)).length, workingSnapshots: sessions.filter((s) => s.transcript.snapshotWhileWorking && !historicalSnapshot(s)).length },
   };
 }
@@ -997,8 +1006,110 @@ function renderCoverageSummary(view) {
   elements.coverageSummary.textContent = `${sessions} selected session${sessions === 1 ? "" : "s"} across ${view.summary.repositoriesWithSessions} repositor${view.summary.repositoriesWithSessions === 1 ? "y" : "ies"}: ${part("tokens", "carry token evidence")}, ${part("tools", "tool evidence")}, ${part("cost", "priced or reported value")}. Every number is a lower bound from local evidence; badges on the dashboard show the eligible share behind each figure.`;
 }
 
-function openCoverage() { closePalette(); if (elements.help.open) elements.help.close(); if (!elements.coverageDialog.open) elements.coverageDialog.showModal(); }
+function openCoverage() { closePalette(); closeMachines(); if (elements.help.open) elements.help.close(); if (!elements.coverageDialog.open) elements.coverageDialog.showModal(); }
 function closeCoverage() { if (elements.coverageDialog.open) elements.coverageDialog.close(); }
+function openMachines() { closePalette(); closeCoverage(); if (elements.help.open) elements.help.close(); if (!elements.machinesDialog.open) elements.machinesDialog.showModal(); }
+function closeMachines() { if (elements.machinesDialog.open) elements.machinesDialog.close(); }
+
+// --------------------------------------------------------------------- machines
+
+/** The sync label once a snapshot is shown: which machines it covers, which are missing, and the live sessions. */
+function showReady(view) {
+  const machines = fullSnapshot?.machines ?? [], { ok, total, failed, stale, reading } = machineTally(machines);
+  const named = (...states) => machines.filter(({ state }) => states.includes(state)).map(({ label }) => label).join(", ");
+  const live = view ? ` · ${integer(view.summary.workingSnapshots)} live` : "";
+  elements.sync.dataset.state = failed || stale ? "warn" : reading ? "reading" : "live";
+  elements.syncLabel.textContent = total < 2 ? `Local snapshot ready${live}`
+    : `${ok} of ${total} machines ready${reading ? ` · reading ${named("reading")}` : ""}${failed ? ` · ${named("failed")} not read` : ""}${stale ? ` · ${named("stale")} stale` : ""}${live}`;
+}
+
+/** Narrow every view to the machines switched on; history coverage needs them all. */
+function applyMachines() {
+  const machines = fullSnapshot.machines ?? [];
+  for (const key of [...hiddenMachines]) if (!machines.some((machine) => machine.key === key)) hiddenMachines.delete(key);
+  snapshot = machineView(fullSnapshot, new Set(machines.map(({ key }) => key).filter((key) => !hiddenMachines.has(key))));
+  sessionsByRepository = groupByRepository(snapshot.sessions); navCache = { key: null };
+  for (const input of providerFilters) input.closest(".chip").hidden = !snapshotProviders().includes(input.dataset.providerFilter);
+  populateRepositories();
+}
+
+function setMachine(key, on) {
+  if (on) hiddenMachines.delete(key); else hiddenMachines.add(key);
+  applyMachines(); renderMachines(); renderView();
+}
+
+/**
+ * The Machines strip and its dialog. A machine with sessions to show is a chip that filters every view;
+ * one without is a button to its reason and fix. Shown only when the snapshot combines machines.
+ */
+function renderMachines() {
+  const machines = fullSnapshot?.machines ?? [], restoreFocus = rememberFocus();
+  elements.machineStrip.hidden = machines.length < 2;
+  clear(elements.machineChips); clear(elements.machinesRows);
+  if (machines.length < 2) return;
+  const timeZone = snapshotTimeZone();
+  for (const machine of machines) {
+    const note = machineNote(machine), counted = machine.state !== "failed" && Boolean(machine.readAt);
+    const chip = node(counted ? "label" : "button", null, "chip machine-chip");
+    chip.dataset.state = machine.state;
+    if (counted) {
+      const input = node("input"); input.type = "checkbox"; input.checked = !hiddenMachines.has(machine.key);
+      input.dataset.focusKey = `machine:${machine.key}`;
+      input.setAttribute("aria-label", `${machine.label}: ${integer(machine.sessions)} sessions${note ? `, ${note}` : ""}`);
+      input.addEventListener("change", () => setMachine(machine.key, input.checked));
+      chip.append(input, node("span", machine.label), node("small", integer(machine.sessions)));
+    } else {
+      chip.type = "button"; chip.dataset.focusKey = `machine:${machine.key}`;
+      chip.setAttribute("aria-label", `${machine.label}: ${note}. Show machine details`);
+      chip.addEventListener("click", openMachines);
+      chip.append(node("span", machine.label));
+    }
+    if (note) chip.append(node("small", note, "machine-note"));
+    elements.machineChips.append(chip);
+  }
+  elements.machineStripMeta.textContent = `read ${timeLabel(fullSnapshot.generatedAt, timeZone)}`;
+  const { ok, total } = machineTally(machines);
+  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows.`;
+  for (const machine of machines) {
+    const row = node("tr"), cell = (value, left = false) => { const item = node("td", value); if (left) item.className = "align-left"; return item; };
+    const state = machine.state === "ok" ? (machine.reason ? machineReasons[machine.reason] ?? machine.reason : "read") : machineNote(machine);
+    row.append(cell(machine.label, true), cell(state, true), cell(machine.readAt ? integer(machine.sessions) : DASH), cell(machine.readAt ? integer(machine.repositories) : DASH),
+      cell(machine.readAt ? `${timeLabel(machine.readAt, timeZone)} · ${machineAge(machine.readAt)}` : DASH, true),
+      cell(machine.durationMs === null ? DASH : `${(machine.durationMs / 1000).toFixed(1)} s`), cell(machine.version ?? DASH, true));
+    elements.machinesRows.append(row);
+    if (!machine.fix) continue;
+    const fix = node("tr", null, "machine-fix"), text = node("td", null, "align-left"); text.colSpan = 7;
+    text.append(node("span", "Fix: "), node("code", machine.fix)); fix.append(text); elements.machinesRows.append(fix);
+  }
+  restoreFocus();
+}
+
+/** Usage value per machine for the window, so "how much of this is the server?" has an answer. */
+function renderMachineSpend(view, context) {
+  const machines = fullSnapshot?.machines ?? [];
+  elements.machineSpendPanel.hidden = machines.length < 2;
+  if (machines.length < 2) return;
+  // A machine without a snapshot has no value to show, not a value of zero.
+  renderBars(elements.machineSpend, machines.filter(({ key, state, readAt }) => !hiddenMachines.has(key) && state !== "failed" && readAt).map((machine) => {
+    const own = (session) => sessionMachine(session, machines) === machine.key, started = view.sessions.filter(own).length;
+    return { id: `machine:${machine.key}`, name: `${machine.label} · ${integer(started)} session${started === 1 ? "" : "s"}`, value: buildVelocity(view.scopeSessions.filter(own), { start: context.start, end: context.end, metric: "value" }).totals[0] };
+  }).sort((left, right) => right.value - left.value), money, machines.length);
+}
+
+/** While a machine is still reading, ask the server every 2 s; once one answers, fetch the snapshot that includes it. */
+function watchMachines() {
+  if (machinePoll !== null) { clearInterval(machinePoll); machinePoll = null; }
+  const reading = (fullSnapshot?.machines ?? []).filter(({ state }) => state === "reading").map(({ key }) => key);
+  if (!reading.length || typeof setInterval !== "function") return;
+  machinePoll = setInterval(() => void (async () => {
+    const response = await fetch("/api/machines");
+    if (!response.ok) return;
+    const { machines } = await response.json();
+    if (!machines.some(({ key, state }) => reading.includes(key) && state !== "reading")) return;
+    clearInterval(machinePoll); machinePoll = null;
+    await load(false, true);
+  })().catch(() => { /* The next poll asks again. */ }), 2000);
+}
 
 function renderRateCards(rateCard) {
   clear(elements.rateCardLinks);
@@ -1082,7 +1193,7 @@ function windowCaption() {
 }
 
 function renderSharedView(view) {
-  if (elements.sync.dataset.state === "live") elements.syncLabel.textContent = `Local snapshot ready · ${integer(view.summary.workingSnapshots)} live`;
+  if (!["loading", "error"].includes(elements.sync.dataset.state)) showReady(view);
   const retained = view?.summary?.retainedSessions ?? 0;
   elements.retentionNote.hidden = !retained;
   elements.retentionNote.textContent = `${retained} source-deleted sessions retain facts and prices from their last successful ingest. Historical working status does not establish current activity.`;
@@ -1140,7 +1251,8 @@ function subagentValue(sessions, { start, end }) {
 }
 
 function renderSummary(view) {
-  renderHistoryCoverage($("#history-coverage"), snapshot.historyCoverage, snapshot.sessions);
+  // History coverage spans every machine, whichever are switched on.
+  renderHistoryCoverage($("#history-coverage"), (fullSnapshot ?? snapshot).historyCoverage, (fullSnapshot ?? snapshot).sessions, fullSnapshot?.machines);
   const summary = view.summary;
   const days = windowDays();
   const context = velocityContext();
@@ -1178,7 +1290,7 @@ function renderSummary(view) {
     renderDelta($(`#metric-${name}-delta`), name === "spend" ? spendDelta(spendComparison, previous?.length) : previousSummary ? deltaDescription(current, before, previous.length) : null);
     renderSparkline($(`#metric-${name}-spark`), series, days, { format, label });
   }
-  renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions);
+  renderLine(dailyProviderSpend(view.dailySessions)); renderDonut(view.sessions); renderMachineSpend(view, context);
   const selected = selectedRepository();
   const ledger = ledgerMoney(view.scopeSessions, context);
   $("#repository-spend-title").textContent = selected ? "Usage value by provider" : "Usage value by repository";
@@ -1514,6 +1626,7 @@ function paletteItems() {
   items.push({ group: "Keyboard", icon: "help", label: `${shortcutsEnabled ? "Disable" : "Enable"} single-key shortcuts`, keywords: "keyboard shortcuts keys toggle character", state: shortcutsEnabled, run: () => setShortcuts(!shortcutsEnabled) });
   items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? "?" : "", keywords: "help keys shortcuts", run: openHelp });
   items.push({ group: "Snapshot", icon: "coverage", label: "Data coverage", hint: shortcutsEnabled ? "e" : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
+  if ((fullSnapshot?.machines?.length ?? 0) > 1) items.push({ group: "Snapshot", icon: "coverage", label: "Machine details", keywords: "machines remote ssh server status stale failed fix", run: openMachines });
   items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? "r" : "", keywords: "reload rescan refresh", run: () => load(true) });
   items.push({ group: "Snapshot", icon: "export", label: "Export view…", keywords: "export download save csv json snapshot", run: () => openExportMenu() });
   return items;
@@ -1567,7 +1680,7 @@ function closePalette() { if (elements.palette.open) elements.palette.close(); }
 
 function togglePalette() { if (elements.palette.open) closePalette(); else openPalette(); }
 
-function openHelp() { closePalette(); closeCoverage(); if (!elements.help.open) elements.help.showModal(); }
+function openHelp() { closePalette(); closeCoverage(); closeMachines(); if (!elements.help.open) elements.help.showModal(); }
 
 function closeHelp() { if (elements.help.open) elements.help.close(); }
 
@@ -1583,11 +1696,13 @@ elements.commandInput.addEventListener("keydown", (event) => {
     if (item) runPaletteItem(item);
   }
 });
-for (const dialog of [elements.palette, elements.help, elements.coverageDialog]) {
+for (const dialog of [elements.palette, elements.help, elements.coverageDialog, elements.machinesDialog]) {
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
 }
 elements.coverageButton.addEventListener("click", openCoverage);
 elements.coverageClose.addEventListener("click", closeCoverage);
+elements.machineDetails.addEventListener("click", openMachines);
+elements.machinesClose.addEventListener("click", closeMachines);
 elements.commandButton.addEventListener("click", openPalette);
 elements.helpButton.addEventListener("click", openHelp);
 elements.helpClose.addEventListener("click", closeHelp);
@@ -1609,7 +1724,7 @@ document.addEventListener("keydown", (event) => {
   if (event.defaultPrevented) return;
   const key = event.key;
   if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "k") { event.preventDefault(); togglePalette(); return; }
-  if (elements.palette.open || elements.help.open || elements.coverageDialog.open) return;
+  if (elements.palette.open || elements.help.open || elements.coverageDialog.open || elements.machinesDialog.open) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   // Only text entry swallows shortcuts; a focused checkbox, radio or button still lets them through.
   if (isTextEntryTarget(event.target)) return;
@@ -1687,28 +1802,38 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = null; sharedSnapshot = data; loadFailed = false; renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
   elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");
   $(".skip-link").href = "#main";
-  snapshot = data; sharedSnapshot = null; loadFailed = false; sessionsByRepository = groupByRepository(data.sessions);
-  for (const input of providerFilters) input.closest(".chip").hidden = !snapshotProviders().includes(input.dataset.providerFilter);
+  // The window spans every machine, so switching one off keeps it.
+  fullSnapshot = data; snapshot = data; sharedSnapshot = null; loadFailed = false;
+  configureWindow(); applyMachines(); renderMachines();
   markStale(false); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
-  populateRepositories();
   if (!urlReady) {
     const match = repositoryFromParameter(initialUrl.repo);
     if (match) elements.repositoryFilter.value = match.repository.id;
   }
-  configureWindow(); renderRateCards(data.rateCard);
+  renderRateCards(data.rateCard);
   delete elements.main.dataset.state;
   renderView();
   finishUrlStartup();
+  watchMachines();
 }
 
-async function loadSnapshot(refresh = false) {
-  resetExportMenu();
+/** `quiet` fetches the snapshot a machine just completed, without the loading state or an error banner. */
+async function loadSnapshot(refresh = false, quiet = false) {
   const previous = snapshot ?? sharedSnapshot;
+  if (quiet) {
+    try {
+      const response = await fetch("/api/analytics");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      render(await response.json()); showReady(snapshot ? activeView() : null);
+    } catch { /* The snapshot on screen stays; Refresh asks again. */ }
+    return;
+  }
+  resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
   elements.main.dataset.state = previous ? "refreshing" : "loading";
@@ -1722,7 +1847,7 @@ async function loadSnapshot(refresh = false) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = await response.json();
     render(body);
-    elements.sync.dataset.state = "live"; elements.syncLabel.textContent = snapshot ? `Local snapshot ready · ${integer(activeView().summary.workingSnapshots)} live` : "Local snapshot ready";
+    showReady(snapshot ? activeView() : null);
   } catch (error) {
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;
@@ -1797,7 +1922,7 @@ function exportSelection() {
   if (sharedSnapshot) return sharedSnapshot;
   if (!snapshot) return null;
   const repositoryId = selectedRepository()?.repository.id ?? null, providers = exportProviders(currentViewName());
-  const snapshotProviders = new Set(snapshot.sessions.map(({ provider }) => provider));
+  const snapshotProviders = new Set(snapshot.sessions.map(({ provider }) => provider)), machines = fullSnapshot?.machines ?? [];
   const scope = (repositoryId ? repositorySessions(repositoryId) : snapshot.sessions).filter(({ provider }) => !providers || providers.includes(provider));
   const { start, end, timeZone } = velocityContext();
   const total = buildVelocity(scope, { start, end, group: "provider", metric: "value" }).totals[0];
@@ -1805,7 +1930,7 @@ function exportSelection() {
   return {
     snapshot: filterSnapshot(snapshot, { repositoryId, ...selectedWindow(), providers }),
     ledger: { sessions: scope, start, end },
-    basis: `Daily value CSV: ${money(total)} usage value by activity date, ${start} to ${end} (${timeZone}), the same ledger as the dashboard. JSON, sessions, models and tools CSVs: whole sessions started in the window. Tools CSV counts only eligible tool evidence, as in the Tools view.${selected < snapshotProviders.size ? ` ${selected} of ${snapshotProviders.size} providers.` : ""}`,
+    basis: `Daily value CSV: ${money(total)} usage value by activity date, ${start} to ${end} (${timeZone}), the same ledger as the dashboard. JSON, sessions, models and tools CSVs: whole sessions started in the window. Tools CSV counts only eligible tool evidence, as in the Tools view.${selected < snapshotProviders.size ? ` ${selected} of ${snapshotProviders.size} providers.` : ""}${machines.length > 1 && hiddenMachines.size ? ` ${machines.length - hiddenMachines.size} of ${machines.length} machines.` : ""}`,
   };
 }
 const resetExportMenu = installExportMenu(exportSelection, {

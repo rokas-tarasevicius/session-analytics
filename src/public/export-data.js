@@ -199,6 +199,8 @@ export function filterSnapshot(snapshot, filters = {}) {
   const combined = aggregateSessions(sessions);
   const discovery = scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]);
   const extras = {
+    // Sessions keep their machine keys, so the machines they name stay listed.
+    ...(snapshot.machines ? { machines: snapshot.machines } : {}),
     ...(snapshot.historyCoverage && !Object.values(filters).some((value) => value !== null && value !== undefined) ? { historyCoverage: snapshot.historyCoverage } : {}),
     ...(snapshot.mcpSourceHealth ? { mcpSourceHealth: snapshot.mcpSourceHealth } : {}),
     ...(snapshot.mcpContext ? { mcpContext: snapshot.mcpContext } : {}),

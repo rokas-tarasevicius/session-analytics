@@ -511,7 +511,7 @@ test("Summary has six KPIs, noun-phrase titles and short notes with full explana
   assert.match(summaryHtml, /Explicit sub-agent evidence · lower bound/);
   assert.equal(document.querySelector("#metric-spend-note")!.textContent, "Activity-dated. Not an invoice.");
   assert.deepEqual([...summaryHtml.matchAll(/class="chart-note">([^<]+)</g)].map((match) => match[1]), [
-    "Activity-dated. Not an invoice.", "Explicit sub-agent evidence · lower bound", "Activity-dated value · session-start counters",
+    "Activity-dated. Not an invoice.", "Explicit sub-agent evidence · lower bound", "Activity-dated · each session counted once", "Activity-dated value · session-start counters",
   ]);
   const coverage = html.split('id="coverage-dialog"')[1]!.split("</dialog>")[0]!;
   assert.match(document.querySelector("#coverage-usage-note")!.textContent, /includes \$10.00 session-dated.*dated by last activity/);

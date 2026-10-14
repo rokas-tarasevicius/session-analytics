@@ -99,8 +99,10 @@ export interface RemoteMachine {
   node: string;
   /** Words that start an installed session-analytics. */
   command: string[];
-  /** Saved in machines.json, so a fix can name `machines set`. */
+  /** Saved in machines.json, so a fix can name `machines set` and its last good snapshot is kept. */
   saved: boolean;
+  /** Hash of the machine ID and account that `machines check` recorded. */
+  identity?: string;
 }
 
 export interface RemoteOptions {
@@ -211,7 +213,7 @@ export function remoteOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv
 export function savedMachine(machine: SavedMachine): RemoteMachine {
   return {
     name: machine.name, ssh: machine.ssh, ...(machine.user ? { user: machine.user } : {}), runtime: machine.runtime,
-    node: machine.node ?? "node", command: machine.command ?? ["session-analytics"], saved: true,
+    node: machine.node ?? "node", command: machine.command ?? ["session-analytics"], saved: true, ...(machine.identity ? { identity: machine.identity } : {}),
   };
 }
 

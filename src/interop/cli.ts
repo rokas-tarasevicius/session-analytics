@@ -42,6 +42,7 @@ export async function reportShare(argv: string[]): Promise<void> {
   const path = argument(argv, "--snapshot");
   // One source ID covers what is shared, so other machines share their own and merge detects overlap.
   const snapshot = path ? await loadMachineSnapshot(path) : await analyzeFrom(argv, true);
+  if ((snapshot.machines?.length ?? 0) > 1) throw new InteropError("This snapshot combines several machines; share from each machine and merge the shared files.");
   const shared = shareSnapshot(snapshot, secret, minimum, aliases);
   process.stderr.write("Share preview: stdout is the entire aggregate payload. No data has been sent. Review aliases and counts before sharing this file.\n");
   process.stderr.write(`${sharedEvidenceCaveat}\n`);
@@ -50,7 +51,7 @@ export async function reportShare(argv: string[]): Promise<void> {
 
 export async function runInterop(command: "export" | "merge", argv: string[]): Promise<void> {
   const valueFlags = new Set(command === "export" ? [...analysisValueFlags, ...remoteValueFlags, "--format", "--out", "--snapshot", "--otlp-endpoint"] : ["--out"]);
-  const booleanFlags = new Set(command === "export" ? [...analysisBooleanFlags, ...remoteBooleanFlags, "--help", "--exclude-hidden", "--include-hidden"] : ["--help"]);
+  const booleanFlags = new Set(command === "export" ? [...analysisBooleanFlags, ...remoteBooleanFlags, "--help", "--exclude-hidden", "--include-hidden", "--strict"] : ["--help"]);
   const inputs: string[] = [];
   const seen = new Set<string>();
   for (let index = 0; index < argv.length; index++) {
@@ -64,7 +65,7 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
     }
   }
   if (argv.includes("--help")) {
-    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n${remoteHelp}` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold, or full snapshots from several machines\n(create each with report --json --portable-ids --time-zone ZONE). stdout is the default. Existing files are never overwritten.\n`);
+    process.stdout.write(command === "export" ? `${brand.command} export --format csv|ndjson|otlp-json --out DIR [analysis options | --snapshot FILE]\n  --otlp-endpoint URL  Explicitly POST otlp-logs.json to this full /v1/logs URL after saving locally.\n  --strict             Exit 3 after saving when another machine was not read now\n${remoteHelp}` : `${brand.command} merge FILE... [--out FILE]\nCombine disjoint shared sources using the same threshold, or full snapshots from several machines\n(create each with report --json --portable-ids --time-zone ZONE). stdout is the default. Existing files are never overwritten.\n`);
     return;
   }
   if (command === "merge") {
@@ -110,6 +111,11 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
   if (endpoint) {
     await postOtlp(endpoint, files["otlp-logs.json"]!);
     process.stderr.write("OTLP collector acknowledged the saved payload.\n");
+  }
+  const unread = (snapshot.machines ?? []).filter(({ state }) => state === "failed" || state === "stale");
+  if (argv.includes("--strict") && unread.length) {
+    process.stderr.write(`--strict: ${unread.map(({ label }) => label).join(", ")} ${unread.length === 1 ? "was" : "were"} not read now; exiting with 3.\n`);
+    process.exitCode = 3;
   }
 }
 

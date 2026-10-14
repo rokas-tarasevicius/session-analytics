@@ -54,6 +54,8 @@ export interface HistoryProfileMonth {
 export interface HistoryProfile {
   profileKey: string;
   ordinal: number;
+  /** Key of the machine this profile is on, in snapshots that combine machines. */
+  machine?: string;
   status: "available" | "missing" | "unsupported" | "unreadable";
   dailyTokensVersion: number | null;
   statisticsThrough: string | null;

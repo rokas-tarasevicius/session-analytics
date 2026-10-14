@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { brand } from "./brand.ts";
 import { combineSnapshots } from "./interop/combine.ts";
@@ -6,9 +7,12 @@ import { maximumSnapshotBytes } from "./interop/files.ts";
 import { validateSnapshot } from "./interop/snapshot.ts";
 import { canonicalTimeZone, type RemoteMachine, type RemoteOptions } from "./options.ts";
 import { stopping, track } from "./processes.ts";
-import { remoteUnavailableWarning } from "./public/evidence.js";
+import { lastGoodMaxAgeMs, readLastGood, writeLastGood } from "./machines/cache.ts";
+import { localIdentity } from "./machines/identity.ts";
+import { remoteUnavailableWarning, staleMachineWarning } from "./public/evidence.js";
+import { machineAge } from "./public/machines.js";
 import { runtimePayload } from "./remote/runtime.ts";
-import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
+import type { AnalyzeOptions, MachineAnalytics, MachineReason, MachineStatus } from "./types.ts";
 import { version } from "./version.ts";
 
 const STDERR_TAIL_BYTES = 8192;
@@ -110,9 +114,7 @@ export async function runRemote(machine: RemoteMachine, args: string[], call: Om
   return { ...second, ms: first.ms + second.ms, installed: true };
 }
 
-export type RemoteFailure = "no-ssh" | "connection" | "dropped" | "sudo" | "no-account" | "permission" | "missing-command" | "no-node" | "node-too-old"
-  | "runtime" | "cache-unwritable" | "corrupted" | "version-skew" | "rejected" | "busy" | "index-newer" | "analysis" | "invalid" | "time-zone"
-  | "timeout" | "too-large" | "cancelled";
+export type RemoteFailure = Exclude<MachineReason, "no-history">;
 
 function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found: string, timeoutMs: number): string {
   const account = machine?.user ?? "the SSH account";
@@ -139,6 +141,7 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
     timeout: `no snapshot within ${Math.round(timeoutMs / 1000)} seconds`,
     "too-large": "the remote snapshot exceeded the snapshot size limit",
     cancelled: "the read was stopped",
+    "same-machine": found ? `the same machine and account as ${found}, so its history is counted once` : "this machine and account, which is always read",
   };
   return texts[reason];
 }
@@ -177,6 +180,7 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
     timeout: `allow more time with --remote-timeout SECONDS, or warm its index once with ${check}`,
     "too-large": "read it with --exclude-hidden, or merge snapshot files instead (see docs/interop.md)",
     cancelled: "",
+    "same-machine": machine.saved ? `${command} machines remove ${name}` : `leave ${machine.ssh} out of --remote`,
   };
   return fixes[reason];
 }
@@ -262,76 +266,198 @@ export function localTimeZone(): string {
   return canonicalTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 }
 
-export interface MachineRead {
-  name: string;
-  state: "read" | "empty" | "failed";
-  sessions?: number;
-  ms?: number;
-  error?: RemoteError;
+/** A machine's key in combined snapshots and its last good files: a saved name in lower case, or a plain form of a destination. */
+export function machineKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64) || "machine";
 }
 
-/** The terminal lines for one machine: what was read, or why not and what to run. */
-export function machineReadLines(read: MachineRead, machine: RemoteMachine): string {
-  if (read.state === "failed") {
-    const error = read.error!;
-    return `Could not read ${read.name}: ${error.message}.${error.detail ? ` ${error.detail}` : ""}${error.fix ? `\n  Fix: ${error.fix}` : ""}`;
+/** What a remote read asks for, so a last good snapshot answers only the same request; switches that do not change the result are left out. */
+export function requestDigest(args: string[]): string {
+  return createHash("sha256").update(args.filter((arg) => arg !== "--offline" && arg !== "--no-index").join("\0")).digest("hex").slice(0, 32);
+}
+
+function noHistoryFix(machine: RemoteMachine): string {
+  return machine.saved
+    ? `if agents run as another account there: ${brand.command} machines set ${machine.name} --user NAME; ${brand.command} machines check ${machine.name} --find-users lists accounts with history`
+    : `if agents run as another account there: ${brand.command} machines add ${machine.ssh} --user NAME`;
+}
+
+/** The terminal lines for one machine: what was read, or why not, what to run and what is shown instead. */
+export function machineReadLines(machine: RemoteMachine, status: MachineStatus, error?: RemoteError): string {
+  if (error) {
+    const stale = status.state === "stale" ? `\n  Using its last good snapshot from ${machineAge(status.readAt) ?? "an earlier read"} (${status.sessions} sessions).` : "";
+    return `Could not read ${machine.name}: ${error.message}.${error.detail ? ` ${error.detail}` : ""}${error.fix ? `\n  Fix: ${error.fix}` : ""}${stale}`;
   }
-  if (read.state === "empty") {
-    const fix = machine.saved
-      ? `${brand.command} machines set ${machine.name} --user NAME; ${brand.command} machines check ${machine.name} --find-users lists accounts with history`
-      : `${brand.command} machines add ${machine.ssh} --user NAME`;
-    return `${read.name}: no agent history for this account (0 sessions read).\n  Fix: if agents run as another account there: ${fix}`;
-  }
-  return "";
+  if (!status.sessions) return `${machine.name}: no agent history for this account (0 sessions read).\n  Fix: ${noHistoryFix(machine)}`;
+  return `Read ${status.sessions} sessions across ${status.repositories} repositories from ${machine.name} in ${((status.durationMs ?? 0) / 1000).toFixed(1)} s.`;
+}
+
+/** One other machine: how it is reached, its current status and the snapshot it contributes. */
+export interface MachineReading {
+  machine: RemoteMachine;
+  status: MachineStatus;
+  /** The latest good read, or the last good one while stale or reading again. */
+  snapshot: MachineAnalytics | null;
+  /** Hash of the machine ID and account that answered. */
+  identity?: string;
+  /** The read in flight. */
+  pending: Promise<void> | null;
+  /** The machine this one duplicates, once reported. */
+  twin?: string;
+}
+
+export interface MachineReads {
+  readings: MachineReading[];
+  /** Settles when last good snapshots are loaded for machines not read yet (with `preload`). */
+  loaded: Promise<void>;
+  /** Start a read for every machine that is not reading now; resolves when those have settled. */
+  start(): Promise<void>;
+  /** Stop the reads in flight. */
+  abort(): void;
+  /** This machine's snapshot with each other machine's current one, and how each was read. */
+  combine(local: MachineAnalytics, localMs: number): MachineAnalytics;
+}
+
+/** The options every machine is read with: this machine's zone and portable repository IDs, so snapshots combine. */
+export function machineOptions(options: AnalyzeOptions): AnalyzeOptions & { timeZone: string } {
+  return { ...options, portableIds: true, timeZone: options.timeZone ?? localTimeZone() };
+}
+
+/**
+ * Reads other machines, each on its own: a machine starts a new read only when it is not reading, and
+ * its status and snapshot change as soon as that read settles. A failed read keeps the machine's last
+ * good snapshot (from this process, else from the data directory for a saved machine), marked stale.
+ * With `preload`, saved machines show their last good snapshot while their first read runs.
+ */
+export function machineReads(
+  options: AnalyzeOptions & { timeZone: string },
+  remote: RemoteOptions,
+  { report = () => {}, signal, onSettle = () => {}, preload = false }: { report?: (line: string, failed: boolean) => void; signal?: AbortSignal; onSettle?: () => void; preload?: boolean } = {},
+): MachineReads {
+  const args = remoteArguments(options), request = requestDigest(args);
+  let controller = new AbortController();
+  const abort = (): void => { controller.abort(); controller = new AbortController(); };
+  signal?.addEventListener("abort", abort, { once: true });
+  const keys = new Set<string>(["local"]);
+  const readings: MachineReading[] = remote.machines.map((machine) => {
+    let key = machineKey(machine.name);
+    for (let attempt = 2; keys.has(key); attempt++) key = `${machineKey(machine.name).slice(0, 60)}-${attempt}`;
+    keys.add(key);
+    return { machine, pending: null, snapshot: null, status: { key, label: machine.name, state: "reading", sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } };
+  });
+  const lastGood = async (reading: MachineReading): Promise<Pick<MachineReading, "snapshot" | "status" | "identity"> | null> => {
+    const found = reading.machine.saved ? await readLastGood(options, reading.status.key, request) : null;
+    if (!found) return null;
+    const { record, snapshot } = found;
+    return { snapshot, ...(record.identity ? { identity: record.identity } : {}), status: { ...reading.status, sessions: record.sessions, repositories: record.repositories, readAt: record.readAt, durationMs: record.durationMs, version: record.producer } };
+  };
+  const loaded = Promise.all(readings.map(async (reading) => {
+    if (!preload) return;
+    const found = await lastGood(reading);
+    // A read that settled first has newer news.
+    if (found && reading.status.state === "reading" && !reading.snapshot) Object.assign(reading, found, { status: { ...found.status, state: "reading" } });
+  })).then(() => {});
+
+  const read = async (reading: MachineReading, stop: AbortSignal): Promise<void> => {
+    const { machine } = reading, { key, label } = reading.status;
+    const started = performance.now();
+    let error: RemoteError | undefined;
+    try {
+      const answer = await fetchRemoteSnapshot(machine, machine.runtime === "bundled" ? [...args, "--identify-machine"] : args, { timeoutMs: remote.timeoutMs, signal: stop });
+      if (answer.velocity?.timeZone !== options.timeZone) throw new RemoteError("time-zone", machine);
+      // The bundled runtime describes itself; that entry is about the read, not part of the history.
+      const { machines: [self] = [], ...snapshot } = answer;
+      const identity = self?.identity ?? machine.identity;
+      if (identity && identity === localIdentity()) throw new RemoteError("same-machine", machine);
+      const status: MachineStatus = {
+        key, label, state: "ok", ...(snapshot.summary.sessions ? {} : { reason: "no-history" as const, fix: noHistoryFix(machine) }),
+        sessions: snapshot.summary.sessions, repositories: snapshot.summary.repositories, readAt: new Date().toISOString(),
+        durationMs: Math.round(performance.now() - started), version: self?.version ?? null,
+      };
+      Object.assign(reading, { snapshot, status, identity, twin: undefined });
+      if (machine.saved) {
+        try { writeLastGood(options, key, { request, readAt: status.readAt!, durationMs: status.durationMs!, producer: status.version, sessions: status.sessions, repositories: status.repositories, ...(identity ? { identity } : {}) }, snapshot); }
+        catch { /* The cache only softens a later failure. */ }
+      }
+    } catch (caught) {
+      // Stopped because this machine failed or is shutting down: that error, not this one, is the news.
+      const stopped = stop.aborted || stopping();
+      error = stopped ? new RemoteError("cancelled", machine) : caught instanceof RemoteError ? caught : new RemoteError("analysis", machine);
+      // The previous snapshot of this process is the newest good one; otherwise the stored one.
+      const age = reading.status.readAt ? Date.now() - Date.parse(reading.status.readAt) : Infinity;
+      const kept = error.reason === "same-machine" ? null
+        : reading.snapshot && age <= lastGoodMaxAgeMs ? { snapshot: reading.snapshot, status: reading.status, ...(reading.identity ? { identity: reading.identity } : {}) }
+        : stopped ? null : await lastGood(reading);
+      const reason = error.reason, fix = error.fix ? { fix: error.fix } : {};
+      if (kept) Object.assign(reading, kept, { status: { ...kept.status, state: "stale", reason, ...fix } });
+      else Object.assign(reading, { snapshot: null, identity: undefined, status: { key, label, state: "failed", reason, ...fix, sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } });
+      if (stopped) return;
+    }
+    report(machineReadLines(machine, reading.status, error), Boolean(error) || !reading.status.sessions);
+  };
+
+  const start = (): Promise<void> => {
+    const stop = controller.signal;
+    for (const reading of readings) {
+      if (reading.pending) continue;
+      const { key, label, sessions, repositories, readAt, durationMs, version: producer } = reading.status;
+      reading.status = { key, label, state: "reading", sessions, repositories, readAt, durationMs, version: producer };
+      reading.pending = read(reading, stop).finally(() => { reading.pending = null; onSettle(); });
+    }
+    return Promise.all(readings.map(({ pending }) => pending)).then(() => {});
+  };
+
+  const combine = (local: MachineAnalytics, localMs: number): MachineAnalytics => {
+    // A machine reached twice counts once: answers read now win, in the configured order, then stale ones.
+    const seen = new Map<string, string>([[localIdentity(), remote.local]]), twins = new Map<MachineReading, string>();
+    for (const reading of [...readings].sort((left, right) => Number(left.status.state !== "ok") - Number(right.status.state !== "ok"))) {
+      if (!reading.snapshot || !reading.identity) continue;
+      const twin = seen.get(reading.identity);
+      if (twin) twins.set(reading, twin); else seen.set(reading.identity, reading.machine.name);
+    }
+    const statuses: MachineStatus[] = [{ key: "local", label: remote.local, state: "ok", sessions: local.summary.sessions, repositories: local.summary.repositories, readAt: local.generatedAt, durationMs: Math.round(localMs), version }];
+    const inputs: Array<MachineAnalytics | null> = [local];
+    for (const reading of readings) {
+      const twin = twins.get(reading);
+      if (!twin) { statuses.push(reading.status); inputs.push(reading.snapshot); continue; }
+      const error = new RemoteError("same-machine", reading.machine, "", twin);
+      if (reading.twin !== twin) { reading.twin = twin; report(`Not counting ${reading.machine.name}: ${error.message}.${error.fix ? `\n  Fix: ${error.fix}` : ""}`, true); }
+      const { key, label } = reading.status;
+      statuses.push({ key, label, state: "failed", reason: "same-machine", ...(error.fix ? { fix: error.fix } : {}), sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null });
+      inputs.push(null);
+    }
+    const warnings = [...(statuses.some(({ state }) => state === "failed") ? [remoteUnavailableWarning] : []), ...(statuses.some(({ state }) => state === "stale") ? [staleMachineWarning] : [])];
+    return combineSnapshots(inputs, { machines: statuses, warnings });
+  };
+
+  return { readings, loaded, start, abort, combine };
 }
 
 /**
  * This machine and every remote one, combined into one validated snapshot. The local scan and the
  * remote reads run at the same time, and each machine is reported as soon as it settles. A machine
- * that cannot be read leaves a fixed warning in the snapshot; a failed local scan stops the reads
- * and fails the whole result.
+ * that cannot be read is listed with its reason and, when it has one, its last good snapshot; a
+ * failed local scan stops the reads and fails the whole result.
  */
 export async function analyzeMachines(
   options: AnalyzeOptions,
   remote: RemoteOptions,
-  report: (line: string, failed: boolean, read?: MachineRead) => void = () => {},
+  report: (line: string, failed: boolean) => void = () => {},
   signal?: AbortSignal,
 ): Promise<MachineAnalytics> {
   if (!remote.machines.length) return await analyzeMachineSessionsIsolated(options);
-  const local = { ...options, portableIds: true, timeZone: options.timeZone ?? localTimeZone() };
-  const args = remoteArguments(local);
-  const controller = new AbortController();
-  const abort = (): void => controller.abort();
-  signal?.addEventListener("abort", abort, { once: true });
-  const reads = remote.machines.map(async (machine): Promise<MachineAnalytics | null> => {
-    const started = performance.now();
-    let read: MachineRead;
-    let snapshot: MachineAnalytics | null = null;
-    try {
-      snapshot = await fetchRemoteSnapshot(machine, args, { timeoutMs: remote.timeoutMs, signal: controller.signal });
-      if (snapshot.velocity?.timeZone !== local.timeZone) throw new RemoteError("time-zone", machine);
-      read = { name: machine.name, state: snapshot.summary.sessions ? "read" : "empty", sessions: snapshot.summary.sessions, ms: performance.now() - started };
-    } catch (error) {
-      snapshot = null;
-      read = { name: machine.name, state: "failed", error: error instanceof RemoteError ? error : new RemoteError("analysis", machine) };
-    }
-    // Stopped because this machine failed or is shutting down: that error, not this one, is the news.
-    if (read.state === "failed" && (controller.signal.aborted || stopping())) return null;
-    const line = read.state === "read"
-      ? `Read ${snapshot!.summary.sessions} sessions across ${snapshot!.summary.repositories} repositories from ${machine.name} in ${(read.ms! / 1000).toFixed(1)} s.`
-      : machineReadLines(read, machine);
-    report(line, read.state !== "read", read);
-    return snapshot;
-  });
+  const local = machineOptions(options);
+  const reads = machineReads(local, remote, { report, ...(signal ? { signal } : {}) });
+  const settled = reads.start();
   try {
-    const own = await analyzeMachineSessionsIsolated(local).catch((error: unknown) => { controller.abort(); throw error; });
-    const others = await Promise.all(reads);
+    const started = performance.now();
+    const own = await analyzeMachineSessionsIsolated(local).catch((error: unknown) => { reads.abort(); throw error; });
+    const ms = performance.now() - started;
+    await settled;
     // A stopped run never passes for this machine alone.
-    if (controller.signal.aborted || stopping()) throw new RemoteError("cancelled");
-    const snapshots = [own, ...others.filter((snapshot): snapshot is MachineAnalytics => snapshot !== null)];
-    return combineSnapshots(snapshots, snapshots.length <= remote.machines.length ? [remoteUnavailableWarning] : []);
+    if (signal?.aborted || stopping()) throw new RemoteError("cancelled");
+    return reads.combine(own, ms);
   } finally {
-    signal?.removeEventListener("abort", abort);
-    await Promise.allSettled(reads);
+    await settled;
   }
 }

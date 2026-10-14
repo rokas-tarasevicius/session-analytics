@@ -437,6 +437,10 @@
           "items": {
             "$ref": "#/$defs/HistoryProfileMonth"
           }
+        },
+        "machine": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
         }
       },
       "required": [
@@ -2582,6 +2586,9 @@
                 "const": "A remote machine could not be read; its sessions are missing from this snapshot."
               },
               {
+                "const": "A remote machine could not be read; its last good snapshot is used instead."
+              },
+              {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
               },
               {
@@ -3070,6 +3077,10 @@
         },
         "updatedAt": {
           "type": "string"
+        },
+        "machine": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
         }
       },
       "required": [
@@ -3096,6 +3107,491 @@
         "transcript",
         "transportTools",
         "updatedAt"
+      ],
+      "additionalProperties": false
+    },
+    "MachineStatus": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "state": {
+          "anyOf": [
+            {
+              "const": "ok"
+            },
+            {
+              "const": "stale"
+            },
+            {
+              "const": "failed"
+            },
+            {
+              "const": "reading"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "const": "no-ssh"
+            },
+            {
+              "const": "connection"
+            },
+            {
+              "const": "dropped"
+            },
+            {
+              "const": "sudo"
+            },
+            {
+              "const": "no-account"
+            },
+            {
+              "const": "permission"
+            },
+            {
+              "const": "missing-command"
+            },
+            {
+              "const": "no-node"
+            },
+            {
+              "const": "node-too-old"
+            },
+            {
+              "const": "runtime"
+            },
+            {
+              "const": "cache-unwritable"
+            },
+            {
+              "const": "corrupted"
+            },
+            {
+              "const": "version-skew"
+            },
+            {
+              "const": "rejected"
+            },
+            {
+              "const": "busy"
+            },
+            {
+              "const": "index-newer"
+            },
+            {
+              "const": "analysis"
+            },
+            {
+              "const": "invalid"
+            },
+            {
+              "const": "time-zone"
+            },
+            {
+              "const": "timeout"
+            },
+            {
+              "const": "too-large"
+            },
+            {
+              "const": "cancelled"
+            },
+            {
+              "const": "no-history"
+            },
+            {
+              "const": "same-machine"
+            }
+          ]
+        },
+        "fix": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "repositories": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "readAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "identity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "const": "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters."
+              },
+              {
+                "const": "Accounting may be incomplete: a repeated numeric token state after a counter decrease was excluded without a proven reset/request identity. The decrease alone cannot distinguish a new request from replay."
+              },
+              {
+                "const": "Some child transcript evidence could not be read."
+              },
+              {
+                "const": "Some provider evidence directories could not be read."
+              },
+              {
+                "const": "Primary transcript is unavailable; surviving child evidence is partial."
+              },
+              {
+                "const": "Recovered from Conductor assistant usage. API-equivalent value is not an invoice; retained messages may not cover the full session. Human turns are unavailable."
+              },
+              {
+                "const": "Final output was recovered only from single-model query receipts with exactly matching main-loop input counters. No input or request count was added; uncertain day, hour and reasoning splits remain unavailable."
+              },
+              {
+                "const": "A higher cumulative receipt lower bound was retained instead of message prices. Tokens and request counts retain message evidence; provider-reported value and model cost allocations can cover a different retained interval and have no request dates."
+              },
+              {
+                "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "A provider evidence store could not be fully read; identified sessions were retained."
+              },
+              {
+                "const": "A provider evidence directory could not be read; sibling directories were retained."
+              },
+              {
+                "const": "A Cursor SDK store could not be read; sibling stores were retained."
+              },
+              {
+                "const": "A Gemini history could not be read or exceeded its budget; sibling histories were retained."
+              },
+              {
+                "const": "A Copilot history could not be read; sibling histories were retained."
+              },
+              {
+                "const": "A Cursor transcript could not be read; sibling histories were retained."
+              },
+              {
+                "const": "A provider transcript root is missing."
+              },
+              {
+                "const": "A provider transcript root could not be read."
+              },
+              {
+                "const": "Cursor local session history could not be read."
+              },
+              {
+                "const": "Cursor local session history is missing."
+              },
+              {
+                "const": "Evidence changed during analysis; unstable index groups were deferred until the next scan."
+              },
+              {
+                "const": "A provider evidence fallback could not be read; canonical sessions were retained."
+              },
+              {
+                "const": "A provider evidence session could not be read; other sessions were retained."
+              },
+              {
+                "const": "A provider evidence store could not be read or has an unsupported schema."
+              },
+              {
+                "const": "The local index failed a consistency check; a full scan of present sources was used. Retained history is unavailable; run index rebuild."
+              },
+              {
+                "const": "A remote machine could not be read; its sessions are missing from this snapshot."
+              },
+              {
+                "const": "A remote machine could not be read; its last good snapshot is used instead."
+              },
+              {
+                "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
+              },
+              {
+                "const": "Some sessions appeared on more than one machine; each is counted once."
+              },
+              {
+                "const": "Source availability could not be checked; showing the last indexed facts."
+              },
+              {
+                "const": "Source-deleted history retains the pricing and parser results from its last successful ingest."
+              },
+              {
+                "const": "Legacy activity dates could not be verified; history is kept until its source can be read again."
+              },
+              {
+                "const": "Workflow projection is unavailable; accounting was retained."
+              },
+              {
+                "const": "A provider evidence fallback could not be read; canonical sessions were retained."
+              },
+              {
+                "const": "Cursor SDK tool events were unavailable; run summaries were retained."
+              },
+              {
+                "const": "Malformed Cursor SDK records were skipped."
+              },
+              {
+                "const": "Cursor SDK usage was recovered from partial stream events; final run counters were unavailable."
+              },
+              {
+                "const": "Cursor SDK usage is aggregated by run. Model request counts and daily cost attribution are unavailable; one started run counts as one observed turn."
+              },
+              {
+                "const": "Cursor SDK usage is aggregated by run and dated by run time. Model request counts and per-request cost attribution are unavailable; one started run counts as one observed turn."
+              },
+              {
+                "const": "Aggregate usage has no per-request context sizes; the upper estimate applies the long-context premium to all usage."
+              },
+              {
+                "const": "Cache-write TTL is unavailable; the ordinary estimate uses the default write rate and the upper estimate allows the configured one-hour write rate."
+              },
+              {
+                "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and daily cost attribution are unavailable. Reported value is not an invoice."
+              },
+              {
+                "const": "Recovered from Conductor result receipts. Tools, human turns, model request counts, and per-request cost dates are unavailable; reported value is session-dated. Reported value is not an invoice."
+              },
+              {
+                "const": "Reported model allocations are incomplete; recovered value is an observed lower bound."
+              },
+              {
+                "const": "Some reported tokens or value have no model allocation; they remain in the unknown model bucket."
+              },
+              {
+                "const": "Token totals retain the observed main-loop lower bound from deduplicated turn receipts; sub-agent usage is unavailable."
+              },
+              {
+                "const": "Accounting is partial: retained receipts do not prove disjoint process epochs or complete resumed history. Ambiguous cumulative snapshots are not added; zeroed crash results cannot erase earlier evidence."
+              },
+              {
+                "const": "Turn-local usage is separate from cumulative model usage. SDK turns, durations, and denial totals are unavailable across multiple receipts because their scopes are not established."
+              },
+              {
+                "const": "Conductor rows disagree on repository attribution; the recovered identity is grouped as unassigned."
+              },
+              {
+                "const": "Reported model allocations differ from the reported total; the SDK result total remains authoritative."
+              },
+              {
+                "const": "Malformed OpenCode message records were skipped."
+              },
+              {
+                "const": "Malformed OpenCode part records were skipped."
+              },
+              {
+                "const": "OpenCode accounting is partial because some records could not be parsed."
+              },
+              {
+                "const": "OpenCode step counters are priced at reviewed API rates, with assistant snapshots used only where step counters are absent. OpenCode's own cost estimate is not added again."
+              },
+              {
+                "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
+              },
+              {
+                "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
+              },
+              {
+                "const": "Malformed Copilot events were skipped."
+              },
+              {
+                "const": "Copilot persisted events provide activity counts. Per-call usage events are ephemeral; tokens and USD value are unavailable. Premium-request multipliers and AI credits are not dollar costs."
+              },
+              {
+                "const": "The evidence does not establish a unique repository path; this session is grouped as unassigned."
+              },
+              {
+                "const": "A provider evidence session could not be read; other sessions were retained."
+              },
+              {
+                "const": "A provider evidence store could not be read or has an unsupported schema."
+              },
+              {
+                "const": "Malformed Cursor transcript records were skipped."
+              },
+              {
+                "const": "Activity-only Cursor transcript: tokens, model, cost, and event times are unavailable. The displayed date is the file modification time, not session start; duration is unavailable."
+              },
+              {
+                "const": "Transcript ID matched, but its recorded working directory did not."
+              },
+              {
+                "const": "Transcript filename matched, but provider metadata validation failed."
+              },
+              {
+                "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
+              },
+              {
+                "const": "Some Claude responses do not expose thinking tokens separately; they remain included in output."
+              },
+              {
+                "const": "Provider history did not record a stable model ID; those tokens are excluded from API-equivalent spend coverage."
+              },
+              {
+                "const": "Discovered directly from the machine-wide provider transcript store."
+              },
+              {
+                "const": "Recovered from a unique working-directory and start-time match in the provider transcript store."
+              },
+              {
+                "const": "Cursor usage value is read from the provider-reported local cost record; it is not inferred from a third-party rate card."
+              },
+              {
+                "const": "Cursor retained session metadata without a provider-reported local cost record; no usage value is inferred."
+              },
+              {
+                "const": "Cursor retained the session header and usage summary, but not detailed local conversation metrics."
+              },
+              {
+                "const": "Conductor has no provider session ID."
+              },
+              {
+                "const": "Unsupported Conductor agent type."
+              },
+              {
+                "const": "Transcript parsing failed without exposing local error details."
+              },
+              {
+                "const": "Some provider metadata was omitted because it was not a bounded public identifier."
+              },
+              {
+                "const": "Cache-write totals were reconciled from the recorded TTL breakdown."
+              },
+              {
+                "const": "Iteration billing is incomplete; uncertain attempts were omitted or left unpriced."
+              },
+              {
+                "const": "Aggregate cache-write TTL totals are known, but their allocation across iterations is unavailable; pricing remains estimated."
+              },
+              {
+                "const": "Aggregate usage has no per-request context sizes; the conservative upper estimate allows each token class its highest configured context rate."
+              },
+              {
+                "const": "Cache-write TTL is unavailable for some tokens; the ordinary estimate uses the default write rate and the upper estimate allows the configured one-hour write rate."
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions include source-deleted history; facts and prices are from their last successful ingest\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} malformed JSONL records were skipped\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} malformed JSONL records were skipped (?:in the primary transcript|in child transcripts)\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} inherited assistant records are owned by earlier sessions and excluded here\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} assistant records lack provable request ownership; their usage and cost are excluded\\. Accounting is partial\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^Some token classes have estimated or unavailable rates for (<unknown>|(?:@cf/)?[A-Za-z][A-Za-z0-9._-]*(?:/[A-Za-z][A-Za-z0-9._-]*){0,2})\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} cumulative token counter reset(?: was|s were) re-baselined as a new observed segment\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} repeated process-wide token snapshot(?: was|s were) excluded from this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} token event(?: lacks|s lack) per-request usage; only deltas between snapshots this session observed were counted\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} process-wide counter baseline(?: was|s were) excluded because the requests inside it were not observed by this session\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} legacy sessions? cannot be correlated because Conductor recorded no provider session ID\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have a provider ID but no validated local transcript\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions have incomplete token pricing\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? include models without a rate card\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,15} sessions? have unsupported provider evidence\\.$"
+              },
+              {
+                "type": "string",
+                "pattern": "^No rate card is configured for (<unknown>|(?:@cf/)?[A-Za-z][A-Za-z0-9._-]*(?:/[A-Za-z][A-Za-z0-9._-]*){0,2})\\.$"
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "state",
+        "sessions",
+        "repositories",
+        "readAt",
+        "durationMs",
+        "version"
       ],
       "additionalProperties": false
     },
@@ -3204,6 +3700,9 @@
               },
               {
                 "const": "A remote machine could not be read; its sessions are missing from this snapshot."
+              },
+              {
+                "const": "A remote machine could not be read; its last good snapshot is used instead."
               },
               {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
@@ -3576,6 +4075,9 @@
                 "const": "A remote machine could not be read; its sessions are missing from this snapshot."
               },
               {
+                "const": "A remote machine could not be read; its last good snapshot is used instead."
+              },
+              {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."
               },
               {
@@ -3828,6 +4330,13 @@
     "MachineAnalytics": {
       "type": "object",
       "properties": {
+        "machines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MachineStatus"
+          },
+          "maxItems": 256
+        },
         "historyCoverage": {
           "$ref": "#/$defs/HistoryCoverage"
         },
@@ -4100,6 +4609,9 @@
               },
               {
                 "const": "A remote machine could not be read; its sessions are missing from this snapshot."
+              },
+              {
+                "const": "A remote machine could not be read; its last good snapshot is used instead."
               },
               {
                 "const": "Filtered export: entire sessions selected by start date; coverage is recomputed for the selection. API-equivalent value is not an invoice."

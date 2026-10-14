@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { InteropError } from "./error.ts";
 import { validateSnapshot } from "./snapshot.ts";
 import type { HistoryCoverage, HistoryMonth, HistoryProfile } from "../metrics/history-types.ts";
-import type { MachineAnalytics, McpSourceHealth, RepositoryRollup, SessionAnalytics } from "../types.ts";
+import type { MachineAnalytics, MachineStatus, McpSourceHealth, RepositoryRollup, SessionAnalytics } from "../types.ts";
 import { aggregateSessions } from "../public/export-data.js";
 import { duplicateMachineWarning } from "../public/evidence.js";
 import { timestampMilliseconds } from "../public/timestamps.js";
@@ -81,40 +81,87 @@ function combineSourceHealth(snapshots: MachineAnalytics[]): McpSourceHealth[] |
   return [...rows.values()];
 }
 
+export interface CombineOptions {
+  /** Fixed warnings to add, such as a machine that could not be read. */
+  warnings?: string[];
+  /**
+   * How each input was read, in input order. Without them, an input keeps the machines it lists
+   * (a combined file) or becomes machine-1, machine-2… A null input is a machine with no snapshot.
+   */
+  machines?: Array<MachineStatus | undefined>;
+}
+
+/** Keys and labels stay unique when combined files name the same machine. */
+function uniqueIn(taken: Set<string>, value: string, suffix: (attempt: number) => string): string {
+  let result = value;
+  for (let attempt = 2; taken.has(result); attempt++) result = suffix(attempt);
+  taken.add(result);
+  return result;
+}
+
 /**
  * One validated snapshot from full snapshots of several machines. Sessions are unioned by provider
- * session key and repositories by ID; the first input names a repository and wins exact ties. Every
- * rollup, coverage warning and history month is recomputed from the union rather than added.
+ * session key and repositories by ID; the first input names a repository and wins exact ties. A copy
+ * read now beats a stale one, whichever is more complete. Every rollup, coverage warning and history
+ * month is recomputed from the union rather than added. Combining more than one input, or describing
+ * how inputs were read, lists the machines and tags each session and profile with its machine.
  */
-export function combineSnapshots(snapshots: MachineAnalytics[], warnings: string[] = []): MachineAnalytics {
+export function combineSnapshots(inputs: ReadonlyArray<MachineAnalytics | null>, { warnings = [], machines: statuses }: CombineOptions = {}): MachineAnalytics {
+  const snapshots = inputs.filter((snapshot): snapshot is MachineAnalytics => snapshot !== null);
   const first = snapshots[0];
   if (!first) throw new InteropError("Combining requires at least one full snapshot.");
   // Hourly cells are local to the analysis time zone; mixing zones would misplace activity.
   if (snapshots.some(({ velocity }) => velocity?.version !== first.velocity?.version || velocity?.timeZone !== first.velocity?.timeZone)) {
     throw new InteropError("Snapshots use different analysis time zones; create each with the same --time-zone.");
   }
-  const sessions = new Map<string, SessionAnalytics>();
+  const described = statuses !== undefined || inputs.length > 1 || snapshots.some(({ machines }) => machines?.length);
+  const machines: MachineStatus[] = [], keys = new Set<string>(), labels = new Set<string>();
+  const sources = inputs.map((snapshot, position) => {
+    const given = statuses?.[position];
+    if (!given && !snapshot) throw new InteropError("Combining requires a status for a machine without a snapshot.");
+    const own: MachineStatus[] = given ? [given] : snapshot!.machines?.length ? snapshot!.machines : [{
+      key: `machine-${position + 1}`, label: `machine-${position + 1}`, state: "ok", sessions: snapshot!.summary.sessions,
+      repositories: snapshot!.summary.repositories, readAt: snapshot!.generatedAt, durationMs: null, version: null,
+    }];
+    const remap = new Map<string, string>();
+    for (const { identity: _, ...status } of own) {
+      const key = uniqueIn(keys, status.key, (attempt) => `${status.key.slice(0, 60)}-${attempt}`);
+      const label = uniqueIn(labels, status.label, (attempt) => `${status.label.slice(0, 248)} (${attempt})`);
+      const scoped = own.length === 1 && snapshot && !snapshot.machines?.length ? unique(snapshot.warnings.filter((warning) => !counted(warning))) : status.warnings;
+      remap.set(status.key, key);
+      machines.push({ ...status, key, label, ...(scoped?.length ? { warnings: scoped } : {}) });
+    }
+    return { snapshot, remap, fallback: remap.get(own[0]!.key)!, fresh: own.some(({ state }) => state === "ok") };
+  });
+  const sessions = new Map<string, { session: SessionAnalytics; fresh: boolean }>();
   const profiles: HistoryProfile[] = [], profileKeys = new Set<string>();
   let generatedAt = first.generatedAt;
   let duplicates = false;
-  for (const [position, snapshot] of snapshots.entries()) {
+  for (const [position, { snapshot, remap, fallback, fresh }] of sources.entries()) {
+    if (!snapshot) continue;
     if (timestampMilliseconds(snapshot.generatedAt) > timestampMilliseconds(generatedAt)) generatedAt = snapshot.generatedAt;
+    const machineOf = (key: string | undefined): string => (key !== undefined ? remap.get(key) : undefined) ?? fallback;
     const remappedProfiles = new Map<string, string>();
     for (const profile of snapshot.historyCoverage?.profiles ?? []) {
       let key = profile.profileKey, attempt = 0;
       // Matching directory hashes do not identify a shared source across machines.
       while (profileKeys.has(key)) key = `profile-${createHash("sha256").update(`${profile.profileKey}:${position}:${attempt++}`).digest("hex").slice(0, 20)}`;
       profileKeys.add(key); remappedProfiles.set(profile.profileKey, key);
-      profiles.push({ ...profile, profileKey: key, ordinal: profiles.length + 1 });
+      const { machine, ...rest } = profile;
+      profiles.push({ ...rest, profileKey: key, ordinal: profiles.length + 1, ...(described ? { machine: machineOf(machine) } : {}) });
     }
     for (const session of snapshot.sessions) {
       const key = `${session.provider}:${session.sessionKey}`;
       const current = sessions.get(key);
       if (current) duplicates = true;
-      if (!current || moreComplete(session, current)) {
+      if (!current || (fresh !== current.fresh ? fresh : moreComplete(session, current.session))) {
         const profileKey = session.historyProfile ? remappedProfiles.get(session.historyProfile.profileKey) : undefined;
-        sessions.set(key, profileKey && profileKey !== session.historyProfile?.profileKey
-          ? { ...session, historyProfile: { profileKey, days: session.historyProfile!.days } } : session);
+        const { machine, ...rest } = session;
+        sessions.set(key, { fresh, session: {
+          ...rest,
+          ...(profileKey && profileKey !== session.historyProfile?.profileKey ? { historyProfile: { profileKey, days: session.historyProfile!.days } } : {}),
+          ...(described ? { machine: machineOf(machine) } : {}),
+        } });
       }
     }
   }
@@ -128,7 +175,7 @@ export function combineSnapshots(snapshots: MachineAnalytics[], warnings: string
       repositories.set(repository.id, row);
     }
   }
-  for (const session of sessions.values()) {
+  for (const { session } of sessions.values()) {
     const row = repositories.get(session.repositoryId);
     // Validated inputs always list their sessions' repositories.
     if (!row) throw new InteropError("Snapshot is invalid, inconsistent, or unsupported.");
@@ -146,6 +193,7 @@ export function combineSnapshots(snapshots: MachineAnalytics[], warnings: string
   const history = combineHistory(snapshots, profiles, selected);
   const health = combineSourceHealth(snapshots);
   return validateSnapshot({
+    ...(described ? { machines } : {}),
     ...(first.velocity ? { velocity: first.velocity } : {}),
     generatedAt,
     schemaVersion: 1,

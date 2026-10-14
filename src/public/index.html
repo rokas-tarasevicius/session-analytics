@@ -147,6 +147,12 @@
             <div class="status-banner-body"><strong class="status-banner-title" id="error-title">Analysis failed</strong><span id="error-message"></span></div>
             <button type="button" class="button error-retry" id="error-retry">Retry</button>
           </div>
+          <div class="machine-strip" id="machine-strip" role="group" aria-labelledby="machine-strip-title" hidden>
+            <span class="machine-strip-title" id="machine-strip-title">Machines</span>
+            <div class="machine-chips" id="machine-chips"></div>
+            <span class="machine-strip-meta" id="machine-strip-meta"></span>
+            <button class="button machine-details-button" id="machine-details" type="button" aria-haspopup="dialog" aria-controls="machines-dialog">Machine details</button>
+          </div>
           <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></span></p>
           <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
 
@@ -204,6 +210,11 @@
                 <header><div><h2>Sub-agent value</h2><p class="chart-note" id="subagent-note" hidden></p></div></header>
                 <div class="bar-list chart-slot" id="repository-subagent-spend"></div>
                 <p class="chart-note">Explicit sub-agent evidence · lower bound</p>
+              </article>
+              <article class="panel span-12" id="machine-spend-panel" hidden>
+                <header><div><h2>Usage value by machine</h2></div></header>
+                <div class="bar-list chart-slot" id="machine-spend"></div>
+                <p class="chart-note">Activity-dated · each session counted once</p>
               </article>
             </section>
 
@@ -314,6 +325,15 @@
             <li>Activity counters do not prove success, quality, or value delivered.</li>
           </ul>
         </section>
+      </div>
+    </dialog>
+
+    <dialog class="help coverage-dialog" id="machines-dialog" aria-labelledby="machines-title">
+      <header><h2 id="machines-title" tabindex="-1" autofocus>Machines</h2><button class="icon-button" id="machines-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
+      <div class="coverage-body">
+        <p class="coverage-intro" id="machines-summary"></p>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th class="align-left">Machine</th><th class="align-left">State</th><th>Sessions</th><th>Repositories</th><th class="align-left">Read</th><th>Took</th><th class="align-left">Version</th></tr></thead><tbody id="machines-rows"></tbody></table></div>
+        <p class="coverage-intro">Sessions are those read from each machine; a session found on two machines counts once. A stale machine shows its last good snapshot until it can be read again. Run a Fix line in a terminal on this machine, then refresh.</p>
       </div>
     </dialog>
 

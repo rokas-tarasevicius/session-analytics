@@ -14,7 +14,9 @@ import { OptionError, remoteOptionsFrom, type RemoteMachine } from "../src/optio
 import { classifyRemote, stderrDetail, type SshResult } from "../src/remote.ts";
 import { bootstrapPath, buildRuntime, runtimePayload } from "../src/remote/runtime.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
-import { remoteUnavailableWarning } from "../src/public/evidence.js";
+import { remoteUnavailableWarning, staleMachineWarning } from "../src/public/evidence.js";
+import type { MachineAnalytics } from "../src/types.ts";
+import { version } from "../src/version.ts";
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
 
 const run = promisify(execFile);
@@ -51,7 +53,7 @@ mkdirSync(home, { recursive: true });
 writeFileSync(join(machine, "machine-id"), "id-" + destination.replace(/-again$/, "") + "\\n");
 writeFileSync(join(machine, "passwd"), ["root:x:0:0::" + join(machine, "root") + ":/bin/bash", "daemon:x:1:1::/usr/sbin:/usr/sbin/nologin", "agents:x:995:995::" + join(machine, "agents") + ":/bin/bash", "ssh-user:x:1000:1000::" + join(machine, "ssh-user") + ":/bin/bash"].join("\\n") + "\\n");
 mkdirSync(join(machine, "agents", ".claude"), { recursive: true });
-const env = { ...process.env, HOME: home, ...(JSON.parse(process.env.FAKE_SSH_ENVS)[destination] || {}) };
+const env = { ...process.env, HOME: home, SESSION_ANALYTICS_MACHINE_ID: "id-" + destination.replace(/-again$/, ""), ...(JSON.parse(process.env.FAKE_SSH_ENVS)[destination] || {}) };
 delete env.XDG_CACHE_HOME;
 if (words[0] === "true") process.exit(0);
 let program = words[0], programArgs = words.slice(1);
@@ -411,6 +413,8 @@ test("a plain report reads saved machines with the bundled runtime: install once
   assert.match(first.stderr, /Read 5 sessions across 3 repositories from server in \d+\.\d s\./);
   assert.match(first.stderr, /empty: no agent history for this account \(0 sessions read\)\.\n {2}Fix: if agents run as another account there: session-analytics machines set empty --user NAME/);
   assert.match(first.stderr, /Could not read down: SSH could not connect/);
+  // The header lists what was read, with counts and timing, and each machine not read with its reason and fix.
+  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: run ssh down true once/);
   assert.deepEqual((await calls()).filter(({ destination }) => destination === "server").map(({ words }) => words[7]), ["run", "install"]);
   assert.deepEqual((await calls()).find(({ destination }) => destination === "server")!.words.slice(0, 6), ["sudo", "-n", "-iu", "agents", "node", "-"]);
   await rm(sshLog, { force: true });
@@ -494,7 +498,9 @@ test("a plain launch reuses the dashboard started with the same saved machines",
   try {
     let stdout = "";
     child.stdout!.on("data", (chunk) => { stdout += chunk; });
-    for (let attempt = 0; attempt < 400 && !/Analyzed/.test(stdout); attempt++) await delay(25);
+    // This machine's snapshot is served first; the server's sessions follow when it answers.
+    for (let attempt = 0; attempt < 400 && !/from server/.test(stdout); attempt++) await delay(25);
+    assert.match(stdout, /Analyzed \d+\/\d+ sessions/);
     assert.match(stdout, /Read 5 sessions across 3 repositories from server/);
     const again = cli(["dashboard", "--no-open", "--port", String(port), ...localFlags, "--data-dir", data]);
     assert.equal(again.status, 0, again.stderr);
@@ -508,3 +514,100 @@ test("a plain launch reuses the dashboard started with the same saved machines",
     await once(child, "exit");
   }
 });
+
+async function freePort(): Promise<number> {
+  return await new Promise<number>((resolve) => {
+    const probe = createServer().listen(0, "127.0.0.1", () => { const address = probe.address(); probe.close(() => resolve(typeof address === "object" && address ? address.port : 0)); });
+  });
+}
+
+test("a machine that fails is shown from its last good snapshot, marked stale, and --strict exits 3", async () => {
+  const data = dataDir("stale");
+  const saved = (ssh: string): MachinesConfig => ({ version: 1, local: { label: "laptop" }, machines: [{ name: "server", ssh, user: "agents", runtime: "bundled", enabled: true }] });
+  await machinesFile("stale", saved("server"));
+  const good = cli(["report", "--json", ...localFlags, "--data-dir", data, "--strict"]);
+  assert.equal(good.status, 0, good.stderr);
+  const fresh = validateSnapshot(JSON.parse(good.stdout));
+  assert.deepEqual(fresh.machines!.map(({ key, label, state }) => [key, label, state]), [["local", "laptop", "ok"], ["server", "server", "ok"]]);
+  // The bundled runtime says which version produced it; its identity stays out of the snapshot.
+  assert.equal(fresh.machines![1]!.version, version);
+  assert.ok(fresh.machines!.every(({ identity }) => identity === undefined));
+  for (const name of ["server.json", "server.snapshot.json"]) assert.equal((await stat(join(data, "machines", name))).mode & 0o777, 0o600);
+  // The same name now reaches a machine that is down.
+  writeMachines({ dataDir: data }, saved("down"));
+  const text = cli(["report", ...localFlags, "--data-dir", data, "--strict"]);
+  assert.equal(text.status, 3, text.stderr);
+  assert.match(text.stdout, /^Session Analytics · laptop and server \(stale\)\n/);
+  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 from a last good snapshot\n.*\n {2}server {2}unreachable; its last good snapshot from (?:just now|\d+ min ago) \(5 sessions, 3 repositories\)\n {4}Fix: run ssh down true once/);
+  assert.match(text.stderr, /Could not read server: SSH could not connect.*\n {2}Fix: .*\n {2}Using its last good snapshot from (?:just now|\d+ min ago) \(5 sessions\)\./);
+  assert.match(text.stderr, /--strict: server was not read now; exiting with 3\.\n$/);
+  const stale = validateSnapshot(JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data]).stdout));
+  assert.deepEqual(stale.machines!.map(({ state, reason }) => [state, reason ?? null]), [["ok", null], ["stale", "connection"]]);
+  assert.equal(stale.machines![1]!.readAt, fresh.machines![1]!.readAt);
+  assert.ok(stale.warnings.includes(staleMachineWarning) && !stale.warnings.includes(remoteUnavailableWarning));
+  // Another version, or another request, reads the machine again rather than reuse its snapshot.
+  const meta = join(data, "machines", "server.json"), record = await readFile(meta, "utf8");
+  const state = (args: string[] = []): string | undefined => (JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data, ...args]).stdout) as MachineAnalytics).machines![1]!.state;
+  await writeFile(meta, JSON.stringify({ ...JSON.parse(record), tool: "0.0.1" }));
+  assert.equal(state(), "failed");
+  await writeFile(meta, record);
+  assert.equal(state(["--time-zone", "Asia/Tokyo"]), "failed");
+  assert.equal(state(), "stale");
+  // Pointing the machine elsewhere, or removing it, forgets its snapshot.
+  assert.equal(cli(["machines", "set", "server", "--ssh", "server", "--data-dir", data]).status, 0);
+  assert.deepEqual(await readdir(join(data, "machines")), []);
+});
+
+test("the same machine reached twice is counted once, and this machine is never read as another", async () => {
+  const data = dataDir("twice");
+  await machinesFile("twice", { version: 1, machines: [
+    { name: "server", ssh: "server", user: "agents", runtime: "bundled", enabled: true },
+    { name: "again", ssh: "server-again", user: "agents", runtime: "bundled", enabled: true },
+  ] });
+  const text = cli(["report", ...localFlags, "--data-dir", data, "--strict"]);
+  assert.equal(text.status, 3, text.stderr);
+  assert.match(text.stdout, /^Session Analytics · this machine and server \(not read: again\)\n/);
+  assert.match(text.stdout, /\n {2}again {9}not read: same machine as another\n {4}Fix: session-analytics machines remove again\n/);
+  assert.match(text.stderr, /Not counting again: the same machine and account as server, so its history is counted once\.\n {2}Fix: session-analytics machines remove again/);
+  const snapshot = validateSnapshot(JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data]).stdout));
+  assert.deepEqual(snapshot.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [["local", "ok", null], ["server", "ok", null], ["again", "failed", "same-machine"]]);
+  const self = cli(["report", "--json", ...localFlags, "--data-dir", data, "--machines", "server"], { SESSION_ANALYTICS_MACHINE_ID: "id-server" });
+  assert.equal(self.status, 0, self.stderr);
+  assert.match(self.stderr, /Could not read server: this machine and account, which is always read\.\n {2}Fix: session-analytics machines remove server/);
+  assert.deepEqual((JSON.parse(self.stdout) as MachineAnalytics).machines!.map(({ state, reason }) => [state, reason ?? null]), [["ok", null], ["failed", "same-machine"]]);
+});
+
+test("the dashboard serves this machine first, shows a slow machine's last good snapshot while it reads, then marks it stale", async () => {
+  const data = dataDir("progressive");
+  await machinesFile("progressive", { version: 1, machines: [{ name: "server", ssh: "server", user: "agents", runtime: "bundled", enabled: true }] });
+  assert.equal(cli(["report", "--json", ...localFlags, "--data-dir", data]).status, 0);
+  // The same name now reaches a machine whose analysis never finishes.
+  writeMachines({ dataDir: data }, { version: 1, machines: [{ name: "server", ssh: "slow", runtime: "bundled", enabled: true }] });
+  const port = await freePort();
+  const child: ChildProcess = spawn(process.execPath, [server, "--port", String(port), ...localFlags, "--data-dir", data, "--remote-timeout", "8"], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    let output = "";
+    child.stdout!.on("data", (chunk) => { output += chunk; });
+    child.stderr!.on("data", (chunk) => { output += chunk; });
+    for (let attempt = 0; attempt < 400 && !/ready:/.test(output); attempt++) await delay(25);
+    const get = async <T>(path: string): Promise<T> => (await (await fetch(`http://127.0.0.1:${port}${path}`)).json()) as T;
+    const first = validateSnapshot(await get("/api/analytics"));
+    assert.deepEqual(first.machines!.map(({ key, state }) => [key, state]), [["local", "ok"], ["server", "reading"]]);
+    assert.equal(first.machines![1]!.sessions, 5);
+    assert.ok(first.machines![1]!.readAt);
+    const reading = await get<{ machines: MachineAnalytics["machines"] }>("/api/machines");
+    assert.deepEqual(reading.machines!.map(({ key, state }) => [key, state]), [["local", "ok"], ["server", "reading"]]);
+    let settled = reading;
+    for (let attempt = 0; attempt < 400 && settled.machines![1]!.state === "reading"; attempt++) { await delay(50); settled = await get("/api/machines"); }
+    assert.deepEqual([settled.machines![1]!.state, settled.machines![1]!.reason], ["stale", "timeout"]);
+    const after = validateSnapshot(await get("/api/analytics"));
+    assert.deepEqual(after.machines!.map(({ key, state }) => [key, state]), [["local", "ok"], ["server", "stale"]]);
+    assert.ok(after.warnings.includes(staleMachineWarning));
+    assert.match(output, /Could not read server: no snapshot within 8 seconds\.[^]*Using its last good snapshot from/);
+  } finally {
+    child.kill("SIGTERM");
+    await once(child, "exit");
+  }
+  assert.deepEqual(await noLeftovers(), []);
+});
+

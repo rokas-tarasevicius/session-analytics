@@ -5,14 +5,14 @@ import { createServer, type ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { AnalysisHeapLimitError } from "./analysis-process.ts";
+import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
 import { remoteFor } from "./machines/config.ts";
 import { stopOnSignals } from "./processes.ts";
-import { analyzeMachines } from "./remote.ts";
+import { analyzeMachines, machineOptions, machineReads } from "./remote.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
-import type { DashboardHealth, MachineAnalytics, SharedSnapshot } from "./types.ts";
+import type { DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
 import { loadSnapshot } from "./interop/snapshot.ts";
 import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
@@ -168,6 +168,7 @@ const staticFiles = new Map<string, string>([
   ["/pricing.css", join(publicRoot, "pricing.css")],
   ["/export-data.js", join(publicRoot, "export-data.js")],
   ["/evidence.js", join(publicRoot, "evidence.js")],
+  ["/machines.js", join(publicRoot, "machines.js")],
   ["/timestamps.js", join(publicRoot, "timestamps.js")],
   ["/export-menu.js", join(publicRoot, "export-menu.js")],
   ["/shared-view.js", join(publicRoot, "shared-view.js")],
@@ -217,11 +218,41 @@ const shutdown = new AbortController();
 let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
 let snapshotReady = false;
+const machineLine = (line: string, failed: boolean): void => { (failed ? process.stderr : process.stdout).write(`${line}\n`); };
+const machineScan = machineOptions(analyzeOptions);
+// Other machines are read on their own: a snapshot is served once this machine's scan is done, with the
+// last good snapshot of a machine still reading, and is rebuilt as each machine answers.
+const machines = !snapshotFile && remote.machines.length ? machineReads(machineScan, remote, {
+  report: machineLine, signal: shutdown.signal, preload: true,
+  onSettle: () => {
+    if (!scanned || analyticsPending) return;
+    try { analyticsPromise = Promise.resolve(machines!.combine(scanned.snapshot, scanned.ms)); }
+    catch { process.stderr.write("A machine's snapshot could not be combined; the previous snapshot stays.\n"); }
+  },
+}) : null;
+let scanned: { snapshot: MachineAnalytics; ms: number } | null = null;
+
+async function scanWithMachines(reads: NonNullable<typeof machines>): Promise<MachineAnalytics> {
+  void reads.start();
+  const started = performance.now();
+  const [snapshot] = await Promise.all([analyzeMachineSessionsIsolated(machineScan).catch((error: unknown) => { reads.abort(); throw error; }), reads.loaded]);
+  scanned = { snapshot, ms: performance.now() - started };
+  return reads.combine(snapshot, scanned.ms);
+}
+
+/** Every machine as it stands now; the dashboard polls this while a machine is still reading. */
+function machineStatuses(): MachineStatus[] {
+  if (!machines) return [];
+  const local: MachineStatus = { key: "local", label: remote.local, state: scanned && !analyticsPending ? "ok" : "reading", sessions: scanned?.snapshot.summary.sessions ?? 0,
+    repositories: scanned?.snapshot.summary.repositories ?? 0, readAt: scanned?.snapshot.generatedAt ?? null, durationMs: scanned ? Math.round(scanned.ms) : null, version };
+  return [local, ...machines.readings.map(({ status }) => status)];
+}
+
 function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> {
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
-    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line, failed) => (failed ? process.stderr : process.stdout).write(`${line}\n`), shutdown.signal))
+    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal))
       .then((result) => {
         snapshotReady = true;
         return result;
@@ -279,6 +310,10 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === "/api/analytics") {
       sendJson(response, 200, await analytics(url.searchParams.get("refresh") === "1"));
+      return;
+    }
+    if (url.pathname === "/api/machines") {
+      sendJson(response, 200, { machines: machineStatuses() });
       return;
     }
     if (url.pathname === "/api/limits") {
