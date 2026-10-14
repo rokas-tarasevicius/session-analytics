@@ -215,7 +215,7 @@ export async function rolloutAccount(path: string): Promise<string | null> {
 
 const planNames: Record<LimitProvider, Record<string, string>> = {
   claude: { pro: "Claude Pro", "max-5x": "Claude Max 5x", "max-20x": "Claude Max 20x", team: "Claude Team", enterprise: "Claude Enterprise" },
-  codex: { free: "ChatGPT Free", go: "ChatGPT Go", plus: "ChatGPT Plus", prolite: "ChatGPT Pro Lite", pro: "ChatGPT Pro", team: "ChatGPT Team", business: "ChatGPT Business", enterprise: "ChatGPT Enterprise", edu: "ChatGPT Edu" },
+  codex: { free: "ChatGPT Free", go: "ChatGPT Go", plus: "ChatGPT Plus", prolite: "ChatGPT Pro 100", pro: "ChatGPT Pro 200", team: "ChatGPT Business", business: "ChatGPT Business", enterprise: "ChatGPT Enterprise", edu: "ChatGPT Edu" },
 };
 const providerTitles: Record<LimitProvider, string> = { claude: "Claude", codex: "Codex" };
 

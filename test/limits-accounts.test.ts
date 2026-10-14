@@ -281,7 +281,7 @@ test("Codex rollouts are attributed to their creating account; scoped meters car
   writeFileSync(join(sessions, "rollout-b.jsonl"), `${line(now - 600, { limit_id: "codex", plan_type: "pro", primary: { used_percent: 30, window_minutes: 10_080, resets_at: now + 3 * 86_400 } })}\n`);
   const snapshot = await collectLimits({ dataDir: join(home, "data") }, environmentFor(home), now);
   const key = codexAccountKey("SECRET-ACCOUNT");
-  assert.deepEqual(snapshot.accounts.map((account) => [account.key, account.plan, account.label]), [[key, "pro", "ChatGPT Pro · default"]], "a rollout without a creator joins its home's only account");
+  assert.deepEqual(snapshot.accounts.map((account) => [account.key, account.plan, account.label]), [[key, "pro", "ChatGPT Pro 200 · default"]], "a rollout without a creator joins its home's only account");
   assert.deepEqual(snapshot.meters.map((meter) => [meter.meter, meter.label, meter.retired]), [
     ["codex_bengalfox.seven_day", "GPT-5.3-Codex-Spark · Weekly", true],
     ["other_scope.five_hour", "Model-scoped limit · 5-hour window", true],

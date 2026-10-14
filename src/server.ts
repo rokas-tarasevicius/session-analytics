@@ -283,7 +283,8 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/limits") {
-      sendJson(response, 200, await limits(url.searchParams.get("refresh") === "1"));
+      // The Subscription view must know when the session snapshot combines other machines, whose sessions are not this machine's.
+      sendJson(response, 200, { ...await limits(url.searchParams.get("refresh") === "1"), remoteMachines: remote.remotes.length });
       return;
     }
     const path = staticFiles.get(url.pathname);

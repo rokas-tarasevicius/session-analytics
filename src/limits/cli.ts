@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { brand } from "../brand.ts";
 import { argument, setting } from "../options.ts";
 import { dataDirectory, secureDirectory, secureFile } from "../store/database.ts";
-import { buildMeters, formatDuration, latestReading, liveMeter, providerNames, type LiveMeter } from "../public/subscription-data.js";
+import { buildMeters, formatDuration, identified, latestReading, liveMeter, providerNames, type LiveMeter } from "../public/subscription-data.js";
 import { planFor } from "../public/subscription-plans.js";
 import { collectLimits, statuslineAccount, type LimitsOptions } from "./index.ts";
 import { appendInbox } from "./ledger.ts";
@@ -55,16 +55,21 @@ function options(args: string[]): LimitsOptions {
 const clock = (seconds: number): string => new Date(seconds * 1000).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 function describe(live: LiveMeter, info: LimitMeterInfo | undefined, now: number, width: number): string {
-  const label = (info?.label ?? live.meter.label).padEnd(width);
+  const label = live.meter.label.padEnd(width);
   if (info?.retired) return `  ${label} not reported since ${clock(info.lastObservedAt)}`;
-  if (!live.cycle || live.cycle.last.status === "idle") return `  ${label} idle · the next request starts a new window`;
-  const parts = [`${live.used.toFixed(0).padStart(3)}% used`, `resets ${clock(live.cycle.resetsAt)} (in ${formatDuration(Math.max(0, live.cycle.resetsAt - now))})`];
-  if (live.state === "unreported") return `  ${label} ${live.used.toFixed(0).padStart(3)}% at last report ${clock(live.observedAt ?? now)} · no longer reported by the provider`;
-  if (live.cycle.last.status === "overage") parts.push("past the included allowance, on extra usage");
+  // Claude's weekly limits reset on a fixed weekly schedule; other windows start with the next request.
+  if (!live.cycle) return live.nextResetAt ? `  ${label} no reading since the last reset · resets ${clock(live.nextResetAt)} on its weekly schedule` : `  ${label} idle · the next request starts a new window`;
+  const used = `${live.used.toFixed(0).padStart(3)}%`;
+  if (live.state === "unreported") return `  ${label} ${used} at last report ${clock(live.observedAt ?? now)} · no longer reported by the provider`;
+  const parts = [`${used} used`, `resets ${clock(live.cycle.resetsAt)} (in ${formatDuration(live.cycle.resetsAt - now)})`];
+  if (live.segment?.before) parts.push(`restarted in place ${clock(live.segment.start)}`);
+  if (live.state === "overage") parts.push("past the included allowance, on extra usage");
   else if (live.state === "capped") parts.push(`capped since ${clock(live.capAt ?? live.cycle.last.t)}`);
-  else if (live.capsEarly && live.capAt && live.capAt > now) parts.push(`at this pace runs out ${clock(live.capAt)}`);
-  else if (live.projected === null) parts.push("too early in the window to project");
-  else if (live.projected !== undefined && live.elapsed !== null && (live.elapsed ?? 0) > 0.05) parts.push(`on pace for ${Math.min(100, live.projected).toFixed(0)}% at reset`);
+  else if (live.capsEarly && live.capAt) parts.push(`at this pace runs out ${clock(live.capAt)}`);
+  else if (live.mayBeUsedUp) parts.push("may already be used up");
+  else if (live.stale) { /* The last reading below says how old it is; no projection. */ }
+  else if (live.tooEarly) parts.push("too early in the window to project");
+  else if (live.projected !== null && live.projected !== undefined) parts.push(`on pace for ${Math.min(100, live.projected).toFixed(0)}% at reset`);
   if (live.stale) parts.push(`last reading ${formatDuration(now - (live.observedAt ?? now))} ago`);
   return `  ${label} ${parts.join(" · ")}`;
 }
@@ -102,14 +107,16 @@ async function report(args: string[]): Promise<number> {
     const accounts = snapshot.accounts.filter((account) => account.provider === provider);
     if (!accounts.length) lines.push(providerNames[provider], "  No meter readings yet.", "");
     for (const account of accounts) {
-      const plan = account.plan && account.plan !== "team" ? planFor(provider, account.plan) : null;
-      lines.push(`${account.label}${plan?.monthlyUsd ? ` ($${plan.monthlyUsd}/mo)` : ""}`);
+      // Only a plan you pay for yourself has a price here; organization seats are billed to the organization.
+      const plan = planFor(provider, account.plan);
+      lines.push(`${account.label}${plan?.payer === "individual" && plan.monthlyUsd ? ` ($${plan.monthlyUsd}/mo)` : ""}`);
       // Each account is its own series: cycles, pace and "no longer reported" never mix two accounts.
-      const own = buildMeters(snapshot.observations.filter((row) => row.provider === provider && row.account === account.key), now);
+      const own = buildMeters(snapshot.observations.filter((row) => row.provider === provider && row.account === account.key), now, snapshot.meters);
       if (!own.length) lines.push("  No meter readings yet.");
       const infos = own.map((meter) => snapshot.meters.find((item) => item.provider === provider && item.account === account.key && item.meter === meter.meter));
-      const width = Math.max(28, ...own.map((meter, index) => (infos[index]?.label ?? meter.label).length + 1));
-      for (const [index, meter] of own.entries()) lines.push(describe(liveMeter(meter, now, latestReading(own)), infos[index], now, width));
+      const width = Math.max(28, ...own.map((meter) => meter.label.length + 1));
+      const reportedUntil = latestReading(own);
+      for (const [index, meter] of own.entries()) lines.push(describe(liveMeter(meter, now, reportedUntil, { project: identified(account.key) }), infos[index], now, width));
       lines.push(...accountFacts(account, snapshot.codexAccount, now), "");
     }
   }

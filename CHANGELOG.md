@@ -9,12 +9,19 @@ All notable changes to this project are documented here. The format follows [Kee
 - Subscription limits are tracked per account. Two Claude logins used on one machine, such as a Max plan and a Team seat in separate `CLAUDE_CONFIG_DIR` profiles, are now separate meters with their own plan, weekly reset time and extra-usage state; profiles logged into the same account share one. Agent SDK events find their account through the session's transcript file name, status-line readings through the inherited `CLAUDE_CONFIG_DIR` or transcript path, and Codex readings through the rollout's or app-server's account ID. Account IDs are hashed where they are read. `limits` prints each account labelled with its plan and local profile names, and `limits --json` (schema version 2) adds `accounts`, `meters` and an `account` on every reading. See [Accounts](docs/subscription.md#accounts).
 - The Claude plan is detected from each profile's `.claude.json` (`oauthAccount` plan enums), so it is found on macOS, where the OAuth credentials live in the Keychain. A Team seat is reported as Team even when its user tier looks like Max 5x.
 - Codex model-scoped limits are labelled with the provider's limit name, such as "GPT-5.3-Codex-Spark · Weekly", and are no longer called "all models". Meters the provider stopped reporting are marked retired instead of idle.
+- The Subscription view shows one card per account, each with its own meters, value per 1%, reset history, lockouts, banked resets and extra usage. Value is matched to an account through its Claude profiles (Codex: every session when there is one Codex account). Recommendations name the account and route work between accounts, for example "Claude Team seat runs out before its Fri 04:00 reset; Claude Max 20x is at 16%", with the profile to point background agents at.
+- In-place resets: when a provider restarts a meter at 0% without moving its reset, the readings after it form a new segment of the cycle. Pace, projection, calibration and the closing level use the latest segment, and the restored level is shown as a reset, never as waste.
+- The plan list, reviewed on 2026-10-14, adds Claude Team standard and premium seats, ChatGPT Pro 100, 200 and 500, and who pays for each plan. Team, Enterprise and Business seats are treated as paid by the organization: they show API value without a personal multiple and get no plan advice.
 
 ### Changed
 
 - The limits ledger moved to `limits-v2.json` (and `limits-inbox-v2.jsonl`) so that an older installation sharing the data directory, such as a scheduled 0.9.0 `limits --quiet`, cannot replace it. The 0.9.0 `limits.json` is imported once and on later harvests, attributed by weekly reset time, and never written; readings that match no account are kept as unattributed history.
 - Read positions are stored in the ledger, so a scheduled `limits --quiet` reads only new log lines instead of rereading every recently modified file.
 - A Claude limit reached while paid extra usage is in use is recorded as `overage` rather than a cap, and readings above 100% are kept.
+- Projections run from now at the current segment's pace and appear only once two readings and a tenth of the window are behind them; a meter without a recent reading gets none and says when it may already be used up.
+- Value per 1% drops cycles whose local value explains almost none of the meter's movement (another machine or the web app did the work), calibrates at the first capped reading, and needs two cycles before it is shown.
+- Recommendations are ranked by urgency first; the dollar value at stake only orders suggestions of the same urgency.
+- "No subscription" on a card is now "Exclude from value totals": the account's meters stay visible.
 
 ### Fixed
 
@@ -23,6 +30,13 @@ All notable changes to this project are documented here. The format follows [Kee
 - A ledger that could not be read was treated as empty and overwritten. A ledger from another version is now left untouched, and an unparseable one is set aside.
 - A provider file that failed to read was skipped for good once a later harvest had passed its modification time; it is now retried.
 - Codex windows that had not started yet, reported at 0% with a sliding reset time, created hundreds of one-reading cycles and false early resets. Reset instants a few seconds apart no longer split one cycle in two, and a capped reading keeps its own time when readings are merged.
+- The headline value multiple divided every provider's value by the price of only the plans that had one (77× where the Codex card said 23×). Ratios now use the same accounts on both sides, and value on unpriced, employer-paid or unmatched accounts is reported beside them.
+- A run-out time could be in the past ("runs out in -53m"), and a 10% reading minutes into a week projected a run-out hours away.
+- Weekly cycles whose last reading came long before the reset were counted as fully observed, so "resets left unused", "weekly resets used" and plan advice treated unobserved use as waste. They are now unknown closes and left out.
+- Price and capacity were prorated over the whole selected range, including days before the first meter reading and the rest of today.
+- With `--remote`, other machines' sessions raised value per 1% for local accounts they never moved. Until sessions record their machine, Codex value is left out while other machines are combined, and the view says so.
+- Value during the daylight-saving fall-back hour was counted twice, and zones with half-hour offsets read activity 30 minutes off.
+- An idle Claude weekly meter said the next request starts a new window; Claude weekly limits reset on a fixed weekly schedule, and the next reset is now shown.
 
 ## [0.9.0] - 2026-10-14
 

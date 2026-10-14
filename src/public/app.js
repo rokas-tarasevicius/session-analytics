@@ -15,11 +15,12 @@ import { providerMark, renderProviderEvidence, metricCoverage } from "./provider
 import { renderPricingPanel } from "./pricing.js";
 import { renderToolsView } from "./tools.js";
 import { renderSubscription, subscriptionRefreshMilliseconds } from "./subscription.js";
+import { zonedDayStart } from "./subscription-data.js";
 import { toolsDays } from "./tools-data.js";
 import { renderVelocity, velocityProviders } from "./velocity.js";
-import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity } from "./velocity-data.js";
+import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity, shiftDay } from "./velocity-data.js";
 import { normalizeTimestamp } from "./timestamps.js";
-import { scanWarnings } from "./evidence.js";
+import { remoteUnavailableWarning, scanWarnings } from "./evidence.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
@@ -725,7 +726,7 @@ async function loadLimitsNow(refresh = false) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     limits = await response.json();
   } catch {
-    limits ??= { schemaVersion: 1, dataSource: "live", persisted: false, plans: { claude: null, codex: null }, sources: [], observations: [], unavailable: true };
+    limits ??= { schemaVersion: 2, dataSource: "live", persisted: false, plans: { claude: null, codex: null }, sources: [], observations: [], accounts: [], meters: [], resetCreditHistory: [], unavailable: true };
   }
   if (snapshot && currentViewName() === "subscription") renderSubscriptionView();
 }
@@ -741,12 +742,13 @@ function scheduleLimits(active) {
 function renderSubscriptionView() {
   const restoreFocus = rememberFocus();
   const context = velocityContext();
-  const totals = buildVelocity(snapshot.sessions, { start: context.start, end: context.end, group: "provider", metric: "value", limit: 50 }).allSeries;
+  // Other machines' sessions carry no machine yet, so while any are combined none can be told apart from this machine's.
+  const remote = (limits?.remoteMachines ?? 0) > 0 || snapshot.warnings?.includes(remoteUnavailableWarning);
   renderSubscription($("#subscription-view"), {
     limits, sessions: snapshot.sessions, timeZone: context.timeZone,
-    days: daysBetween(context.start, context.end).length,
-    extractedByProvider: Object.fromEntries(totals.map((series) => [series.id, series.total])),
+    range: { from: zonedDayStart(context.start, context.timeZone), to: zonedDayStart(shiftDay(context.end, 1), context.timeZone) },
     rangeLabel: dateRange(context.start, context.end),
+    local: remote ? () => false : null,
     onPlanChange: () => renderSubscriptionView(),
   });
   restoreFocus();

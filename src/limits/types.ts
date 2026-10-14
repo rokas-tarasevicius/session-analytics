@@ -156,4 +156,6 @@ export interface LimitsSnapshot {
   resetCreditHistory: Array<[LimitProvider, string, number, number]>;
   /** Whether the opt-in Codex account read (banked resets) is enabled. */
   codexAccount: "off" | "ok" | "unavailable";
+  /** Dashboard only: how many remote machines the dashboard's session snapshot combines with this one (`--remote`). */
+  remoteMachines?: number;
 }

@@ -8,16 +8,22 @@ A Claude or ChatGPT subscription is a fixed price for a rolling allowance. Unuse
 | --- | --- |
 | Account | One subscription login. Every meter belongs to one account: two Claude logins used on one machine are two sets of meters, never one. See [Accounts](#accounts). |
 | Meter | One provider allowance of one account, reported by the provider as percent used: Claude's 5-hour and weekly limits, Codex's weekly limit (and 5-hour limit on plans that have one). Claude reports more than 100% while paid extra usage covers the overflow. |
-| Cycle | One reset window of a meter, identified by its reset instant. Instants within two minutes of each other are one cycle, because providers report them with a few seconds of drift. A Codex cycle can end early when OpenAI resets limits; that remainder is not counted as waste. |
-| Value per 1% | API-equivalent value of this machine's activity inside a cycle, divided by the meter reading at that time. The median across cycles is used. |
+| Cycle | One reset window of a meter, identified by its reset instant. Instants within three minutes of each other are one cycle, because providers report them with a few seconds of drift. A cycle can end early when the provider resets limits or a banked reset is redeemed; that remainder is not counted as waste. |
+| Segment | Part of a cycle. A provider can restart a meter at 0% without moving its reset (an in-place reset); the readings after it are a new segment of the same cycle. Pace, projection and the closing level use the latest segment. |
+| Value per 1% | API-equivalent value of the account's own sessions inside a segment, divided by the meter reading at that time; at a cap, the first capped reading, because value after it did not move the meter. Segments whose value per 1% is under a quarter of the median moved mostly elsewhere (another machine, the web app) and are dropped. The median of the rest is used and needs at least two segments; with fewer, the view says there is not enough history. |
 | Weekly capacity | Value per 1% × 100: what one full weekly allowance is worth at list prices. |
 | Monthly potential | Weekly capacity × 30.44 / 7: the value of using every weekly reset fully. |
-| Extracted | The provider's API-equivalent value for the selected dates, from the same activity ledger as Summary, Velocity and Costs. |
-| Capacity used | Extracted ÷ (weekly capacity × days / 7). Over 100% means usage outpaces what the limits refill, so limits will be hit. |
-| Weekly resets used | Meter only: the mean highest reading of recent weekly cycles before they reset, plus the live cycle's projection once 15% of it has elapsed. |
-| Value multiple | Extracted ÷ the plan price prorated to the selected dates. |
+| Extracted | The account's API-equivalent value for the selected dates, from the same activity ledger as Summary, Velocity and Costs, counted from the account's first meter reading up to now. |
+| Capacity used | Extracted ÷ (weekly capacity × days / 7), over calibrated accounts. Over 100% means usage outpaces what the limits refill, so limits will be hit. |
+| Weekly resets used | Meter only: the mean closing level of recent weekly cycles whose close was observed, plus the live cycle's projection once 15% of the time to its reset has passed. |
+| Value multiple | Extracted ÷ the plan price prorated to the same time, for an account you pay for. Team, Enterprise and Business seats are paid by the organization, so they show API value without a multiple. |
 
-Weekly limits bound total value; 5-hour limits bound bursts. The view reports both. Each live meter shows used percent, a tick for linear pace through the window, a hatched projection to the reset, and the time it runs out at the current average pace.
+Weekly limits bound total value; 5-hour limits bound bursts. The view reports both. Each live meter shows used percent, a tick for even pace to the reset, a hatched projection to the reset, and the time it runs out at the current pace.
+
+- **Pace** runs from the start of the current segment through now. Hours without readings count as hours without use, so a run-out time is never in the past.
+- **Projection** needs two readings and a tenth of the window behind them: 17 hours of a week, 30 minutes of a 5-hour window. Before that the meter says it is too early to project, however fast it is rising.
+- **Stale meters** have no reading for a tenth of their window (at least an hour) and get no projection. If the pace before the last reading would have used the allowance up by now, the meter says it may already be used up.
+- **Idle meters**: Claude resets each weekly limit at a fixed time of the week, so an idle Claude weekly meter shows its next scheduled reset. Other windows start with the next request.
 
 ## Accounts
 
@@ -36,6 +42,18 @@ A Claude reading whose session is in no profile is grouped by its weekly reset i
 
 Each account is labelled with its plan and the names of its non-default profile directories, without the `.claude-` or `.codex-` prefix: for example `Claude Max 20x · work` and `Claude Team · client`. These names come from local directory names, may name an employer, and appear only in the live `limits` output and the loopback dashboard API, never in saved or shared snapshots. Each account also lists its `profileKeys`, the same pseudonymous keys as a session's `historyProfile.profileKey`, so value can be matched to the account whose meters it moved.
 
+### Which value belongs to which account
+
+Value is matched to accounts through sessions, never by provider alone:
+
+- A Claude session belongs to the account whose profile holds its transcript: its `historyProfile.profileKey` is one of the account's `profileKeys`.
+- Codex sessions do not record their account yet. With one Codex account, every Codex session on this machine is that account's; with two or more, Codex value is not calibrated.
+- A session without a profile key joins its provider's only account, if there is exactly one.
+- When the dashboard combines other machines (`--remote`), their sessions cannot yet be told apart from this machine's. Claude sessions still match through this machine's profiles; Codex value is left out of every account, and the view says so. The dashboard's `/api/limits` reports the number of combined machines as `remoteMachines`.
+- Sessions that match no account are reported as unattributed value. They never calibrate a meter. Readings without an account (weekly-phase groups and unattributed history) are shown as reported, without pace, value or advice.
+
+An account with no matched sessions has unknown value, not zero: it is left out of the headline ratios.
+
 Plans are read per account. Claude's plan comes from the profile's `oauthAccount` enums (`organizationType`, `organizationRateLimitTier`, `userRateLimitTier`, `seatTier`, `billingType`), then `.credentials.json`, then the last plan seen. The organization type decides: `claude_max` is Max 20x or Max 5x by its rate-limit tier, `claude_team` is Team even when the seat carries a Max-like user tier, `claude_pro` is Pro and `claude_enterprise` is Enterprise. A Team seat's type (standard or premium) is not recorded locally, so Team is not priced. Codex's plan is the account's latest `plan_type`; an unrecognized value is kept as plan evidence. Claude extra usage is tracked per account from that account's own events, starting from the profile's `hasExtraUsageEnabled`.
 
 ## Resets, banked resets and credits
@@ -44,8 +62,9 @@ A reset restarts a window at 0%. It is worth what had been used when it happened
 
 | Kind | How it is tracked |
 | --- | --- |
-| Scheduled reset | The meter's own `resets_at`. The closing reading of each cycle is the share used; the rest expired. |
-| Early reset (a redeemed credit, a paid reset, or a provider-wide reset) | Detected when a new cycle starts before the old one's scheduled reset. It is not counted as waste. Its value is the share restored. When the banked count drops across it, it is labelled as a redeemed credit. |
+| Scheduled reset | The meter's own `resets_at`. The closing reading of each cycle is the share used; the rest expired. A closing reading taken more than a tenth of the window (at least an hour) before the reset is a lower bound: the close is unknown, and the cycle is left out of unused-allowance figures, weekly resets used and plan advice. |
+| Early reset (a redeemed credit, a paid reset, or a provider-wide reset) | Detected when a new cycle starts before the old one's scheduled reset. It is not counted as waste. Its value is the share restored, when the level just before it was observed. When the account's banked count drops across it, it is labelled as a redeemed credit. |
+| In-place reset | The provider restarts a meter at 0% and keeps its reset instant. A fall of 5 points or more that the next reading confirms starts a new segment; a latest reading counts on its own only when it halves the level. The reset is placed midway between the readings on either side. It is not counted as waste; its value is the level before the fall, when observed close to it. |
 | Codex banked reset credits | Read automatically through the local Codex app-server's `account/rateLimits/read`, the same read Codex's usage display makes, once for each Codex home. Kept per account: count, scope, grant and expiry times. Dropped: credit IDs, titles, the account ID (only its hash is kept). At most one read every 10 minutes; `account/rateLimitResetCredit/consume` is never sent. Off with `--no-codex-account`, `SESSION_ANALYTICS_CODEX_ACCOUNT=0` or `--offline`. Banked resets usually expire 30 days after they are granted. |
 | Codex credits | The balance from every Codex `rate_limits` record (`credits.balance`, in Codex credits, not dollars). Credits pay for usage after the included allowance runs out. |
 | Claude extra usage | On, in use or off (with the reason, such as `org_level_disabled`) per account, from that account's Agent SDK events. Extra usage is billed at API rates. A limit reached while extra usage is in use is recorded as `overage`, not as a cap: work continues and the meter reads above 100%. |
@@ -102,20 +121,24 @@ Provider logs rotate: T3 Code keeps several days of events, and Claude Code dele
 
 ## Recommendations
 
-Suggestions are rules over the same numbers, ranked by urgency and value at stake:
+Suggestions are rules over the same numbers, made per account. They are ranked by urgency: act now, then opportunities, then setup, then what is going well. The value at stake only orders suggestions of the same rank, so a large expiring allowance never outranks an account that is about to run out.
 
-- **Runs out early**: the weekly meter's projection reaches 100% before the reset. Shows the daily rate the remaining allowance supports, and the other subscription's headroom if it has some.
-- **Capacity-bound**: every subscription runs out early. You already extract more than the limits refill, so the advice is to ration by priority rather than to use more.
+- **Runs out early**: the weekly meter's projection reaches 100% before the reset. Shows the daily rate the remaining allowance supports. When another account has room, the same provider first, it is named with the profile to switch to, for example "Claude Team seat runs out before its Fri 04:00 reset; Claude Max 20x is at 16%", then "Point background agents and long-running work at the personal profile".
+- **Used up or on extra usage**: the weekly meter is capped or past 100% on paid extra usage, with another account's headroom when there is some.
+- **May already be used up**: a stale meter whose earlier pace would have reached 100% by now.
+- **Capacity-bound**: every account with a fresh weekly reading runs out early or is used up. You already extract more than the limits refill, so the advice is to ration by priority rather than to use more.
 - **Will expire unused**: the weekly projection closes below 85% with more than 12 hours left. Shows the expiring share and its API-equivalent value, and the daily rate that would use all of it.
-- **Resets left unused**: two or more closed weekly cycles averaged 15% or more unused.
-- **5-hour lockouts**: windows that hit the limit in the last seven days, with time locked out. If the weekly limit is also binding, the lockouts are treated as pacing.
-- **Banked resets**: redeem now, hold, or use before expiry (see above).
-- **Plan fit**: capped in two of the last four weeks on a lower tier, or under 30% average use on a higher tier.
+- **Resets left unused**: two or more weekly cycles with an observed close averaged 15% or more unused.
+- **Closes not observed**: two or more weekly closes were lower bounds and fewer than two were observed; a scheduled harvest records them.
+- **5-hour lockouts**: windows that hit the limit in the last seven days, with time locked out. If the weekly limit is also binding, the lockouts are treated as pacing. Otherwise another account with room is suggested for lockouts.
+- **Banked resets**: redeem now, hold, or use before expiry (see above), for each Codex account.
+- **Plan fit**: on a plan you pay for, from at least three observed closes: capped in two of the last four observed weeks on a plan below the top tier, or under 30% average use on a higher tier. Employer-paid seats get no plan advice.
 
 ## Caveats
 
-- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Local value covers this machine only, so value per percent and capacity are conservative (lower bounds), and capacity used is an upper bound.
+- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Local value covers this machine's matched sessions only, so value per percent and capacity are conservative (lower bounds), and capacity used is an upper bound. The outlier rule drops cycles that another client moved almost entirely.
 - API-equivalent value is a list-price comparison, not an invoice.
-- Projections assume the cycle's average pace continues.
-- Plan prices were reviewed on 2026-10-13 from [claude.com/pricing](https://claude.com/pricing), the [Max plan article](https://support.claude.com/en/articles/11049741-what-is-the-max-plan) and [ChatGPT pricing](https://learn.chatgpt.com/docs/pricing). Override the detected plan on each card; the choice is stored in the browser.
+- Projections assume the current segment's pace, measured through now, continues.
+- Headline ratios compare like with like. The value multiple divides the value of accounts you pay for by their prorated price; the potential multiple divides their monthly potential by their monthly price. Value on employer-paid seats, on plans without a price and outside any account is reported beside them, never divided by another account's price. Price and capacity are prorated over the time since each account's first meter reading, up to now, so days before the ledger and the rest of today are not counted.
+- Plan prices were reviewed on 2026-10-14 from [claude.com/pricing](https://claude.com/pricing) (Pro $20 a month or $17 billed yearly; Team standard seat $25 or $20 billed yearly, premium seat $125 or $100 billed yearly; Enterprise $20 a seat a month billed yearly plus usage at API rates), the [Max plan article](https://support.claude.com/en/articles/11049741-what-is-the-max-plan) (Max 5x $100, Max 20x $200), [ChatGPT pricing](https://learn.chatgpt.com/docs/pricing) (Go $8, Plus $20, Business $25 a seat or $20 billed yearly; Enterprise and Edu by contract) and OpenAI's [Pro tiers article](https://help.openai.com/articles/9793128-about-chatgpt-pro-tiers) (Pro 100, Pro 200 and Pro 500). A Team seat's type is not recorded locally; Team, Enterprise and Business seats are treated as paid by the organization. Codex reports a `promax` plan type that is not mapped to Pro 500 because nothing confirms the match; choose it on the card. Override the detected plan on each card, or exclude an account from value totals; the choice is stored in the browser.
 - Limit meters are live-only and are not part of saved or shared snapshots.
