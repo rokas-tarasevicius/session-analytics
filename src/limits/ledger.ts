@@ -232,13 +232,20 @@ function mergeWeeklyPhases(observations: LimitObservation[]): void {
 }
 
 /**
- * Codex reports a window that has not started at 0% with a reset one window after each reading, so the reset slides
- * forward. Such a reading starts a real cycle only when another reading confirms the same reset later or above 0%;
+ * A window that has not started is reported at 0% with a reset one window after each reading, so the reset slides
+ * forward: every Codex window, and Claude's 5-hour window (its reset floored to 10 minutes; Claude's weekly reset is fixed).
+ * Such a reading starts a real cycle only when another reading confirms the same reset later or above 0%;
  * otherwise only the latest one is kept per meter, as an `idle` marker, and only while no later reading supersedes it.
+ * Unattributed readings keep no marker: an idle window of no known account says nothing.
  */
 function markIdle(series: LimitObservation[]): LimitObservation[] {
-  if (series[0]?.provider !== "codex") return series;
-  const rolling = (item: LimitObservation) => item.usedPercent === 0 && item.windowMinutes !== null && Math.abs(item.resetsAt - item.observedAt - item.windowMinutes * 60) <= 180;
+  const first = series[0];
+  if (!first || (first.provider === "claude" && first.windowMinutes !== 300)) return series;
+  const floored = first.provider === "claude" ? 600 : 0;
+  const rolling = (item: LimitObservation) => {
+    const lead = item.windowMinutes === null ? NaN : item.observedAt + item.windowMinutes * 60 - item.resetsAt;
+    return item.usedPercent === 0 && lead >= -180 && lead <= floored + 180;
+  };
   const byReset = [...series].sort((left, right) => left.resetsAt - right.resetsAt);
   const confirmed = (item: LimitObservation) => {
     let low = 0, high = byReset.length;
@@ -257,7 +264,7 @@ function markIdle(series: LimitObservation[]): LimitObservation[] {
     else if (!idle || item.observedAt > idle.observedAt) idle = item;
   }
   const marker: LimitObservation | null = idle;
-  if (marker && kept.every((item) => item.observedAt < marker.observedAt)) kept.push({ ...marker, status: "idle" });
+  if (marker && marker.account !== "" && kept.every((item) => item.observedAt < marker.observedAt)) kept.push({ ...marker, status: "idle" });
   return kept;
 }
 
@@ -295,8 +302,8 @@ function quarantineInterleaved(series: LimitObservation[]): void {
 /**
  * Normalize readings into one row per account, meter, reset cycle and time bucket. Each bucket keeps its highest reading
  * (earliest on ties) with the most severe status among them; a rejected reading keeps its own row and time, so the moment
- * a cap was hit is never moved earlier. Unattributed Claude readings join their account first, idle Codex readings are
- * reduced to one marker, and reset instants within two minutes are one cycle.
+ * a cap was hit is never moved earlier. Unattributed Claude readings join their account first, readings of windows that
+ * have not started are reduced to one marker, and reset instants within two minutes are one cycle.
  */
 export function compactObservations(observations: Iterable<LimitObservation>, now: number): LimitObservation[] {
   const valid: LimitObservation[] = [];
@@ -540,8 +547,8 @@ const weekMinute = (resetsAt: number): number => Math.round(resetsAt / 60) % 10_
 /**
  * Give version 1 readings an account. A Claude weekly reading goes to the one account whose weekly resets fall at the
  * same minute of the week; other Claude readings join the account whose harvested readings share their cycle, else the
- * majority of the weekly readings taken at the same instants in their cycle; Codex readings go to the only Codex account. Anything else stays unattributed (`""`). Readings the
- * ledger already holds (same meter, instant and value) are skipped.
+ * majority of the weekly readings taken at the same instants in their cycle; Codex readings go to the only Codex account.
+ * Anything else stays unattributed (`""`). Readings the ledger already holds (same meter, instant and value) are skipped.
  */
 export function attributeLegacy(legacy: LimitObservation[], current: LimitObservation[], codexAccounts: string[]): LimitObservation[] {
   const phases = new Map<number, Set<string>>();

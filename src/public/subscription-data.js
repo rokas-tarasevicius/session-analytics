@@ -58,7 +58,7 @@ const isCapped = (sample) => sample.status === "rejected" || (sample.used >= 100
 
 /**
  * Group observations into meters per account and into reset cycles. A cycle ends at its reset, or earlier when the next
- * cycle begins first. `infos` (`LimitsSnapshot.meters`) supplies display labels and retired flags. Idle Codex markers
+ * cycle begins first. `infos` (`LimitsSnapshot.meters`) supplies display labels and retired flags. Idle markers
  * never form a cycle.
  */
 export function buildMeters(observations, now, infos = []) {
@@ -663,10 +663,13 @@ export function recommendations(items, { now, sources = [], persisted = true, co
     if (weekly?.cycle) {
       const other = alternative(item);
       if (weekly.state === "capped" || weekly.state === "overage") {
+        const overage = weekly.state === "overage";
         push(item, {
           tone: "act", score: 1100,
-          title: weekly.state === "overage" ? `${name} is past its weekly allowance and on paid extra usage until ${formatTime(weekly.cycle.resetsAt)}` : `${name} weekly allowance is used up until ${formatTime(weekly.cycle.resetsAt)}`,
-          detail: (other ? `${elsewhere(other)}. Point background agents at ${target(other, item)} until the reset.` : "Until the reset, only a banked or paid reset, extra usage, or credits keep this account working.") + afterCap(item),
+          title: overage ? `${name} is past its weekly allowance and on paid extra usage until ${formatTime(weekly.cycle.resetsAt)}` : `${name} weekly allowance is used up until ${formatTime(weekly.cycle.resetsAt)}`,
+          detail: other ? `${elsewhere(other)}. Point background agents at ${target(other, item)} until the reset.${afterCap(item)}`
+            : overage ? "Work continues at API rates until the reset, so move work that can wait until after it."
+            : `Until the reset, only ${item.provider === "codex" ? "a banked or paid reset, or credits," : "extra usage"} keep${item.provider === "codex" ? "" : "s"} this account working.${afterCap(item)}`,
         });
       } else if (weekly.capsEarly) {
         const early = weekly.cycle.resetsAt - weekly.capAt;

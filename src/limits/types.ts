@@ -4,8 +4,8 @@ export type LimitProvider = "claude" | "codex";
 export type LimitSource = "codex-session" | "codex-account" | "claude-sdk-log" | "claude-statusline";
 /**
  * `rejected` means the provider refused requests on this meter (the cap was hit). `overage` means the cap was passed and
- * work continued on paid Claude extra usage, so it is not a lockout. `idle` marks a Codex window that has not started:
- * Codex reports it at 0% with a reset that slides forward with every reading.
+ * work continued on paid Claude extra usage, so it is not a lockout. `idle` marks a window that has not started (any
+ * Codex window, Claude's 5-hour window): it is reported at 0% with a reset that slides forward with every reading.
  */
 export type LimitStatus = "allowed" | "warning" | "rejected" | "overage" | "idle" | "unknown";
 

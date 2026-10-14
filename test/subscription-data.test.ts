@@ -377,6 +377,19 @@ test("recommendations flag a capacity-bound week and expiring allowance with its
   assert.equal(expiring.some((item) => item.tone === "setup"), true, "missing Claude meters ask for setup");
 });
 
+test("a used-up weekly allowance names what keeps each provider working; extra usage says work continues at API rates", () => {
+  const now = start + 4 * DAY;
+  const used = (owner: LimitAccount, level: number, status: LimitObservation["status"]) => utilization(owner, [
+    reading(owner.provider, "seven_day", start + WEEK, start + HOUR, 5, "allowed", owner.key), reading(owner.provider, "seven_day", start + WEEK, now - HOUR, level, status, owner.key),
+  ], now);
+  const detail = (item: ReturnType<typeof used>) => recommendations([item], { now }).find((advice) => advice.tone === "act")!.detail;
+  const team = account("claude", "claude-aaaaaaaaaaaaaaaa", { extraUsage: { observedAt: now, extraUsage: "in-use", disabledReason: null } });
+  assert.equal(detail(used(team, 104, "overage")), "Work continues at API rates until the reset, so move work that can wait until after it.");
+  const max = account("claude", "claude-bbbbbbbbbbbbbbbb", { extraUsage: { observedAt: now, extraUsage: "disabled", disabledReason: "org_level_disabled" } });
+  assert.match(detail(used(max, 100, "rejected")), /^Until the reset, only extra usage keeps this account working\. Extra usage is off for this organization/);
+  assert.match(detail(used(account("codex", "codex-aaaaaaaaaaaaaaaa"), 100, "rejected")), /^Until the reset, only a banked or paid reset, or credits, keep this account working\./);
+});
+
 test("banked resets: redeem near the cap with days left, hold while on course to cap, warn before expiry", () => {
   const resetsAt = start + WEEK;
   const credit = (expiresAt: number | null) => ({ observedAt: start, credits: null, ordinaryUsageAllowed: true, resetCredits: { available: 1, credits: [{ status: "available" as const, scope: "all" as const, grantedAt: start - DAY, expiresAt }] } });

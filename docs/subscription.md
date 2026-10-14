@@ -9,7 +9,8 @@ The view leads with **Limits now**, one row per account with the most urgent fir
 | Term | Meaning |
 | --- | --- |
 | Account | One subscription login. Every meter belongs to one account: two Claude logins used on one machine are two sets of meters, never one. See [Accounts](#accounts). |
-| Meter | One provider allowance of one account, reported by the provider as percent used: Claude's 5-hour and weekly limits, Codex's weekly limit (and 5-hour limit on plans that have one). Claude reports more than 100% while paid extra usage covers the overflow. |
+| Meter | One provider allowance of one account, reported by the provider as percent used: Claude's 5-hour and weekly limits, Codex's weekly limit (and 5-hour limit on plans that have one), and model-specific limits such as a Codex model's own weekly limit. |
+| Extra usage (overage) | A Claude limit passed while paid extra usage is on. Work continues at API rates and the meter reads above 100%; the reading is recorded as `overage`, not as a cap, and no time is counted as locked out. |
 | Cycle | One reset window of a meter, identified by its reset instant. Instants within three minutes of each other are one cycle, because providers report them with a few seconds of drift. A cycle can end early when the provider resets limits or a banked reset is redeemed; that remainder is not counted as waste. |
 | Segment | Part of a cycle. A provider can restart a meter at 0% without moving its reset (an in-place reset); the readings after it are a new segment of the same cycle. Pace, projection and the closing level use the latest segment. |
 | Value per 1% | API-equivalent value of the account's own sessions inside a segment, divided by the meter reading at that time; at a cap, the first capped reading, because value after it did not move the meter. Segments whose value per 1% is under a quarter of the median moved mostly elsewhere (another machine, the web app) and are dropped. The median of the rest is used and needs at least two segments; with fewer, the view says there is not enough history. |
@@ -34,15 +35,15 @@ Limits belong to a login, not to a machine or a profile directory. Each reading 
 | Provider | How a reading finds its account |
 | --- | --- |
 | Claude, Agent SDK events | The event's `session_id` names a transcript, `<profile>/projects/*/<session_id>.jsonl`, in one of the discovered Claude profiles (`~/.claude`, `~/.claude-*`, `CLAUDE_CONFIG_DIR`). Only directory listings are read; transcripts are never opened. The profile's `.claude.json` (`~/.claude.json` for `~/.claude`) names the login. |
-| Claude, status line | The `CLAUDE_CONFIG_DIR` Claude Code passes to the status-line command, else the profile holding `transcript_path`, else the profile holding `session_id`. |
+| Claude, status line | The `CLAUDE_CONFIG_DIR` the status-line command inherits from Claude Code, else the profile holding `transcript_path`, else the profile holding `session_id`. |
 | Codex, session files | The rollout's `session_meta.creator_account_id`. Older rollouts without one join the only account seen in the same Codex home. |
 | Codex, account read | The `accountId` the app-server reports, which matches the rollouts' account. |
 
-The account key is a hash computed where the login is read: Claude hashes the organization and account IDs from `oauthAccount`, Codex hashes the ChatGPT account ID. Profiles logged into the same account, such as `~/.claude` and `~/.claude-work`, therefore share one set of meters, and the same login has the same key on every machine. A profile without an `oauthAccount` record gets a key from its directory until its login is known; its readings then join that account. The IDs themselves are never stored or returned.
+The account key (`claude-` or `codex-` and 16 hexadecimal characters) is a hash computed where the login is read: Claude hashes the organization and account IDs from `oauthAccount`, Codex hashes the ChatGPT account ID. Profiles logged into the same account, such as `~/.claude` and `~/.claude-work`, therefore share one set of meters, and the same login has the same key on every machine. A profile without an `oauthAccount` record gets a key from its directory (`claude-p-…`) until its login is known; its readings then join that account. The IDs themselves are never stored or returned.
 
 A Claude reading whose session is in no profile is grouped by its weekly reset instant, because each Claude account resets its weekly limit at its own fixed weekday and time. The group joins an account only when that account reported a weekly reading with exactly the same reset instant; otherwise it stays a separate "unidentified account" and is never folded into another account's meters.
 
-Each account is labelled with its plan and the names of its non-default profile directories, without the `.claude-` or `.codex-` prefix: for example `Claude Max 20x · work` and `Claude Team · client`. These names come from local directory names, may name an employer, and appear only in the live `limits` output and the loopback dashboard API, never in saved or shared snapshots. Each account also lists its `profileKeys`, the same pseudonymous keys as a session's `historyProfile.profileKey`, so value can be matched to the account whose meters it moved.
+Each account is labelled with its plan and the names of its profile directories, without the `.claude-` or `.codex-` prefix: for example `Claude Max 20x · work`, `Claude Team · client`, or `ChatGPT Pro 200 · default` when only the default directory uses it. A weekly-reset group is labelled `Claude · unidentified account (weekly reset Sat 23:00)`, and readings without any account `Unattributed history`; both show levels only, without pace, value or advice. Profile names come from local directory names, may name an employer, and appear only in the live `limits` output and the loopback dashboard API, never in saved or shared snapshots. A name that is not plain letters, digits, dots, dashes and underscores (up to 40) is shown as `profile`. Each account also lists its `profileKeys`, the same pseudonymous keys as a session's `historyProfile.profileKey`, so value can be matched to the account whose meters it moved.
 
 ### Which value belongs to which account
 
@@ -97,7 +98,7 @@ Provider logs rotate: T3 Code keeps several days of events, and Claude Code dele
 
 - **Incremental reads.** Each harvest reads only the bytes appended since the previous one. Read positions are stored in the ledger, keyed by file identity and checked against a hash of the bytes before them, so a scheduled `limits --quiet` does not reread whole files, and a file that was rewritten or replaced is read again from the start. A file that could not be read is retried by the next harvest even if it has not changed.
 - **Concurrent harvests.** Harvests in one process run one at a time, and the dashboard shares a harvest that is still running. Every write rereads the ledger and merges it before replacing it, so the dashboard and a scheduled harvest never erase each other's readings. Status-line samples are appended to `limits-inbox-v2.jsonl` and claimed by renaming, so two harvests never take the same samples.
-- **Unstarted Codex windows.** Codex reports a window that has not started at 0% with a reset one window after each reading. Such readings never form cycles; the latest one is kept as an `idle` marker until a later reading supersedes it.
+- **Windows that have not started.** Codex reports a window that has not started at 0% with a reset one window after each reading, and Claude does the same for its 5-hour window, with the reset rounded down to 10 minutes. Such readings never form cycles, so they never appear as 5-hour windows or early resets; the latest one is kept as an `idle` marker until a later reading supersedes it, and dropped when it has no account.
 - **Conflicting Codex readings.** One account is in one weekly cycle at a time. A cycle whose readings all fall inside a busier cycle of the same account and meter came from another limit context, so it is moved to unattributed history.
 - **Retired meters.** A meter the provider stopped reporting while still reporting the account's other meters, for longer than its window, is marked retired rather than shown as idle.
 - **Unreadable ledgers.** A ledger written by another version, or one this user may not replace, is left untouched and history is not kept until that is resolved. A ledger that cannot be parsed is renamed `limits-v2.json.unreadable-<time>` and a new one is started.
@@ -106,18 +107,20 @@ Provider logs rotate: T3 Code keeps several days of events, and Claude Code dele
 ## Keeping it up to date
 
 - The dashboard harvests when the Subscription view opens and every two minutes while it stays open. The meters appear as soon as they are read, before the session scan finishes; value fills in when it does. A refresh keeps keyboard focus, the inspected chart reading and open sections.
-- Schedule a harvest so history stays continuous when the dashboard is closed:
+- Schedule a harvest so history stays continuous when the dashboard is closed. One entry covers every account and profile on the machine: it reads every discovered Claude profile, every Codex home and the host event logs, and attributes each reading to its account.
 
   ```sh
   # crontab -e
   */20 * * * * session-analytics limits --quiet
   ```
 
-- In the interactive Claude Code CLI, add the status line to `~/.claude/settings.json`:
+- In the interactive Claude Code CLI, add the status line to each profile you use. Each profile has its own settings file: `~/.claude/settings.json` for the default profile, and `settings.json` in the `CLAUDE_CONFIG_DIR` directory for the others, for example `~/.claude-work/settings.json`. The command inherits the `CLAUDE_CONFIG_DIR` Claude Code runs with (the default profile is found from the transcript path), so each reading is recorded for the account that profile is logged into.
 
   ```json
   { "statusLine": { "type": "command", "command": "session-analytics limits statusline" } }
   ```
+
+- Limits are read on the machine that runs the command. With `--remote`, schedule the same harvest on the other machines; their ledgers stay on those machines.
 
 `session-analytics limits` prints each account with its plan and every meter's reset time and projection; `--json` prints the content-free snapshot (`schemaVersion` 2: `accounts`, `meters` and `observations` carry the account key).
 

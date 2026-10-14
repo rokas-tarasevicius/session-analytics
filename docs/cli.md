@@ -134,7 +134,17 @@ session-analytics limits statusline      # Claude Code status line: records stdi
 session-analytics limits --no-codex-account  # skip the banked-reset read through the local Codex app-server
 ```
 
-Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. Each reading is attributed to an account: two Claude logins used on one machine are reported separately, each with its plan and profile names. They are kept in `limits-v2.json` in the data directory; `--no-index` neither reads nor writes it. The 0.9.0 ledger, `limits.json`, is imported and never written. See [Subscription limits and value](subscription.md#accounts).
+Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. Each reading is attributed to an account, so two Claude logins used on one machine are reported separately.
+
+`limits` prints one block per account, labelled with its plan and local profile names, for example `Claude Max 20x · work ($200/mo)` or `Claude Team · client`. A price is shown only for plans you pay for yourself; a Team seat instead lists its seat evidence. Each meter shows the share used and its reset, then what applies: the projected level at the reset or the run-out time when it comes first, "too early in the window to project", a cap, a restart in place, extra usage past the allowance, a stale last reading, or that the window is idle or no longer reported. Then come the account's extra-usage state, banked Codex resets and Codex credit balance, and each source's status. `--json` prints the content-free snapshot (`schemaVersion` 2) with `accounts`, `meters` and an account key on every reading; its fields are listed in the [privacy manifest](privacy.md#limits-endpoint-limitssnapshot).
+
+- `--quiet` harvests without printing, for cron. One entry covers every account on the machine.
+- `--claude-root PATH` reads only that profile: event-log and profile discovery are skipped unless `SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` is set.
+- `--codex-root PATH` reads Codex rollouts from `PATH` and skips the Codex account read.
+- `--no-codex-account` (or `SESSION_ANALYTICS_CODEX_ACCOUNT=0`) and `--offline` skip the banked-reset read through the local Codex app-server.
+- `limits statusline` records the readings Claude Code passes on stdin for the account of the profile it runs in; add it to each profile's `settings.json`.
+
+Readings are kept in `limits-v2.json` in the data directory; `--no-index` neither reads nor writes it. The 0.9.0 ledger, `limits.json`, is imported and never written, so an older installation can share the data directory. See [Subscription limits and value](subscription.md#accounts).
 
 ## MCP server and agent skill
 

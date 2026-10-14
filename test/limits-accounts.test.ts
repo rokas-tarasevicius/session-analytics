@@ -158,7 +158,23 @@ test("Codex windows that have not started are one idle marker, superseded by the
   assert.deepEqual(rows.map((row) => [row.observedAt, row.usedPercent, row.status]), [[t + 3600, 0, "allowed"], [t + 4800, 3, "allowed"]]);
   assert.equal(new Set(rows.map((row) => row.resetsAt)).size, 1);
   const claude = compactObservations(rolling.map((row) => ({ ...row, provider: "claude" as const, account: "", source: "claude-sdk-log" as const })), now);
-  assert.equal(claude.filter((row) => row.status === "idle").length, 0, "only Codex slides an unstarted window");
+  assert.equal(claude.filter((row) => row.status === "idle").length, 0, "Claude's weekly reset is fixed; it never slides");
+});
+
+test("Claude 5-hour windows that have not started (reset floored to 10 minutes) are one idle marker", () => {
+  const t = Math.floor((now - 86_400) / 600) * 600, window = 300 * 60;
+  const claude = (observedAt: number, resetsAt: number, usedPercent: number): LimitObservation =>
+    ({ provider: "claude", account: "claude-0123456789abcdef", meter: "five_hour", windowMinutes: 300, resetsAt, observedAt, usedPercent, status: "unknown", source: "claude-sdk-log" });
+  // Readings at :29, :30, :40 and :02 past, each reporting a window that would start at the floored 10-minute mark.
+  const rolling = [540 + 50, 600 + 5, 1200 + 30, 4920].map((offset) => claude(t + offset, t + Math.floor(offset / 600) * 600 + window, 0));
+  assert.deepEqual(compactObservations(rolling, now).map((row) => [row.observedAt, row.status]), [[t + 4920, "idle"]]);
+  assert.deepEqual(compactObservations(rolling.map((row) => ({ ...row, account: "" })), now), [], "an idle window of no known account is dropped");
+  // A started window: its first 0% reading is confirmed by a later one with the same reset.
+  const started = [claude(t + 6000, t + 6000 + window, 0), claude(t + 7200, t + 6000 + window, 4)];
+  const rows = compactObservations([...rolling, ...started], now);
+  assert.deepEqual(rows.map((row) => [row.observedAt, row.usedPercent, row.status]), [[t + 6000, 0, "unknown"], [t + 7200, 4, "unknown"]]);
+  const meter = buildMeters(rows, now)[0]!;
+  assert.equal(meter.cycles.length, 1, "unstarted windows never become 5-hour windows of their own");
 });
 
 test("reset instants within two minutes are one cycle, snapped to the busiest instant without chaining", () => {

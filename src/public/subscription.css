@@ -146,6 +146,8 @@
 .worth-totals dd { margin: 4px 0 0; font: 500 var(--fs-lg)/1.1 var(--font-mono); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .worth-totals small { display: block; margin-top: 4px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
 #subscription-view .worth-table table { min-width: 720px; }
+#subscription-view .worth-table th[scope="row"] { min-width: 150px; }
+#subscription-view .worth-table td > small { min-width: 9rem; max-width: 15rem; margin-left: auto; white-space: normal; }
 #subscription-view .worth-table select { height: 28px; max-width: 160px; padding: 0 22px 0 8px; font-size: var(--fs-xs); }
 #subscription-view .sources-table table { min-width: 520px; }
 .method-notes { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.6; }

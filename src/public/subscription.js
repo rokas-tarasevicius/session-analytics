@@ -633,7 +633,7 @@ function sourcesSection(limits, items, fmt, { remote }) {
   for (const text of [
     "Meters are the provider's own usage percentages, copied from records already on this machine. Nothing is requested from Anthropic; the Codex account read asks the local Codex app-server.",
     `Readings are kept in a private ledger${limits.persisted ? "" : " (off: --no-index)"} so reset history outlives provider log rotation. Run \`session-analytics limits --quiet\` every 20 minutes (cron or launchd) to keep it continuous.`,
-    "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline`. It records the documented rate_limits field and prints the meters.",
+    "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline` in each profile's settings.json. It records the documented rate_limits field for that profile's account and prints the meters.",
     "Value per 1% divides the API-equivalent value of an account's own sessions (matched through its Claude profiles, or every Codex session when there is one Codex account) by the meter's reading.",
     `Plan prices were reviewed on ${plansReviewedAt}. Team, Enterprise and Business seats are treated as paid by the employer: they show API value without a personal multiple unless you say you pay. Plan and payer choices stay in this browser.`,
   ]) list.append(el("li", text));
