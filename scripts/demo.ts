@@ -8,13 +8,15 @@
  *   node scripts/demo.ts --port 4180       choose another loopback port
  *   node scripts/demo.ts report [--json]   terminal report or JSON snapshot
  *   node scripts/demo.ts --keep            keep the generated data after exit
+ *   node scripts/demo.ts --bin PATH        run another build, such as an installed package's bin
+ *                                          (or set SESSION_ANALYTICS_DEMO_BIN)
  *
  * Every provider source is passed explicitly, and the child process runs with
  * HOME pointed at an empty directory inside the demo root, so neither the
  * explicit flags nor profile discovery can reach the machine's real history.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -28,7 +30,6 @@ import { seedHistoryDemo } from "./demo-history.ts";
 import { seedMcpDemo } from "./mcp-demo.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const bin = join(projectRoot, "bin", "session-analytics.ts");
 const DAY = 86_400_000;
 const DAYS = 60;
 
@@ -44,22 +45,27 @@ function valueOf(flag: string): string | undefined {
   const index = options.indexOf(flag);
   return index >= 0 ? options[index + 1] : undefined;
 }
-const known = new Set(["--json", "--keep", "--no-open", "--port", "--help"]);
+const known = new Set(["--json", "--keep", "--no-open", "--port", "--bin", "--help"]);
 for (let index = 0; index < options.length; index += 1) {
   const flag = options[index] ?? "";
   if (!known.has(flag)) fail(`Unknown demo argument: ${flag}`);
-  if (flag === "--port") index += 1;
+  if (flag === "--port" || flag === "--bin") index += 1;
 }
 if (has("--json") && !reportMode) fail("--json is only valid with report.");
 if (has("--help")) {
   process.stdout.write(
-    "Usage: node scripts/demo.ts [report [--json] | mcp] [--no-open] [--port PORT] [--keep]\n" +
-      "Generates synthetic sessions in a temporary directory and analyzes only that data.\n",
+    "Usage: node scripts/demo.ts [report [--json] | mcp] [--no-open] [--port PORT] [--keep] [--bin PATH]\n" +
+      "Generates synthetic sessions in a temporary directory and analyzes only that data.\n" +
+      "--bin (or SESSION_ANALYTICS_DEMO_BIN) runs another session-analytics build, such as an installed package.\n",
   );
   process.exit(0);
 }
 const port = Number(valueOf("--port") ?? "4175");
 if (!Number.isInteger(port) || port < 1024 || port > 65_535) fail("--port must be an integer from 1024 through 65535.");
+// The same synthetic sources and scrubbed environment drive any build, so an installed package is checked like the source.
+if (has("--bin") && !valueOf("--bin")) fail("--bin requires a path.");
+const bin = resolve(valueOf("--bin") ?? process.env["SESSION_ANALYTICS_DEMO_BIN"] ?? join(projectRoot, "bin", "session-analytics.ts"));
+if (!existsSync(bin)) fail(`No session-analytics bin at ${bin}.`);
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { appendFile, chmod, link, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { request } from "node:http";
+import { createServer as createHttpServer, request } from "node:http";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,6 +16,8 @@ import { addUnsafeVelocityModels } from "./velocity-fixtures.ts";
 
 import { plantMalformedModels } from "./model-privacy-fixture.ts";
 import { readDashboardToken, writeDashboardToken } from "../src/store/dashboard.ts";
+import { reuseRefusal } from "../src/dashboard-reuse.ts";
+import { version } from "../src/version.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -137,7 +139,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.ok(["building", "not-started", "ready"].includes(String(healthBody.snapshot)));
     assert.match(health.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     await t.test("health exposes only content-free launch identity and stores a private per-port token", async () => {
-      assert.deepEqual(Object.keys(healthBody).sort(), ["dataSource", "instanceToken", "optionsHash", "service", "snapshot", "status"]);
+      assert.deepEqual(Object.keys(healthBody).sort(), ["dataSource", "instanceToken", "optionsHash", "service", "snapshot", "status", "version"]);
+      assert.equal(healthBody.version, version);
       assert.match(String(healthBody.instanceToken), /^[a-f0-9]{64}$/);
       assert.match(String(healthBody.optionsHash), /^[a-f0-9]{64}$/);
       const tokenFile = join(childEnvironment.SESSION_ANALYTICS_DATA_DIR, `dashboard-${port}.token`);
@@ -360,6 +363,58 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   } finally {
     if (child) await stopServer(child);
     await rm(temporaryDirectory, { force: true, recursive: true });
+  }
+});
+
+test("a launch reuses only the same version with the same options and token", () => {
+  const token = "a".repeat(64), hash = "b".repeat(64);
+  const running = { service: "session-analytics", dataSource: "live", snapshot: "ready", status: "ok", instanceToken: token, optionsHash: hash, version: "1.2.3" } as const;
+  const expected = { version: "1.2.3", optionsHash: hash, instanceToken: token };
+  const options = "Session Analytics is already running on this port with different options; stop it or choose --port.";
+  assert.equal(reuseRefusal(running, expected), null);
+  const { version: _omitted, ...unversioned } = running;
+  assert.equal(reuseRefusal(unversioned, expected), "An older Session Analytics is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
+  assert.equal(reuseRefusal({ ...running, version: "1.2.2" }, expected), "An older Session Analytics (1.2.2) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
+  assert.equal(reuseRefusal({ ...running, version: "1.10.0" }, expected), "A newer Session Analytics (1.10.0) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
+  assert.equal(reuseRefusal({ ...running, version: "\u001b[2Jx; rm -rf /" }, expected), "An older Session Analytics is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.", "only a plain version is printed");
+  assert.equal(reuseRefusal({ ...running, version: "1.2.2" }, { ...expected, instanceToken: null }), "An older Session Analytics (1.2.2) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
+  for (const health of [null, { ...running, optionsHash: "c".repeat(64) }, { ...running, instanceToken: "c".repeat(64) }, { ...running, dataSource: "snapshot" as const }, { ...running, service: "other" as "session-analytics" }]) {
+    assert.equal(reuseRefusal(health, expected), options);
+  }
+  assert.equal(reuseRefusal(running, { ...expected, instanceToken: null }), options, "a saved-file launch never reuses");
+});
+
+test("a dashboard from another version on the port is named, not reused", { timeout: 30_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dashboard-version-"));
+  const dataDir = join(directory, "data");
+  const token = "d".repeat(64);
+  let health: Record<string, unknown> = {};
+  const older = createHttpServer((_request, response) => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(health)); });
+  try {
+    await new Promise<void>((resolve) => older.listen(0, "127.0.0.1", resolve));
+    const address = older.address();
+    assert.ok(address && typeof address === "object");
+    writeDashboardToken({ dataDir }, address.port, token);
+    const launch = async (): Promise<{ code: unknown; stdout: string; stderr: string }> => {
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:CLAUDE_CONFIG_DIR|CODEX_HOME|SESSION_ANALYTICS_|CONDUCTOR_)/.test(key)));
+      const child = spawn(process.execPath, [serverPath, "--port", String(address.port), "--data-dir", dataDir, "--no-index", "--offline"], { cwd: repositoryRoot, env: { ...env, HOME: directory }, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "", stderr = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+      child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+      const [code] = await once(child, "exit");
+      return { code, stdout, stderr };
+    };
+    // A 0.9.0 dashboard reports no version but would otherwise pass every reuse check.
+    health = { service: "session-analytics", dataSource: "live", snapshot: "ready", status: "ok", instanceToken: token, optionsHash: "0".repeat(64) };
+    const refused = await launch();
+    assert.equal(refused.code, 1);
+    assert.equal(refused.stdout, "");
+    assert.equal(refused.stderr, `An older Session Analytics is running on this port; this is ${version}. Stop it (Ctrl+C where it runs) or choose --port.\n`);
+    health = { ...health, version: "999.0.0" };
+    assert.match((await launch()).stderr, /^A newer Session Analytics \(999\.0\.0\) is running on this port/);
+  } finally {
+    await new Promise<void>((resolve) => older.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

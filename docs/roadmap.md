@@ -11,7 +11,8 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 - [x] Document five personas/jobs, 84 individually scored feature ideas, primary-source competitive research, bounded local evidence, dashboard navigation/wireframes, metric contracts, and packaging/open-source launch gates.
 - [ ] Validate the proposed repository investigation workflow with consenting pilot users and synthetic tasks; collect no automatic telemetry or real histories.
 - [ ] Resolve the documented comparison/denominator/context prerequisites and agree shared schema semantics before promoting new ratios or period comparisons.
-- [ ] Pass compiled npm installed-artifact gates before advertising registry installation; evaluate Homebrew and executable packaging separately.
+- [x] Build a compiled package and gate it on installing and running the packed tarball (`npm run release:check`).
+- [ ] Publish that package before advertising registry installation; evaluate Homebrew and executable packaging separately.
 
 ## M0: Correctness
 

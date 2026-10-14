@@ -50,9 +50,9 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Pass the compiled installed-artifact gate before npm publication. | §6, Not in scope for 0.8.0; distribution-launch proposal |
+| P3 | Publish the compiled package that `release:check` installs and smoke-tests: attach the tarball to GitHub Releases and publish the same bytes to npm. | §6, Not in scope for 0.8.0; distribution-launch proposal |
 | P3 | Evaluate Homebrew distribution separately. | §6, Not in scope for 0.8.0 |
-| P3 | Review declaration files and verify compiled installed artifacts before npm publication. CHANGELOG and required license assets are checked by the source-release preflight. | §4 P3; §6, Not in scope for 0.8.0 |
+| P3 | Decide whether the package should ship declaration files; it ships none today. The release check already installs and runs the compiled artifact and requires CHANGELOG and license assets. | §4 P3; §6, Not in scope for 0.8.0 |
 | P3 | Add release compare links to CHANGELOG. | §4 P3; §6, Not in scope for 0.8.0 |
 | P3 | Upload the social preview through repository settings at release time. | §4 P3; §6 Release 0.8.0, maintainer step |
 

@@ -44,7 +44,7 @@ session-analytics --snapshot team.json --no-open   # open a saved or shared snap
 session-analytics --remote server # also read another machine over SSH
 ```
 
-The server binds to `127.0.0.1` only and answers read-only `GET` requests. `--remote` adds machines read over your SSH configuration, such as a server where agents run; see [combine machines](interop.md#combine-machines). Running the command again reuses a verified live dashboard on that port only with the same analysis options; otherwise stop it or choose `--port`. Saved-file dashboards are kept separate. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
+The server binds to `127.0.0.1` only and answers read-only `GET` requests. `--remote` adds machines read over your SSH configuration, such as a server where agents run; see [combine machines](interop.md#combine-machines). Running the command again reuses a verified live dashboard on that port only when it runs the same version with the same analysis options; otherwise stop it or choose `--port`. After an upgrade, a dashboard still running the old version is named with its version instead of being reused; the footer shows the version a dashboard runs. Saved-file dashboards are kept separate. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
 
 ### Window and URL state
 
@@ -213,7 +213,7 @@ npm run demo -- report            # terminal report of the same data
 node scripts/demo.ts mcp          # MCP server over the synthetic data
 ```
 
-The demo generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory, and deletes it on exit. It never reads real history. Every screenshot in this repository is rendered from it.
+The demo generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory, and deletes it on exit. It never reads real history. Every screenshot in this repository is rendered from it. `--bin PATH` (or `SESSION_ANALYTICS_DEMO_BIN`) runs the same data through another build, such as the `bin/session-analytics.js` of an installed package; `node scripts/smoke-installed.ts TARBALL` uses it to check a packed release from a temporary install.
 
 Developers can run `node scripts/parity.ts --machine` to compare full, cold-index and warm-index accounting. It uses the 1024 MB analysis worker, offline pricing, a fresh private index under `.lane/`, and the shared real-scan lock. Output contains month/provider totals and differences by hashed session key, never repository names or transcript content. Live source changes are reported separately and do not suppress the unfiltered diff or a failing exit status. Use `--demo-root PATH` with a retained synthetic demo for repeatable local checks.
 

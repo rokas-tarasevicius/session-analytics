@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-/** Source-release preflight. Reads synthetic data only; never publishes or changes repository settings. */
+/** Release preflight: source checks, then the compiled package is built, packed, installed and run. Reads synthetic data only; never publishes or changes repository settings. */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
+import { staticRoutes } from "../src/static-routes.ts";
 import { version } from "../src/version.ts";
 
 interface ReleaseMetadata {
@@ -41,12 +43,12 @@ export function extractReleaseNotes(metadata: ReleaseMetadata, tag: string): str
   return `${notes}\n`;
 }
 
+/** The compiled package must carry every entry point, worker, served file, notice and schema, and no source, map or local data. */
 export function checkPackageFiles(paths: string[]): void {
   const required = [
     "package.json", "README.md", "LICENSE", "CHANGELOG.md",
-    "bin/session-analytics.ts", "src/analysis-worker.ts", "src/cursor-worker.ts", "src/server.ts",
-    "src/public/index.html", "src/public/app.js", "src/public/styles.css",
-    "src/public/fonts/geist-latin.woff2", "src/public/fonts/geist-mono-latin.woff2",
+    "bin/session-analytics.js", "src/analysis-worker.js", "src/cursor-worker.js", "src/mcp/worker.js", "src/server.js",
+    ...staticRoutes.map(([, file]) => `src/public/${file}`),
     "src/public/fonts/OFL-1.1.txt", "src/public/brands/NOTICE.md",
     "data/rate-cards.json", "schemas/snapshot.v1.schema.json", "schemas/shared.v1.schema.json",
     "skills/session-analytics/SKILL.md",
@@ -55,10 +57,24 @@ export function checkPackageFiles(paths: string[]): void {
   for (const path of paths) {
     const parts = path.split("/");
     const allowed = /^(?:bin|src|data|schemas|skills)\//.test(path) || /^(?:package\.json|README\.md|LICENSE|CHANGELOG\.md)$/.test(path);
-    if (!allowed || parts.some((part) => part.startsWith(".") || part === "node_modules") || /\.(?:log|sqlite|db|jsonl|tgz|pem|key)$/i.test(path)) {
+    if (!allowed || parts.some((part) => part.startsWith(".") || part === "node_modules") ||
+        /\.(?:ts|mts|cts|map|tsbuildinfo|log|sqlite|db|jsonl|tgz|pem|key)$/i.test(path)) {
       throw new Error(`Unexpected package file: ${path}.`);
     }
   }
+}
+
+/** Installing must run nothing, and the installed command must be this version's compiled bin. */
+export function checkPackageManifest(manifest: Record<string, unknown>, binSource: string, expectedVersion: string): void {
+  for (const field of ["scripts", "dependencies", "optionalDependencies", "peerDependencies", "bundleDependencies", "bundledDependencies", "devDependencies", "private", "publishConfig"]) {
+    if (manifest[field] !== undefined) throw new Error(`Package manifest must not declare ${field}.`);
+  }
+  if (manifest["name"] !== "session-analytics" || manifest["type"] !== "module") throw new Error("Package manifest must be the session-analytics ES module package.");
+  if (manifest["version"] !== expectedVersion) throw new Error(`Package version does not match source version ${expectedVersion}.`);
+  if (JSON.stringify(manifest["bin"]) !== JSON.stringify({ "session-analytics": "bin/session-analytics.js" })) throw new Error("Package bin must be bin/session-analytics.js.");
+  if (!binSource.startsWith("#!/usr/bin/env node\n")) throw new Error("Package bin must start with #!/usr/bin/env node.");
+  const engines = manifest["engines"] as { node?: unknown } | undefined, os = manifest["os"];
+  if (engines?.node !== ">=24" || !Array.isArray(os) || !os.includes("darwin") || !os.includes("linux")) throw new Error("Package manifest must require Node.js 24 on macOS and Linux.");
 }
 
 function main(): void {
@@ -103,11 +119,18 @@ function main(): void {
     throw new Error("Synthetic report contains private fixture content.");
   }
   console.log(`Synthetic report passes the snapshot contract (${snapshot.sessions.length} sessions, six providers).`);
-  const packed = JSON.parse(run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"]));
-  if (!Array.isArray(packed) || packed.length !== 1 || !Array.isArray(packed[0]?.files)) throw new Error("Unexpected npm package manifest.");
-  checkPackageFiles(packed[0].files.map((entry: { path: string }) => entry.path));
-  console.log(`Package allowlist and required assets pass (${packed[0].files.length} files).`);
-  console.log("Source preflight passed. No package or release was published; hosted CI and repository settings remain separate gates.");
+  run(process.execPath, ["scripts/build.ts"]);
+  const destination = mkdtempSync(join(tmpdir(), "session-analytics-pack-"));
+  try {
+    const packed = JSON.parse(run("npm", ["pack", "./dist", "--json", "--ignore-scripts", "--pack-destination", destination]));
+    if (!Array.isArray(packed) || packed.length !== 1 || !Array.isArray(packed[0]?.files) || typeof packed[0]?.filename !== "string") throw new Error("Unexpected npm package manifest.");
+    checkPackageFiles(packed[0].files.map((entry: { path: string }) => entry.path));
+    checkPackageManifest(JSON.parse(readFileSync(resolve(root, "dist/package.json"), "utf8")), readFileSync(resolve(root, "dist/bin/session-analytics.js"), "utf8"), version);
+    console.log(`Compiled package files and manifest pass (${packed[0].files.length} files, ${packed[0].size} bytes packed).`);
+    const smoke = spawnSync(process.execPath, ["scripts/smoke-installed.ts", join(destination, packed[0].filename)], { cwd: root, stdio: "inherit", timeout: 900_000 });
+    if (smoke.error || smoke.status !== 0) throw new Error("Release check failed: the installed package smoke test.");
+  } finally { rmSync(destination, { recursive: true, force: true }); }
+  console.log("Release preflight passed. No package or release was published; hosted CI and repository settings remain separate gates.");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

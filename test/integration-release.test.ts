@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { Element, Option, documentFromHtml } from "./release-dom.ts";
 import { version } from "../src/version.ts";
-import { checkPackageFiles, checkReleaseMetadata, extractReleaseNotes } from "../scripts/release-check.ts";
+import { checkPackageFiles, checkPackageManifest, checkReleaseMetadata, extractReleaseNotes } from "../scripts/release-check.ts";
+import { build } from "../scripts/build.ts";
+import { staticRoutes } from "../src/static-routes.ts";
 
 const views = ["summary", "velocity", "costs", "pricing", "subscription", "tools", "activity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
@@ -105,19 +109,36 @@ test("release: notes exclude unreleased and older changes; mismatched tags and m
   assert.throws(() => extractReleaseNotes({ ...metadata, changelog: "## [1.2.3]\n\n### Changed\n" }, "v1.2.3"), /no release notes/);
 });
 
-test("release: package excludes accidental local data and includes worker and font assets", async () => {
-  const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
-  assert.equal(result.status, 0, result.stderr);
-  const files: string[] = JSON.parse(result.stdout)[0].files.map((file: { path: string }) => file.path);
-  checkPackageFiles(files);
-  for (const extra of [".env", "src/.env", "data/sessions.jsonl", "data/local.sqlite", "test/fixtures.ts", "assets/private.png", "src/../secret.ts"]) {
-    assert.throws(() => checkPackageFiles([...files, extra]), /Unexpected package file/);
-  }
-  for (const missing of ["src/analysis-worker.ts", "src/public/fonts/OFL-1.1.txt", "CHANGELOG.md"]) assert.throws(() => checkPackageFiles(files.filter((path) => path !== missing)), /Package is missing/);
+test("release: the compiled package carries workers, served files and notices, and installs without running anything", { timeout: 120_000 }, async () => {
+  const out = await mkdtemp(join(tmpdir(), "session-analytics-build-"));
+  try {
+    build(out);
+    const result = spawnSync("npm", ["pack", out, "--dry-run", "--json", "--ignore-scripts"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    assert.equal(result.status, 0, result.stderr);
+    const files: string[] = JSON.parse(result.stdout)[0].files.map((file: { path: string }) => file.path);
+    checkPackageFiles(files);
+    for (const extra of [".env", "src/.env", "data/sessions.jsonl", "data/local.sqlite", "test/fixtures.ts", "assets/private.png", "src/../secret.ts",
+      "src/analyzer.ts", "src/public/format.d.ts", "src/server.js.map", "bin/session-analytics.ts", ".DS_Store"]) {
+      assert.throws(() => checkPackageFiles([...files, extra]), /Unexpected package file/, extra);
+    }
+    for (const missing of ["src/analysis-worker.js", "src/cursor-worker.js", "src/mcp/worker.js", "src/public/fonts/OFL-1.1.txt", "src/public/subscription.css", "CHANGELOG.md"]) {
+      assert.throws(() => checkPackageFiles(files.filter((path) => path !== missing)), /Package is missing/, missing);
+    }
+    const manifest = JSON.parse(await readFile(join(out, "package.json"), "utf8")) as Record<string, unknown>;
+    const binSource = await readFile(join(out, "bin/session-analytics.js"), "utf8");
+    checkPackageManifest(manifest, binSource, version);
+    for (const [field, value] of [["scripts", { postinstall: "x" }], ["dependencies", { left: "1" }], ["private", true], ["version", "0.0.1"], ["bin", { "session-analytics": "bin/session-analytics.ts" }], ["os", ["darwin"]]] as const) {
+      assert.throws(() => checkPackageManifest({ ...manifest, [field]: value }, binSource, version), Error, field);
+    }
+    assert.throws(() => checkPackageManifest(manifest, binSource.replace("#!/usr/bin/env node\n", ""), version), /#!\/usr\/bin\/env node/);
+    const root = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as Record<string, unknown>;
+    assert.equal(root["private"], true, "the TypeScript source layout can never be published by accident");
+    assert.equal(root["version"], manifest["version"]);
+  } finally { await rm(out, { recursive: true, force: true }); }
 });
 
 test("release: every dispatcher command shares help and version without scanning", () => {
-  for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp"]) {
+  for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits"]) {
     const help = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--help"], { encoding: "utf8" });
     assert.equal(help.status, 0, `${command}: ${help.stderr}`); assert.match(help.stdout, /session-analytics/i);
     const result = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--version"], { encoding: "utf8" });
@@ -160,9 +181,7 @@ test("release: complete demo API, all six renderers, static modules and privacy 
     const warm = validateSnapshot(await refreshed.json());
     assert.deepEqual(warm.sessions, snapshot.sessions, "warm demo replays every provider and namespace");
     // Cover the exact server allowlist, including modules imported transitively by views.
-    const server = await readFile(new URL("../src/server.ts", import.meta.url), "utf8");
-    const staticBlock = server.slice(server.indexOf("const staticFiles ="), server.indexOf("let analyticsPromise"));
-    const assets = [...staticBlock.matchAll(/\["(\/[^"\n]*)",\s*join\(/g)].map((m) => m[1]!);
+    const assets = staticRoutes.map(([route]) => route);
     for (const asset of ["/export-data.js", "/chart-colors.js", "/chart-legend.js", "/chart-scale.js"]) assert.ok(assets.includes(asset), asset);
     for (const asset of assets) { const r = await realFetch(base + asset); assert.equal(r.status, 200, asset); assert.ok((await r.arrayBuffer()).byteLength, asset); }
     const html = await (await realFetch(base)).text();

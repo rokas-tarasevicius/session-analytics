@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `npm run build` compiles an installable package into `dist/`: the same code as JavaScript, the dashboard files, rate card, schemas and agent skill, and a generated manifest with a `.js` command, no install scripts and no dependencies. `npm run pack:release` packs it into `release/`. Development is unchanged: Node runs the TypeScript sources directly, and the root `package.json` stays private.
+- `npm run release:check` now builds and packs that package, checks its files and manifest, and installs the tarball into a temporary prefix whose path contains a space. From the installed copy it runs every command's help and version, the synthetic report (compared with the source run), an MCP tool call, the dashboard with every static file and API route, and the report again from a read-only installation. `node scripts/smoke-installed.ts` runs the same smoke against a tarball or a registry version, and `node scripts/demo.ts --bin PATH` runs the demo against any build.
+- The dashboard footer shows the version it runs, and `/api/health` reports it.
+
+### Changed
+
+- Running `session-analytics` again reuses a dashboard on the same port only when it runs the same version. After an upgrade, a dashboard left running from the older version is named, with its version and how to stop it, instead of being reused silently.
+
+### Fixed
+
+- On Node.js older than 24, the command now stops with "needs Node.js 24 or newer" instead of failing later with a generic analysis error. When an analysis worker cannot start because a module is missing, `node:sqlite` is unavailable or TypeScript runs from `node_modules`, `report`, the MCP tools and the dashboard server's terminal output and API error give that fixed reason instead of a generic failure such as "Session analysis could not be completed."
+
 ## [0.9.0] - 2026-10-14
 
 ### Added

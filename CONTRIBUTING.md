@@ -15,7 +15,7 @@ npm ci              # TypeScript and Node type definitions only
 npm run check       # type check and the full test suite
 ```
 
-There is no build step. Node runs the TypeScript sources directly.
+Development has no build step: Node runs the TypeScript sources directly. Releases ship the same code compiled into `dist/`, because Node refuses TypeScript under `node_modules`. Code that names a sibling file by path at run time, such as a worker entry, uses `moduleUrl("./worker.ts", import.meta.url)` from `src/module-url.ts`, which names the emitted `.js` in the compiled package; the build fails on a string path that still names a `.ts` file. The dashboard serves only the files listed in `src/static-routes.ts`, and the release check requires each of them in the package.
 
 | Script | What it does |
 | --- | --- |
@@ -26,7 +26,9 @@ There is no build step. Node runs the TypeScript sources directly.
 | `npm test` | `node scripts/test.ts` runs the Node test runner with concurrency 2 over `test/`, `test/validation/` and `verify/` suites, using an isolated temporary directory. |
 | `npm run test:browser` | Run the two Chrome suites with isolated fixtures; missing or unlaunchable Chrome fails. Set `SESSION_ANALYTICS_CHROME` to your Chrome/Chromium executable outside the default macOS location. |
 | `npm run check` | Type check, then tests. CI requires GitHub-hosted Ubuntu and macOS source checks plus a required Ubuntu Chrome check for pull requests, pushes to `master` and manual runs, in both private and public repositories. |
-| `npm run release:check` | Validate the source release locally: version metadata, type check, tests, snapshot schemas, synthetic JSON report and package contents. Does not publish. |
+| `npm run build` | Compile the installable package into `dist/`: JavaScript, dashboard files, rate card, schemas and skill, with a generated manifest that has no install scripts or dependencies. `node scripts/build.ts --out DIR` builds elsewhere. |
+| `npm run pack:release` | Build, then pack `dist/` into `release/session-analytics-X.Y.Z.tgz`. |
+| `npm run release:check` | Validate a release locally: version metadata, type check, tests, snapshot schemas and synthetic JSON report, then build and pack the package, check its files and manifest, install it into a temporary prefix and run every command, the demo report, MCP and the dashboard from the installed copy (`scripts/smoke-installed.ts`). Does not publish. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
 
@@ -35,13 +37,15 @@ The test wrapper chooses a writable temporary directory outside ancestor Git rep
 ## Project layout
 
 ```text
-bin/session-analytics.ts     command dispatcher (dashboard, report, rates, export, merge, index, mcp)
+bin/session-analytics.ts     command dispatcher (dashboard, report, rates, export, merge, index, mcp, limits)
 src/
   analyzer.ts                discovery, identity, repository assignment, parsers, pricing, aggregation
   analysis-process.ts        runs an analysis in a child process
   analysis-worker.ts         child-process entry point
   cursor-worker.ts           child process for the Cursor database
   server.ts                  loopback dashboard server
+  static-routes.ts           every file the dashboard serves
+  module-url.ts              sibling module paths for source and compiled runs
   cli.ts                     terminal report and JSON snapshot
   types.ts                   public snapshot types and internal correlation types
   brand.ts, version.ts       product identity and version
@@ -53,7 +57,9 @@ src/
   public/                    dashboard (HTML, ES module, CSS, fonts, provider marks)
 data/rate-cards.json         versioned model rates with source URLs
 skills/session-analytics/    agent skill
-scripts/demo.ts              synthetic dataset and demo launcher
+scripts/demo.ts              synthetic dataset and demo launcher (--bin runs another build)
+scripts/build.ts             compiles the installable package into dist/
+scripts/smoke-installed.ts   installs a packed tarball and runs it end to end
 test/                        node:test suites and fixtures
 verify/                      independent accounting oracles and verification guide
 schemas/                     closed public snapshot and sharing schemas

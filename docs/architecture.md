@@ -6,8 +6,10 @@
 
 | Path | Role |
 | --- | --- |
-| `bin/session-analytics.ts` | Dispatcher for dashboard, report, rates, export, merge, index and MCP; common help/version handling. |
+| `bin/session-analytics.ts` | Dispatcher for dashboard, report, rates, export, merge, index, MCP and limits; common help/version handling. Stops with a fixed message on Node.js older than 24 before loading any command. |
 | `src/server.ts` | Dashboard server: argument and environment parsing, loopback HTTP server, static files, `/api/health`, `/api/analytics`, browser opener. |
+| `src/static-routes.ts` | The fixed map of dashboard URL paths to files in `src/public`; release checks require every target in the package. |
+| `src/dashboard-reuse.ts` | Whether a launch may reuse the dashboard on its port, and the refusal naming an older or newer version. |
 | `src/cli.ts` | Terminal report and `--json` snapshot. |
 | `src/mcp/` | Stdio protocol, strict tool schemas, bounded snapshot worker, TTL cache, query metrics and structured evidence collector. See [MCP](mcp.md). |
 | `src/analysis-process.ts` | Runs one analysis in a child process and returns the parsed result. |
@@ -41,7 +43,8 @@
 | `src/store/projection.ts` | Explicit disk allowlist for session facts, used when writing and reading cached sessions. |
 | `src/store/parity.ts` | Typed consistency failures, exact comparison and rotating sample selection. |
 | `src/store/cli.ts` | `index status|path|rebuild|prune` management commands. |
-| `src/store/errors.ts` | Fixed index failure codes/messages allowed across the worker boundary. |
+| `src/store/errors.ts` | Fixed failure codes/messages allowed across the worker boundary: index states, and a worker that could not start. |
+| `src/module-url.ts` | Resolves a sibling module by its source name: `.ts` from a checkout, the emitted `.js` from the compiled package. |
 | `src/types.ts` | Public snapshot types, rate-card types, and internal-only correlation types. |
 | `src/public-model.ts`, `src/public/model-id.js` | Shared bounded model-identifier projection for providers, pricing and metric dimensions. |
 | `src/metrics/context-windows.ts` | Reviewed Claude context-window table used for `maxContextWindow` and `contextUtilizationPeak`. |
@@ -50,7 +53,8 @@
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
 | `data/rate-cards.json` | Versioned model rates with an effective date and a source URL per model. |
 | `skills/session-analytics/` | Agent skill that launches the dashboard or report. |
-| `scripts/demo.ts` | Synthetic dataset generator that runs the tool against that data only. |
+| `scripts/demo.ts` | Synthetic dataset generator that runs the tool against that data only; `--bin` runs another build, such as an installed package. |
+| `scripts/build.ts`, `scripts/smoke-installed.ts` | Compile the installable package into `dist/`, and install a packed tarball into a temporary prefix to run every surface from it. |
 | `scripts/benchmark-index.ts` | Numeric-only cold/warm timing, plus full-scan parity for a retained demo dataset. |
 | `test/` | Node test runner suites and the shared fixture builder. |
 
@@ -61,7 +65,7 @@
   <img alt="The command dispatches to the dashboard or report; each uses a 1024 MiB analysis worker, which uses a separate 192 MiB Cursor parser." src="diagrams/process-model.svg" width="880" />
 </picture>
 
-The server and report never parse transcripts themselves. Each snapshot runs in a fresh worker with `--max-old-space-size=1024`; Cursor uses a separate 192 MiB worker. These are V8 old-space caps, not total resident-memory limits. Only serialized, allowlisted results cross the process boundary. Child stderr is discarded; index failures cross as bounded error codes and other failures use fixed messages.
+The server and report never parse transcripts themselves. Each snapshot runs in a fresh worker with `--max-old-space-size=1024`; Cursor uses a separate 192 MiB worker. These are V8 old-space caps, not total resident-memory limits. Only serialized, allowlisted results cross the process boundary. Child stderr is never forwarded: index failures cross as bounded error codes, a worker that could not start is recognised by Node's own error code (a missing module, `node:sqlite` unavailable, TypeScript under `node_modules`) and reported with a fixed message, and other failures use fixed messages.
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
 
@@ -128,7 +132,7 @@ Provider logs repeat information in several ways. Each is handled explicitly:
 - After the first successful scan, refreshes stale public pricing feeds once in the background unless offline or pinned to a reviewed card. This does not mutate the in-memory analytics snapshot; the next explicit refresh loads new cache evidence. There is no price-update HTTP endpoint.
 - Caches one snapshot promise. `/api/analytics?refresh=1` starts a new scan; concurrent requests share the scan in progress.
 - Sends a strict Content Security Policy (`default-src 'self'`, no inline script or style, `frame-ancestors 'none'`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and same-origin opener and resource policies. No CORS headers are sent.
-- If the port is taken, it reuses a live dashboard only when `/api/health` has its service ID, the same normalized analysis-options SHA-256 hash, and a launch token matching `dashboard-PORT.token` in the caller's private data directory. The token is random per launch, written atomically with mode `0600` only after binding the port, inside a mode `0700` directory. A different configuration or an unverifiable service exits with an error directing you to stop it or choose `--port`. Saved-file dashboards and the demo refuse port reuse.
+- If the port is taken, it reuses a live dashboard only when `/api/health` has its service ID, the same version, the same normalized analysis-options SHA-256 hash, and a launch token matching `dashboard-PORT.token` in the caller's private data directory. A dashboard from another version, including one too old to report a version, is named as older or newer with its version and how to stop it, so an upgrade never silently keeps serving old code. The token is random per launch, written atomically with mode `0600` only after binding the port, inside a mode `0700` directory. A different configuration or an unverifiable service exits with an error directing you to stop it or choose `--port`. Saved-file dashboards and the demo refuse port reuse.
 
 ## Persistent index
 
@@ -188,6 +192,7 @@ Retention counts and pricing caveats follow the filtered sessions; scan-wide war
 
 - **No runtime dependencies.** A tool that reads every transcript on a machine should have a small, auditable supply chain. Development dependencies are TypeScript and Node type definitions only.
 - **Erasable TypeScript.** The code runs directly under Node's type stripping, so it avoids enums, namespaces, and parameter properties (`erasableSyntaxOnly` in `tsconfig.json`).
+- **One codebase, two layouts.** Node refuses TypeScript under `node_modules`, so the installable package is the same code compiled by `scripts/build.ts`: `tsc` rewrites import extensions, browser files are copied verbatim, and the generated manifest has a `.js` bin and no install scripts or dependencies. Paths that strings name at run time (worker entries, index fingerprint inputs) go through `moduleUrl()`, and the build fails if emitted code still names a `.ts` file. The index revision hashes the code that runs, so an upgrade, or switching between a checkout and an installed copy, parses present sessions again once; retained history whose sources are gone is kept.
 - **Streaming parsers.** Transcripts are read line by line. Identity checks stop at the first records that carry an ID and working directory, and concurrency is kept low because a single Codex `session_meta` record can be several megabytes.
 - **Fail closed on content.** When a record is malformed it is counted as a warning, not echoed.
 
