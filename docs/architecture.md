@@ -55,7 +55,7 @@
 | `skills/session-analytics/` | Agent skill that launches the dashboard or report. |
 | `scripts/demo.ts` | Synthetic dataset generator that runs the tool against that data only; `--bin` runs another build, such as an installed package. |
 | `scripts/build.ts`, `scripts/smoke-installed.ts` | Compile the installable package into `dist/`, and install a packed tarball into a temporary prefix to run every surface from it. |
-| `scripts/homebrew-formula.ts` | Render the Homebrew tap formula for a release tarball; the release workflow commits it to the tap. |
+| `scripts/homebrew-formula.ts` | Render the Homebrew tap formula for a release tarball; the release workflow installs and tests it with Homebrew, then commits it to the tap once the tap is set up. |
 | `scripts/benchmark-index.ts` | Numeric-only cold/warm timing, plus full-scan parity for a retained demo dataset. |
 | `test/` | Node test runner suites and the shared fixture builder. |
 

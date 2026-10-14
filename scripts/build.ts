@@ -2,7 +2,8 @@
 /** Build the installable package into dist/ (or --out DIR): compiled ESM plus verbatim assets. No network, no runtime dependencies. */
 import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,7 +14,10 @@ export function typeScriptReferences(source: string): string[] {
   return [...code.matchAll(/(?:new URL|import|readFile|readFileSync)\(\s*["'`]([^"'`]+\.ts)["'`]/g)].map((match) => match[1]!);
 }
 
-/** Every emitted module must name only emitted files, and every moduleUrl() target must exist in the package. */
+/**
+ * Every emitted module must name only emitted files, and every moduleUrl() target and literal
+ * `new URL("./file", import.meta.url)` it reads at run time must exist in the package; directory URLs are not files.
+ */
 export function checkEmitted(out: string): string[] {
   const problems: string[] = [];
   const walk = (directory: string): void => {
@@ -25,6 +29,9 @@ export function checkEmitted(out: string): string[] {
       for (const reference of typeScriptReferences(source)) problems.push(`${relative(out, path)} still names ${reference}`);
       for (const [, specifier] of source.matchAll(/moduleUrl\(\s*["']([^"']+\.ts)["']/g)) {
         if (!existsSync(join(dirname(path), `${specifier!.slice(0, -3)}.js`))) problems.push(`${relative(out, path)} runs missing ${specifier!.slice(0, -3)}.js`);
+      }
+      for (const [, target] of source.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/new URL\(\s*["'](\.\.?\/[^"']*[^/"'])["']\s*,\s*import\.meta\.url\s*\)/g)) {
+        if (!target!.endsWith(".ts") && !existsSync(join(dirname(path), target!))) problems.push(`${relative(out, path)} reads missing ${target}`);
       }
     }
   };
@@ -42,13 +49,37 @@ export function packageManifest(source: Record<string, unknown>): Record<string,
   };
 }
 
+/**
+ * The build empties its destination first, so it accepts only the default dist/, a missing or empty directory, or an
+ * earlier build's output; never this checkout, home or a directory containing either.
+ */
+export function checkOutput(out: string, home = homedir()): void {
+  const target = resolve(out);
+  if (target === join(root, "dist")) return;
+  const contains = (parent: string, child: string): boolean => {
+    const path = relative(parent, child);
+    return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+  };
+  if (contains(target, root) || contains(target, home)) throw new Error(`Refusing to build into ${out}: it contains this checkout or your home directory.`);
+  if (!existsSync(target)) return;
+  if (!statSync(target).isDirectory()) throw new Error(`Refusing to build into ${out}: it is not a directory.`);
+  if (!readdirSync(target).length) return;
+  let manifest: Record<string, any> | null = null;
+  try { manifest = JSON.parse(readFileSync(join(target, "package.json"), "utf8")) as Record<string, any>; } catch { /* Not a build. */ }
+  if (manifest?.["name"] !== "session-analytics" || manifest["bin"]?.["session-analytics"] !== "bin/session-analytics.js" || manifest["scripts"] !== undefined) {
+    throw new Error(`Refusing to empty ${out}: it is not empty and holds no earlier build. Choose a new or empty directory.`);
+  }
+}
+
 export function build(out: string): void {
+  checkOutput(out);
   rmSync(out, { recursive: true, force: true });
   const tsc = spawnSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", join(root, "tsconfig.build.json"), "--outDir", out], { stdio: "inherit" });
   if (tsc.status !== 0) throw new Error("TypeScript compilation failed.");
-  // After tsc, so these verbatim browser modules replace the copies tsc re-printed for server-side imports.
+  // After tsc, so verbatim files replace any copy tsc re-printed for a server-side import: the browser modules, and any
+  // other non-TypeScript file under src that a module reads at run time without importing it.
   const assets = (path: string): boolean => !basename(path).startsWith(".") && !path.endsWith(".d.ts");
-  cpSync(join(root, "src/public"), join(out, "src/public"), { recursive: true, filter: assets });
+  cpSync(join(root, "src"), join(out, "src"), { recursive: true, filter: (path) => assets(path) && !path.endsWith(".ts") });
   for (const directory of ["data", "schemas", "skills"]) cpSync(join(root, directory), join(out, directory), { recursive: true, filter: assets });
   for (const file of ["README.md", "LICENSE", "CHANGELOG.md"]) cpSync(join(root, file), join(out, file));
   const manifest = packageManifest(JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>);

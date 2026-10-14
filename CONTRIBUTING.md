@@ -15,7 +15,7 @@ npm ci              # TypeScript and Node type definitions only
 npm run check       # type check and the full test suite
 ```
 
-Development has no build step: Node runs the TypeScript sources directly. Releases ship the same code compiled into `dist/`, because Node refuses TypeScript under `node_modules`. Code that names a sibling file by path at run time, such as a worker entry, uses `moduleUrl("./worker.ts", import.meta.url)` from `src/module-url.ts`, which names the emitted `.js` in the compiled package; the build fails on a string path that still names a `.ts` file. The dashboard serves only the files listed in `src/static-routes.ts`, and the release check requires each of them in the package.
+Development has no build step: Node runs the TypeScript sources directly. Releases ship the same code compiled into `dist/`, because Node refuses TypeScript under `node_modules`. Code that names a sibling file by path at run time, such as a worker entry, uses `moduleUrl("./worker.ts", import.meta.url)` from `src/module-url.ts`, which names the emitted `.js` in the compiled package; the build fails on a string path that still names a `.ts` file. Every other file under `src/` ships verbatim, and the build also fails when a literal `new URL("./file", import.meta.url)` names a file missing from the package. The dashboard serves only the files listed in `src/static-routes.ts`, and the release check requires each of them in the package.
 
 | Script | What it does |
 | --- | --- |
@@ -26,11 +26,13 @@ Development has no build step: Node runs the TypeScript sources directly. Releas
 | `npm test` | `node scripts/test.ts` runs the Node test runner with concurrency 2 over `test/`, `test/validation/` and `verify/` suites, using an isolated temporary directory. |
 | `npm run test:browser` | Run the two Chrome suites with isolated fixtures; missing or unlaunchable Chrome fails. Set `SESSION_ANALYTICS_CHROME` to your Chrome/Chromium executable outside the default macOS location. |
 | `npm run check` | Type check, then tests. CI requires GitHub-hosted Ubuntu and macOS source checks plus a required Ubuntu Chrome check for pull requests, pushes to `master` and manual runs, in both private and public repositories. |
-| `npm run build` | Compile the installable package into `dist/`: JavaScript, dashboard files, rate card, schemas and skill, with a generated manifest that has no install scripts or dependencies. `node scripts/build.ts --out DIR` builds elsewhere. |
+| `npm run build` | Compile the installable package into `dist/`: JavaScript, dashboard files, rate card, schemas and skill, with a generated manifest that has no install scripts or dependencies. `node scripts/build.ts --out DIR` builds elsewhere; DIR is emptied first, so it must be new, empty or an earlier build, and never the checkout, your home directory or a directory containing either. |
 | `npm run pack:release` | Build, then pack `dist/` into `release/session-analytics-X.Y.Z.tgz`. |
 | `npm run release:check` | Validate a release locally: version metadata, type check, tests, snapshot schemas and synthetic JSON report, then build and pack the package, check its files and manifest, install it into a temporary prefix and run every command, the demo report, MCP and the dashboard from the installed copy (`scripts/smoke-installed.ts`). Does not publish. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
+
+If you also have an installed copy, give the checkout its own data directory (`SESSION_ANALYTICS_DATA_DIR` or `--data-dir`) for `npm start`, `npm run report` and `npm link`. The index fingerprints the code that runs, so a checkout and an installed copy sharing one data directory parse every present session again each time you switch between them.
 
 The test wrapper chooses a writable temporary directory outside ancestor Git repositories and passes it to fixtures through `TMPDIR`, `TMP` and `TEMP`. This prevents repository-discovery tests from inheriting an unrelated parent Git root. It removes only its own run directory on exit. If neither the system temp directory nor `/var/tmp` is usable, set `TMPDIR` to a writable directory outside any Git checkout.
 

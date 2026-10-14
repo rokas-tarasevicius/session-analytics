@@ -35,30 +35,26 @@ Model is the default grouping. Provider colours keep the series easy to distingu
 
 ## Get started
 
-Requires **Node.js 24+** on macOS or Linux. macOS is the primary platform; Claude Code and Codex sources also work on Linux. Install it with one of:
+Requires **Node.js 24+** on macOS or Linux. macOS is the primary platform; Claude Code and Codex sources also work on Linux.
+
+Releases after 0.9.0 attach a compiled package to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases). npm installs the latest one straight from the release, without the npm registry:
 
 ```bash
-brew install rokas-tarasevicius/tap/session-analytics   # Homebrew, with its own Node.js
-npm install -g session-analytics                        # npm
-npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz   # release tarball, no registry
-```
-
-Then analyze your own history:
-
-```bash
+npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
 session-analytics             # opens http://127.0.0.1:4174
 session-analytics --offline   # disables public pricing refreshes
 ```
 
-`npx -y session-analytics` tries it once without installing. Every channel installs the same tarball, attached to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) with `SHA256SUMS` and covered by a build provenance attestation; packaged releases start after 0.9.0. See [installation](docs/cli.md#install) for pinning a version, upgrades, uninstalling and platform limits.
-
-To explore synthetic data first, or to contribute, use a source checkout of `master`. Node runs its TypeScript directly; `npm ci` is needed only for the checks in [CONTRIBUTING.md](CONTRIBUTING.md).
+Until the first packaged release, or to explore synthetic data and contribute, use a source checkout. Node runs its TypeScript directly, so there is no install step:
 
 ```bash
 git clone https://github.com/rokas-tarasevicius/session-analytics.git
 cd session-analytics
-npm run demo                  # synthetic history only; never reads your sessions
+npm run demo                    # synthetic history only; never reads your sessions
+node bin/session-analytics.ts   # your own history at http://127.0.0.1:4174
 ```
+
+A checkout runs unreleased `master`; check out a release tag to run released code, and `npm link` to get a `session-analytics` command. npm registry and Homebrew packages of the same tarball are planned but not published yet. See [installation](docs/cli.md#install) for verifying a download, pinning a version, upgrades, uninstalling and platform limits; `npm ci` is needed only for the checks in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What it does
 

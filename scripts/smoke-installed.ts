@@ -8,7 +8,7 @@
  *   node scripts/smoke-installed.ts release/session-analytics-X.Y.Z.tgz [--port PORT]
  *   node scripts/smoke-installed.ts session-analytics@X.Y.Z
  */
-import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -57,6 +57,16 @@ function ran(result: SpawnSyncReturns<string>, label: string): string {
   return result.stdout;
 }
 
+/** Stop a demo wrapper with SIGTERM, which it forwards to its session-analytics child before removing its synthetic data; SIGKILL only if that hangs. */
+async function stop(child: ChildProcess, signals: Array<NodeJS.Signals | null>): Promise<void> {
+  for (const signal of signals) {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = once(child, "exit").catch(() => undefined);
+    if (signal) child.kill(signal);
+    await Promise.race([exited, delay(10_000, undefined, { ref: false })]);
+  }
+}
+
 async function freePort(): Promise<number> {
   const probe = createServer();
   await new Promise<void>((done) => probe.listen(0, "127.0.0.1", done));
@@ -83,8 +93,10 @@ async function main(): Promise<void> {
   const environment: NodeJS.ProcessEnv = { PATH: path, HOME: join(work, "home"), SESSION_ANALYTICS_DATA_DIR: join(work, "data"), SESSION_ANALYTICS_OFFLINE: "1" };
   for (const key of ["LANG", "LC_ALL", "TMPDIR", "TZ"]) if (process.env[key]) environment[key] = process.env[key];
   mkdirSync(environment["HOME"]!);
-  // Every demo run generates the same sessions, so the installed build and this checkout analyze identical data.
+  // Every demo run generates the same sessions, so the installed build and this checkout analyze identical data. Each run
+  // names its build with --bin, so an exported SESSION_ANALYTICS_DEMO_BIN cannot replace the checkout baseline.
   const demoEnvironment: NodeJS.ProcessEnv = { ...process.env, PATH: path, SESSION_ANALYTICS_DEMO_NOW: new Date().toISOString() };
+  delete demoEnvironment["SESSION_ANALYTICS_DEMO_BIN"];
   const demo = (demoArgs: string[], label: string): string =>
     ran(spawnSync(process.execPath, [join(root, "scripts/demo.ts"), ...demoArgs], { cwd: work, env: demoEnvironment, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 300_000 }), label);
   try {
@@ -118,7 +130,8 @@ async function main(): Promise<void> {
     // Cursor sessions come from a separate worker that runs only when a Cursor database exists.
     const cursor = installed.sessions.filter((session) => session.provider === "cursor").length;
     check(cursor > 0, "the Cursor worker returned no sessions");
-    check(JSON.stringify(stableProjection(installed)) === JSON.stringify(stableProjection(report("source demo report", []))), "the installed report differs from this checkout's");
+    const source = report("source demo report", ["--bin", join(root, "bin/session-analytics.ts")]);
+    check(JSON.stringify(stableProjection(installed)) === JSON.stringify(stableProjection(source)), "the installed report differs from this checkout's");
     console.log(`Installed demo report matches this checkout (${installed.sessions.length} sessions, six providers, ${cursor} from the Cursor worker).`);
 
     const mcp = spawn(process.execPath, [join(root, "scripts/demo.ts"), "mcp", "--bin", bin], { cwd: work, env: demoEnvironment, stdio: ["pipe", "pipe", "ignore"] });
@@ -147,7 +160,7 @@ async function main(): Promise<void> {
       console.log("MCP initialize and usage_summary pass.");
     } finally {
       mcp.stdin.end();
-      if (mcp.exitCode === null) await Promise.race([once(mcp, "exit"), delay(10_000, undefined, { ref: false }).then(() => mcp.kill("SIGKILL"))]);
+      await stop(mcp, [null, "SIGTERM", "SIGKILL"]);
     }
 
     const port = requestedPort ?? await freePort();
@@ -178,7 +191,7 @@ async function main(): Promise<void> {
       check(await fetch(`${origin}/api/health`).then(() => false, () => true), "the dashboard still answers after SIGTERM");
       console.log(`Dashboard serves ${staticRoutes.length} static files, /api/analytics, /api/limits and /api/health at ${version}, and stops on SIGTERM.`);
     } finally {
-      if (dashboard.exitCode === null && dashboard.signalCode === null) dashboard.kill("SIGKILL");
+      await stop(dashboard, ["SIGTERM", "SIGKILL"]);
     }
 
     ran(spawnSync("chmod", ["-R", "a-w", packageRoot], { encoding: "utf8" }), "chmod");

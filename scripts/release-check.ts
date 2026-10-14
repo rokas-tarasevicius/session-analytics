@@ -117,7 +117,8 @@ function main(): void {
   }
   run(process.execPath, ["scripts/snapshot-schema.ts", "--check"]);
   console.log("Published snapshot schemas match the source.");
-  const json = run(process.execPath, ["scripts/demo.ts", "report", "--json"]);
+  // --bin names the checkout even when SESSION_ANALYTICS_DEMO_BIN points the demo at another build.
+  const json = run(process.execPath, ["scripts/demo.ts", "report", "--json", "--bin", join(root, "bin/session-analytics.ts")]);
   const snapshot = validateSnapshot(JSON.parse(json));
   if (snapshot.sessions.length === 0 || new Set(snapshot.sessions.map((session) => session.provider)).size !== 6) {
     throw new Error("Synthetic report must include sessions from all six providers.");

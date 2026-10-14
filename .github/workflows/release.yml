@@ -174,17 +174,21 @@ jobs:
       - name: Publish GitHub Release
         # REST calls with the workflow token: no gh CLI dependency on the runner. Files go to a draft first, so
         # /releases/latest/download/session-analytics.tgz never 404s; a re-run resumes this tag's draft, and a published release is never changed.
+        # A tag published after a newer release, such as a backport or a late re-run, never becomes latest.
         run: |
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
           import { readFileSync } from 'node:fs';
           const tag = process.env.GITHUB_REF_NAME, version = tag.slice(1), prerelease = version.includes('-');
           const api = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases`;
-          const call = async (url, init = {}) => {
+          const call = async (url, init = {}, missing = undefined) => {
             const response = await fetch(url, { ...init, headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', ...init.headers } });
+            if (response.status === 404 && missing !== undefined) return missing;
             if (!response.ok) { console.error(`${init.method ?? 'GET'} ${new URL(url).pathname} failed: HTTP ${response.status}`); console.error(await response.text()); process.exit(1); }
             return response.status === 204 ? null : response.json();
           };
+          const stable = (name) => /^v(\d+)\.(\d+)\.(\d+)$/.exec(name ?? '')?.slice(1).map(Number) ?? null;
+          const newer = (a, b) => a.reduce((order, part, index) => order || Math.sign(part - b[index]), 0) > 0;
           const files = [`session-analytics-${version}.tgz`, 'session-analytics.tgz', 'SHA256SUMS'].map((name) => {
             const bytes = readFileSync(`release/${name}`);
             return { name, bytes, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` };
@@ -208,8 +212,11 @@ jobs:
             });
             if (uploaded.size !== file.bytes.length || (uploaded.digest && uploaded.digest !== file.digest)) { console.error(`Uploaded ${file.name} does not match the verified file.`); process.exit(1); }
           }
-          await call(`${api}/${release.id}`, { method: 'PATCH', body: JSON.stringify({ draft: false, make_latest: prerelease ? 'false' : 'true' }) });
-          console.log(`Published release ${tag} with ${files.map((file) => file.name).join(', ')}`);
+          const latest = stable((await call(`${api}/latest`, {}, null))?.tag_name);
+          const makeLatest = !prerelease && !(latest && newer(latest, stable(tag)));
+          await call(`${api}/${release.id}`, { method: 'PATCH', body: JSON.stringify({ draft: false, make_latest: makeLatest ? 'true' : 'false' }) });
+          console.log(`Published release ${tag} with ${files.map((file) => file.name).join(', ')}${makeLatest ? ' as the latest release' : ''}`);
+          if (!prerelease && !makeLatest) console.log(`v${latest.join('.')} is newer and stays the latest release.`);
           NODE
         env:
           GH_TOKEN: ${{ github.token }}
@@ -253,12 +260,18 @@ jobs:
 
       - name: Publish the release tarball
         # Trusted publishing exchanges this job's OIDC token for a one-time credential and adds provenance; no npm token is stored.
-        # A re-run after a successful publish finds the same bytes and publishes nothing.
+        # A re-run after a successful publish finds the same bytes and publishes nothing. An explicit --tag turns off npm's own
+        # guard against tagging an older version latest, so a version older than the current latest is published as `backport`.
         run: |
           V="${GITHUB_REF_NAME#v}"
-          case "$V" in *-*) DIST_TAG=next ;; *) DIST_TAG=latest ;; esac
           INTEGRITY="sha512-$(openssl dgst -sha512 -binary "release/session-analytics-$V.tgz" | openssl base64 -A)"
           if [ "$(npm view "session-analytics@$V" dist.integrity 2>/dev/null)" = "$INTEGRITY" ]; then echo "session-analytics@$V is already on npm with these bytes."; exit 0; fi
+          LATEST="$(npm view session-analytics dist-tags.latest)" || { echo "Could not read the latest dist-tag; nothing was published." >&2; exit 1; }
+          case "$V" in
+            *-*) DIST_TAG=next ;;
+            *) if [ "$(printf '%s\n%s\n' "$LATEST" "$V" | sort -V | tail -n 1)" = "$V" ]; then DIST_TAG=latest; else DIST_TAG=backport; fi ;;
+          esac
+          echo "Publishing session-analytics@$V with dist-tag $DIST_TAG; latest is ${LATEST:-unset}."
           npm publish "release/session-analytics-$V.tgz" --tag "$DIST_TAG"
 
       - name: Verify npm serves the release bytes
@@ -283,9 +296,10 @@ jobs:
     # Off until the tap and its token exist (docs/release.md) and the HOMEBREW_TAP repository variable is set.
     # Waits for npm only when npm publishing ran; prereleases leave the tap alone.
     if: ${{ !cancelled() && needs.release.result == 'success' && (needs.npm.result == 'success' || needs.npm.result == 'skipped') && vars.HOMEBREW_TAP == 'true' && !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-latest
+    # macOS, so the formula is installed and tested with Homebrew before it is committed; the tap's CI checks only syntax on main.
+    runs-on: macos-latest
     environment: homebrew
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -304,16 +318,29 @@ jobs:
 
       - name: Verify checksums
         working-directory: release
-        run: sha256sum -c SHA256SUMS
+        run: shasum -a 256 -c SHA256SUMS
 
       - name: Render the formula
         run: |
           V="${GITHUB_REF_NAME#v}"
-          node scripts/homebrew-formula.ts --version "$V" --sha256 "$(sha256sum "release/session-analytics-$V.tgz" | cut -d ' ' -f 1)" > session-analytics.rb
+          node scripts/homebrew-formula.ts --version "$V" --sha256 "$(shasum -a 256 "release/session-analytics-$V.tgz" | cut -d ' ' -f 1)" > session-analytics.rb
           cat session-analytics.rb
 
+      - name: Install, test and audit the formula
+        # A throwaway local tap: the formula downloads the published release asset, installs with Homebrew's Node and runs its test.
+        run: |
+          brew tap-new --no-git session-analytics/release-check
+          cp session-analytics.rb "$(brew --repository session-analytics/release-check)/Formula/session-analytics.rb"
+          brew install --formula session-analytics/release-check/session-analytics
+          brew test session-analytics/release-check/session-analytics
+          brew audit --strict --formula session-analytics/release-check/session-analytics
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+
       - name: Commit the formula to the tap
-        # Contents API with a token limited to the tap: one commit to main, or none when the formula is unchanged.
+        # Contents API with a token limited to the tap: one commit to main, or none when the formula is unchanged or the tap
+        # already has a newer version, so a backport or a late re-run never downgrades `brew upgrade`.
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
@@ -323,7 +350,13 @@ jobs:
           const current = await fetch(`${url}?ref=main`, { headers });
           if (!current.ok && current.status !== 404) { console.error(`Reading the tap failed: HTTP ${current.status}`); console.error(await current.text()); process.exit(1); }
           const existing = current.ok ? await current.json() : null;
-          if (existing && Buffer.from(existing.content, 'base64').toString('utf8') === formula) { console.log('The tap already has this formula.'); process.exit(0); }
+          const text = existing ? Buffer.from(existing.content, 'base64').toString('utf8') : '';
+          if (existing && text === formula) { console.log('The tap already has this formula.'); process.exit(0); }
+          const version = (source) => /\/releases\/download\/v(\d+)\.(\d+)\.(\d+)\//.exec(source)?.slice(1).map(Number) ?? null;
+          const [tapped, releasing] = [version(text), version(formula)];
+          if (tapped && tapped.reduce((order, part, index) => order || Math.sign(part - releasing[index]), 0) > 0) {
+            console.log(`The tap already has the newer ${tapped.join('.')}; leaving it unchanged.`); process.exit(0);
+          }
           const response = await fetch(url, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({
             message: `session-analytics ${process.env.GITHUB_REF_NAME.slice(1)}`, content: Buffer.from(formula).toString('base64'), branch: 'main', ...(existing ? { sha: existing.sha } : {}),
           }) });

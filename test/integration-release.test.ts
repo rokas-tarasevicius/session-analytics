@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { Element, Option, documentFromHtml } from "./release-dom.ts";
@@ -150,7 +151,7 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   const order = ["-c SHA256SUMS", "attest-build-provenance", "draft: true", "upload_url", "draft: false"].map((step) => release!.indexOf(step));
   assert.ok(order.every((index, position) => index > 0 && (position === 0 || index > order[position - 1]!)), `release order ${order}`);
   assert.match(release!, /subject-path: release\/session-analytics-\*\.tgz/);
-  assert.match(release!, /make_latest: prerelease \? 'false' : 'true'/);
+  assert.match(release!, /make_latest: makeLatest \? 'true' : 'false'/);
   for (const asset of ["`session-analytics-${version}.tgz`", "'session-analytics.tgz'", "'SHA256SUMS'"]) assert.ok(release!.includes(asset), asset);
 
   // npm and Homebrew follow the GitHub Release and stay off until their one-time setup sets a repository variable.
@@ -165,7 +166,6 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   assert.ok(major !== undefined && minor !== undefined && patch !== undefined, "npm is pinned to an exact version");
   assert.ok(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))), "trusted publishing needs npm 11.5.1 or newer");
   assert.match(npm!, /registry-url: https:\/\/registry\.npmjs\.org/);
-  assert.match(npm!, /case "\$V" in \*-\*\) DIST_TAG=next ;; \*\) DIST_TAG=latest ;; esac/);
   assert.match(npm!, /npm publish "release\/session-analytics-\$V\.tgz" --tag "\$DIST_TAG"/);
   const [published, verified, installed] = ["npm publish", "dist.integrity 2>/dev/null || true", "scripts/smoke-installed.ts \"session-analytics@"].map((step) => npm!.indexOf(step));
   assert.ok(published! > 0 && verified! > published! && installed! > verified!, "npm checks the registry integrity, then installs the registry version and runs it");
@@ -176,8 +176,94 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
     assert.equal(canUpdateTap({ needs: { release: released, npm: npmResult }, vars: { HOMEBREW_TAP: flag }, ref }), expected, `release=${released}, npm=${npmResult}, HOMEBREW_TAP=${flag}, ${ref}`);
   }
   assert.match(homebrew!, /node scripts\/homebrew-formula.ts --version "\$V" --sha256 /);
+  assert.match(homebrew!, /^    runs-on: macos-latest$/m, "Homebrew installs and tests the formula before the tap receives it");
+  const tapOrder = ["scripts/homebrew-formula.ts", "brew install --formula", "brew test", "brew audit --strict", "contents/Formula/session-analytics.rb"].map((step) => homebrew!.indexOf(step));
+  assert.ok(tapOrder.every((index, position) => index > 0 && (position === 0 || index > tapOrder[position - 1]!)), `homebrew order ${tapOrder}`);
   assert.match(homebrew!, /repos\/rokas-tarasevicius\/homebrew-tap\/contents\/Formula\/session-analytics\.rb/);
   assert.match(homebrew!, /TAP_TOKEN: \$\{\{ secrets.TAP_TOKEN \}\}/);
+});
+
+/** A step's `run:` script, dedented; for an inline `node <<'NODE'` script, the script alone. */
+function stepScript(job: string, name: string): string {
+  const step = job.split(/^      - name: /m).find((candidate) => candidate.startsWith(`${name}\n`));
+  assert.ok(step, name);
+  const block = /^        run: \|\n((?:(?: {10}.*)?\n)+)/m.exec(step)?.[1];
+  assert.ok(block, `${name} runs a script`);
+  const script = block.split("\n").map((line) => line.slice(10)).join("\n");
+  return /<<'NODE'\n([\s\S]*?)\nNODE\n/.exec(script)?.[1] ?? script;
+}
+
+/** Run a workflow's inline Node script against canned GitHub API replies; returns the API calls it made. */
+async function runAgainstApi(script: string, directory: string, routes: Record<string, { status: number, json?: unknown }>, env: Record<string, string>): Promise<Array<{ method: string, path: string, body?: any }>> {
+  const mock = join(directory, "mock-fetch.mjs"), log = join(directory, "calls.jsonl");
+  await writeFile(mock, `import { appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+const routes = JSON.parse(process.env.MOCK_ROUTES);
+globalThis.fetch = async (url, init = {}) => {
+  const method = init.method ?? "GET", { host, pathname, search } = new URL(url), body = init.body === undefined ? undefined : Buffer.from(init.body);
+  const upload = host === "uploads.github.com";
+  appendFileSync(process.env.MOCK_LOG, JSON.stringify({ method, path: pathname + search, body: body && !upload ? JSON.parse(body.toString()) : undefined }) + "\\n");
+  const reply = upload ? { status: 201, json: { size: body.length, digest: "sha256:" + createHash("sha256").update(body).digest("hex") } }
+    : routes[method + " " + pathname + search] ?? routes[method + " " + pathname] ?? { status: 404, json: { message: "Not Found" } };
+  return new Response(reply.json === undefined ? null : JSON.stringify(reply.json), { status: reply.status });
+};
+`);
+  await rm(log, { force: true });
+  const result = spawnSync(process.execPath, ["--import", pathToFileURL(mock).href, "--input-type=module"], {
+    cwd: directory, input: script, encoding: "utf8", env: { PATH: process.env["PATH"], ...env, MOCK_ROUTES: JSON.stringify(routes), MOCK_LOG: log },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+}
+
+test("release: a tag published after a newer release never moves GitHub, npm or Homebrew back to it", async () => {
+  const { release, npm, homebrew } = workflowJobs(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as Record<string, string>;
+  const directory = await mkdtemp(join(tmpdir(), "session-analytics-latest-"));
+  try {
+    await mkdir(join(directory, "release"));
+    for (const name of ["session-analytics-1.9.0.tgz", "session-analytics.tgz", "SHA256SUMS"]) await writeFile(join(directory, "release", name), `${name} bytes\n`);
+    await writeFile(join(directory, "notes.md"), "- Notes.\n");
+    const publishRelease = stepScript(release!, "Publish GitHub Release");
+    for (const [latest, expected] of [["v1.10.0", "false"], ["v1.9.1", "false"], ["v1.8.7", "true"], [null, "true"]] as const) {
+      const calls = await runAgainstApi(publishRelease, directory, {
+        "GET /repos/o/r/releases?per_page=100&page=1": { status: 200, json: [] },
+        "POST /repos/o/r/releases": { status: 201, json: { id: 7, assets: [], upload_url: "https://uploads.github.com/repos/o/r/releases/7/assets{?name,label}" } },
+        "PATCH /repos/o/r/releases/7": { status: 200, json: { id: 7 } },
+        ...(latest ? { "GET /repos/o/r/releases/latest": { status: 200, json: { tag_name: latest } } } : {}),
+      }, { GITHUB_REF_NAME: "v1.9.0", GITHUB_REPOSITORY: "o/r", GH_TOKEN: "token" });
+      assert.deepEqual(calls.at(-1), { method: "PATCH", path: "/repos/o/r/releases/7", body: { draft: false, make_latest: expected } }, `latest ${latest}`);
+    }
+
+    // npm: the real step with a recording npm on PATH; openssl hashes the tarball as on the runner.
+    const bin = join(directory, "bin"), log = join(directory, "npm.log");
+    await mkdir(bin);
+    await writeFile(join(bin, "npm"), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$MOCK_LOG"\ncase "$*" in\n  "view session-analytics dist-tags.latest") printf \'%s\\n\' "$MOCK_LATEST" ;;\n  view*) exit 1 ;;\nesac\n');
+    await chmod(join(bin, "npm"), 0o755);
+    const publishNpm = stepScript(npm!, "Publish the release tarball");
+    for (const [tag, latest, expected] of [["v1.9.0", "1.10.0", "backport"], ["v1.9.0", "1.9.1", "backport"], ["v1.9.0", "1.8.7", "latest"], ["v1.9.0", "", "latest"], ["v1.10.0", "1.9.0", "latest"]] as const) {
+      await writeFile(join(directory, "release", `session-analytics-${tag.slice(1)}.tgz`), "bytes\n");
+      await rm(log, { force: true });
+      const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", publishNpm], {
+        cwd: directory, encoding: "utf8", env: { PATH: `${bin}${delimiter}${process.env["PATH"]}`, GITHUB_REF_NAME: tag, MOCK_LOG: log, MOCK_LATEST: latest },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal((await readFile(log, "utf8")).trim().split("\n").at(-1), `publish release/session-analytics-${tag.slice(1)}.tgz --tag ${expected}`, `${tag} after ${latest || "none"}`);
+    }
+
+    // Homebrew: never replace a newer formula, and make no commit for an identical one.
+    const commitFormula = stepScript(homebrew!, "Commit the formula to the tap");
+    const sha256 = "0123456789abcdef".repeat(4), path = "/repos/rokas-tarasevicius/homebrew-tap/contents/Formula/session-analytics.rb";
+    await writeFile(join(directory, "session-analytics.rb"), homebrewFormula("1.9.0", sha256));
+    for (const [tapped, commits] of [["1.10.0", false], ["1.9.0", false], ["1.8.7", true], [null, true]] as const) {
+      const calls = await runAgainstApi(commitFormula, directory, {
+        ...(tapped ? { [`GET ${path}?ref=main`]: { status: 200, json: { sha: "tap-sha", content: Buffer.from(homebrewFormula(tapped, sha256)).toString("base64") } } } : {}),
+        [`PUT ${path}`]: { status: 200, json: {} },
+      }, { GITHUB_REF_NAME: "v1.9.0", TAP_TOKEN: "token" });
+      const put = calls.find((call) => call.method === "PUT");
+      assert.equal(Boolean(put), commits, `tap at ${tapped}`);
+      if (put) assert.equal(put.body.sha, tapped ? "tap-sha" : undefined);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("release: the Homebrew formula installs the release tarball with Homebrew's Node", (t) => {
@@ -224,6 +310,13 @@ test("release: the compiled package carries workers, served files and notices, a
   const out = await mkdtemp(join(tmpdir(), "session-analytics-build-"));
   try {
     build(out);
+    // Every non-TypeScript file under src ships verbatim, including ones a module reads at run time without importing.
+    const sourceRoot = fileURLToPath(new URL("../src/", import.meta.url));
+    for (const entry of await readdir(sourceRoot, { recursive: true, withFileTypes: true })) {
+      const path = relative(sourceRoot, join(entry.parentPath, entry.name));
+      if (!entry.isFile() || path.endsWith(".ts") || path.split(sep).some((part) => part.startsWith("."))) continue;
+      assert.deepEqual(await readFile(join(out, "src", path)), await readFile(join(sourceRoot, path)), `src/${path} ships verbatim`);
+    }
     const result = spawnSync("npm", ["pack", out, "--dry-run", "--json", "--ignore-scripts"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
     assert.equal(result.status, 0, result.stderr);
     const files: string[] = JSON.parse(result.stdout)[0].files.map((file: { path: string }) => file.path);

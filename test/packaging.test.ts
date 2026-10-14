@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { checkEmitted, typeScriptReferences } from "../scripts/build.ts";
+import { build, checkEmitted, checkOutput, packageManifest, typeScriptReferences } from "../scripts/build.ts";
 import { loadSnapshot } from "../src/mcp/snapshot.ts";
 import { moduleUrl } from "../src/module-url.ts";
 import { indexErrorCode, workerExitMessage } from "../src/store/errors.ts";
@@ -56,7 +56,46 @@ test("packaging: the build guard finds runtime .ts references and missing module
     await writeFile(join(out, "src", "analyzer.js"), 'spawn(process.execPath, [fileURLToPath(moduleUrl("./cursor-worker.ts", import.meta.url))]);\n');
     await writeFile(join(out, "src", "cursor-worker.js"), "");
     assert.deepEqual(checkEmitted(out), []);
+    // A file read through new URL() ships only if the build copied it; directory URLs and comments are not files.
+    await mkdir(join(out, "src", "remote"));
+    await writeFile(join(out, "src", "remote", "runtime.js"), 'const bootstrap = readFileSync(fileURLToPath(new URL("./bootstrap.js", import.meta.url)));\n' +
+      'const installRoot = new URL("../../", import.meta.url);\nconst schema = new URL("../../schemas/snapshot.v1.schema.json", import.meta.url);\n/** new URL("./example.txt", import.meta.url) */\n');
+    assert.deepEqual(checkEmitted(out).sort(), ["src/remote/runtime.js reads missing ../../schemas/snapshot.v1.schema.json", "src/remote/runtime.js reads missing ./bootstrap.js"]);
+    await mkdir(join(out, "schemas"));
+    await writeFile(join(out, "schemas", "snapshot.v1.schema.json"), "{}");
+    await writeFile(join(out, "src", "remote", "bootstrap.js"), "");
+    assert.deepEqual(checkEmitted(out), []);
   } finally { await rm(out, { recursive: true, force: true }); }
+});
+
+test("packaging: the build empties only a new, empty or earlier build directory, never the checkout, home or other files", async () => {
+  const checkout = fileURLToPath(new URL("../", import.meta.url)).replace(/\/$/, "");
+  const scratch = await mkdtemp(join(tmpdir(), "session-analytics-out-"));
+  const home = join(scratch, "home"), work = join(scratch, "work"), earlier = join(scratch, "earlier"), sentinel = join(work, "keep", "sentinel.txt");
+  try {
+    await mkdir(join(work, "keep"), { recursive: true }); await mkdir(home); await mkdir(earlier); await mkdir(join(scratch, "empty"));
+    await writeFile(sentinel, "keep me");
+    await writeFile(join(earlier, "package.json"), JSON.stringify(packageManifest({ name: "session-analytics", version: "1.2.3" })));
+    await writeFile(join(earlier, "stale.js"), "");
+    for (const out of [join(checkout, "dist"), join(scratch, "new"), join(scratch, "empty"), earlier]) assert.doesNotThrow(() => checkOutput(out, home), out);
+    for (const out of [checkout, dirname(checkout), "/", home, scratch]) assert.throws(() => checkOutput(out, home), /contains this checkout or your home/, out);
+    for (const out of [join(checkout, "src"), work]) assert.throws(() => checkOutput(out, home), /holds no earlier build/, out);
+    assert.throws(() => checkOutput(sentinel, home), /not a directory/);
+    await writeFile(join(earlier, "package.json"), JSON.stringify({ ...packageManifest({ name: "session-analytics" }), scripts: { build: "x" } }));
+    assert.throws(() => checkOutput(earlier, home), /holds no earlier build/, "the source manifest has scripts");
+    assert.throws(() => build(work), /holds no earlier build/);
+    assert.equal(await readFile(sentinel, "utf8"), "keep me");
+  } finally { await rm(scratch, { recursive: true, force: true }); }
+});
+
+test("packaging: checkout baselines name the checkout bin, so an exported SESSION_ANALYTICS_DEMO_BIN cannot replace them", async () => {
+  const demo = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/demo.ts", import.meta.url)), "report", "--json", "--bin", "/nonexistent/explicit-bin"],
+    { encoding: "utf8", env: { ...process.env, SESSION_ANALYTICS_DEMO_BIN: fileURLToPath(new URL("../bin/session-analytics.ts", import.meta.url)) } });
+  assert.equal(demo.status, 2, "--bin wins over the environment");
+  assert.match(demo.stderr, /explicit-bin/);
+  for (const script of ["smoke-installed.ts", "release-check.ts"]) {
+    assert.match(await readFile(new URL(`../scripts/${script}`, import.meta.url), "utf8"), /"--bin", join\(root, "bin\/session-analytics\.ts"\)/, script);
+  }
 });
 
 test("packaging: a worker that cannot start gets a fixed reason, never its stderr", async () => {
