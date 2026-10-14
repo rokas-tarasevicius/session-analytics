@@ -115,7 +115,7 @@ test("--remote combines this machine with others read over the user's ssh", asyn
   // The server's configured remote must not trigger a second-level SSH call.
   assert.deepEqual(recorded.map(({ destination }) => destination).sort(), ["copied", "server"]);
   for (const call of recorded) {
-    assert.deepEqual(call.options, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-T"]);
+    assert.deepEqual(call.options, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-T", "-a", "-x", "-o", "ClearAllForwardings=yes", "-o", "PermitLocalCommand=no", "-o", "RemoteCommand=none"]);
     assert.deepEqual(call.command, ["session-analytics", ...remoteArguments({ timeZone: "UTC", offline: true, noIndex: true, additionalProviders: false })]);
     // This machine's paths and switches that describe it stay here.
     assert.doesNotMatch(JSON.stringify(call), new RegExp(directory.replaceAll("/", "\\/")));

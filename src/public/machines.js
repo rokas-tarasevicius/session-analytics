@@ -6,7 +6,7 @@ import { discoveryWarnings, remoteUnavailableWarning, staleMachineWarning } from
 export const machineReasons = {
   "no-ssh": "ssh is missing here", connection: "unreachable", dropped: "connection dropped", sudo: "sudo needs a password",
   "no-account": "no such account", permission: "command not executable", "missing-command": "session-analytics not found",
-  "no-node": "Node.js not found", "node-too-old": "Node.js too old", runtime: "runtime did not start", "cache-unwritable": "cache not writable",
+  "no-node": "Node.js not found", "node-too-old": "Node.js too old", runtime: "runtime did not start", "cache-unwritable": "cache not writable or not private",
   corrupted: "runtime damaged in transit", "version-skew": "another version", rejected: "request rejected", busy: "index busy",
   "index-newer": "index from a newer version", analysis: "analysis failed", invalid: "invalid output", "time-zone": "another time zone",
   timeout: "timed out", "too-large": "snapshot too large", cancelled: "read stopped", "no-history": "no history for this account",

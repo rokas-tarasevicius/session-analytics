@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { type ChildProcess, execFile, spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +24,7 @@ const bin = new URL("../bin/session-analytics.ts", import.meta.url).pathname;
 const server = new URL("../src/server.ts", import.meta.url).pathname;
 
 /** Pinned: a change to the bootstrap is a protocol change; review it, then update this hash. */
-const bootstrapSha256 = "fbfe9b4c12e68b713c6473d68e50b2ca680cdffd065e42adb42900adfa4a9ac4";
+const bootstrapSha256 = "87659a8907cfd117321acf2b9e632dca5fcc95ad3f5b06c2e8ffd937c311c0eb";
 
 /**
  * A stand-in for `ssh` that runs the remote words on this machine the way sshd does: through pipes
@@ -56,6 +56,8 @@ mkdirSync(join(machine, "agents", ".claude"), { recursive: true });
 const env = { ...process.env, HOME: home, SESSION_ANALYTICS_MACHINE_ID: "id-" + destination.replace(/-again$/, ""), ...(JSON.parse(process.env.FAKE_SSH_ENVS)[destination] || {}) };
 delete env.XDG_CACHE_HOME;
 if (words[0] === "true") process.exit(0);
+// A login profile that prints, as some do.
+if (destination === "chatty") process.stdout.write("Welcome to chatty!\\n");
 let program = words[0], programArgs = words.slice(1);
 if (program === "node") {
   if (destination === "nonode") fail(127, "-bash: line 1: node: command not found");
@@ -71,7 +73,8 @@ if (program === "sh") {
     .replaceAll("/etc/machine-id", join(machine, "machine-id"))
     .replace("\\nid -u\\n", "\\necho " + [...account].reduce((sum, letter) => sum + letter.charCodeAt(0), 1000) + "\\n")
     .replaceAll("command -v node", destination === "nonode" ? "command -v sa-no-such-node" : "command -v node")
-    .replace("getent passwd 2>/dev/null || cat /etc/passwd", "cat " + join(machine, "passwd"))
+    .replace("getent passwd", "cat " + join(machine, "passwd"))
+    .replace("sudo -n true", "true")
     .replaceAll("sudo -n test -d", "test -d")));
 } else process.stdin.pipe(child.stdin);
 child.stdout.pipe(process.stdout);
@@ -192,6 +195,28 @@ test("the bootstrap installs on need-runtime, verifies its digest and refuses wh
   answer = bootstrap("install", [payload.version, payload.digest], payload.install, { XDG_CACHE_HOME: locked });
   assert.equal(answer.status, 80);
   assert.match(answer.stderr, /^sa1: cache-unwritable E[A-Z]+\n$/);
+  // A cache another account could swap between verification and start is refused, even with a good runtime in it.
+  const linked = join(directory, "linked-cache"), elsewhere = join(directory, "elsewhere-cache");
+  await mkdir(linked);
+  await mkdir(join(elsewhere, "runtime"), { recursive: true });
+  await symlink(elsewhere, join(linked, "session-analytics"));
+  const shared = join(directory, "shared-cache");
+  await mkdir(shared);
+  await chmod(shared, 0o777);
+  for (const unsafe of [linked, shared]) {
+    for (const [mode, input] of [["run", payload.run], ["install", payload.install]] as const) {
+      answer = bootstrap(mode, [payload.version, payload.digest, "--version"], input, { XDG_CACHE_HOME: unsafe });
+      assert.deepEqual([answer.status, answer.stderr], [80, "sa1: cache-unwritable not-private\n"], `${unsafe} ${mode}`);
+    }
+  }
+  // A shared sticky directory such as /tmp is fine: no one else can rename what this account creates there.
+  await chmod(shared, 0o1777);
+  answer = bootstrap("install", [payload.version, payload.digest, "--version"], payload.install, { XDG_CACHE_HOME: shared });
+  assert.deepEqual([answer.status, answer.stdout.trim()], [0, payload.version], answer.stderr);
+  // Runtime directories opened up by hand are made private again.
+  await chmod(root, 0o755);
+  assert.equal(bootstrap("run", [payload.version, payload.digest, "--version"], payload.run).status, 75);
+  assert.equal((await stat(root)).mode & 0o777, 0o700);
   // A relative XDG_CACHE_HOME is ignored in favour of ~/.cache, like the XDG specification says.
   answer = bootstrap("run", [payload.version, payload.digest], payload.run, { XDG_CACHE_HOME: "relative", HOME: join(directory, "relative-home") });
   assert.equal(answer.status, 75);
@@ -379,6 +404,7 @@ test("machines check is a doctor: each failure names its fix, and --find-users l
     { name: "locked", ssh: "server", user: "locked", runtime: "bundled", enabled: true },
     { name: "nonode", ssh: "nonode", runtime: "bundled", enabled: true },
     { name: "oldnode", ssh: "oldnode", runtime: "bundled", enabled: true },
+    { name: "chatty", ssh: "chatty", runtime: "bundled", enabled: true },
     { name: "missing", ssh: "server", user: "ssh-user", runtime: "installed", command: ["/opt/missing/session-analytics"], enabled: false },
   ] });
   const checked = cli(["machines", "check", "--data-dir", data, "--find-users"]);
@@ -389,7 +415,9 @@ test("machines check is a doctor: each failure names its fix, and --find-users l
   assert.match(checked.stdout, /✗ node {6}node was not found on the SSH account's login PATH\n {4}Fix: install Node\.js 24 or later there, or point to it: session-analytics machines set nonode --node \/usr\/bin\/node/);
   assert.match(checked.stdout, /oldnode .*\n(?: {2}✓ .*\n)+ {2}✗ runtime {3}the remote Node\.js is v22\.3\.0; the bundled runtime needs 24 or later\. sa1: node-too-old v22\.3\.0\n/);
   assert.match(checked.stdout, /missing  \(ssh server, as ssh-user, installed: \/opt\/missing\/session-analytics, disabled\)[\s\S]*✗ command {3}session-analytics was not found there/);
-  assert.match(checked.stdout, /locked, nonode, oldnode, missing failed a check/);
+  assert.match(checked.stdout, /chatty .*\n {2}✓ ssh .*\n {2}✗ node {6}the remote answered the machine probe with something else\n {4}Fix: make sure nothing in that account's login profile prints to stdout\n/);
+  assert.doesNotMatch(checked.stdout, /Welcome/);
+  assert.match(checked.stdout, /locked, nonode, oldnode, chatty, missing failed a check/);
   const json = JSON.parse(cli(["machines", "check", "server", "--json", "--data-dir", data]).stdout) as { machines: Array<{ name: string; ok: boolean; checks: Array<{ check: string; status: string }> }> };
   assert.deepEqual(json.machines.map(({ name, ok, checks }) => [name, ok, checks.map(({ check, status }) => `${check}:${status}`)]),
     [["server", true, ["ssh:ok", "sudo:ok", "node:ok", "machine:ok", "runtime:ok", "history:ok"]]]);

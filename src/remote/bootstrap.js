@@ -20,6 +20,22 @@
   var name = version + "-" + digest.slice(0, 16);
   var directory = path.join(root, name);
   var allowed = /^(?:package\.json|(?:bin|src|data|schemas)(?:\/[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*)+)$/;
+  var uid = process.getuid ? process.getuid() : -1;
+
+  // Only this account may change what runs between verification and start: both runtime directories are
+  // its own, private and not links, and their parent is its own or root's and not open to everyone unless sticky.
+  function secure() {
+    var unsafe = new Error("unsafe");
+    unsafe.code = "not-private";
+    fs.mkdirSync(root, { recursive: true, mode: 448 });
+    var parent = fs.statSync(cache);
+    if ((uid >= 0 && parent.uid !== uid && parent.uid !== 0) || ((parent.mode & 2) && !(parent.mode & 512))) throw unsafe;
+    [path.dirname(root), root].forEach(function (target) {
+      var stats = fs.lstatSync(target);
+      if (!stats.isDirectory() || (uid >= 0 && stats.uid !== uid)) throw unsafe;
+      if (stats.mode & 63) fs.chmodSync(target, 448);
+    });
+  }
 
   // The digest covers every file in path order as path NUL size NUL bytes, like the sender's.
   function manifestDigest(entries, read) {
@@ -57,7 +73,7 @@
     if (offset !== payload.length || manifestDigest(entries, function (item) { return payload.subarray(offsets[item], offsets[item] + entries[item][1]); }) !== digest) fail(81, "digest-mismatch");
     var temporary;
     try {
-      fs.mkdirSync(root, { recursive: true, mode: 448 });
+      secure();
       if (verified(directory)) return;
       temporary = fs.mkdtempSync(path.join(root, ".tmp-"));
       for (var file = 0; file < entries.length; file++) {
@@ -95,7 +111,10 @@
   }
 
   if (mode === "install") install();
-  else if (!verified(directory)) fail(75, "need-runtime");
+  else {
+    try { secure(); } catch (error) { fail(80, "cache-unwritable " + (error && error.code ? error.code : "error")); }
+    if (!verified(directory)) fail(75, "need-runtime");
+  }
   try { var now = new Date(); fs.utimesSync(directory, now, now); } catch (error) { /* Recency only guides pruning. */ }
 
   var entry = fs.existsSync(path.join(directory, "bin", "session-analytics.js")) ? "session-analytics.js" : "session-analytics.ts";

@@ -47,7 +47,13 @@ Yes. Sibling profile directories such as `~/.claude-work` or `~/.codex-personal`
 <details>
 <summary><strong>Can it include sessions from another computer?</strong></summary>
 
-Yes. Agents that run on a server or VM write their history there, so a laptop cannot see it directly. Run `session-analytics machines add server` once (any SSH destination); from then on a plain `session-analytics` reads it too. The machine needs only Node.js 24: it runs this install's own code, copied into that account's `~/.cache` over SSH. Each machine analyzes its own history; only its content-free snapshot comes back over your SSH connection. If agents run under a different account there, add `--user agents`; `machines check --find-users` lists the accounts that have agent history. The dashboard shows which machines were read, lets you switch each one's sessions in or out, and keeps a machine that is briefly unreachable on screen from its last good snapshot, marked stale. Snapshot files and `merge` work without SSH. See [combine machines](interop.md#combine-machines).
+Yes. Agents that run on a server or VM write their history there, so a laptop cannot see it directly. Run `session-analytics machines add server` once (any SSH destination); from then on a plain `session-analytics` reads it too. The machine needs only Node.js 24: it runs this install's own code, copied into that account's `~/.cache` over SSH. Each machine analyzes its own history; only its content-free snapshot comes back over your SSH connection. If agents run under a different account there, add `--user agents`, which reads that account through passwordless `sudo`; `machines check --find-users` lists the accounts that have agent history, and `machines check` prints the sudo rule when one is missing. The dashboard shows which machines were read, lets you switch each one's sessions in or out, and keeps a machine that is briefly unreachable on screen from its last good snapshot, marked stale. Snapshot files and `merge` work without SSH. See [combine machines](interop.md#combine-machines).
+</details>
+
+<details>
+<summary><strong>What does reading another computer leave on it?</strong></summary>
+
+Two things, both in the account that is read. Its `~/.cache/session-analytics/runtime` holds a copy of this install's code (about 2 MB per version, private to that account), and its own session-analytics data directory holds the private index that any `report` there writes. Nothing runs between reads, and nothing is installed system-wide. With `--runtime installed`, only the data directory is written. See [what a read leaves on that machine](interop.md#the-bundled-runtime).
 </details>
 
 <details>

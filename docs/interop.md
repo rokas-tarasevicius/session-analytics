@@ -85,17 +85,35 @@ Every nonempty contribution includes a domain-separated keyed `sources[]` identi
 
 ## Combine machines
 
-Agents that run on another computer, such as a server, a VM or a T3 Code host, write their history there. Save each such machine once with `machines add`; from then on a plain `session-analytics`, `report` and `export` read it over SSH together with this one. Snapshot files do the same without SSH.
+Agents that run on another computer, such as a server, a VM or a T3 Code host, write their history there. Save each such machine once; from then on a plain `session-analytics`, `report` and `export` read it over your own SSH together with this one:
+
+```bash
+session-analytics machines add agentbox --user agent-t3   # agents run as agent-t3 on the host agentbox
+session-analytics                                         # this machine and agentbox, every time
+```
+
+`agentbox` is any SSH destination your `ssh` reaches without a prompt: a host alias from `~/.ssh/config`, `user@host` or `ssh://user@host:port`. `--user agent-t3` names the account whose history is read there, for agents that run as their own user; without it, the account you log in as is read. That account needs Node.js 24 or later on its login `PATH` and nothing else, because session-analytics brings its own code ([the bundled runtime](#the-bundled-runtime)). Snapshot files combine machines [without SSH](#from-files).
 
 ### Save a machine
 
-```bash
-session-analytics machines add server                    # read server as your SSH user
-session-analytics machines add agentbox --user agent-t3  # agents run as their own account there
-session-analytics                                        # this machine and every saved one, every time
+`machines add` connects first and runs the same checks as [`machines check`](#check-a-machine), each with its fix:
+
+```text
+$ session-analytics machines add agentbox --user agent-t3
+agentbox  (ssh agentbox, as agent-t3, bundled runtime)
+  ✓ ssh       connected in 0.1 s without a prompt
+  ✓ sudo      sudo -n -iu agent-t3 works without a password
+  ✓ node      v24.21.0 (needs 24 or later)
+  ✓ machine   not this machine, and not saved under another name
+  ✓ runtime   0.9.0+09867a9b installed now (434 KB in 0.4 s)
+  ✓ history   741 sessions, 11 repositories in 19.6 s
+
+The bundled runtime is this session-analytics 0.9.0, copied into agent-t3's ~/.cache/session-analytics/runtime on agentbox and run there; use --runtime installed to run your own install instead.
+
+Saved agentbox. A plain session-analytics now reads this machine and agentbox.
 ```
 
-`machines add` connects first and runs the same checks as [`machines check`](#check-a-machine). It refuses a machine it cannot log in to, this machine itself, and a machine and account already saved under another name; any other failure is saved with a warning and its fix, so a machine that is not ready yet can still be added. `--no-check` saves without connecting. The machine needs nothing installed except Node.js 24 or later on that account's login `PATH`.
+It refuses a machine it cannot log in to, this machine itself, and a machine and account already saved under another name; any other failure is saved with a warning and its fix, so a machine that is not ready yet can still be added. `--no-check` saves without connecting, and `--name LABEL` chooses the label (default: the host name up to its first dot).
 
 ```bash
 session-analytics machines list [--json]
@@ -106,28 +124,48 @@ session-analytics machines remove NAME
 ```
 
 - **The saved file** is `machines.json` in the private data directory, mode `0600` and replaced atomically. It holds labels, SSH destinations, account names, how to start session-analytics there, and a 16-digit hash of each machine's ID and account, which `check` records so the same machine cannot be saved twice under different names. A file with an unknown field, version or value is refused, never repaired or partly read.
-- **`--user NAME`** reads as that account through `sudo -n -iu NAME`, which needs passwordless sudo to that account. Labels, destinations, account names and node paths are validated words, so none can smuggle shell syntax.
-- **Which machines a run reads**, first match wins: `--no-remote` reads none; `--remote` reads its own list for this run ([below](#ad-hoc-machines-with---remote)); the deprecated `SESSION_ANALYTICS_REMOTE` does the same for every launch; otherwise every enabled saved machine. `--machines a,b` narrows a run to those saved machines, disabled ones included. Repository filters and `--rate-card` describe this machine only, so saved machines step aside for them with a notice; with `--remote` or `--machines` they are refused.
-- **The dashboard** counts the saved machines as part of its options, so a plain `session-analytics` reuses a dashboard started with the same machines. After a change, stop the running dashboard or choose `--port`.
+- **`--user NAME`** reads as that account through `sudo -n -iu NAME`, which needs passwordless sudo to that account ([below](#when-sudo-needs-a-password)). Labels, destinations, account names and node paths are validated words, so none can smuggle shell syntax.
+- **Which machines a run reads**, first match wins: `--no-remote` reads none; `--remote` reads its own list for this run ([advanced](#advanced-ad-hoc-machines-with---remote)); the deprecated `SESSION_ANALYTICS_REMOTE` does the same for every launch; otherwise every enabled saved machine. `--machines a,b` narrows a run to those saved machines, disabled ones included, and `machines set NAME --disable` leaves one out until `--enable`. Repository filters and `--rate-card` describe this machine only, so saved machines step aside for them with a notice; with `--remote` or `--machines` they are refused.
+- **The dashboard** reads the saved machines when it starts and counts them as part of its options, so a plain `session-analytics` reuses a dashboard started with the same machines. After a change, stop the running dashboard or choose `--port`.
+
+### When sudo needs a password
+
+`--user` runs every command there as `sudo -n -iu ACCOUNT …`: `-n` never prompts, and `-i` starts that account's login shell, so its `HOME`, `PATH` and Node.js are used. When sudo wants a password, `check` says `sudo -n could not run commands as agent-t3 without a password` and prints the rule that allows it. Run it on that machine, logged in as the account you reach it with over SSH:
+
+```bash
+echo "$USER ALL=(agent-t3) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/session-analytics-agent-t3
+sudo chmod 0440 /etc/sudoers.d/session-analytics-agent-t3
+sudo visudo -c        # optional: checks every sudoers file
+```
+
+The rule lets your SSH account run any command as `agent-t3` without a password, not only session-analytics, and anyone who can log in as you can then act as `agent-t3`. It grants nothing towards root or any other account. A narrower rule would not be safer: the bundled runtime is `node -`, which runs whatever arrives on its standard input, so it can do anything that account can. Without a rule, log in as that account directly with a key in its `~/.ssh/authorized_keys`: `machines set agentbox --ssh agent-t3@agentbox --no-user`.
 
 ### The bundled runtime
 
 By default a saved machine runs this machine's own session-analytics, so nothing is installed there by hand and both machines run the same code. For each read, this machine runs
 
 ```text
-ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -T -- agentbox \
+ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -T \
+  -a -x -o ClearAllForwardings=yes -o PermitLocalCommand=no -o RemoteCommand=none -- agentbox \
   sudo -n -iu agent-t3 node - sa1 run 0.9.0 <digest> \
-  report --json --no-remote --portable-ids --time-zone <this machine's zone> [forwarded switches]
+  report --json --no-remote --portable-ids --time-zone <this machine's zone> [forwarded switches] --identify-machine
 ```
 
-with a small fixed bootstrap (`src/remote/bootstrap.js`) on stdin, so no shell quoting layer ever sees it. The bootstrap:
+with a small fixed bootstrap (`src/remote/bootstrap.js`) on stdin, so no shell quoting layer ever sees it. `BatchMode` turns a password or host-key prompt into a failure; `-a`, `-x` and `ClearAllForwardings` keep your SSH agent, X11 display and any ports forwarded in your SSH configuration away from the code that runs there; `PermitLocalCommand=no` and `RemoteCommand=none` keep a host's `LocalCommand` or `RemoteCommand` out of the read. The bootstrap:
 
 1. Exits 78 with `sa1: node-too-old` when Node.js is older than 24, before any newer syntax can fail.
 2. Looks for this exact install in that account's `~/.cache/session-analytics/runtime/<version>-<digest>` (under `$XDG_CACHE_HOME` when it is an absolute path). The digest is a SHA-256 over this install's `package.json`, `bin`, `src`, `data` and `schemas`, so a checkout with local changes gets its own copy. The cached copy is verified against the digest before every run.
-3. When it is missing or damaged, answers `sa1: need-runtime` (exit 75). Only then does a second round trip send the install itself, about 0.4 MB compressed, after the bootstrap. The bootstrap verifies it against the digest (81 on a mismatch), writes it to a private temporary directory and renames it into place (80 when the cache cannot be written). It keeps the newest three runtimes and any used in the last 14 days.
-4. Runs `report` from the cached copy with that account's Node.js and relays its output and exit status.
+3. Refuses a cache that another account could change between that verification and the start: `session-analytics` and `runtime` must be directories owned by that account, not links, and are made private (`0700`) when they are not; their parent must belong to that account or root, and must not be writable by everyone unless it is sticky like `/tmp`. Otherwise it exits 80 with `sa1: cache-unwritable not-private`.
+4. When the install is missing or damaged, answers `sa1: need-runtime` (exit 75). Only then does a second round trip send the install itself, about 0.4 MB compressed, after the bootstrap. The bootstrap verifies it against the digest (81 on a mismatch), writes it to a private temporary directory and renames it into place (80 when the cache cannot be written). It keeps the newest three runtimes and any used in the last 14 days.
+5. Runs `report` from the cached copy with that account's Node.js and relays its output and exit status.
 
-Measured against a real server: the install took about 1 s, and a later check's `--version` round trip through `ssh`, `sudo` and the cached runtime took 0.14 s. A new runtime has a new parser revision, so it rebuilds that account's private index once: on that server, the first read after an install took about 19 s and later reads 2 s.
+What a read leaves on that machine:
+
+- **The runtime**, in `~/.cache/session-analytics/runtime/<version>-<first 16 digits of the digest>/`: this install's `package.json`, `bin`, `src`, `data` and `schemas` (about 2 MB unpacked), plus `.manifest` (file names and sizes) and `.complete` (the digest). Directories are mode `0700`, files `0600`. It holds code only: no history, analytics or configuration. Each new version, or each local change to a checkout, adds one directory. `machines remove` leaves it in place; delete the directory there to reclaim the space.
+- **That account's own data directory** (`$XDG_DATA_HOME/session-analytics` or `~/.local/share/session-analytics` on Linux, `~/Library/Application Support/session-analytics` on macOS, or `SESSION_ANALYTICS_DATA_DIR` there): its private index, exactly as a `report` run there by hand would write it; `--no-index` reads without it. A `report` makes no network request of its own: it prices with that machine's cached and reviewed rates.
+- **Nothing else.** Provider history there is only read. No saved-machines file, dashboard, service or scheduled job is created, and nothing keeps running between reads.
+
+Measured against a real server with about 740 sessions, adding it took 20.7 s: 0.4 s to install the runtime, then 19.6 s for the first read, because a new runtime has a new parser revision and rebuilds that account's private index once. Later checks took about 3 s, of which the read took 2.0 to 2.7 s, and a `report` of a laptop with 6,400 sessions and that server took 35 s, set by the laptop's own scan.
 
 This copies code to the machine and runs it as that account. It is not a boundary against that account, which can already run anything as itself; `node -` runs whatever arrives on stdin by design. To run your own install there instead, use `--runtime installed`, with `--command` naming it when `session-analytics` is not on that account's non-interactive `PATH`, for example `--command "node /opt/session-analytics/bin/session-analytics.ts"`. When an installed machine fails as if it ran another version, it is asked for `--version` and the message names both versions.
 
@@ -140,32 +178,31 @@ agentbox  (ssh agentbox, as agent-t3, bundled runtime)
   ✓ sudo      sudo -n -iu agent-t3 works without a password
   ✓ node      v24.21.0 (needs 24 or later)
   ✓ machine   not this machine, and not saved under another name
-  ✓ runtime   0.9.0+3b5858bc cached
-  ✓ history   731 sessions, 10 repositories in 2.3 s
+  ✓ runtime   0.9.0+09867a9b cached
+  ✓ history   741 sessions, 11 repositories in 2.0 s
 
 All checks passed.
 ```
 
-`check` stops each machine at its first failure and prints the reason, the most telling line `ssh` or the remote printed, and the exact command that fixes it. It exits 1 when any check fails. The history step is a real read, so it also warms that machine's index. `--find-users` also lists the login accounts whose home holds `.claude`, `.codex` or `.t3/userdata`, by name only; homes the SSH user cannot see are tested with `sudo -n test -d`. `--json` prints the same results as content-free JSON.
+`check` stops each machine at its first failure and prints the reason, the most telling line `ssh` or the remote printed, and the exact command that fixes it. It exits 1 when any check fails. The history step is a real read, so it also warms that machine's index. `--find-users` also lists the login accounts whose home holds `.claude`, `.codex` or `.t3/userdata`, by name only (on macOS, from `dscl`); homes the SSH account cannot enter are tested with `sudo -n test -d`, and only when `sudo -n` works at all, so a machine without passwordless sudo logs one refusal rather than one per account. `--json` prints the same results as content-free JSON.
 
 | Failure | Fix printed |
 | --- | --- |
 | SSH login or host key | run `ssh HOST true` once in a terminal; `ssh-copy-id HOST` installs a key |
-| sudo needs a password | a rule `YOU ALL=(ACCOUNT) NOPASSWD: ALL` in `/etc/sudoers.d/session-analytics` |
+| sudo needs a password | the rule [above](#when-sudo-needs-a-password), in `/etc/sudoers.d/session-analytics-ACCOUNT` |
 | account not found | `machines check NAME --find-users` lists the accounts with history |
 | `node` missing or older than 24 | install Node.js 24 or later there, or `machines set NAME --node /usr/bin/node` |
-| cache not writable | `machines set NAME --runtime installed`, or a writable `XDG_CACHE_HOME` in that account's profile |
+| output other than asked for | make sure nothing in that account's login profile (`.bashrc`, `.profile`) prints to stdout |
+| cache not writable or not private | `machines set NAME --runtime installed`, or a writable, private `XDG_CACHE_HOME` in that account's profile |
 | no history (a warning) | that account has no agent history: `machines set NAME --user ACCOUNT`, with `--find-users` to find it |
 | command not found (installed) | the bundled runtime, or the full command in `--command` |
 
-That rule lets you run anything as that account, which the bundled runtime does anyway: `node -` runs whatever arrives on stdin. Without sudo, log in as that account directly: `machines set NAME --ssh ACCOUNT@HOST --no-user`.
-
 ### Reading
 
-The local scan and every machine's read run at the same time, and each machine is reported as it finishes, for example `Read 731 sessions across 10 repositories from agentbox in 2.0 s.` The reply is validated like an imported file before it is combined with the local scan ([below](#how-snapshots-combine)), and **Refresh snapshot** reads every machine again, except one still reading.
+The local scan and every machine's read run at the same time, and each machine is reported as it finishes, for example `Read 741 sessions across 11 repositories from agentbox in 2.2 s.` The reply is validated like an imported file before it is combined with the local scan ([below](#how-snapshots-combine)), and **Refresh snapshot** reads every machine again, except one still reading.
 
-- **What crosses the network.** The command line goes out: the account, Node.js path, protocol words, version, digest, fixed report flags, this machine's time zone name and the forwarded switches. With the bundled runtime, the bootstrap and, once per version, this install's code go out on stdin. Only the remote machine's content-free snapshot comes back. Each machine reads its own transcripts and keeps its own private index, so its history survives provider cleanup there. Remote snapshots stay in memory here; nothing from them enters this machine's index.
-- **Authentication** is your SSH configuration: host aliases, keys, agents and jump hosts all work. `BatchMode` turns password and host-key prompts into failures instead of a hanging dashboard.
+- **What crosses the network.** The command line goes out: the account, Node.js path, protocol words, version, digest, fixed report flags, this machine's time zone name and the forwarded switches. With the bundled runtime, the bootstrap and, once per version, this install's code go out on stdin. Nothing that describes this machine goes out: no paths, history, saved machines or local options. Only the remote machine's content-free snapshot comes back, with the standard error of `ssh` and the remote, of which one sanitized line is shown in this terminal and nowhere else. Each machine reads its own transcripts and keeps its own private index, so its history survives provider cleanup there. Remote snapshots stay in memory here; nothing from them enters this machine's index.
+- **Authentication** is your SSH configuration: host aliases, keys, agents, jump hosts and connection sharing all work. Every read, with either runtime or `--remote`, uses the `ssh` options [above](#the-bundled-runtime), so a password or host-key prompt fails instead of hanging the dashboard.
 - **Forwarded switches:** `--offline`, `--no-index`, `--exclude-hidden`, `--no-additional-providers` and the pricing policy, sources and age. Source paths, `--data-dir` and `--database` describe this machine and stay here.
 - **Time limit.** A machine that has not answered within 300 seconds is stopped; `--remote-timeout SECONDS` or `SESSION_ANALYTICS_REMOTE_TIMEOUT` changes it. A machine's first indexed read is its slowest, so run `machines check` once after adding a large one.
 - **Stopping.** The time limit, Ctrl-C, `SIGTERM` and `SIGHUP` stop this machine's `ssh` and analysis workers before the process exits, and a stopped run never prints a partial result. With the bundled runtime the remote work stops too: the bootstrap relays the report's output and writes an empty line about once a second, so when the connection closes its next write fails and it stops the report and its analysis worker within a few seconds. A `--runtime installed` or `--remote` read keeps running there until it finishes.
@@ -191,7 +228,7 @@ Every snapshot that combines machines lists them in `machines`, this machine fir
 - **`report`** names the machines it covers in its header (stale ones marked, failed ones listed as not read) and adds a `Machines` block with each machine's sessions, repositories and read time, or its reason and fix. **`--strict`** makes `report` and `export` exit with status 3 after their output when any machine was not read now (failed or stale), so a scheduled export notices; without it they exit 0. The snapshot also carries a fixed warning when a machine's sessions are missing or stale.
 - **The dashboard** shows a Machines strip above the scope line: one chip per machine with its session count and state, which switches that machine's sessions in or out of every view, total and export; a machine without a snapshot is a button that opens **Machine details** with its state, counts, read time, duration, version and fix. The sync label says how many machines are ready and names the others, and Summary adds **Usage value by machine**. Coverage notes name the machine that raised them.
 
-### Ad-hoc machines with --remote
+### Advanced: ad-hoc machines with --remote
 
 ```bash
 session-analytics --remote server                     # dashboard: this machine and server

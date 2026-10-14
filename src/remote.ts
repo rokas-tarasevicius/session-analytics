@@ -16,8 +16,13 @@ import type { AnalyzeOptions, MachineAnalytics, MachineReason, MachineStatus } f
 import { version } from "./version.ts";
 
 const STDERR_TAIL_BYTES = 8192;
-export const sshOptions = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-T"];
-const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+// No prompts, no terminal, and nothing a host's ssh_config adds: no forwarded agent, X11 or ports for code
+// running there, no LocalCommand output mixed into the snapshot, and no RemoteCommand in place of ours.
+export const sshOptions = [
+  "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-T",
+  "-a", "-x", "-o", "ClearAllForwardings=yes", "-o", "PermitLocalCommand=no", "-o", "RemoteCommand=none",
+];
+export const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 /** The request every remote machine runs: a full snapshot in this machine's zone, with portable repository IDs. */
 export function remoteArguments(options: AnalyzeOptions & { timeZone: string }): string[] {
@@ -129,16 +134,16 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
     "no-node": `node was not found on ${account}'s login PATH`,
     "node-too-old": `the remote Node.js is ${found || "too old"}; the bundled runtime needs 24 or later`,
     runtime: "the bundled runtime could not start there",
-    "cache-unwritable": `the bundled runtime cannot be stored in ${account}'s ~/.cache`,
+    "cache-unwritable": `the bundled runtime cannot be stored safely in ${account}'s ~/.cache`,
     corrupted: "the bundled runtime arrived damaged",
     "version-skew": `the remote runs session-analytics ${found}, this machine ${version}`,
     rejected: "the remote session-analytics rejected the request (probably another version)",
     busy: "the remote index is busy with another read",
     "index-newer": "the remote index was created by a newer session-analytics",
     analysis: "the remote analysis failed",
-    invalid: "the remote output was not a valid full snapshot",
+    invalid: found ? `the remote answered ${found} with something else` : "the remote output was not a valid full snapshot",
     "time-zone": "the remote snapshot used another time zone",
-    timeout: `no snapshot within ${Math.round(timeoutMs / 1000)} seconds`,
+    timeout: `no snapshot within ${Math.round(timeoutMs / 1000)} second${Math.round(timeoutMs / 1000) === 1 ? "" : "s"}`,
     "too-large": "the remote snapshot exceeded the snapshot size limit",
     cancelled: "the read was stopped",
     "same-machine": found ? `the same machine and account as ${found}, so its history is counted once` : "this machine and account, which is always read",
@@ -158,7 +163,7 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
     connection: `run ssh ${machine.ssh} true once in a terminal to accept the host key and check the login (ssh-copy-id ${machine.ssh} installs a key)`,
     dropped: `check that the machine is up and has memory to spare, then ${check}`,
     sudo: machine.user
-      ? `on that machine run: echo "$USER ALL=(${machine.user}) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/session-analytics && sudo chmod 0440 /etc/sudoers.d/session-analytics`
+      ? `on that machine run: echo "$USER ALL=(${machine.user}) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/session-analytics-${machine.user} && sudo chmod 0440 /etc/sudoers.d/session-analytics-${machine.user}`
       : "allow that command through sudo without a password there",
     "no-account": machine.saved ? `${command} machines check ${name} --find-users lists the accounts with agent history` : "check the account name in --remote-command",
     permission: `use the bundled runtime: ${bundled}`,
@@ -168,7 +173,7 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
     "no-node": `install Node.js 24 or later there, or point to it: ${node}`,
     "node-too-old": `install Node.js 24 or later there, or point to a newer one: ${node}`,
     runtime: `retry; if it persists, run ${check}`,
-    "cache-unwritable": machine.saved ? `${command} machines set ${name} --runtime installed, or set XDG_CACHE_HOME to a writable directory in that account's profile` : "set XDG_CACHE_HOME to a writable directory in that account's profile",
+    "cache-unwritable": machine.saved ? `${command} machines set ${name} --runtime installed, or set XDG_CACHE_HOME to a private, writable directory in that account's profile` : "set XDG_CACHE_HOME to a private, writable directory in that account's profile",
     corrupted: "retry the read",
     "version-skew": `install ${version} there, or use the bundled runtime: ${bundled}`,
     rejected: `run the same version on both machines, or use the bundled runtime: ${bundled}`,

@@ -43,6 +43,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
+| P2 | Read subscription limits from other machines: run `limits --json` there through the same bootstrap and merge the observations by account key, so Subscription meters match value read from every machine. Needs per-account meters first. | Machines review (limits-never-read-remote) |
 | P3 | Persist portable repository IDs and session keys with retained index facts, so history whose sources were deleted keeps its portable identity across exports. | #62 review |
 | P3 | Compare pricing freshness across machines: each machine prices its own sessions with its own cache, and a remote's stale or older rate card is not flagged. | Machines review (no-cross-machine-consistency) |
 | P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
@@ -51,6 +52,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
+| P1 | Release builds must ship `src/remote/bootstrap.js`, which is read from disk rather than imported, so a compiled install can build the bundled runtime; the installed-artifact smoke test should read a machine through it. Blocks the first compiled release that includes saved machines. | Machines review |
 | P3 | Pass the compiled installed-artifact gate before npm publication. | §6, Not in scope for 0.8.0; distribution-launch proposal |
 | P3 | Evaluate Homebrew distribution separately. | §6, Not in scope for 0.8.0 |
 | P3 | Review declaration files and verify compiled installed artifacts before npm publication. CHANGELOG and required license assets are checked by the source-release preflight. | §4 P3; §6, Not in scope for 0.8.0 |
@@ -66,6 +68,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Completed
 
+- **Completed: 2026-10-14 (unreleased).** Machines as a dimension: saved machines with a bundled runtime and `machines check`, per-machine status in combined snapshots, the report and the dashboard (Machines strip and filter, Machine details, Usage value by machine), last good snapshots and progressive loading: `src/machines/`, `src/remote.ts`, `src/remote/` and `src/public/machines.js`.
 - **Completed: 2026-10-13 (readiness candidate).** Mobile time-window selector, single-column KPIs below 400 px, and wrapped snapshot metadata: six views checked at 375, 768 and 1440 px through the collaborative preview; 375 px also checked in both themes and densities. Custom ranges focus the start date, and failed refreshes preserve the snapshot without widening the page. Synthetic mobile captures and their provenance are in `assets/SCREENSHOTS.md`.
 - **Completed: 2026-10-13 (0.8.0).** Formatter, shared type/focus/chart tokens, Summary hierarchy and view finishes (PR-E1–E4): `a383526`, `37a3e3d`, `cd65a99`, `20eadba`.
 - **Completed: 2026-10-13 (0.8.0).** Focused-repository provider breakdowns and fleet comparator: `20eadba` and current `src/public/app.js`.

@@ -54,6 +54,14 @@ session-analytics --offline   # disables public pricing refreshes
 
 Without `npm link`, run `node bin/session-analytics.ts`. See [installation and options](docs/cli.md) for source paths, ports and platform limits.
 
+To include a server or VM where agents run, save it once; every later launch reads it too, and it needs only Node.js 24 there:
+
+```bash
+session-analytics machines add agentbox --user agent-t3   # SSH host, and the account the agents run as
+```
+
+See [combine machines](docs/interop.md#combine-machines).
+
 ## What it does
 
 - **Groups work by repository.** Combine agents, profiles, linked worktrees and clones of the same remote in one view. Conductor can enrich the mapping when installed.

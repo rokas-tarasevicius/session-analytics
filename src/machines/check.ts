@@ -1,6 +1,6 @@
 import { brand } from "../brand.ts";
 import { accountPattern, type RemoteMachine } from "../options.ts";
-import { accountPrefix, classifyRemote, fetchRemoteSnapshot, localTimeZone, RemoteError, remoteArguments, runRemote, runSsh } from "../remote.ts";
+import { accountPrefix, classifyRemote, fetchRemoteSnapshot, localTimeZone, RemoteError, remoteArguments, runRemote, runSsh, versionPattern } from "../remote.ts";
 import { runtimePayload } from "../remote/runtime.ts";
 import { version } from "../version.ts";
 import type { SavedMachine } from "./config.ts";
@@ -37,10 +37,14 @@ const probeScript = (node: string): string => `if command -v ${node} >/dev/null 
 machine="\${SESSION_ANALYTICS_MACHINE_ID:-$(cat /etc/machine-id 2>/dev/null)}"; [ -n "$machine" ] || machine=$(hostname); echo "$machine"
 id -u
 `;
-const findUsersScript = `{ getent passwd 2>/dev/null || cat /etc/passwd; } | while IFS=: read -r name _ _ _ _ home shell; do
+// macOS has no getent, so its accounts come from dscl. sudo is tried once, then only for homes the SSH user cannot enter,
+// so a machine without passwordless sudo logs one refusal rather than one per account.
+const findUsersScript = `if sudo -n true </dev/null >/dev/null 2>&1; then sudo=yes; else sudo=; fi
+{ getent passwd 2>/dev/null || { command -v dscl >/dev/null 2>&1 && dscl . -list /Users NFSHomeDirectory | awk '{ print $1 ":*::::" $2 ":/bin/sh" }'; } || cat /etc/passwd; } |
+while IFS=: read -r name _ _ _ _ home shell; do
   case "$shell" in *nologin|*false|"") continue;; esac
   for dir in .claude .codex .t3/userdata; do
-    if test -d "$home/$dir" 2>/dev/null || sudo -n test -d "$home/$dir" </dev/null 2>/dev/null; then echo "$name"; break; fi
+    if test -d "$home/$dir" 2>/dev/null || { test -n "$sudo" && ! test -x "$home" && sudo -n test -d "$home/$dir" </dev/null 2>/dev/null; }; then echo "$name"; break; fi
   done
 done
 `;
@@ -101,7 +105,7 @@ export async function checkMachine(
   const probeError = classifyRemote({ ...machine, runtime: "installed" }, probe);
   const [nodeVersion = "", machineId = "", uid = ""] = probe.stdout.toString("utf8").split("\n").map((line) => line.trim());
   if (probeError || !machineId || !/^\d+$/.test(uid)) {
-    add(failed("node", probeError ?? new RemoteError("invalid", machine, probe.stderr)));
+    add(failed("node", probeError ?? new RemoteError("invalid", machine, probe.stderr, "the machine probe")));
     return await finish();
   }
   if (machine.runtime === "bundled") {
@@ -118,14 +122,16 @@ export async function checkMachine(
       : { check: "machine", status: "ok", text: "not this machine, and not saved under another name" })) return await finish();
 
   const runtime = await runRemote(machine, ["--version"], { deadline: Date.now() + timeoutMs, limit: 4096 });
-  const answer = runtime.stdout.toString("utf8").trim();
+  // Anything but a version (a login profile that prints, say) would also break every snapshot read, and is never echoed.
+  const answer = runtime.stdout.toString("utf8").trim(), known = versionPattern.test(answer);
   const runtimeError = classifyRemote(machine, runtime, timeoutMs);
   if (machine.runtime === "bundled") {
     const payload = runtimePayload();
     const stored = runtime.installed ? `installed now (${Math.round(payload.bytes / 1024)} KB in ${seconds(runtime.ms)})` : "cached";
-    if (!add(runtimeError ? failed("runtime", runtimeError, runtime.ms) : { check: "runtime", status: "ok", text: `${answer}+${payload.digest.slice(0, 8)} ${stored}`, ms: runtime.ms })) return await finish();
+    const error = runtimeError ?? (known ? null : new RemoteError("invalid", machine, "", "--version"));
+    if (!add(error ? failed("runtime", error, runtime.ms) : { check: "runtime", status: "ok", text: `${answer}+${payload.digest.slice(0, 8)} ${stored}`, ms: runtime.ms })) return await finish();
   } else {
-    const error = runtimeError ?? (answer === version ? null : /^\d+\.\d+\.\d+/.test(answer) ? new RemoteError("version-skew", machine, "", answer) : new RemoteError("invalid", machine));
+    const error = runtimeError ?? (answer === version ? null : known ? new RemoteError("version-skew", machine, "", answer) : new RemoteError("invalid", machine, "", "--version"));
     if (!add(error ? failed("command", error) : { check: "command", status: "ok", text: `${machine.command.join(" ")} runs ${answer}, the same as this machine` })) return await finish();
   }
 
