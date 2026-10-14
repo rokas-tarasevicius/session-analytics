@@ -109,6 +109,16 @@ export function bankedResets(input: {
 }): BankedResets;
 export function economics(input: { provider: LimitProvider; planId: string | null; payer?: PlanPayer | null; perPercent: number | null; extracted: number | null; days: number }): Economics;
 export function resetUtilization(history: ResetCycle[], live: LiveMeter | null, limit?: number): { mean: number; closed: number; includesProjection: boolean } | null;
+export function visibleMeters(item: AccountUtilization): { weekly: LiveMeter | null; session: LiveMeter | null; extra: LiveMeter[] };
+export interface AccountStatus {
+  kind: "capped" | "overage" | "runs-out" | "may-be-used-up" | "stale" | "too-early" | "on-track" | "idle" | "levels-only";
+  tone: "danger" | "warn" | "ok" | "muted"; rank: number; used: number; meter: "weekly" | "session";
+  /** Run-out instant; `until`: the reset that ends a cap or an idle week; `since`: the last reading; `early`: seconds before the reset. */
+  at: number | null; until: number | null; since: number | null; early: number | null;
+}
+export function limitStatus(item: AccountUtilization, now: number): AccountStatus;
+export function compareUrgency(left: AccountStatus, right: AccountStatus): number;
+export function meterPace(live: LiveMeter | null, now: number): { segment: number; cycle: number; budget: number | null } | null;
 export function formatDuration(seconds: number): string;
 export function accountUtilization(input: {
   account: LimitAccount; meters: Meter[]; sessions?: unknown[]; timeZone?: string; now: number; range: ValueRange;

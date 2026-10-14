@@ -1,6 +1,8 @@
 # Subscription limits and value
 
-A Claude or ChatGPT subscription is a fixed price for a rolling allowance. Unused allowance expires at each reset. The Subscription view and the `limits` command show how much of each allowance you use, what it is worth at API list prices, and what to change.
+A Claude or ChatGPT subscription is a fixed price for a rolling allowance. Unused allowance expires at each reset. The Subscription view and the `limits` command show how much of each allowance is left and when it resets, what to change, and what each allowance is worth at API list prices.
+
+The view leads with **Limits now**, one row per account with the most urgent first, then at most three next steps, the account cards, **What it's worth**, the reset history and the sources. The [dashboard guide](dashboard.md#subscription-can-i-keep-working-and-is-it-worth-it) walks through it. Times are shown in your browser's time zone; value is counted in the snapshot's time zone, like the rest of the dashboard.
 
 ## What is measured
 
@@ -12,11 +14,11 @@ A Claude or ChatGPT subscription is a fixed price for a rolling allowance. Unuse
 | Segment | Part of a cycle. A provider can restart a meter at 0% without moving its reset (an in-place reset); the readings after it are a new segment of the same cycle. Pace, projection and the closing level use the latest segment. |
 | Value per 1% | API-equivalent value of the account's own sessions inside a segment, divided by the meter reading at that time; at a cap, the first capped reading, because value after it did not move the meter. Segments whose value per 1% is under a quarter of the median moved mostly elsewhere (another machine, the web app) and are dropped. The median of the rest is used and needs at least two segments; with fewer, the view says there is not enough history. |
 | Weekly capacity | Value per 1% × 100: what one full weekly allowance is worth at list prices. |
-| Monthly potential | Weekly capacity × 30.44 / 7: the value of using every weekly reset fully. |
-| Extracted | The account's API-equivalent value for the selected dates, from the same activity ledger as Summary, Velocity and Costs, counted from the account's first meter reading up to now. |
-| Capacity used | Extracted ÷ (weekly capacity × days / 7), over calibrated accounts. Over 100% means usage outpaces what the limits refill, so limits will be hit. |
-| Weekly resets used | Meter only: the mean closing level of recent weekly cycles whose close was observed, plus the live cycle's projection once 15% of the time to its reset has passed. |
-| Value multiple | Extracted ÷ the plan price prorated to the same time, for an account you pay for. Team, Enterprise and Business seats are paid by the organization, so they show API value without a multiple. |
+| A month of full use | Weekly capacity × 30.44 / 7 (monthly potential): the value of using every weekly reset fully. |
+| Value used | The account's API-equivalent value for the selected dates, from the same activity ledger as Summary, Velocity and Costs, counted from the account's first meter reading up to now. |
+| Share of what limits refill | Value used ÷ (weekly capacity × days / 7), over calibrated accounts. Over 100% means usage outpaces what the limits refill, so limits will be hit. |
+| Typical week closes at | Meter only: the mean closing level of recent weekly cycles whose close was observed, plus the live cycle's projection once 15% of the time to its reset has passed. |
+| Value multiple | Value used ÷ the plan price prorated to the same time, for an account you pay for. Team, Enterprise and Business seats are paid by the organization, so they show API value without a multiple unless you mark the seat as paid by you. |
 
 Weekly limits bound total value; 5-hour limits bound bursts. The view reports both. Each live meter shows used percent, a tick for even pace to the reset, a hatched projection to the reset, and the time it runs out at the current pace.
 
@@ -62,7 +64,7 @@ A reset restarts a window at 0%. It is worth what had been used when it happened
 
 | Kind | How it is tracked |
 | --- | --- |
-| Scheduled reset | The meter's own `resets_at`. The closing reading of each cycle is the share used; the rest expired. A closing reading taken more than a tenth of the window (at least an hour) before the reset is a lower bound: the close is unknown, and the cycle is left out of unused-allowance figures, weekly resets used and plan advice. |
+| Scheduled reset | The meter's own `resets_at`. The closing reading of each cycle is the share used; the rest expired. A closing reading taken more than a tenth of the window (at least an hour) before the reset is a lower bound: the close is unknown, and the cycle is left out of unused-allowance figures, the typical weekly close and plan advice. |
 | Early reset (a redeemed credit, a paid reset, or a provider-wide reset) | Detected when a new cycle starts before the old one's scheduled reset. It is not counted as waste. Its value is the share restored, when the level just before it was observed. When the account's banked count drops across it, it is labelled as a redeemed credit. |
 | In-place reset | The provider restarts a meter at 0% and keeps its reset instant. A fall of 5 points or more that the next reading confirms starts a new segment; a latest reading counts on its own only when it halves the level. The reset is placed midway between the readings on either side. It is not counted as waste; its value is the level before the fall, when observed close to it. |
 | Codex banked reset credits | Read automatically through the local Codex app-server's `account/rateLimits/read`, the same read Codex's usage display makes, once for each Codex home. Kept per account: count, scope, grant and expiry times. Dropped: credit IDs, titles, the account ID (only its hash is kept). At most one read every 10 minutes; `account/rateLimitResetCredit/consume` is never sent. Off with `--no-codex-account`, `SESSION_ANALYTICS_CODEX_ACCOUNT=0` or `--offline`. Banked resets usually expire 30 days after they are granted. |
@@ -77,7 +79,7 @@ Banked-reset advice follows from the value rule:
 - **Expiring**: a reset that expires within three days, or before you would need it at the current pace, is worth nothing unused. Plan a heavy run, let the meter climb, then redeem.
 - **Badly timed**: an early reset in the last 30 days that restored less than 60% is flagged, with the value a reset at 100% would have restored.
 
-Monthly potential notes the value of banked resets separately: each adds up to one more full window if redeemed near 100%.
+A month of full use notes the value of banked resets separately: each adds up to one more full window if redeemed near 100%.
 
 ## Where the readings come from
 
@@ -103,7 +105,7 @@ Provider logs rotate: T3 Code keeps several days of events, and Claude Code dele
 
 ## Keeping it up to date
 
-- The dashboard harvests when the Subscription view opens and every two minutes while it stays open.
+- The dashboard harvests when the Subscription view opens and every two minutes while it stays open. The meters appear as soon as they are read, before the session scan finishes; value fills in when it does. A refresh keeps keyboard focus, the inspected chart reading and open sections.
 - Schedule a harvest so history stays continuous when the dashboard is closed:
 
   ```sh
@@ -121,7 +123,7 @@ Provider logs rotate: T3 Code keeps several days of events, and Claude Code dele
 
 ## Recommendations
 
-Suggestions are rules over the same numbers, made per account. They are ranked by urgency: act now, then opportunities, then setup, then what is going well. The value at stake only orders suggestions of the same rank, so a large expiring allowance never outranks an account that is about to run out.
+Suggestions are rules over the same numbers, made per account. They are ranked by urgency: act now, then opportunities, then setup, then what is going well. The view shows the first three as one line each, with the reasoning under "Why?", and the rest under a toggle. The value at stake only orders suggestions of the same rank, so a large expiring allowance never outranks an account that is about to run out.
 
 - **Runs out early**: the weekly meter's projection reaches 100% before the reset. Shows the daily rate the remaining allowance supports. When another account has room, the same provider first, it is named with the profile to switch to, for example "Claude Team seat runs out before its Fri 04:00 reset; Claude Max 20x is at 16%", then "Point background agents and long-running work at the personal profile".
 - **Used up or on extra usage**: the weekly meter is capped or past 100% on paid extra usage, with another account's headroom when there is some.
@@ -136,9 +138,9 @@ Suggestions are rules over the same numbers, made per account. They are ranked b
 
 ## Caveats
 
-- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Local value covers this machine's matched sessions only, so value per percent and capacity are conservative (lower bounds), and capacity used is an upper bound. The outlier rule drops cycles that another client moved almost entirely.
+- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Local value covers this machine's matched sessions only, so value per percent and capacity are conservative (lower bounds), and the share of what limits refill is an upper bound. The outlier rule drops cycles that another client moved almost entirely.
 - API-equivalent value is a list-price comparison, not an invoice.
 - Projections assume the current segment's pace, measured through now, continues.
 - Headline ratios compare like with like. The value multiple divides the value of accounts you pay for by their prorated price; the potential multiple divides their monthly potential by their monthly price. Value on employer-paid seats, on plans without a price and outside any account is reported beside them, never divided by another account's price. Price and capacity are prorated over the time since each account's first meter reading, up to now, so days before the ledger and the rest of today are not counted.
-- Plan prices were reviewed on 2026-10-14 from [claude.com/pricing](https://claude.com/pricing) (Pro $20 a month or $17 billed yearly; Team standard seat $25 or $20 billed yearly, premium seat $125 or $100 billed yearly; Enterprise $20 a seat a month billed yearly plus usage at API rates), the [Max plan article](https://support.claude.com/en/articles/11049741-what-is-the-max-plan) (Max 5x $100, Max 20x $200), [ChatGPT pricing](https://learn.chatgpt.com/docs/pricing) (Go $8, Plus $20, Business $25 a seat or $20 billed yearly; Enterprise and Edu by contract) and OpenAI's [Pro tiers article](https://help.openai.com/articles/9793128-about-chatgpt-pro-tiers) (Pro 100, Pro 200 and Pro 500). A Team seat's type is not recorded locally; Team, Enterprise and Business seats are treated as paid by the organization. Codex reports a `promax` plan type that is not mapped to Pro 500 because nothing confirms the match; choose it on the card. Override the detected plan on each card, or exclude an account from value totals; the choice is stored in the browser.
+- Plan prices were reviewed on 2026-10-14 from [claude.com/pricing](https://claude.com/pricing) (Pro $20 a month or $17 billed yearly; Team standard seat $25 or $20 billed yearly, premium seat $125 or $100 billed yearly; Enterprise $20 a seat a month billed yearly plus usage at API rates), the [Max plan article](https://support.claude.com/en/articles/11049741-what-is-the-max-plan) (Max 5x $100, Max 20x $200), [ChatGPT pricing](https://learn.chatgpt.com/docs/pricing) (Go $8, Plus $20, Business $25 a seat or $20 billed yearly; Enterprise and Edu by contract) and OpenAI's [Pro tiers article](https://help.openai.com/articles/9793128-about-chatgpt-pro-tiers) (Pro 100, Pro 200 and Pro 500). A Team seat's type is not recorded locally; Team, Enterprise and Business seats are treated as paid by the organization. Codex reports a `promax` plan type that is not mapped to Pro 500 because nothing confirms the match; choose it on the card. The plan chip on each card overrides the detected plan or excludes the account from value totals; an excluded account keeps its card, meters and the control that undoes it. In What it's worth, a plan with a list price can be marked as paid by you or by an employer, for example a Team seat you pay for yourself. These choices are stored in the browser.
 - Limit meters are live-only and are not part of saved or shared snapshots.

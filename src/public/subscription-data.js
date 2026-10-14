@@ -442,6 +442,60 @@ export function economics({ provider, planId, payer = null, perPercent, extracte
   };
 }
 
+/**
+ * The meters worth showing for an account: weekly and 5-hour apart from the rest (model-specific and other scoped limits).
+ * Retired meters and scoped meters that never moved off 0% are left out; a 5-hour meter with no open window stays while
+ * the provider still reports it, so a returning limit shows again.
+ */
+export function visibleMeters(item) {
+  const shown = (live) => live && live.state !== "retired" && !live.meter.retired;
+  return {
+    weekly: shown(item.weekly) ? item.weekly : null,
+    session: shown(item.session) ? item.session : null,
+    extra: item.live.filter((live) => live !== item.weekly && live !== item.session && shown(live)
+      && live.meter.cycles.some((cycle) => cycle.samples.some((sample) => sample.used > 0))),
+  };
+}
+
+/**
+ * One status per account and its urgency (lower `rank` first): a cap, extra usage, then the soonest run-out; on-track
+ * accounts by how full they are; stale, idle and unidentified accounts last. `used` is the weekly level, capped at 100.
+ */
+export function limitStatus(item, now) {
+  const open = (live) => live?.cycle && live.state !== "retired" ? live : null;
+  const weekly = open(item.weekly), session = open(item.session);
+  const used = weekly ? Math.min(100, weekly.used) : 0;
+  const status = (kind, tone, rank, extra = {}) => ({ kind, tone, rank, used, at: null, until: null, since: null, early: null, meter: "weekly", ...extra });
+  if (!item.identified) return status("levels-only", "muted", 9);
+  if (weekly?.state === "capped") return status("capped", "danger", 0, { until: weekly.cycle.resetsAt });
+  if (session?.state === "capped" && session.cycle.resetsAt > now) return status("capped", "danger", 1, { until: session.cycle.resetsAt, meter: "session" });
+  if (weekly?.state === "overage") return status("overage", "warn", 2, { until: weekly.cycle.resetsAt });
+  if (weekly?.capsEarly) return status("runs-out", "warn", 3, { at: weekly.capAt, early: weekly.cycle.resetsAt - weekly.capAt });
+  if (weekly?.mayBeUsedUp) return status("may-be-used-up", "warn", 4, { since: weekly.observedAt });
+  if (session?.capsEarly && !session.stale) return status("runs-out", "warn", 5, { at: session.capAt, early: session.cycle.resetsAt - session.capAt, meter: "session" });
+  if (weekly && (weekly.stale || weekly.state === "unreported")) return status("stale", "muted", 7, { since: weekly.observedAt });
+  if (weekly) return status(weekly.tooEarly ? "too-early" : "on-track", weekly.tooEarly ? "muted" : "ok", 6);
+  return status("idle", "muted", 8, { until: item.weekly?.nextResetAt ?? null });
+}
+
+/** Most urgent first: by rank, then the sooner run-out, then the fuller weekly meter. */
+export const compareUrgency = (left, right) => left.rank - right.rank || (left.at ?? Infinity) - (right.at ?? Infinity) || right.used - left.used;
+
+/**
+ * Pace of a live meter in percent per hour: the current segment's, the whole cycle's (levels restored by in-place resets
+ * count as used), and the most that lasts until the reset.
+ */
+export function meterPace(live, now) {
+  if (!live?.cycle) return null;
+  const { cycle } = live;
+  const spent = cycle.segments.slice(1).reduce((total, segment) => total + Math.min(100, segment.before.used), 0) + Math.min(100, live.used);
+  return {
+    segment: (live.rate ?? 0) * HOUR,
+    cycle: spent / Math.max(1, (Math.min(now, cycle.resetsAt) - cycle.start) / HOUR),
+    budget: live.remaining > 0 ? Math.max(0, 100 - live.used) / Math.max(1, live.remaining / HOUR) : null,
+  };
+}
+
 /** Meter-only utilization: the mean closing level of recent exactly observed weekly resets, with the live projection once it has evidence. */
 export function resetUtilization(history, live, limit = 6) {
   const closed = history.filter(exactClose).slice(-limit).map((cycle) => cycle.peak);

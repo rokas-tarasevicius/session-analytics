@@ -170,7 +170,8 @@ function emptyState(container, message, title = null) {
 /** Captures the focused control's key before a re-render and restores focus to its replacement afterwards. */
 function rememberFocus() {
   const active = document.activeElement;
-  const key = active instanceof HTMLElement ? active.dataset.focusKey : null;
+  // Charts are SVG elements: any element with a focus key counts, not only HTML ones.
+  const key = active?.dataset?.focusKey ?? null;
   if (!key) return () => {};
   return () => {
     const current = document.activeElement;
@@ -445,6 +446,7 @@ function switchView(name, { history: mode = "push" } = {}) {
   // A new view starts at its top. The jump is instant, so it never animates (reduced motion included).
   if (changed && snapshot) window.scrollTo?.({ top: 0, left: 0, behavior: "instant" });
   if (snapshot) renderView();
+  else if (!loadFailed) { scheduleLimits(name === "subscription"); if (name === "subscription") renderSubscriptionView(); }
   syncUrl(mode);
 }
 
@@ -728,7 +730,8 @@ async function loadLimitsNow(refresh = false) {
   } catch {
     limits ??= { schemaVersion: 2, dataSource: "live", persisted: false, plans: { claude: null, codex: null }, sources: [], observations: [], accounts: [], meters: [], resetCreditHistory: [], unavailable: true };
   }
-  if (snapshot && currentViewName() === "subscription") renderSubscriptionView();
+  // Meters need no sessions, so they render as soon as they arrive, before the session scan finishes.
+  if (!sharedSnapshot && !loadFailed && currentViewName() === "subscription") renderSubscriptionView();
 }
 const loadLimits = singleFlight(loadLimitsNow);
 
@@ -738,19 +741,23 @@ function scheduleLimits(active) {
   if (typeof setInterval === "function") limitsTimer ??= setInterval(() => { if (document.visibilityState !== "hidden") void loadLimits(false); }, subscriptionRefreshMilliseconds);
 }
 
-/** Subscription is account-wide: it reads every session, ignoring the repository focus, over the selected dates. */
+/**
+ * Subscription is account-wide: it reads every session, ignoring the repository focus, over the selected dates. Before the
+ * snapshot arrives it shows the meters alone. Each refresh keeps focus, open disclosures and the scroll position.
+ */
 function renderSubscriptionView() {
   const restoreFocus = rememberFocus();
-  const context = velocityContext();
+  const scroll = window.scrollY;
+  const context = snapshot ? velocityContext() : null;
   // Other machines' sessions carry no machine yet, so while any are combined none can be told apart from this machine's.
-  const remote = (limits?.remoteMachines ?? 0) > 0 || snapshot.warnings?.includes(remoteUnavailableWarning);
+  const remote = (limits?.remoteMachines ?? 0) > 0 || Boolean(snapshot?.warnings?.includes(remoteUnavailableWarning));
   renderSubscription($("#subscription-view"), {
-    limits, sessions: snapshot.sessions, timeZone: context.timeZone,
-    range: { from: zonedDayStart(context.start, context.timeZone), to: zonedDayStart(shiftDay(context.end, 1), context.timeZone) },
-    rangeLabel: dateRange(context.start, context.end),
+    limits, sessions: snapshot ? snapshot.sessions : null, timeZone: context?.timeZone ?? "UTC",
+    range: context ? { from: zonedDayStart(context.start, context.timeZone), to: zonedDayStart(shiftDay(context.end, 1), context.timeZone) } : null,
     local: remote ? () => false : null,
     onPlanChange: () => renderSubscriptionView(),
   });
+  if (typeof scroll === "number" && window.scrollY !== scroll) window.scrollTo?.({ top: scroll, left: 0, behavior: "instant" });
   restoreFocus();
 }
 

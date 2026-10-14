@@ -82,9 +82,25 @@ Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the
   </picture>
 </p>
 
-### Subscription: are you using what you pay for?
+### Subscription: can I keep working, and is it worth it?
 
-Subscription answers "how much of my Claude and Codex allowance turns into work?" Each account has its own card, so a personal plan and an employer's Team seat used on one machine are never mixed. A card shows the account's live meters: the 5-hour window and weekly limits as used percent, with a tick for even pace to the reset, a hatched projection to the reset, and when it runs out at the current pace. A chart of the current weekly cycle marks in-place resets and sits beside the value of 1% of the week, weekly capacity and monthly potential, all calibrated from the account's own meter readings and sessions. Headline figures compare monthly potential, extracted value and plan price over the accounts you pay for; employer-paid seats show API value only. Weekly resets shows how full each allowance was when it reset, and 5-hour windows shows each window's peak and any time locked out. Ranked recommendations come first. Limits are account-wide, so the repository focus does not apply. See [Subscription limits and value](subscription.md).
+Subscription answers "which of my accounts can I still use, and until when?" first, and "what is each allowance worth?" second. Every account is shown on its own, so a personal Max plan and an employer's Team seat used on one machine are never mixed. Limits are account-wide, so the repository focus does not apply. The view reads from top to bottom:
+
+1. **Limits now**: one row per account, the most urgent first. Each row has the weekly bar, a thin 5-hour bar, the weekly share left in large type, when it resets (absolute and relative, in your browser's time zone) and one status: on track, runs out early, capped until the reset, using extra usage, or last seen a while ago. These rows appear as soon as the meters are read, before the session scan finishes.
+2. **Next**: at most three suggestions, one line each; "Why?" opens the reasoning, and the rest sit under a "more suggestions" toggle.
+3. **Account cards**: the plan chip ("Max 20x · detected") opens a menu to choose another plan or to exclude the account from value totals; an excluded card stays visible with the same control to undo it. Weekly and 5-hour meters come first, with a tick for even pace and a hatched projection; model-specific limits are collapsed, stale meters are muted and retired ones hidden. The chart of this week marks an in-place reset where it happened and projects from the current segment. Banked resets, credits and extra usage belong to the account.
+4. **What it's worth**: value used, the value multiple over plans you pay for, a month of full use and the typical weekly close, then each account's value per 1% of the week, weekly capacity, value used and multiple, with the date range stated. A listed price can be marked as paid by you or by an employer. It starts collapsed on narrow screens.
+5. **History**: each account's weekly closes on one time axis (hatched when a reset came early, outlined when the close was not observed) and the last week's 5-hour windows, one lane per account.
+6. **Sources and method**: the accounts found, each source's last reading, and what the readings cover.
+
+Charts take Left, Right, Home and End to inspect readings. The two-minute refresh keeps keyboard focus, the inspected reading and open sections. See [Subscription limits and value](subscription.md).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-subscription-dark.webp" />
+    <img alt="Subscription view: Limits now with a capped Team seat, a ChatGPT Pro account and a Max plan on track, three next steps with Why? toggles, and account cards with meters, this week's chart, banked resets and credits" src="../assets/screenshot-subscription.webp" width="100%" />
+  </picture>
+</p>
 
 ### Tools: what the agents reach for
 

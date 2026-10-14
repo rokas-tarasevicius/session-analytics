@@ -11,7 +11,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - Codex model-scoped limits are labelled with the provider's limit name, such as "GPT-5.3-Codex-Spark · Weekly", and are no longer called "all models". Meters the provider stopped reporting are marked retired instead of idle.
 - The Subscription view shows one card per account, each with its own meters, value per 1%, reset history, lockouts, banked resets and extra usage. Value is matched to an account through its Claude profiles (Codex: every session when there is one Codex account). Recommendations name the account and route work between accounts, for example "Claude Team seat runs out before its Fri 04:00 reset; Claude Max 20x is at 16%", with the profile to point background agents at.
 - In-place resets: when a provider restarts a meter at 0% without moving its reset, the readings after it form a new segment of the cycle. Pace, projection, calibration and the closing level use the latest segment, and the restored level is shown as a reset, never as waste.
-- The plan list, reviewed on 2026-10-14, adds Claude Team standard and premium seats, ChatGPT Pro 100, 200 and 500, and who pays for each plan. Team, Enterprise and Business seats are treated as paid by the organization: they show API value without a personal multiple and get no plan advice.
+- The plan list, reviewed on 2026-10-14, adds Claude Team standard and premium seats, ChatGPT Pro 100, 200 and 500, and who pays for each plan. Team, Enterprise and Business seats are treated as paid by the organization: they show API value without a personal multiple and get no plan advice. A plan with a list price can be marked as paid by you or by an employer in the view.
+- The Subscription view leads with **Limits now**: one row per account, the most urgent first, with the weekly and 5-hour bars, the share left this week, the next reset (absolute and relative, in your browser's time zone) and one status, such as "Runs out Thu 18:07 · 9h early", "Capped until Fri 04:00", "Using extra usage" or "Last seen 2h ago". **Next** follows with at most three one-line suggestions whose reasoning opens under "Why?", then the account cards, **What it's worth**, **History** and **Sources and method**. Model-specific limits are collapsed under their readable names, retired and never-used meters are hidden, and stale meters are muted without a pace tick. This week's chart states the pace since an in-place reset beside the week's average. Weekly closes of every account share one time axis, with early resets hatched rather than grey (grey is Codex's colour), and 5-hour windows get one lane per account. See the [dashboard guide](docs/dashboard.md#subscription-can-i-keep-working-and-is-it-worth-it).
+- The demo includes synthetic subscription limits for two Claude profiles (a Team seat that resets on Fridays and a Max plan that resets on Mondays, with a capped 5-hour window and an in-place reset) and a ChatGPT Pro account with a banked reset, and `scripts/screenshots.ts` captures the Subscription view. The demo now discovers Claude inside its synthetic home instead of passing `--claude-root`.
 
 ### Changed
 
@@ -21,7 +23,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Projections run from now at the current segment's pace and appear only once two readings and a tenth of the window are behind them; a meter without a recent reading gets none and says when it may already be used up.
 - Value per 1% drops cycles whose local value explains almost none of the meter's movement (another machine or the web app did the work), calibrates at the first capped reading, and needs two cycles before it is shown.
 - Recommendations are ranked by urgency first; the dollar value at stake only orders suggestions of the same urgency.
-- "No subscription" on a card is now "Exclude from value totals": the account's meters stay visible.
+- Value figures moved below the meters into What it's worth and use plain names: value used, a month of full use, the share of what limits refill, and the typical weekly close (formerly "Extracted", "Monthly potential", "Capacity used" and "Weekly resets used").
 
 ### Fixed
 
@@ -37,6 +39,11 @@ All notable changes to this project are documented here. The format follows [Kee
 - With `--remote`, other machines' sessions raised value per 1% for local accounts they never moved. Until sessions record their machine, Codex value is left out while other machines are combined, and the view says so.
 - Value during the daylight-saving fall-back hour was counted twice, and zones with half-hour offsets read activity 30 minutes off.
 - An idle Claude weekly meter said the next request starts a new window; Claude weekly limits reset on a fixed weekly schedule, and the next reset is now shown.
+- Choosing "No subscription" removed the account's card, and with it the only control that could undo the choice. It is now "Exclude from value totals" on the plan chip: the card, its meters and the control stay.
+- The two-minute refresh and plan changes moved keyboard focus to the top of the page and reset an inspected chart reading. They now keep focus, the inspected reading, open sections and the scroll position.
+- The meters waited for the full session scan, which can take minutes on a first run. They now render as soon as the limits are read, and value fills in when the scan finishes.
+- The icon outline style leaked into Subscription charts, outlining every bar (a black or white barcode on phones).
+- Day labels on the 5-hour chart collided at phone widths, and explanations were only in hover tooltips; they now thin out, and every explanation is inline text or a disclosure that keyboard and touch users can open.
 
 ## [0.9.0] - 2026-10-14
 

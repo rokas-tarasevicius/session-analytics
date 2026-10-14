@@ -1,21 +1,26 @@
-// Subscription view: how much of each paid allowance turns into usage, from provider-reported limit meters.
+// Subscription view: which accounts can still be used and until when, what to do next, and what the allowances are worth.
 // Rendering only; every number comes from subscription-data.js.
 
-import { dayMonth, integer, money, percent, weekdayDate, weekdayTime, wholeMoney } from "./format.js";
+import { dayMonth, integer, money, weekdayDate, weekdayTime, wholeMoney } from "./format.js";
 import { providerColor } from "./chart-colors.js";
 import { providerMark } from "./providers.js";
-import { chartWidth, el, redrawOnResize, DASH } from "./ui.js";
+import { chartWidth, dataTable, el, redrawOnResize, DASH } from "./ui.js";
 import {
-  DAY, calibrationMinimum, formatDuration, providerNames, recommendations, subscriptionModel,
+  DAY, HOUR, calibrationMinimum, compareUrgency, formatDuration, limitStatus, meterPace, providerNames, recommendations, subscriptionModel, visibleMeters,
 } from "./subscription-data.js";
-import { plansReviewedAt, subscriptionPlans } from "./subscription-plans.js";
+import { planFor, plansReviewedAt, subscriptionPlans } from "./subscription-plans.js";
 
 /** Explanatory paragraphs wrap freely; one-line `.chart-note` captions are reserved for short labels. */
 const note = (text, className = "subscription-note") => el("p", text, className);
-/** Plan overrides are kept per account key in this browser. */
+/** Plan and payer overrides are kept per account key in this browser. */
 const planKey = (account) => `session-analytics.subscription-plan.${account}`;
-const readPlan = (account) => { try { return localStorage.getItem(planKey(account)); } catch { return null; } };
-const writePlan = (account, value) => { try { if (value) localStorage.setItem(planKey(account), value); else localStorage.removeItem(planKey(account)); } catch { /* Optional. */ } };
+const payerKey = (account) => `session-analytics.subscription-payer.${account}`;
+const readSetting = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+const writeSetting = (key, value) => { try { if (value) localStorage.setItem(key, value); else localStorage.removeItem(key); } catch { /* Optional. */ } };
+/** Disclosure states and inspected chart items by key: a refresh or a plan change never collapses or resets them. */
+const opened = new Map();
+const inspected = new Map();
+let patterns = 0;
 
 const sourceLabels = {
   "codex-account": "Codex account (banked resets)",
@@ -23,6 +28,7 @@ const sourceLabels = {
   "claude-sdk-log": "Claude Agent SDK events (host logs)",
   "claude-statusline": "Claude Code status line",
 };
+const toneLabels = { act: "Act now", watch: "Watch", setup: "Setup", good: "Going well" };
 
 function svg(tag, attributes = {}, text) {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
@@ -31,34 +37,55 @@ function svg(tag, attributes = {}, text) {
   return node;
 }
 
-function formatters(timeZone) {
+/** Times in the viewer's zone: today's as "14:20", this week's as "Fri 04:00", later ones as "6 Nov". */
+function formatters(timeZone, now) {
+  const clock = (seconds) => weekdayTime(seconds, timeZone);
+  const today = dayMonth(now, timeZone);
   return {
-    time: (seconds) => weekdayTime(seconds, timeZone),
+    zone: timeZone,
+    time: clock,
+    when: (seconds) => dayMonth(seconds, timeZone) === today && Math.abs(seconds - now) < DAY ? clock(seconds).slice(-5)
+      : Math.abs(seconds - now) < 6.5 * DAY ? clock(seconds) : dayMonth(seconds, timeZone),
     date: (seconds) => dayMonth(seconds, timeZone),
     day: (seconds) => weekdayDate(seconds, timeZone),
+    relative: (seconds) => seconds >= now ? `in ${formatDuration(seconds - now)}` : `${formatDuration(now - seconds)} ago`,
   };
 }
 
 const usd = (value) => value === null || value === undefined ? DASH : value >= 10_000 ? `$${Math.round(value / 100) / 10}k` : wholeMoney(value);
-const pct = (value, digits = 0) => value === null || value === undefined ? DASH : `${Math.round(value * 10 ** digits) / 10 ** digits}%`;
+const percentText = (value) => `${Math.round(value)}%`;
+const leftOf = (live) => Math.max(0, 100 - Math.min(100, live.used));
+const rate = (value) => `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}%/h`;
+const shortPlan = (plan) => plan.label.replace(/^Claude /, "").replace(/ \(seat type unknown\)$/, " seat");
+const plural = (count, word) => `${integer(count)} ${word}${count === 1 ? "" : "s"}`;
 
-function kpi(label, value, noteText, { accent = false, title = null } = {}) {
-  const article = el("article", null, accent ? "kpi accent" : "kpi");
-  const name = el("span", label, "kpi-label"); if (title) name.title = title;
-  article.append(name, el("strong", value), el("small", noteText, "kpi-note"));
-  return article;
+function disclosure(key, summary, { open = false, className = "" } = {}) {
+  const details = el("details", null, className);
+  details.open = opened.get(key) ?? open;
+  const head = el("summary");
+  head.dataset.focusKey = `details:${key}`;
+  head.append(...(Array.isArray(summary) ? summary : [summary]).map((part) => typeof part === "string" ? el("span", part) : part));
+  details.append(head);
+  details.addEventListener("toggle", () => opened.set(key, details.open));
+  return details;
 }
 
-/** A readout under a chart: pointer and arrow keys move between items; the text is announced politely. */
-function inspectable(svgNode, items, describe, position) {
+/**
+ * A readout under a chart: pointer and arrow keys move between items and the text is announced politely. The inspected
+ * item is remembered by `key`, so a refresh keeps it.
+ */
+function inspectable(svgNode, key, items, identity, describe, position) {
   const readout = el("div", null, "subscription-readout");
   readout.setAttribute("aria-live", "polite");
+  svgNode.setAttribute("data-focus-key", `chart:${key}`);
   if (!items.length) return readout;
-  let selected = items.length - 1;
+  const remembered = items.findIndex((item) => identity(item) === inspected.get(key));
+  let selected = remembered >= 0 ? remembered : items.length - 1;
   const marker = position.marker;
-  const show = (index) => {
+  const show = (index, remember = true) => {
     selected = Math.max(0, Math.min(items.length - 1, index));
     const item = items[selected];
+    if (remember) inspected.set(key, identity(item));
     readout.replaceChildren(...describe(item).map((line, i) => el(i === 0 ? "strong" : "span", line)));
     if (marker) { const x = position.x(item); marker.setAttribute("x1", x); marker.setAttribute("x2", x); marker.setAttribute("visibility", "visible"); }
   };
@@ -68,7 +95,7 @@ function inspectable(svgNode, items, describe, position) {
     if (target === undefined) return;
     event.preventDefault(); show(target);
   });
-  svgNode.addEventListener("focus", () => show(selected));
+  svgNode.addEventListener("focus", () => show(selected, false));
   const pointer = (event) => {
     const bounds = svgNode.getBoundingClientRect();
     const width = Number(svgNode.getAttribute("data-width"));
@@ -78,413 +105,597 @@ function inspectable(svgNode, items, describe, position) {
     show(best);
   };
   svgNode.addEventListener("pointermove", pointer); svgNode.addEventListener("click", pointer);
-  show(selected);
+  show(selected, false);
   return readout;
 }
 
-/** Bullet meter: fill = used, tick = even pace to the reset, hatched extension = projection at reset. */
+/** Bullet meter: fill = used, hatched extension = projection to the reset, tick = even pace. Stale meters are muted, without pace. */
+function track(live, className = "meter-track") {
+  const bar = el("div", null, className);
+  bar.setAttribute("role", "img");
+  if (!live?.cycle) return bar;
+  const used = Math.min(100, live.used), fresh = !live.stale && live.state !== "unreported";
+  if (!fresh) bar.dataset.stale = "true";
+  const fill = el("i", null, "meter-fill"); fill.style.width = `${used}%`;
+  bar.append(fill);
+  if (fresh && live.state === "active" && live.projected !== null && live.projected !== undefined && live.projected > live.used) {
+    const projection = el("i", null, "meter-projection");
+    projection.style.left = `${used}%`;
+    projection.style.width = `${Math.max(0, Math.min(100, live.projected) - used)}%`;
+    bar.append(projection);
+  }
+  if (fresh && live.state === "active" && live.elapsed !== undefined) {
+    const pace = el("i", null, "meter-pace"); pace.style.left = `${live.elapsed * 100}%`; bar.append(pace);
+  }
+  return bar;
+}
+
+const isSession = (live) => live.meter.windowMinutes === 300;
+
+/** When a meter resets, absolute and relative; idle meters say how their next window starts. */
+function resetText(live, fmt) {
+  if (!live) return "No reading yet";
+  if (live.cycle) return `Resets ${fmt.when(live.cycle.resetsAt)} · ${fmt.relative(live.cycle.resetsAt)}`;
+  if (live.nextResetAt) return `Resets ${fmt.when(live.nextResetAt)} · ${fmt.relative(live.nextResetAt)}`;
+  return isSession(live) ? "No window open · your next message starts one" : "Starts with your next request";
+}
+
+/** One sentence per meter, in plain words. */
+function meterSentence(live, fmt, now) {
+  if (live.state === "retired") return { text: "The provider no longer reports this meter." };
+  if (!live.cycle) return { text: live.nextResetAt ? `No use since the last reset. Next reset ${fmt.when(live.nextResetAt)}, on its fixed weekly schedule.` : resetText(live, fmt) };
+  const reset = `resets ${fmt.when(live.cycle.resetsAt)} (${fmt.relative(live.cycle.resetsAt)})`;
+  const restarted = live.segment?.before ? ` Restarted in place ${fmt.when(live.segment.start)}.` : "";
+  const used = `${percentText(live.used)} used`;
+  if (live.state === "unreported") return { text: `${used} at the last report, ${fmt.when(live.observedAt)}. The provider no longer reports this meter.` };
+  if (live.state === "overage") return { text: `Past the included allowance, on paid extra usage; ${reset}.${restarted}`, tone: "warn" };
+  if (live.state === "capped") return { text: `Limit reached ${fmt.when(live.capAt)}; ${reset}.${restarted}`, tone: "danger" };
+  if (live.capsEarly) return { text: `${used}. At this pace it runs out ${fmt.when(live.capAt)}, ${formatDuration(live.cycle.resetsAt - live.capAt)} before it ${reset}.${restarted}`, tone: "warn" };
+  if (live.mayBeUsedUp) return { text: `${used} at ${fmt.when(live.observedAt)}. The pace before that reaches 100% by now, so it may already be used up; ${reset}.`, tone: "warn" };
+  if (live.stale) return { text: `${used} at the last reading, ${fmt.when(live.observedAt)} (${formatDuration(now - live.observedAt)} ago); ${reset}.${restarted}` };
+  if (live.projected === null || live.projected === undefined) return { text: `${used}; ${live.tooEarly ? "too early in the window to project" : "levels only, no projection"}; ${reset}.${restarted}` };
+  return { text: `${used}; on pace to close near ${percentText(Math.min(100, live.projected))}; ${reset}.${restarted}` };
+}
+
 function meterRow(live, fmt, now) {
   const row = el("div", null, "meter-row");
-  const color = providerColor(live.meter.provider);
   const head = el("div", null, "meter-head");
-  head.append(el("span", live.meter.label, "meter-name"));
-  const value = el("span", live.cycle ? `${Math.round(live.used)}%` : DASH, "meter-value");
-  head.append(value);
-  const track = el("div", null, "meter-track");
-  track.setAttribute("role", "img");
-  track.style.setProperty("--meter-color", color);
-  if (live.cycle) {
-    const fill = el("i", null, "meter-fill"); fill.style.width = `${Math.min(100, live.used)}%`;
-    track.append(fill);
-    if (live.state === "active" && live.projected !== null && live.projected !== undefined && live.projected > live.used) {
-      const projection = el("i", null, "meter-projection");
-      projection.style.left = `${Math.min(100, live.used)}%`;
-      projection.style.width = `${Math.max(0, Math.min(100, live.projected) - Math.min(100, live.used))}%`;
-      track.append(projection);
-    }
-    if (live.elapsed !== undefined && !live.stale) {
-      const pace = el("i", null, "meter-pace"); pace.style.left = `${live.elapsed * 100}%`; track.append(pace);
-    }
-  }
-  const status = el("p", null, "meter-status");
-  let sentence;
-  if (live.state === "retired") sentence = "The provider no longer reports this meter.";
-  else if (!live.cycle) sentence = live.nextResetAt ? `No reading since the last reset. This limit resets on a fixed weekly schedule: next ${fmt.time(live.nextResetAt)}.` : "No active window. The next request starts one.";
-  else if (live.state === "unreported") sentence = `${Math.round(live.used)}% at the last report (${fmt.time(live.observedAt)}). The provider no longer reports this meter.`;
-  else {
-    const reset = `Resets ${fmt.time(live.cycle.resetsAt)}, in ${formatDuration(live.cycle.resetsAt - now)}.`;
-    const restarted = live.segment?.before ? ` Restarted in place ${fmt.time(live.segment.start)}.` : "";
-    if (live.state === "overage") { sentence = `Past the included allowance, on paid extra usage. ${reset}`; status.dataset.tone = "warn"; }
-    else if (live.state === "capped") { sentence = `Limit reached ${fmt.time(live.capAt)}. ${reset}`; status.dataset.tone = "danger"; }
-    else if (live.capsEarly) { sentence = `At this pace it runs out ${fmt.time(live.capAt)}, ${formatDuration(live.cycle.resetsAt - live.capAt)} early. ${reset}`; status.dataset.tone = "warn"; }
-    else if (live.mayBeUsedUp) { sentence = `May already be used up: the pace before the last reading reaches 100% by now. ${reset}`; status.dataset.tone = "warn"; }
-    else if (live.stale) sentence = reset;
-    else if (live.projected === null || live.projected === undefined) sentence = `${live.tooEarly ? "Too early in the window to project" : "No projection for readings without an account"}. ${reset}`;
-    else sentence = `On pace to close near ${Math.round(Math.min(100, live.projected))}%. ${reset}`;
-    sentence += restarted;
-    if (live.stale) sentence += ` Last reading ${formatDuration(now - live.observedAt)} ago.`;
-  }
-  status.textContent = sentence;
-  track.setAttribute("aria-label", `${live.meter.label}: ${sentence}`);
-  row.append(head, track, status);
+  head.append(el("span", live.meter.label.replace(" · all models", ""), "meter-name"),
+    el("span", live.cycle ? `${percentText(leftOf(live))} left` : live.state === "idle" ? "100% left" : DASH, "meter-value"));
+  const bar = track(live);
+  const { text, tone } = meterSentence(live, fmt, now);
+  const status = el("p", text, "meter-status");
+  if (tone) status.dataset.tone = tone;
+  bar.setAttribute("aria-label", `${live.meter.label}: ${text}`);
+  row.append(head, bar, status);
   return row;
 }
 
-const segmentOf = (cycle, sample) => cycle.segments.find((segment) => segment.samples.includes(sample)) ?? cycle.segments[0];
-
-/** Current weekly cycle: used % against time, with the even-pace diagonal from the current segment and the projection to reset. */
-function burnChart(container, item, fmt, now) {
-  const live = item.weekly;
-  container.replaceChildren();
-  if (!live?.cycle) { container.append(note(live?.nextResetAt ? `No reading since the last weekly reset. The next one is ${fmt.time(live.nextResetAt)}.` : "No active weekly cycle. Your next request starts one.")); return; }
-  const cycle = live.cycle, width = chartWidth(container, 520, 260), height = 180, left = 36, right = 12, top = 10, bottom = 26;
-  const plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const x = (t) => left + (t - cycle.start) / Math.max(1, cycle.resetsAt - cycle.start) * plotWidth;
-  const y = (value) => top + (1 - Math.min(100, value) / 100) * plotHeight;
-  const color = providerColor(item.provider);
-  const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, "data-width": width, role: "group", class: "subscription-chart", "aria-label": `${item.label} weekly cycle: ${Math.round(live.used)}% used, ${Math.round((live.elapsed ?? 0) * 100)}% of the time to the reset elapsed. Use Left and Right to inspect readings.` });
-  for (const tick of [0, 50, 100]) {
-    root.append(svg("line", { x1: left, x2: width - right, y1: y(tick), y2: y(tick), class: tick === 100 ? "limit-line" : "grid-line" }));
-    root.append(svg("text", { x: left - 6, y: y(tick) + 4, "text-anchor": "end", class: "axis-label" }, `${tick}%`));
-  }
-  for (let day = 0; day <= 7; day += 1) {
-    const t = cycle.start + day * DAY;
-    if (t > cycle.resetsAt) break;
-    if (day % (plotWidth < 360 ? 2 : 1) === 0) root.append(svg("text", { x: x(t), y: height - 8, "text-anchor": day === 0 ? "start" : day === 7 ? "end" : "middle", class: "axis-label" }, fmt.day(t)));
-  }
-  const segment = live.segment;
-  root.append(svg("line", { x1: x(segment.start), y1: y(0), x2: x(cycle.resetsAt), y2: y(100), class: "pace-line" }));
-  // Each segment is its own line: an in-place reset is a marked restart, not a cliff.
-  for (const part of cycle.segments) {
-    const shown = part.samples.filter((sample) => sample.t <= now);
-    if (shown.length) root.append(svg("path", { d: shown.map((sample, index) => `${index ? "L" : "M"}${x(sample.t).toFixed(1)},${y(sample.used).toFixed(1)}`).join(" "), class: "used-line", stroke: color }));
-    if (part.before) {
-      root.append(svg("line", { x1: x(part.start), x2: x(part.start), y1: top, y2: top + plotHeight, class: "grid-line" }));
-      root.append(svg("text", { x: x(part.start) + 3, y: top + 10, class: "axis-label" }, "reset"));
-    }
-  }
-  const points = cycle.samples.filter((sample) => sample.t <= now);
-  if (live.state === "active" && live.projected !== null && live.projected !== undefined && points.length) {
-    const last = points[points.length - 1];
-    const endT = live.capsEarly ? live.capAt : cycle.resetsAt;
-    // The projection starts now: time since the last reading counts at the cycle's pace.
-    root.append(svg("path", { d: `M${x(now)},${y(live.used)} L${x(endT)},${y(live.capsEarly ? 100 : live.projected)}`, class: "projection-line", stroke: color }));
-    root.append(svg("circle", { cx: x(last.t), cy: y(last.used), r: 4, fill: color, class: "end-dot" }));
-  }
-  root.append(svg("line", { x1: x(now), x2: x(now), y1: top, y2: top + plotHeight, class: "now-line" }));
-  const marker = svg("line", { x1: 0, x2: 0, y1: top, y2: top + plotHeight, class: "inspect-line", visibility: "hidden" });
-  root.append(marker);
-  const readout = inspectable(root, points, (sample) => [
-    `${fmt.time(sample.t)} · ${Math.round(sample.used)}% used`,
-    `Even pace: ${Math.round(Math.min(1, Math.max(0, (sample.t - segmentOf(cycle, sample).start) / (cycle.resetsAt - segmentOf(cycle, sample).start))) * 100)}%`,
-    sample.status === "rejected" ? "Requests refused on this meter" : "",
-  ].filter(Boolean), { x: (sample) => x(sample.t), marker });
-  const key = el("p", null, "chart-key");
-  key.append(el("span", "Used", "key-used"), el("span", "Projection", "key-projection"), el("span", "Even pace", "key-pace"), el("span", "Now", "key-now"));
-  key.style.setProperty("--meter-color", color);
-  container.append(root, key, readout);
+function statusText(status, fmt, now) {
+  const session = status.meter === "session";
+  return {
+    capped: () => `${session ? "5-hour limit capped" : "Capped"} until ${fmt.when(status.until)}`,
+    overage: () => "Using extra usage",
+    "runs-out": () => `${session ? "5-hour limit runs" : "Runs"} out ${fmt.when(status.at)} · ${formatDuration(status.early)} early`,
+    "may-be-used-up": () => "May be used up",
+    stale: () => `Last seen ${formatDuration(now - status.since)} ago`,
+    "too-early": () => "Too early to tell",
+    "on-track": () => "On track",
+    idle: () => "Not used this week",
+    "levels-only": () => "Levels only",
+  }[status.kind]();
 }
 
-/** Closing level of each weekly reset, one row per account. The live cycle is drawn hollow at its projected level. */
-function resetsChart(container, items, fmt, now) {
-  container.replaceChildren();
-  const rows = items.filter((item) => item.weeklyMeter);
-  if (!rows.length) { container.append(note("No weekly meter readings yet.")); return; }
-  for (const item of rows) {
-    const cycles = [...item.history.slice(-12).map((cycle) => ({ ...cycle, live: false }))];
-    if (item.weekly?.cycle) cycles.push({ resetsAt: item.weekly.cycle.resetsAt, peak: Math.min(100, item.weekly.used), projected: Math.min(100, item.weekly.projected ?? item.weekly.used), live: true, capped: item.weekly.state === "capped" || item.weekly.capsEarly });
-    const block = el("div", null, "resets-row");
-    const label = el("p", null, "resets-label"); label.append(providerMark(item.provider), el("span", item.label));
-    block.append(label);
-    const width = chartWidth(container, 520, 260), height = 132, left = 36, right = 8, top = 8, bottom = 22;
-    const slots = Math.max(cycles.length, 6), band = (width - left - right) / slots, barWidth = Math.min(28, band * 0.6);
-    const y = (value) => top + (1 - value / 100) * (height - top - bottom);
-    const bx = (index) => left + band * (slots - cycles.length + index) + band / 2;
-    const color = providerColor(item.provider);
-    const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, "data-width": width, role: "group", class: "subscription-chart", "aria-label": `${item.label} weekly resets: closing utilization per cycle. Use Left and Right to inspect.` });
-    for (const tick of [0, 50, 100]) {
-      root.append(svg("line", { x1: left, x2: width - right, y1: y(tick), y2: y(tick), class: tick === 100 ? "limit-line" : "grid-line" }));
-      root.append(svg("text", { x: left - 6, y: y(tick) + 4, "text-anchor": "end", class: "axis-label" }, `${tick}%`));
-    }
-    cycles.forEach((cycle, index) => {
-      const cx = bx(index), level = cycle.live ? cycle.projected : cycle.peak;
-      if (cycle.live) {
-        root.append(svg("rect", { x: cx - barWidth / 2, y: y(level), width: barWidth, height: Math.max(1, y(0) - y(level)), rx: 3, class: "bar-projected", stroke: color }));
-        root.append(svg("rect", { x: cx - barWidth / 2, y: y(cycle.peak), width: barWidth, height: Math.max(1, y(0) - y(cycle.peak)), rx: 3, fill: color, "fill-opacity": 0.55 }));
-      } else {
-        root.append(svg("rect", { x: cx - barWidth / 2, y: y(cycle.peak), width: barWidth, height: Math.max(1, y(0) - y(cycle.peak)), rx: 3, fill: cycle.endedEarly || cycle.lowerBound ? "var(--neutral-mark)" : color }));
-      }
-      if (cycle.capped) root.append(svg("circle", { cx, cy: y(100) - 5, r: 3, class: "capped-dot" }));
-      if (index === cycles.length - 1 || index % Math.ceil(cycles.length / 6) === 0) root.append(svg("text", { x: cx, y: height - 6, "text-anchor": "middle", class: "axis-label" }, fmt.date(cycle.resetsAt)));
-    });
-    const marker = svg("line", { x1: 0, x2: 0, y1: top, y2: y(0), class: "inspect-line", visibility: "hidden" });
-    root.append(marker);
-    const readout = inspectable(root, cycles, (cycle) => cycle.live ? [
-      `Current cycle · resets ${fmt.time(cycle.resetsAt)}`,
-      `${Math.round(cycle.peak)}% used so far; on pace for ${Math.round(cycle.projected)}%${cycle.capped ? " (runs out before the reset)" : ""}`,
-    ] : [
-      `Reset ${fmt.time(cycle.resetsAt)} · closed at ${cycle.lowerBound ? "at least " : ""}${Math.round(cycle.peak)}%`,
-      cycle.endedEarly
-        ? cycle.restored !== null ? `${cycle.cause === "credit" ? "Banked reset redeemed" : "Reset early"} at ${Math.round(cycle.restored)}% used: restored ${Math.round(cycle.restored)}% of a week${cycle.restoredUsd !== null ? ` (≈ ${usd(cycle.restoredUsd)})` : ""}` : "Reset early; the level at the reset was not observed"
-        : cycle.expired !== null ? `${Math.round(cycle.expired)}% expired unused${cycle.expiredUsd !== null ? ` (≈ ${usd(cycle.expiredUsd)} API value)` : ""}` : "The last reading came long before the reset, so the unused share is unknown",
-      ...cycle.inPlace.map((reset) => `${reset.cause === "credit" ? "Banked reset redeemed" : "Provider reset"} in place ${fmt.time(reset.at)}${reset.restored !== null ? `, restoring ${Math.round(reset.restored)}%${reset.restoredUsd !== null ? ` (≈ ${usd(reset.restoredUsd)})` : ""}` : ""}`),
-      cycle.capped ? `Capped for ${formatDuration(cycle.lockedSeconds)} before the reset` : "",
-    ].filter(Boolean), { x: (cycle) => bx(cycles.indexOf(cycle)), marker });
-    block.append(root, readout);
-    container.append(block);
+/** One row per account: weekly and 5-hour bars, % left, the reset and one status. */
+function limitRow(item, status, fmt, now) {
+  const row = el("li", null, "limit-row");
+  row.dataset.tone = status.tone;
+  row.style.setProperty("--meter-color", providerColor(item.provider));
+  const { weekly, session } = visibleMeters(item);
+  const name = el("div", null, "limit-account");
+  name.append(providerMark(item.provider), el("strong", item.label));
+  const bars = el("div", null, "limit-bars");
+  const line = (live, label, thin) => {
+    const meter = el("div", null, `limit-meter${thin ? " thin" : ""}`);
+    const bar = track(live, `meter-track${thin ? " thin" : ""}`);
+    bar.setAttribute("aria-label", `${label}: ${live?.cycle ? `${percentText(live.used)} used, ${percentText(leftOf(live))} left` : "no use in this window"}. ${resetText(live, fmt)}.`);
+    meter.append(el("span", label, "limit-meter-name"), bar);
+    return meter;
+  };
+  bars.append(line(weekly, "Weekly", false));
+  if (session) {
+    bars.append(line(session, "5-hour", true));
+    bars.append(el("p", session.cycle ? `5-hour: ${percentText(leftOf(session))} left · resets ${fmt.when(session.cycle.resetsAt)}` : "5-hour: no window open", "limit-session"));
   }
-  container.append(note("Bars show each weekly meter's highest reading before it reset. The hollow bar is the current cycle at its projected close. A dot marks a cycle that hit its limit. Grey bars are cycles that reset early, from a reset credit or a provider-wide reset, or whose closing level was not observed."));
+  const left = el("div", null, "limit-left");
+  left.append(el("strong", weekly?.cycle ? percentText(leftOf(weekly)) : weekly ? "100%" : DASH), el("span", "left this week"));
+  if (weekly?.stale || weekly?.state === "unreported") left.dataset.stale = "true";
+  const chip = el("span", statusText(status, fmt, now), "status-chip");
+  chip.dataset.tone = status.tone;
+  // On wide screens the reset and the status are grid columns; narrower, they share one wrapping line.
+  const when = el("div", null, "limit-when");
+  when.append(el("p", resetText(weekly, fmt), "limit-reset"), chip);
+  row.append(name, bars, left, when);
+  return row;
 }
 
-/** Five-hour windows over the last seven days: width = window, height = peak, red base = time locked out. */
-function windowsChart(container, items, fmt, now) {
-  container.replaceChildren();
-  const rows = items.filter((item) => item.windows?.windows.length);
-  if (!rows.length) { container.append(note("No 5-hour window readings in the last 7 days. ChatGPT Pro has no 5-hour limit; Claude windows appear once meters are recorded.")); return; }
-  for (const item of rows) {
-    const { windows, from, to } = item.windows;
-    const width = chartWidth(container, 1040, 300), height = 120, left = 36, right = 8, top = 8, bottom = 22;
-    const x = (t) => left + (Math.max(from, Math.min(to, t)) - from) / (to - from) * (width - left - right);
-    const y = (value) => top + (1 - value / 100) * (height - top - bottom);
-    const color = providerColor(item.provider);
-    const block = el("div", null, "resets-row");
-    const label = el("p", null, "resets-label"); label.append(providerMark(item.provider), el("span", `${item.label} · ${windows.length} window${windows.length === 1 ? "" : "s"}, ${item.windows.capped} capped, ${formatDuration(item.windows.lockedSeconds)} locked out`));
-    block.append(label);
-    const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, "data-width": width, role: "group", class: "subscription-chart", "aria-label": `${item.label} 5-hour windows in the last 7 days. Use Left and Right to inspect each window.` });
-    for (const tick of [0, 100]) {
-      root.append(svg("line", { x1: left, x2: width - right, y1: y(tick), y2: y(tick), class: tick === 100 ? "limit-line" : "grid-line" }));
-      root.append(svg("text", { x: left - 6, y: y(tick) + 4, "text-anchor": "end", class: "axis-label" }, `${tick}%`));
-    }
-    for (let t = Math.ceil(from / DAY) * DAY; t < to; t += DAY) root.append(svg("text", { x: x(t), y: height - 6, "text-anchor": "middle", class: "axis-label" }, fmt.day(t)));
-    for (const window of windows) {
-      const x0 = x(window.start) + 1, x1 = x(Math.min(window.end, now)) - 1;
-      root.append(svg("rect", { x: x0, y: y(window.peak), width: Math.max(2, x1 - x0), height: Math.max(1, y(0) - y(window.peak)), rx: 2, fill: color, "fill-opacity": window.active ? 0.5 : 0.85 }));
-      if (window.cappedAt !== null) root.append(svg("rect", { x: x(window.cappedAt), y: y(0) + 2, width: Math.max(2, x(Math.min(window.end, now)) - x(window.cappedAt)), height: 4, rx: 2, class: "locked-band" }));
-    }
-    const marker = svg("line", { x1: 0, x2: 0, y1: top, y2: y(0), class: "inspect-line", visibility: "hidden" });
-    root.append(marker);
-    const readout = inspectable(root, windows, (window) => [
-      `${fmt.time(window.start)} – ${fmt.time(window.resetsAt)}${window.active ? " · active" : ""}`,
-      `Peak ${Math.round(window.peak)}%`,
-      window.cappedAt !== null ? `Limit reached ${fmt.time(window.cappedAt)}; locked out ${formatDuration(window.lockedSeconds)}` : "",
-    ].filter(Boolean), { x: (window) => (x(window.start) + x(Math.min(window.end, now))) / 2, marker });
-    block.append(root, readout);
-    container.append(block);
-  }
-  container.append(note("A 5-hour window starts with your first message after the previous one ends. Gaps between bars are hours with no window open. The red base marks time spent locked out after reaching the limit."));
-}
-
-function planSelect(item, onChange) {
-  const label = el("label", null, "plan-select");
-  label.append(el("span", "Plan", "sr-only"));
-  const select = document.createElement("select");
-  select.setAttribute("aria-label", `${item.label} plan`);
-  const automatic = document.createElement("option");
-  const detectedPlan = subscriptionPlans[item.provider].find((plan) => plan.id === item.account.plan);
-  automatic.value = ""; automatic.textContent = detectedPlan ? `Detected: ${detectedPlan.label}` : "Plan not detected";
-  select.append(automatic);
-  for (const plan of subscriptionPlans[item.provider]) {
-    const option = document.createElement("option");
-    option.value = plan.id; option.textContent = `${plan.label}${plan.monthlyUsd !== null ? ` · $${plan.monthlyUsd}/mo` : ""}${plan.payer === "organization" ? " · paid by the organization" : ""}`;
-    select.append(option);
-  }
-  const none = document.createElement("option"); none.value = "none"; none.textContent = "Exclude from value totals"; select.append(none);
-  select.value = readPlan(item.key) ?? "";
-  select.addEventListener("change", () => { writePlan(item.key, select.value); onChange(); });
-  label.append(select);
-  return label;
-}
-
-function resetsSection(item, fmt, now, codexAccount) {
-  const section = el("section", null, "resets-section");
-  section.append(el("h4", "Resets and credits"));
-  const list = el("dl", null, "subscription-facts resets-facts");
-  const fact = (term, value, detail) => { const row = el("div"); row.append(el("dt", term), el("dd", value)); if (detail) row.append(el("small", detail)); list.append(row); };
-  const banked = item.resets;
-  if (item.provider === "codex" && !banked.known && codexAccount !== "ok") {
-    fact("Banked resets", DASH, codexAccount === "off" ? "Not read (turned off)" : "Codex app-server did not answer");
-  } else if (banked.known || banked.available) {
-    fact("Banked resets", String(banked.available), banked.upToUsd !== null && banked.available ? `Up to ${usd(banked.upToUsd)} if redeemed at 100%` : banked.available ? "" : "None available");
-    for (const credit of banked.credits.slice(0, 4)) {
-      const scope = credit.scope === "five_hour" ? "5-hour reset" : credit.scope === "seven_day" ? "Weekly reset" : "Full reset";
-      const restore = banked.nowValue(credit);
-      fact(scope, credit.expiresAt ? `expires ${fmt.date(credit.expiresAt)}` : "no expiry",
-        `${credit.expiresAt ? `in ${formatDuration(credit.expiresAt - now)} · ` : ""}${restore !== null ? `restores ${usd(restore)} now` : ""}`);
-    }
-  }
-  const credits = item.account.codex?.credits;
-  if (credits) fact("Credit balance", credits.unlimited ? "Unlimited" : credits.balance !== null ? integer(Math.round(credits.balance)) : DASH, "Used after the included allowance runs out");
-  const extra = item.account.extraUsage;
-  if (extra) {
-    const label = { enabled: "On", "in-use": "In use", disabled: "Off", unknown: "Unknown" }[extra.extraUsage];
-    fact("Extra usage", label, extra.disabledReason ? extra.disabledReason.replace(/_/g, " ") : extra.extraUsage === "disabled" ? "" : "Billed at API rates past a limit");
-  }
-  const inPlace = (reset) => ({ term: "Restarted in place", at: reset.at, restored: reset.restored, restoredUsd: reset.restoredUsd });
-  const early = item.history.flatMap((cycle) => [
-    ...cycle.inPlace.map(inPlace),
-    ...(cycle.endedEarly ? [{ term: cycle.cause === "credit" ? "Reset redeemed" : "Early reset", at: cycle.end, restored: cycle.restored, restoredUsd: cycle.restoredUsd }] : []),
-  ]).concat(item.restarts.map(inPlace)).sort((left, right) => left.at - right.at).slice(-3);
-  for (const reset of early) {
-    fact(reset.term, `${fmt.date(reset.at)}${reset.restored !== null ? ` at ${Math.round(reset.restored)}%` : ""}`,
-      reset.restored !== null ? `Restored ${Math.round(reset.restored)}% of a week${reset.restoredUsd !== null ? ` (≈ ${usd(reset.restoredUsd)})` : ""}` : "The level at the reset was not observed");
-  }
+function limitsNow(entries, fmt, now, generatedAt) {
+  const section = el("section", null, "panel limits-now");
+  section.setAttribute("aria-labelledby", "limits-now-title");
+  const header = el("header");
+  const title = el("h3", "Limits now"); title.id = "limits-now-title";
+  header.append(title, el("span", `Read ${generatedAt ? fmt.when(generatedAt) : "now"} · refreshes every 2 minutes · times in ${fmt.zone}`, "panel-meta"));
+  section.append(header);
+  const list = el("ol", null, "limit-rows");
+  for (const { item, status } of entries) list.append(limitRow(item, status, fmt, now));
   section.append(list);
   return section;
 }
 
-const valueScope = (item) => ({
-  profiles: `Value from ${integer(item.value.sessions)} of this machine's sessions in this account's profiles.`,
-  provider: `Value from this machine's ${integer(item.value.sessions)} ${providerNames[item.provider]} sessions: it is the only ${providerNames[item.provider]} account.`,
-  none: "No sessions could be matched to this account, so its value is unknown.",
-})[item.value.basis];
+/** At most three suggestions, one line each; the reasoning opens under "Why?". */
+function nextActions(advice) {
+  const section = el("section", null, "panel subscription-next");
+  section.setAttribute("aria-labelledby", "subscription-next-title");
+  const title = el("h3", "Next"); title.id = "subscription-next-title";
+  section.append(title);
+  const item = (entry, index) => {
+    const row = el("li", null, "next-item");
+    row.dataset.tone = entry.tone;
+    const details = disclosure(`why:${index}`, [el("span", toneLabels[entry.tone], "next-tone"), ...(entry.provider ? [providerMark(entry.provider)] : []), el("span", entry.title, "next-title"), el("span", "Why?", "next-why")]);
+    details.append(el("p", entry.detail));
+    row.append(details);
+    return row;
+  };
+  if (!advice.length) { section.append(note("Nothing needs attention: no account is on course to run out early or to leave much of its week unused.")); return section; }
+  const list = el("ol", null, "next-list");
+  advice.slice(0, 3).forEach((entry, index) => list.append(item(entry, index)));
+  section.append(list);
+  if (advice.length > 3) {
+    const more = disclosure("next-more", `${advice.length - 3} more suggestion${advice.length === 4 ? "" : "s"}`, { className: "next-more" });
+    const rest = el("ol", null, "next-list");
+    advice.slice(3).forEach((entry, index) => rest.append(item(entry, index + 3)));
+    more.append(rest);
+    section.append(more);
+  }
+  return section;
+}
 
-function accountCard(item, fmt, now, onChange, codexAccount) {
+const segmentOf = (cycle, sample) => cycle.segments.find((segment) => segment.samples.includes(sample)) ?? cycle.segments[0];
+
+/** Current weekly cycle: each segment its own line, an in-place reset marked where it happened, the projection from now. */
+function burnChart(container, item, fmt, now) {
+  const live = item.weekly;
+  container.replaceChildren();
+  if (!live?.cycle) { container.append(note(live?.nextResetAt ? `No use since the last weekly reset. The next one is ${fmt.when(live.nextResetAt)}.` : "No weekly cycle open: your next request starts one.")); return; }
+  const cycle = live.cycle, width = chartWidth(container, 520, 260), height = 168, left = 36, right = 12, top = 12, bottom = 24;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const x = (t) => left + (t - cycle.start) / Math.max(1, cycle.resetsAt - cycle.start) * plotWidth;
+  const y = (value) => top + (1 - Math.min(100, value) / 100) * plotHeight;
+  const color = providerColor(item.provider);
+  const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, "data-width": width, role: "group", class: "subscription-chart", "aria-label": `${item.label}, current week: ${percentText(live.used)} used, ${Math.round((live.elapsed ?? 0) * 100)}% of the time to the reset gone. Use Left and Right to inspect readings.` });
+  for (const tick of [0, 50, 100]) {
+    root.append(svg("line", { x1: left, x2: width - right, y1: y(tick), y2: y(tick), class: tick === 100 ? "limit-line" : "grid-line" }));
+    root.append(svg("text", { x: left - 6, y: y(tick) + 4, "text-anchor": "end", class: "axis-label" }, `${tick}%`));
+  }
+  const step = plotWidth < 300 ? 3 : plotWidth < 420 ? 2 : 1;
+  for (let day = 0; day <= 7; day += step) {
+    const t = cycle.start + day * DAY;
+    if (t > cycle.resetsAt) break;
+    root.append(svg("text", { x: x(t), y: height - 6, "text-anchor": day === 0 ? "start" : day === 7 ? "end" : "middle", class: "axis-label" }, fmt.day(t)));
+  }
+  const segment = live.segment;
+  if (!live.stale) root.append(svg("line", { x1: x(segment.start), y1: y(0), x2: x(cycle.resetsAt), y2: y(100), class: "pace-line" }));
+  for (const part of cycle.segments) {
+    const shown = part.samples.filter((sample) => sample.t <= now);
+    if (part.before) {
+      root.append(svg("line", { x1: x(part.start), x2: x(part.start), y1: top, y2: top + plotHeight, class: "reset-marker" }));
+      root.append(svg("text", { x: x(part.start) + 4, y: top + 10, class: "axis-label reset-label" }, "reset"));
+    }
+    if (shown.length) root.append(svg("path", { d: shown.map((sample, index) => `${index ? "L" : "M"}${x(sample.t).toFixed(1)},${y(sample.used).toFixed(1)}`).join(" "), class: "used-line", stroke: color }));
+  }
+  const points = cycle.samples.filter((sample) => sample.t <= now);
+  const last = points.at(-1);
+  if (live.state === "active" && !live.stale && live.projected !== null && live.projected !== undefined && last) {
+    const endT = live.capsEarly ? live.capAt : cycle.resetsAt;
+    root.append(svg("path", { d: `M${x(now)},${y(live.used)} L${x(endT)},${y(live.capsEarly ? 100 : live.projected)}`, class: "projection-line", stroke: color }));
+  }
+  if (last) root.append(svg("circle", { cx: x(last.t), cy: y(last.used), r: 3.5, fill: color, class: "end-dot" }));
+  root.append(svg("line", { x1: x(now), x2: x(now), y1: top, y2: top + plotHeight, class: "now-line" }));
+  const marker = svg("line", { x1: 0, x2: 0, y1: top, y2: top + plotHeight, class: "inspect-line", visibility: "hidden" });
+  root.append(marker);
+  const readout = inspectable(root, `burn:${item.key}`, points, (sample) => sample.t, (sample) => {
+    const part = segmentOf(cycle, sample);
+    return [
+      `${fmt.time(sample.t)} · ${percentText(sample.used)} used`,
+      `Even pace by then: ${Math.round(Math.min(1, Math.max(0, (sample.t - part.start) / (cycle.resetsAt - part.start))) * 100)}%`,
+      sample.status === "rejected" ? "Requests refused on this meter" : sample.status === "overage" ? "On paid extra usage" : "",
+    ].filter(Boolean);
+  }, { x: (sample) => x(sample.t), marker });
+  const key = el("p", null, "chart-key");
+  key.append(el("span", "Used", "key-used"), el("span", "Projection", "key-projection"), el("span", "Even pace", "key-pace"), el("span", "Now", "key-now"));
+  if (cycle.segments.length > 1) key.append(el("span", "In-place reset", "key-reset"));
+  key.style.setProperty("--meter-color", color);
+  const pace = meterPace(live, now);
+  const paceText = live.stale || live.state !== "active" || !pace ? null
+    : `Pace ≈ ${rate(pace.segment)}${cycle.segments.length > 1 ? ` since the reset ${fmt.when(segment.start)}, ${rate(pace.cycle)} across the week` : " this week"}${pace.budget !== null ? `; up to ${rate(pace.budget)} lasts until the reset.` : "."}`;
+  container.append(root, key, readout);
+  if (paceText) container.append(note(paceText, "subscription-note chart-pace"));
+}
+
+function planControl(item, onChange) {
+  const label = el("label", null, "plan-chip");
+  label.append(el("span", `Plan for ${item.label}`, "sr-only"));
+  const select = el("select");
+  select.dataset.focusKey = `plan:${item.key}`;
+  const option = (value, text) => { const choice = el("option", text); choice.value = value; select.append(choice); };
+  const detected = planFor(item.provider, item.account.plan);
+  option("", detected ? `${shortPlan(detected)} · detected` : "Plan not detected");
+  for (const plan of subscriptionPlans[item.provider]) option(plan.id, `${shortPlan(plan)}${plan.monthlyUsd !== null ? ` · $${plan.monthlyUsd}/mo` : ""}${plan.payer === "organization" ? " · employer seat" : ""}`);
+  option("none", "Exclude from value totals");
+  select.value = readSetting(planKey(item.key)) ?? "";
+  select.addEventListener("change", () => { writeSetting(planKey(item.key), select.value); onChange?.(); });
+  label.append(select);
+  return label;
+}
+
+/** Banked resets, credits, extra usage and recent resets of one account. */
+function accountFacts(item, fmt, now, codexAccount) {
+  const list = el("dl", null, "subscription-facts account-facts");
+  const fact = (term, value, detail) => { const row = el("div"); row.append(el("dt", term), el("dd", value)); if (detail) row.append(el("small", detail)); list.append(row); };
+  const banked = item.resets;
+  if (item.provider === "codex" && !banked.known && codexAccount !== "ok") fact("Banked resets", DASH, codexAccount === "off" ? "Not read (turned off or offline)" : "The Codex app-server did not answer");
+  else if (banked.known || banked.available) {
+    const next = banked.credits.find((credit) => credit.expiresAt !== null);
+    fact("Banked resets", String(banked.available), banked.available
+      ? `${next ? `Next expires ${fmt.when(next.expiresAt)} (${fmt.relative(next.expiresAt)})` : "No expiry reported"}${banked.nowValue(banked.credits[0]) !== null ? ` · redeeming now restores ≈ ${usd(banked.nowValue(banked.credits[0]))}` : ""}`
+      : "None available");
+  }
+  const credits = item.account.codex?.credits;
+  if (credits) fact("Credit balance", credits.unlimited ? "Unlimited" : credits.balance !== null ? integer(Math.round(credits.balance)) : DASH, "Codex credits, used after the included allowance runs out");
+  const extra = item.account.extraUsage;
+  if (extra) {
+    const label = { enabled: "On", "in-use": "In use", disabled: "Off", unknown: "Unknown" }[extra.extraUsage];
+    fact("Extra usage", label, extra.extraUsage === "disabled" ? extra.disabledReason === "org_level_disabled" ? "Off for this organization: a cap means waiting for the reset" : "A cap means waiting for the reset" : "Billed at API rates past a limit");
+  }
+  const inPlace = (reset) => ({ term: reset.cause === "credit" ? "Banked reset redeemed" : "Restarted in place", at: reset.at, restored: reset.restored, restoredUsd: reset.restoredUsd });
+  const resets = item.history.flatMap((cycle) => [
+    ...cycle.inPlace.map(inPlace),
+    ...(cycle.endedEarly ? [{ term: cycle.cause === "credit" ? "Banked reset redeemed" : "Reset early", at: cycle.end, restored: cycle.restored, restoredUsd: cycle.restoredUsd }] : []),
+  ]).concat(item.restarts.map(inPlace)).filter((reset) => reset.at >= now - 30 * DAY).sort((left, right) => left.at - right.at).slice(-2);
+  for (const reset of resets) {
+    fact(reset.term, fmt.date(reset.at), reset.restored !== null ? `Gave back ${percentText(reset.restored)} of a week${reset.restoredUsd !== null ? ` (≈ ${usd(reset.restoredUsd)})` : ""}` : "The level before it was not observed");
+  }
+  return list.childElementCount ? list : null;
+}
+
+function accountCard(item, status, fmt, now, { onPlanChange, codexAccount, later }) {
   const card = el("article", null, "panel subscription-card");
   card.style.setProperty("--meter-color", providerColor(item.provider));
+  card.dataset.account = item.key;
+  if (item.excluded) card.dataset.excluded = "true";
   const header = el("header", null, "subscription-card-header");
   const title = el("h3"); title.append(providerMark(item.provider), el("span", item.label));
   header.append(title);
-  if (item.identified) header.append(planSelect(item, onChange));
+  if (item.identified) header.append(planControl(item, onPlanChange));
   card.append(header);
+  if (item.excluded) card.append(note("Excluded from value totals. Its limits still show here; choose a plan above to include it again."));
   if (!item.identified) card.append(note(item.account.attribution === "weekly-phase"
-    ? "Readings whose session was not found in any profile, grouped by weekly reset time. They are shown as reported, without pace, value or advice."
-    : "Readings that could not be tied to an account. They are shown as reported, without pace, value or advice."));
+    ? "Readings whose session was not found in any profile, grouped by weekly reset time. Shown as reported, without pace, value or advice."
+    : "Readings that could not be tied to an account. Shown as reported, without pace, value or advice."));
+  const { weekly, session, extra } = visibleMeters(item);
   const meters = el("div", null, "meter-list");
-  const live = item.live.filter((entry) => entry.cycle || (entry.state !== "retired" && (entry.meter === item.weeklyMeter || entry.meter === item.sessionMeter)));
-  if (!live.length) meters.append(note("No limit readings yet."));
-  for (const entry of live) meters.append(meterRow(entry, fmt, now));
+  for (const live of [weekly, session]) if (live) meters.append(meterRow(live, fmt, now));
+  if (!weekly && !session && !extra.length) meters.append(note("No limit readings yet."));
   card.append(meters);
+  if (extra.length) {
+    const scoped = extra.every((live) => live.meter.meter.includes(".") || /_(opus|sonnet)$/.test(live.meter.meter));
+    const more = disclosure(`limits:${item.key}`, `${scoped ? "Model-specific limits" : "Other limits"} · ${extra.length}`, { className: "more-limits" });
+    const list = el("div", null, "meter-list");
+    for (const live of extra) list.append(meterRow(live, fmt, now));
+    more.append(list);
+    card.append(more);
+  }
   if (!item.identified) return card;
-  card.append(resetsSection(item, fmt, now, codexAccount));
-  const chart = el("div", null, "burn-chart chart-slot");
-  card.append(el("h4", "Current weekly cycle"), chart);
-  burnChart(chart, item, fmt, now);
-  redrawOnResize(chart, () => burnChart(chart, item, fmt, now));
-  const { economics: money_, calibration, period } = item;
-  const facts = el("dl", null, "subscription-facts");
-  const fact = (term, value, title) => { const row = el("div"); const dt = el("dt", term); if (title) dt.title = title; row.append(dt, el("dd", value)); facts.append(row); };
-  fact("Value per 1% of the week", calibration.perPercent !== null ? money(calibration.perPercent) : DASH,
-    `${calibration.perPercent !== null ? `Median of ${calibration.cycles} cycles, range ${money(calibration.low)}–${money(calibration.high)}` : `Not enough history: needs ${calibrationMinimum} weekly readings of at least 5% with this account's activity (${calibration.cycles} so far)`}${calibration.excluded ? `; ${calibration.excluded} cycle${calibration.excluded === 1 ? "" : "s"} left out because local value explains almost none of the meter's movement` : ""}. ${valueScope(item)}`);
-  fact("Weekly capacity", usd(money_.weeklyCapacity), "API-equivalent value of 100% of one weekly allowance");
-  if (item.sessionCalibration?.perPercent) fact("One full 5-hour window", usd(item.sessionCalibration.perPercent * 100), "API-equivalent value of 100% of a 5-hour window");
-  fact("Monthly potential", usd(money_.monthlyPotential), "Weekly capacity × 4.35");
-  fact(`Extracted · ${Math.round(period.days * 10) / 10} days`, usd(money_.extracted), period.firstReading !== null ? `Since ${fmt.date(period.from)}: the selected dates, from this account's first meter reading, up to now` : "No meter readings in the selected dates");
-  fact("Value multiple", money_.multiple !== null ? `${money_.multiple.toFixed(1)}×` : DASH,
-    money_.price !== null ? `${usd(money_.extracted)} of API value for ${usd(money_.price)} of subscription` : money_.payer === "organization" ? "Paid by the organization: API value only, no personal price" : "Choose a plan to compare");
-  fact("Weekly resets used", item.utilization ? pct(item.utilization.mean) : DASH, item.utilization ? `Mean closing level of ${item.utilization.closed} observed cycle${item.utilization.closed === 1 ? "" : "s"}${item.utilization.includesProjection ? " plus the current projection" : ""}` : "Needs a weekly reset whose closing level was observed");
-  card.append(facts);
+  if (weekly) {
+    const chart = el("div", null, "burn-chart");
+    card.append(el("h4", "This week"), chart);
+    later.push(() => { burnChart(chart, item, fmt, now); redrawOnResize(chart, () => burnChart(chart, item, fmt, now)); });
+  }
+  const facts = accountFacts(item, fmt, now, codexAccount);
+  if (facts) card.append(facts);
   return card;
 }
 
-function recommendationList(items) {
-  const list = el("ol", null, "recommendations");
-  if (!items.length) { list.append(el("li", "Nothing to change: no meter is on course to run out early or leave much unused.", "recommendation")); return list; }
-  const toneLabel = { act: "Act now", watch: "Opportunity", good: "Going well", setup: "Setup" };
-  for (const item of items.slice(0, 8)) {
-    const entry = el("li", null, "recommendation");
-    entry.dataset.tone = item.tone;
-    const head = el("div", null, "recommendation-head");
-    head.append(el("span", toneLabel[item.tone], "recommendation-tone"));
-    if (item.provider) head.append(providerMark(item.provider));
-    head.append(el("strong", item.title));
-    entry.append(head, el("p", item.detail));
-    list.append(entry);
-  }
-  return list;
+const valueScope = (item) => ({
+  profiles: `${plural(item.value.sessions, "session")} in this account's profiles`,
+  provider: `this machine's ${plural(item.value.sessions, `${providerNames[item.provider]} session`)}; the only ${providerNames[item.provider]} account`,
+  none: "no sessions matched, so its value is unknown",
+})[item.value.basis];
+
+/** The plan and who pays for it; a listed price can be marked as paid by you or by an employer. */
+function payerControl(item, onChange) {
+  const plan = item.economics.plan;
+  if (!plan) return { text: item.excluded ? "Excluded" : "No plan", detail: item.excluded ? "left out of the totals" : "choose one on the card" };
+  if (plan.monthlyUsd === null) return { text: shortPlan(plan), detail: plan.payer === "organization" ? "employer pays · no list price" : "no list price" };
+  const cell = el("div", null, "plan-cell");
+  const select = el("select");
+  select.dataset.focusKey = `payer:${item.key}`;
+  select.setAttribute("aria-label", `Who pays for ${item.label}`);
+  for (const [value, text] of [["individual", "You pay"], ["organization", "Employer pays"]]) { const choice = el("option", text); choice.value = value; select.append(choice); }
+  select.value = item.economics.payer ?? plan.payer;
+  select.addEventListener("change", () => { writeSetting(payerKey(item.key), select.value === plan.payer ? null : select.value); onChange?.(); });
+  cell.append(el("span", `${shortPlan(plan)} · $${plan.monthlyUsd}/mo`), select);
+  return cell;
 }
 
-function sourcesPanel(limits, fmt) {
-  const panel = el("article", null, "panel subscription-sources");
-  panel.append(el("h3", "Sources and method"));
-  const table = el("table", null, "data-table");
-  const head = el("thead"), row = el("tr");
-  for (const name of ["Source", "Status", "Latest reading", "Read this refresh"]) row.append(el("th", name));
-  head.append(row); table.append(head);
-  const body = el("tbody");
-  for (const source of limits.sources) {
-    const line = el("tr");
-    line.append(el("td", sourceLabels[source.source] ?? source.source), el("td", source.status), el("td", source.latest ? fmt.time(source.latest) : DASH), el("td", String(source.read)));
-    body.append(line);
-  }
-  table.append(body);
-  const wrap = el("div", null, "table-wrap"); wrap.append(table);
-  panel.append(wrap);
+/** Value per account and totals that compare like with like; secondary, so it starts open only on wide screens. */
+function worthSection(model, items, fmt, { pending, onPlanChange, wide }) {
+  const section = el("section", null, "panel subscription-worth");
+  const details = disclosure("worth", [el("h3", "What it's worth"), el("span", "API-equivalent value of each allowance, from your own sessions", "panel-meta")], { open: wide, className: "section-disclosure" });
+  section.append(details);
+  if (pending) { details.append(note("Calibrating from history… Value appears when the session scan finishes; the limits above are already live.")); return section; }
+  const accounts = items.filter((item) => item.identified);
+  if (!accounts.length) { details.append(note("No account to value yet.")); return section; }
+  const { totals } = model;
+  const totalsList = el("dl", null, "worth-totals");
+  const total = (term, value, detail) => { const row = el("div"); row.append(el("dt", term), el("dd", value), el("small", detail)); totalsList.append(row); };
+  const pricedNames = accounts.filter((item) => !item.excluded && item.economics.extracted !== null && item.economics.price !== null).map((item) => item.label);
+  const earliest = Math.min(...accounts.map((item) => item.period.from));
+  total("Value used", usd(totals.extracted), `${fmt.date(earliest)} to now, matched to accounts${totals.capacityUsed !== null ? `; ${percentText(totals.capacityUsed * 100)} of what calibrated limits refilled` : ""}${totals.unattributed ? `; ${usd(totals.unattributed)} more matched none` : ""}`);
+  total("Value multiple", totals.priced.multiple !== null ? `${totals.priced.multiple.toFixed(1)}×` : DASH,
+    totals.priced.multiple !== null ? `${usd(totals.priced.extracted)} for ${usd(totals.priced.price)} of plan price: ${pricedNames.join(", ")}` : "Needs a plan you pay for with matched value");
+  total("A month of full use", usd(totals.monthlyPotential), totals.monthlyPotential === null ? "Needs two weekly cycles with matched sessions" : `${totals.potentialMultiple !== null ? `${Math.round(totals.potentialMultiple)}× the monthly price of priced plans` : "Every weekly reset used to 100%"}${totals.banked ? `; banked resets add up to ${usd(totals.banked)}` : ""}`);
+  total("Typical week closes at", totals.resetsUsed !== null ? percentText(totals.resetsUsed) : DASH, totals.resetsUsed !== null ? "Observed weekly closes, plus this week's projection" : "Needs a weekly reset whose close was observed");
+  details.append(totalsList);
+  const rows = accounts.map((item) => {
+    const { economics: value, calibration, period } = item;
+    return [
+      { text: item.label, detail: `Since ${fmt.date(period.from)}${period.firstReading !== null && period.from <= period.firstReading + 60 ? " (first reading)" : ""} · ${Math.round(period.days * 10) / 10} days${item.excluded ? " · excluded" : ""}` },
+      payerControl(item, onPlanChange),
+      calibration.perPercent !== null ? { text: money(calibration.perPercent), detail: `median of ${plural(calibration.cycles, "cycle")}` }
+        : { text: DASH, detail: `needs ${calibrationMinimum} cycles (${calibration.cycles} so far)` },
+      { text: usd(value.weeklyCapacity), detail: value.weeklyCapacity !== null ? "a full week" : "" },
+      value.extracted !== null ? { text: usd(value.extracted), detail: valueScope(item) } : { text: "Unknown", detail: valueScope(item) },
+      value.multiple !== null ? { text: `${value.multiple.toFixed(1)}×`, detail: `for ${usd(value.price)} of plan price` }
+        : { text: DASH, detail: value.payer === "organization" ? "employer pays: value only" : value.plan ? "no list price" : "choose a plan" },
+    ];
+  });
+  details.append(dataTable([
+    { text: "Account", align: "left" }, { text: "Plan", align: "left" }, "Per 1% of the week", "Weekly capacity", "Value used", "Value multiple",
+  ], rows, { rowHeader: true, className: "worth-table", caption: "Value per account" }));
+  const aside = [
+    totals.organization.extracted ? `${usd(totals.organization.extracted)} on employer-paid seats` : "",
+    totals.unpriced.extracted ? `${usd(totals.unpriced.extracted)} on plans without a price` : "",
+  ].filter(Boolean);
+  const excluded = items.filter((item) => item.excluded).map((item) => item.label);
+  details.append(note([
+    "The value multiple divides only the value of plans you pay for by their price, prorated from each account's first reading to now.",
+    aside.length ? `Not in the multiple: ${aside.join(" and ")}.` : "",
+    excluded.length ? `Excluded from totals: ${excluded.join(", ")}.` : "",
+    model.unattributed.remote ? "Other machines are combined into this snapshot; their sessions cannot be matched to accounts yet, so Codex value is left out." : "",
+  ].filter(Boolean).join(" ")));
+  return section;
+}
+
+/** A diagonal hatch in the account's colour: early resets, never grey (grey is Codex's own colour). */
+function hatch(root, color) {
+  const id = `subscription-hatch-${patterns += 1}`;
+  const defs = svg("defs"), pattern = svg("pattern", { id, width: 5, height: 5, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+  pattern.append(svg("rect", { width: 5, height: 5, fill: color, "fill-opacity": 0.16 }), svg("line", { x1: 1, y1: 0, x2: 1, y2: 5, stroke: color, "stroke-width": 2 }));
+  defs.append(pattern); root.append(defs);
+  return `url(#${id})`;
+}
+
+/** Weekly closes of every account on one time axis: filled when closed, hatched when reset early, outlined when the close was not observed. */
+function closesChart(container, rows, fmt, now) {
+  container.replaceChildren();
+  if (!rows.length) { container.append(note("No weekly meter readings yet.")); return; }
+  const cycles = rows.map((item) => [
+    ...item.history.slice(-12).map((cycle) => ({ ...cycle, at: cycle.endedEarly ? cycle.end : cycle.resetsAt, live: false, item })),
+    ...(item.weekly?.cycle ? [{ at: item.weekly.cycle.resetsAt, resetsAt: item.weekly.cycle.resetsAt, peak: Math.min(100, item.weekly.used), projected: Math.min(100, item.weekly.projected ?? item.weekly.used), live: true,
+      capped: item.weekly.state === "capped" || item.weekly.capsEarly, cappedNow: item.weekly.state === "capped", capAt: item.weekly.capAt, endedEarly: false, lowerBound: false, inPlace: item.restarts, item }] : []),
+  ]);
+  const all = cycles.flat();
+  if (!all.length) { container.append(note("No weekly resets observed yet.")); return; }
+  const width = chartWidth(container, 1040, 280), left = 36, right = 14;
+  const from = Math.min(...all.map((cycle) => cycle.at)) - 4 * DAY, to = Math.max(...all.map((cycle) => cycle.at)) + 2 * DAY;
+  const x = (t) => left + (t - from) / (to - from) * (width - left - right);
+  const barWidth = Math.max(3, Math.min(14, (width - left - right) / ((to - from) / (7 * DAY)) * 0.3));
+  rows.forEach((item, index) => {
+    const lane = cycles[index];
+    const lastLane = index === rows.length - 1, height = lastLane ? 92 : 72, top = 8, base = 64;
+    const y = (value) => top + (1 - value / 100) * (base - top);
+    const color = providerColor(item.provider);
+    const block = el("div", null, "history-lane");
+    const label = el("p", null, "lane-label"); label.append(providerMark(item.provider), el("span", item.label));
+    const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, "data-width": width, role: "group", class: "subscription-chart", "aria-label": `${item.label}: how full each weekly allowance was when it reset. Use Left and Right to inspect.` });
+    const fillEarly = hatch(root, color);
+    for (const tick of [0, 100]) {
+      root.append(svg("line", { x1: left, x2: width - right, y1: y(tick), y2: y(tick), class: tick === 100 ? "limit-line" : "grid-line" }));
+      root.append(svg("text", { x: left - 6, y: y(tick) + 4, "text-anchor": "end", class: "axis-label" }, `${tick}%`));
+    }
+    for (const cycle of lane) {
+      const cx = x(cycle.at), rect = (level, attributes) => svg("rect", { x: cx - barWidth / 2, y: y(level), width: barWidth, height: Math.max(1, y(0) - y(level)), rx: 2, ...attributes });
+      if (cycle.live) {
+        root.append(rect(cycle.projected, { class: "bar-projected", stroke: color }), rect(cycle.peak, { fill: color, "fill-opacity": 0.55 }));
+      } else if (cycle.endedEarly) root.append(rect(cycle.peak, { fill: fillEarly, class: "bar-early", stroke: color }));
+      else if (cycle.lowerBound) root.append(rect(cycle.peak, { class: "bar-unobserved", stroke: color }));
+      else root.append(rect(cycle.peak, { fill: color }));
+      if (cycle.capped) root.append(svg("circle", { cx, cy: y(100) - 5, r: 3, class: "capped-dot" }));
+    }
+    if (lastLane) {
+      const step = Math.max(7 * DAY, Math.ceil((to - from) / DAY / Math.max(2, Math.floor((width - left - right) / 70))) * DAY);
+      for (let t = from + 2 * DAY; t < to; t += step) root.append(svg("text", { x: x(t), y: height - 6, "text-anchor": "middle", class: "axis-label" }, fmt.date(t)));
+    }
+    root.append(svg("line", { x1: x(now), x2: x(now), y1: top, y2: y(0), class: "now-line" }));
+    const marker = svg("line", { x1: 0, x2: 0, y1: top, y2: y(0), class: "inspect-line", visibility: "hidden" });
+    root.append(marker);
+    const readout = inspectable(root, `closes:${item.key}`, lane, (cycle) => `${cycle.live}|${cycle.resetsAt}`, (cycle) => cycle.live ? [
+      `This week · resets ${fmt.when(cycle.resetsAt)}`,
+      cycle.cappedNow ? `Used up since ${fmt.when(cycle.capAt)}` : `${percentText(cycle.peak)} used so far${cycle.projected > cycle.peak ? `; on pace for ${percentText(cycle.projected)}` : ""}${cycle.capped ? "; runs out before the reset" : ""}`,
+    ] : [
+      `${cycle.endedEarly ? `Reset early ${fmt.date(cycle.end)}` : `Reset ${fmt.date(cycle.resetsAt)}`} · closed at ${cycle.lowerBound ? "at least " : ""}${percentText(cycle.peak)}`,
+      cycle.endedEarly
+        ? cycle.restored !== null ? `${cycle.cause === "credit" ? "Banked reset redeemed" : "Reset before its schedule"}: gave back ${percentText(cycle.restored)} of a week${cycle.restoredUsd !== null ? ` (≈ ${usd(cycle.restoredUsd)})` : ""}` : "Reset before its schedule; the level at the reset was not observed"
+        : cycle.expired !== null ? `${percentText(cycle.expired)} expired unused${cycle.expiredUsd !== null ? ` (≈ ${usd(cycle.expiredUsd)} of API value)` : ""}` : "The last reading came long before the reset, so how much went unused is unknown",
+      ...cycle.inPlace.map((reset) => `${reset.cause === "credit" ? "Banked reset redeemed" : "Restarted in place"} ${fmt.when(reset.at)}${reset.restored !== null ? `, giving back ${percentText(reset.restored)}` : ""}`),
+      cycle.capped ? `Capped for ${formatDuration(cycle.lockedSeconds)} before the reset` : "",
+    ].filter(Boolean), { x: (cycle) => x(cycle.at), marker });
+    block.append(label, root, readout);
+    container.append(block);
+  });
+  const key = el("p", null, "chart-key history-key");
+  key.append(el("span", "Closed", "key-closed"), el("span", "Reset early", "key-early"), el("span", "Close not observed", "key-unobserved"), el("span", "This week, projected", "key-live"), el("span", "Hit the limit", "key-capped"));
+  container.append(key);
+}
+
+/** Five-hour windows of the last seven days, one lane per account so windows of two accounts never stack. */
+function windowsChart(container, rows, fmt, now) {
+  container.replaceChildren();
+  const lanes = rows.filter((item) => item.windows?.windows.length);
+  if (!lanes.length) { container.append(note("No 5-hour windows in the last 7 days.")); return; }
+  const from = now - 7 * DAY, to = now;
+  const width = chartWidth(container, 1040, 280), left = 36, right = 14, plotWidth = width - left - right;
+  const x = (t) => left + (Math.max(from, Math.min(to, t)) - from) / (to - from) * plotWidth;
+  lanes.forEach((item, index) => {
+    const lastLane = index === lanes.length - 1, top = 4, base = 40, height = lastLane ? 62 : 46;
+    const y = (value) => base - (base - top) * Math.min(100, value) / 100;
+    const color = providerColor(item.provider), { windows } = item.windows;
+    const block = el("div", null, "history-lane");
+    const label = el("p", null, "lane-label");
+    label.append(providerMark(item.provider), el("span", item.label), el("small", `${plural(windows.length, "window")}${item.windows.capped ? `, ${item.windows.capped} capped, ${formatDuration(item.windows.lockedSeconds)} locked out` : ""}`));
+    const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, "data-width": width, role: "group", class: "subscription-chart", "aria-label": `${item.label}: 5-hour windows in the last 7 days. Use Left and Right to inspect each window.` });
+    for (const tick of [0, 100]) {
+      root.append(svg("line", { x1: left, x2: width - right, y1: y(tick), y2: y(tick), class: tick === 100 ? "limit-line" : "grid-line" }));
+      root.append(svg("text", { x: left - 6, y: y(tick) + 4, "text-anchor": "end", class: "axis-label" }, `${tick}%`));
+    }
+    const shown = windows.map((window) => ({ ...window, x0: x(window.start) + 0.5, x1: x(Math.min(window.end, now)) - 0.5 }));
+    for (const window of shown) {
+      root.append(svg("rect", { x: window.x0, y: y(window.peak), width: Math.max(2, window.x1 - window.x0), height: Math.max(1, y(0) - y(window.peak)), rx: 1.5, fill: color, "fill-opacity": window.active ? 0.5 : 0.85 }));
+      if (window.cappedAt !== null) root.append(svg("rect", { x: x(window.cappedAt), y: y(0) + 1.5, width: Math.max(2, x(Math.min(window.end, now)) - x(window.cappedAt)), height: 3, rx: 1.5, class: "locked-band" }));
+    }
+    if (lastLane) {
+      // Day labels thin out on narrow screens so they never collide.
+      const step = plotWidth < 300 ? 3 : plotWidth < 480 ? 2 : 1;
+      let day = 0;
+      for (let t = Math.ceil(from / DAY) * DAY; t < to; t += DAY, day += 1) if (day % step === 0) root.append(svg("text", { x: x(t), y: height - 6, "text-anchor": "middle", class: "axis-label" }, fmt.day(t)));
+    }
+    const marker = svg("line", { x1: 0, x2: 0, y1: top, y2: y(0), class: "inspect-line", visibility: "hidden" });
+    root.append(marker);
+    const readout = inspectable(root, `windows:${item.key}`, shown, (window) => window.start, (window) => [
+      `${fmt.time(window.start)} – ${fmt.time(window.resetsAt)}${window.active ? " · open now" : ""}`,
+      `Peak ${percentText(window.peak)}`,
+      window.cappedAt !== null ? `Limit reached ${fmt.time(window.cappedAt)}; locked out ${formatDuration(window.lockedSeconds)}` : "",
+    ].filter(Boolean), { x: (window) => (window.x0 + window.x1) / 2, marker });
+    block.append(label, root, readout);
+    container.append(block);
+  });
+  container.append(note("A 5-hour window opens with your first message after the previous one ends. Bar height is the window's peak; the red base is time locked out after reaching the limit."));
+}
+
+function historySection(items, fmt, now, later) {
+  const section = el("section", null, "panel subscription-history");
+  section.setAttribute("aria-labelledby", "subscription-history-title");
+  const header = el("header");
+  const title = el("h3", "History"); title.id = "subscription-history-title";
+  header.append(title, el("span", "How full each weekly allowance was when it reset, and the 5-hour windows of the last week", "panel-meta"));
+  const rows = items.filter((item) => item.identified && item.weeklyMeter);
+  const closes = el("div", null, "chart-slot closes-chart"), windows = el("div", null, "chart-slot windows-chart");
+  section.append(header, el("h4", "Weekly closes"), closes, el("h4", "5-hour windows · last 7 days"), windows);
+  later.push(() => {
+    closesChart(closes, rows, fmt, now); redrawOnResize(closes, () => closesChart(closes, rows, fmt, now));
+    windowsChart(windows, items.filter((item) => item.identified), fmt, now); redrawOnResize(windows, () => windowsChart(windows, items.filter((item) => item.identified), fmt, now));
+  });
+  return section;
+}
+
+function sourcesSection(limits, items, fmt, { remote }) {
+  const section = el("section", null, "panel subscription-sources");
+  const details = disclosure("sources", [el("h3", "Sources and method"), el("span", "Where the readings come from and what they cover", "panel-meta")], { className: "section-disclosure" });
+  section.append(details);
+  const accounts = limits.accounts ?? [];
+  const found = ["claude", "codex"].map((provider) => {
+    const own = accounts.filter((account) => account.provider === provider && account.attribution !== "weekly-phase" && account.attribution !== "unattributed");
+    const names = [...new Set(own.flatMap((account) => account.profileNames))];
+    return own.length ? `${plural(own.length, `${providerNames[provider]} account`)}${names.length ? ` (profiles: ${names.join(", ")})` : ""}` : "";
+  }).filter(Boolean);
+  const unidentified = accounts.filter((account) => account.attribution === "weekly-phase" || account.attribution === "unattributed").length;
+  details.append(note(`Accounts found: ${found.length ? found.join("; ") : "none"}${unidentified ? `; ${plural(unidentified, "group")} of readings without an account` : ""}. Times are shown in ${fmt.zone}.`));
+  details.append(note(remote
+    ? `This dashboard combines ${limits.remoteMachines ? plural(limits.remoteMachines, "other machine") : "other machines"}. Limits are read on this machine only: run \`session-analytics limits\` on the others. Their sessions cannot be matched to accounts yet, so Codex value is left out.`
+    : "Limits are read on this machine. Usage on other machines, the web and the desktop apps moves the same meters, so value per 1% is a lower bound."));
+  details.append(dataTable([{ text: "Source", align: "left" }, { text: "Status", align: "left" }, "Last reading", "New readings"],
+    (limits.sources ?? []).map((source) => [sourceLabels[source.source] ?? source.source,
+      source.source === "codex-account" && limits.codexAccount === "off" ? "Turned off" : { ok: "Reading", empty: "Found, no readings yet", unavailable: "Not on this machine" }[source.status] ?? source.status,
+      source.latest ? `${fmt.when(source.latest)} · ${fmt.relative(source.latest)}` : DASH, integer(source.read)]),
+    { rowHeader: true, className: "sources-table", caption: "Limit sources", empty: "No sources checked yet." }));
   const list = el("ul", null, "method-notes");
   for (const text of [
-    "Meters are the provider's own usage percentages, copied from records already on this machine. Nothing is requested from Anthropic or OpenAI.",
+    "Meters are the provider's own usage percentages, copied from records already on this machine. Nothing is requested from Anthropic; the Codex account read asks the local Codex app-server.",
     `Readings are kept in a private ledger${limits.persisted ? "" : " (off: --no-index)"} so reset history outlives provider log rotation. Run \`session-analytics limits --quiet\` every 20 minutes (cron or launchd) to keep it continuous.`,
     "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline`. It records the documented rate_limits field and prints the meters.",
-    "Value per percent divides the API-equivalent value of an account's own sessions in a window (matched through their Claude profile, or every Codex session when there is one Codex account) by the meter's reading. Usage on other machines, the web app or the desktop app also moves the meter, so capacity is a conservative lower bound and utilization an upper bound.",
-    `Plan prices were reviewed on ${plansReviewedAt}. Team, Enterprise and Business seats are treated as paid by the organization: they show API value without a personal multiple. Override the detected plan on each card; the choice stays in this browser.`,
+    "Value per 1% divides the API-equivalent value of an account's own sessions (matched through its Claude profiles, or every Codex session when there is one Codex account) by the meter's reading.",
+    `Plan prices were reviewed on ${plansReviewedAt}. Team, Enterprise and Business seats are treated as paid by the employer: they show API value without a personal multiple unless you say you pay. Plan and payer choices stay in this browser.`,
   ]) list.append(el("li", text));
-  panel.append(list);
-  return panel;
+  details.append(list);
+  if (!items.some((item) => item.identified)) details.append(note("No account has readings yet."));
+  return section;
+}
+
+/** Source-aware empty state: what to set up so meters appear. */
+function emptyState(limits) {
+  const box = el("div", null, "empty-state subscription-empty");
+  box.append(el("strong", "No limit readings yet"));
+  const claude = (limits.sources ?? []).filter((source) => source.source.startsWith("claude")).some((source) => source.status === "ok");
+  const codex = (limits.sources ?? []).some((source) => source.source.startsWith("codex") && source.status === "ok");
+  box.append(el("span", [
+    claude ? "" : "Claude: set `session-analytics limits statusline` as the Claude Code status line, or use a host that logs Agent SDK events, such as T3 Code.",
+    codex ? "" : "Codex: readings appear after your next Codex session on this machine.",
+  ].filter(Boolean).join(" ") || "Readings appear after your next Claude or Codex session."));
+  return box;
 }
 
 /**
- * Render the Subscription view. `sessions` must be every session: limits are account-wide, so a repository focus does not apply.
- * `range` is the selected dates in Unix seconds. `local` is null when every session is this machine's, else a test for this
- * machine's sessions: other machines' sessions never calibrate an account they cannot be matched to.
+ * Render the Subscription view. Limits are account-wide, so `sessions` must be every session (a repository focus does not
+ * apply); `null` while the session scan is still running, when the meters render and value waits. `timeZone` is the
+ * snapshot's zone for value; times are shown in `displayTimeZone` (the viewer's). `range` is the selected dates in Unix
+ * seconds. `local` is null when every session is this machine's, else a test for this machine's sessions.
  */
-export function renderSubscription(container, { limits, sessions, timeZone, range, rangeLabel, local = null, onPlanChange, now = Date.now() / 1000 }) {
+export function renderSubscription(container, { limits, sessions = null, timeZone = "UTC", displayTimeZone = null, range = null, local = null, onPlanChange, now = Date.now() / 1000, wide = null }) {
   container.replaceChildren();
-  if (!limits) { container.append(note("Loading limit meters…")); return; }
-  if (limits.unavailable) { container.append(note("Limit meters could not be loaded. Check the terminal running the dashboard.", "empty-state")); return; }
-  if (limits.dataSource === "snapshot") { container.append(note("Limit meters are live-only. They are not part of saved snapshots.", "empty-state")); return; }
-  const fmt = formatters(timeZone);
-  const plans = Object.fromEntries((limits.accounts ?? []).map((account) => [account.key, readPlan(account.key)]));
-  const model = subscriptionModel({ limits, sessions, timeZone, now, range, plans, local });
-  const items = model.accounts.filter((item) => item.meters.length || item.economics.extracted > 0);
-  const { totals } = model;
-
-  const hero = el("section", null, "kpi-grid subscription-kpis");
-  hero.setAttribute("aria-label", "Subscription value");
-  const priced = totals.priced, aside = [
-    totals.organization.extracted ? `${usd(totals.organization.extracted)} on organization-paid seats` : "",
-    totals.unpriced.extracted ? `${usd(totals.unpriced.extracted)} on plans without a price` : "",
-  ].filter(Boolean).join(" and ");
-  hero.append(
-    kpi("Monthly potential", usd(totals.monthlyPotential), totals.monthlyPotential === null ? "Needs calibration" : `${totals.potentialMultiple !== null ? `${totals.potentialMultiple.toFixed(0)}× price` : "Full use of every reset"}${totals.banked ? ` · +${usd(totals.banked)} banked` : ""}`,
-      { accent: true, title: `API-equivalent value of using 100% of each calibrated weekly allowance for a month. The price multiple counts only accounts you pay for that are calibrated.${totals.banked ? ` Banked resets add up to ${usd(totals.banked)} more if each is redeemed near 100%.` : ""}` }),
-    kpi("Extracted", usd(totals.extracted), totals.unattributed ? `+ ${usd(totals.unattributed)} unmatched` : "Matched to accounts", { title: `API-equivalent value of the sessions matched to each account, ${rangeLabel}, from each account's first meter reading.${totals.unattributed ? ` Another ${usd(totals.unattributed)} came from sessions no account could claim.` : ""}` }),
-    kpi("Capacity used", totals.capacityUsed !== null ? percent(totals.capacityUsed, 0) : DASH, totals.capacityUsed === null ? "Needs calibration" : totals.capacityUsed > 1 ? `${totals.capacityUsed.toFixed(1)}× the refill rate` : `of ${usd(totals.potential)} for these dates`,
-      { title: `Extracted value of calibrated accounts ÷ their capacity for the same time (${usd(totals.potential)}). Over 100% means usage outpaces what the weekly limits refill, so limits will be hit.` }),
-    kpi("Weekly resets used", totals.resetsUsed !== null ? pct(totals.resetsUsed) : DASH, "Mean observed close", { title: "Meter only: how full each weekly allowance was when it reset, with the live cycle's projection. Closes that were not observed are left out." }),
-    kpi("Value multiple", priced.multiple !== null ? `${priced.multiple.toFixed(1)}×` : DASH, priced.multiple !== null ? `on ${usd(priced.price)} of plan price` : aside ? "No personal plan price" : "Choose plans to compare",
-      { title: `${priced.multiple !== null ? `${usd(priced.extracted)} of API-equivalent value ÷ ${usd(priced.price)} of plan price` : "Value ÷ price"} over the accounts you pay for, prorated to ${rangeLabel}.${aside ? ` Not included: ${aside}.` : ""}` }),
-  );
-  container.append(hero);
-  if (model.unattributed.remote) container.append(note("This snapshot combines other machines. Their sessions cannot be matched to these accounts yet, so value per 1% and Extracted use only sessions matched through a Claude profile on this machine, and Codex value is left out."));
-
-  const advice = el("article", null, "panel subscription-advice");
-  advice.append(el("h3", "How to get more out of it"));
-  advice.append(recommendationList(recommendations(items, { now, sources: limits.sources, persisted: limits.persisted, codexAccount: limits.codexAccount ?? "off", formatTime: fmt.time })));
-  container.append(advice);
-
+  if (!limits) { container.append(note("Reading limit meters…")); return; }
+  if (limits.unavailable) { container.append(note("Limit meters could not be loaded. Check the terminal running the dashboard; the next refresh retries.", "empty-state")); return; }
+  if (limits.dataSource === "snapshot") { container.append(note("Limit meters are live-only and are not part of saved snapshots. Run `session-analytics limits` on the machine that recorded this snapshot.", "empty-state")); return; }
+  const fmt = formatters(displayTimeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC", now);
+  const accounts = limits.accounts ?? [];
+  const plans = Object.fromEntries(accounts.map((account) => [account.key, readSetting(planKey(account.key))]));
+  const payers = Object.fromEntries(accounts.map((account) => [account.key, readSetting(payerKey(account.key))]));
+  const pending = sessions === null;
+  const model = subscriptionModel({ limits, sessions: sessions ?? [], timeZone, now, range: range ?? { from: now, to: now }, plans, payers, local });
+  const entries = model.accounts.filter((item) => item.meters.some((meter) => meter.cycles.length) || (item.identified && item.economics.extracted))
+    .map((item) => ({ item, status: limitStatus(item, now) }))
+    // Unidentified history without an open cycle stays out of the live view; Sources says it exists.
+    .filter(({ item }) => item.identified || item.live.some((live) => live.cycle))
+    .sort((left, right) => compareUrgency(left.status, right.status));
+  if (!entries.length) { container.append(emptyState(limits)); container.append(sourcesSection(limits, [], fmt, { remote: model.unattributed.remote })); return; }
+  const items = entries.map(({ item }) => item);
+  const generatedAt = Date.parse(limits.generatedAt) / 1000;
+  const later = [];
+  const advice = recommendations(items, { now, sources: limits.sources, persisted: limits.persisted, codexAccount: limits.codexAccount ?? "off", formatTime: fmt.when });
   const cards = el("section", null, "subscription-cards");
-  cards.setAttribute("aria-label", "Subscriptions");
-  for (const item of items) cards.append(accountCard(item, fmt, now, onPlanChange, limits.codexAccount ?? "off"));
-  if (!items.length) cards.append(note("No Claude or Codex limit readings or activity were found.", "empty-state"));
-  container.append(cards);
-
-  const resets = el("article", null, "panel");
-  resets.append(el("h3", "Weekly resets: how much of each one you used"));
-  const resetsBody = el("div", null, "chart-slot");
-  resets.append(resetsBody);
-  container.append(resets);
-  const accounts = items.filter((item) => item.identified);
-  resetsChart(resetsBody, accounts, fmt, now);
-
-  const windows = el("article", null, "panel");
-  windows.append(el("h3", "5-hour windows · last 7 days"));
-  const windowsBody = el("div", null, "chart-slot");
-  windows.append(windowsBody);
-  container.append(windows);
-  windowsChart(windowsBody, accounts, fmt, now);
-  redrawOnResize(windowsBody, () => windowsChart(windowsBody, accounts, fmt, Date.now() / 1000));
-
-  container.append(sourcesPanel(limits, fmt));
+  cards.setAttribute("aria-label", "Accounts");
+  for (const { item, status } of entries) cards.append(accountCard(item, status, fmt, now, { onPlanChange, codexAccount: limits.codexAccount ?? "off", later }));
+  const open = wide ?? (typeof matchMedia === "function" ? matchMedia("(min-width: 761px)").matches : true);
+  container.append(
+    limitsNow(entries, fmt, now, Number.isFinite(generatedAt) ? generatedAt : null),
+    nextActions(advice),
+    cards,
+    worthSection(model, items, fmt, { pending, onPlanChange, wide: open }),
+    historySection(items, fmt, now, later),
+    sourcesSection(limits, items, fmt, { remote: model.unattributed.remote }),
+  );
+  // Charts measure their slot, so they draw once the whole view is in place.
+  for (const draw of later) draw();
 }
 
 export const subscriptionRefreshMilliseconds = 2 * 60 * 1000;
-

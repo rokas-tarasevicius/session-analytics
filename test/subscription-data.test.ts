@@ -5,8 +5,9 @@ import type { LimitAccount, LimitObservation } from "../src/limits/types.ts";
 
 const data: typeof import("../src/public/subscription-data.js") = await import(new URL("../src/public/subscription-data.js", import.meta.url).href);
 const {
-  DAY, HOUR, MONTH_DAYS, WEEK, accountUtilization, attributeSessions, bankedResets, buildMeters, calibrate, economics, formatDuration, hourlyValue, inPlaceResets,
-  liveMeter, recommendations, resetHistory, resetUtilization, sessionWindows, subscriptionModel, subscriptionTotals, zonedDayStart,
+  DAY, HOUR, MONTH_DAYS, WEEK, accountUtilization, attributeSessions, bankedResets, buildMeters, calibrate, compareUrgency, economics, formatDuration, hourlyValue,
+  inPlaceResets, limitStatus, liveMeter, meterPace, recommendations, resetHistory, resetUtilization, sessionWindows, subscriptionModel, subscriptionTotals,
+  visibleMeters, zonedDayStart,
 } = data;
 
 const start = Date.parse("2026-10-05T00:00:00Z") / 1000;
@@ -427,4 +428,64 @@ test("a meter the provider stopped reporting is unreported rather than still cap
   assert.deepEqual([idle.state, idle.nextResetAt], ["idle", resetsAt + 2 * WEEK]);
   const codex = liveMeter(buildMeters([reading("codex", "seven_day", resetsAt, start + DAY, 60), reading("codex", "seven_day", later + WEEK, later - 60, 0, "idle")], later)[0]!, later);
   assert.deepEqual([codex.state, codex.nextResetAt, codex.meter.cycles.length], ["idle", null, 1], "an idle marker never forms a cycle");
+});
+
+test("limits now: a cap ranks first, then the sooner run-out, then the fuller meter; unidentified readings last", () => {
+  const now = start + 4 * DAY, resetsAt = start + WEEK;
+  const weekly = (key: string, levels: number[], status: LimitObservation["status"] = "allowed") =>
+    levels.map((level, index) => reading("claude", "seven_day", resetsAt, start + (index + 1) * DAY, level, index === levels.length - 1 ? status : "allowed", key));
+  const item = (key: string, observations: LimitObservation[], extra: Partial<LimitAccount> = {}) =>
+    utilization(account("claude", key, extra), observations, now);
+  const capped = item("claude-aaaaaaaaaaaaaaaa", weekly("claude-aaaaaaaaaaaaaaaa", [40, 80, 95, 100], "rejected"));
+  const soon = item("claude-bbbbbbbbbbbbbbbb", weekly("claude-bbbbbbbbbbbbbbbb", [30, 50, 70, 85]));
+  const later = item("claude-cccccccccccccccc", weekly("claude-cccccccccccccccc", [25, 40, 55, 65]));
+  const calm = item("claude-dddddddddddddddd", weekly("claude-dddddddddddddddd", [5, 10, 15, 20]));
+  const phase = item("claude-w-100", weekly("claude-w-100", [10, 20, 30, 90]), { attribution: "weekly-phase" });
+  const statuses = [phase, calm, later, soon, capped].map((entry) => ({ key: entry.key, status: limitStatus(entry, now) }));
+  assert.deepEqual(statuses.map(({ status }) => status.kind), ["levels-only", "on-track", "runs-out", "runs-out", "capped"]);
+  assert.equal(statuses.find(({ key }) => key === capped.key)!.status.until, resetsAt);
+  assert.ok(statuses.find(({ key }) => key === soon.key)!.status.early! > 0);
+  assert.deepEqual(statuses.sort((left, right) => compareUrgency(left.status, right.status)).map(({ key }) => key), [capped.key, soon.key, later.key, calm.key, phase.key]);
+  const overage = item("claude-eeeeeeeeeeeeeeee", weekly("claude-eeeeeeeeeeeeeeee", [60, 90, 104], "overage"));
+  assert.deepEqual([limitStatus(overage, now).kind, limitStatus(overage, now).used], ["overage", 100]);
+  const stale = item("claude-ffffffffffffffff", weekly("claude-ffffffffffffffff", [20, 30]));
+  assert.deepEqual([limitStatus(stale, now).kind, limitStatus(stale, now).since], ["stale", start + 2 * DAY]);
+  const lockout = item("claude-1111111111111111", [...weekly("claude-1111111111111111", [5, 10, 15, 20]),
+    reading("claude", "five_hour", now + 2 * HOUR, now - 2 * HOUR, 60, "allowed", "claude-1111111111111111"),
+    reading("claude", "five_hour", now + 2 * HOUR, now - HOUR, 100, "rejected", "claude-1111111111111111")]);
+  assert.deepEqual([limitStatus(lockout, now).kind, limitStatus(lockout, now).meter, limitStatus(lockout, now).until], ["capped", "session", now + 2 * HOUR], "a 5-hour lockout outranks an on-track week");
+});
+
+test("visible meters: weekly and 5-hour apart, scoped limits grouped, retired and never-used meters hidden", () => {
+  const now = start + 3 * DAY, key = "codex-aaaaaaaaaaaaaaaa", resetsAt = start + WEEK;
+  const observations = [
+    reading("codex", "seven_day", resetsAt, start + DAY, 20, "allowed", key), reading("codex", "seven_day", resetsAt, now - HOUR, 40, "allowed", key),
+    reading("codex", "codex_spark.seven_day", resetsAt, now - HOUR, 12, "allowed", key),
+    reading("codex", "base_model_inference.seven_day", resetsAt, now - HOUR, 0, "allowed", key),
+    reading("codex", "five_hour", start - 20 * DAY + 5 * HOUR, start - 20 * DAY, 30, "allowed", key),
+  ];
+  const meters = buildMeters(observations, now, [
+    { provider: "codex", account: key, meter: "five_hour", label: "5-hour window", windowMinutes: 300, lastObservedAt: start - 20 * DAY, retired: true },
+    { provider: "codex", account: key, meter: "codex_spark.seven_day", label: "GPT-5.3-Codex-Spark · Weekly", windowMinutes: 10_080, lastObservedAt: now - HOUR, retired: false },
+  ]);
+  const item = accountUtilization({ account: account("codex", key), meters, now, range: { from: now - 30 * DAY, to: now } });
+  const { weekly, session, extra } = visibleMeters(item);
+  assert.equal(weekly?.meter.meter, "seven_day");
+  assert.equal(session, null, "a retired 5-hour meter is hidden");
+  assert.deepEqual(extra.map((live) => live.meter.label), ["GPT-5.3-Codex-Spark · Weekly"], "a scoped meter that never moved off 0% is hidden");
+});
+
+test("pace counts the level given back by an in-place reset in the whole week, and the current segment on its own", () => {
+  const resetsAt = start + WEEK, now = start + 3 * DAY, key = "claude-aaaaaaaaaaaaaaaa";
+  const meters = buildMeters([
+    reading("claude", "seven_day", resetsAt, start + DAY, 30, "allowed", key), reading("claude", "seven_day", resetsAt, start + 2 * DAY, 60, "allowed", key),
+    reading("claude", "seven_day", resetsAt, start + 2 * DAY + HOUR, 1, "allowed", key), reading("claude", "seven_day", resetsAt, now, 40, "allowed", key),
+  ], now);
+  const live = liveMeter(meters[0]!, now);
+  const pace = meterPace(live, now)!;
+  assert.equal(live.cycle!.segments.length, 2);
+  assert.ok(Math.abs(pace.cycle - 100 / 72) < 1e-9, "60% before the reset plus 40% after, over 72 hours");
+  assert.ok(pace.segment > pace.cycle, "the current segment is faster than the week's average");
+  assert.ok(Math.abs(pace.budget! - 60 / 96) < 1e-9, "60% left over the 96 hours to the reset");
+  assert.equal(meterPace(null, now), null);
 });
