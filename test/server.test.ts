@@ -376,7 +376,11 @@ test("a launch reuses only the same version with the same options and token", ()
   assert.equal(reuseRefusal(unversioned, expected), "An older Session Analytics is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
   assert.equal(reuseRefusal({ ...running, version: "1.2.2" }, expected), "An older Session Analytics (1.2.2) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
   assert.equal(reuseRefusal({ ...running, version: "1.10.0" }, expected), "A newer Session Analytics (1.10.0) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
-  assert.equal(reuseRefusal({ ...running, version: "\u001b[2Jx; rm -rf /" }, expected), "An older Session Analytics is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.", "only a plain version is printed");
+  assert.equal(reuseRefusal({ ...running, version: "1.3.0-rc.1" }, expected), "A newer Session Analytics (1.3.0-rc.1) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
+  assert.equal(reuseRefusal({ ...running, version: "1.2.3-rc.1" }, expected), "Another Session Analytics (1.2.3-rc.1) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
+  for (const version of ["\u001b[2Jx; rm -rf /", "1.2.4-/Users/PRIVATE", 124 as unknown as string]) {
+    assert.equal(reuseRefusal({ ...running, version }, expected), "Another Session Analytics is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.", "only a release-grammar version is printed");
+  }
   assert.equal(reuseRefusal({ ...running, version: "1.2.2" }, { ...expected, instanceToken: null }), "An older Session Analytics (1.2.2) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
   for (const health of [null, { ...running, optionsHash: "c".repeat(64) }, { ...running, instanceToken: "c".repeat(64) }, { ...running, dataSource: "snapshot" as const }, { ...running, service: "other" as "session-analytics" }]) {
     assert.equal(reuseRefusal(health, expected), options);

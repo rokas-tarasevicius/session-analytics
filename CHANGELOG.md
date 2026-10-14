@@ -7,12 +7,13 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - `npm run build` compiles an installable package into `dist/`: the same code as JavaScript, the dashboard files, rate card, schemas and agent skill, and a generated manifest with a `.js` command, no install scripts and no dependencies. `npm run pack:release` packs it into `release/`. Development is unchanged: Node runs the TypeScript sources directly, and the root `package.json` stays private.
-- `npm run release:check` now builds and packs that package, checks its files and manifest, and installs the tarball into a temporary prefix whose path contains a space. From the installed copy it runs every command's help and version, the synthetic report (compared with the source run), an MCP tool call, the dashboard with every static file and API route, and the report again from a read-only installation. `node scripts/smoke-installed.ts` runs the same smoke against a tarball or a registry version, and `node scripts/demo.ts --bin PATH` runs the demo against any build.
+- `npm run release:check` now builds and packs that package, checks its files and manifest, and installs the tarball into a temporary prefix whose path contains a space. From the installed copy it runs every command's help and version, the synthetic report (compared with the source run), an MCP tool call, the dashboard with every static file and API route, and the report again from a read-only installation. `node scripts/smoke-installed.ts` runs the same smoke against a tarball or a registry version. `node scripts/demo.ts --bin PATH` runs the demo against any build, and `SESSION_ANALYTICS_DEMO_NOW` pins the instant the demo generates its data from, so two runs analyze the same sessions.
 - The dashboard footer shows the version it runs, and `/api/health` reports it.
 
 ### Changed
 
 - Running `session-analytics` again reuses a dashboard on the same port only when it runs the same version. After an upgrade, a dashboard left running from the older version is named, with its version and how to stop it, instead of being reused silently.
+- The index revision hashes the code that runs: TypeScript sources in a checkout, JavaScript in the compiled package. The first scan after switching between a checkout and an installed copy, like the first after an upgrade, parses present sessions again once; retained history whose sources are gone is kept.
 
 ### Fixed
 

@@ -92,7 +92,9 @@ function main(): void {
     console.log(`Release tag and notes verified: ${args[1]}`);
     return;
   }
-  if (args.length) throw new Error("Usage: node scripts/release-check.ts [--notes vX.Y.Z]");
+  // --port fixes the installed smoke's dashboard port; it otherwise takes any free one.
+  const smokePort = args.length === 2 && args[0] === "--port" ? args[1]! : null;
+  if (args.length && !smokePort) throw new Error("Usage: node scripts/release-check.ts [--notes vX.Y.Z | --port PORT]");
   checkReleaseMetadata(metadata);
   extractReleaseNotes(metadata, `v${version}`);
   if (Object.keys(manifest.dependencies ?? {}).length || Object.keys(manifest.optionalDependencies ?? {}).length) {
@@ -127,7 +129,7 @@ function main(): void {
     checkPackageFiles(packed[0].files.map((entry: { path: string }) => entry.path));
     checkPackageManifest(JSON.parse(readFileSync(resolve(root, "dist/package.json"), "utf8")), readFileSync(resolve(root, "dist/bin/session-analytics.js"), "utf8"), version);
     console.log(`Compiled package files and manifest pass (${packed[0].files.length} files, ${packed[0].size} bytes packed).`);
-    const smoke = spawnSync(process.execPath, ["scripts/smoke-installed.ts", join(destination, packed[0].filename)], { cwd: root, stdio: "inherit", timeout: 900_000 });
+    const smoke = spawnSync(process.execPath, ["scripts/smoke-installed.ts", join(destination, packed[0].filename), ...(smokePort ? ["--port", smokePort] : [])], { cwd: root, stdio: "inherit", timeout: 900_000 });
     if (smoke.error || smoke.status !== 0) throw new Error("Release check failed: the installed package smoke test.");
   } finally { rmSync(destination, { recursive: true, force: true }); }
   console.log("Release preflight passed. No package or release was published; hosted CI and repository settings remain separate gates.");

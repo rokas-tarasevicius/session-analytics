@@ -10,6 +10,7 @@
  *   node scripts/demo.ts --keep            keep the generated data after exit
  *   node scripts/demo.ts --bin PATH        run another build, such as an installed package's bin
  *                                          (or set SESSION_ANALYTICS_DEMO_BIN)
+ *   SESSION_ANALYTICS_DEMO_NOW=ISO-TIME    generate the data as of that instant, so two builds see the same sessions
  *
  * Every provider source is passed explicitly, and the child process runs with
  * HOME pointed at an empty directory inside the demo root, so neither the
@@ -56,7 +57,8 @@ if (has("--help")) {
   process.stdout.write(
     "Usage: node scripts/demo.ts [report [--json] | mcp] [--no-open] [--port PORT] [--keep] [--bin PATH]\n" +
       "Generates synthetic sessions in a temporary directory and analyzes only that data.\n" +
-      "--bin (or SESSION_ANALYTICS_DEMO_BIN) runs another session-analytics build, such as an installed package.\n",
+      "--bin (or SESSION_ANALYTICS_DEMO_BIN) runs another session-analytics build, such as an installed package.\n" +
+      "SESSION_ANALYTICS_DEMO_NOW (an ISO 8601 instant) pins the generated data, so two runs analyze the same sessions.\n",
   );
   process.exit(0);
 }
@@ -66,6 +68,9 @@ if (!Number.isInteger(port) || port < 1024 || port > 65_535) fail("--port must b
 if (has("--bin") && !valueOf("--bin")) fail("--bin requires a path.");
 const bin = resolve(valueOf("--bin") ?? process.env["SESSION_ANALYTICS_DEMO_BIN"] ?? join(projectRoot, "bin", "session-analytics.ts"));
 if (!existsSync(bin)) fail(`No session-analytics bin at ${bin}.`);
+// One clock for every generated record; SESSION_ANALYTICS_DEMO_NOW pins it so two builds analyze identical data.
+const demoNow = process.env["SESSION_ANALYTICS_DEMO_NOW"] ? Date.parse(process.env["SESSION_ANALYTICS_DEMO_NOW"]) : Date.now();
+if (!Number.isFinite(demoNow) || demoNow > Date.now()) fail("SESSION_ANALYTICS_DEMO_NOW must be an ISO 8601 instant that is not in the future.");
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -250,7 +255,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   const effort = model.includes("haiku") ? undefined : weighted(effortLevels);
   const coldCache = repository.name === "data-pipeline" && !options.subagent;
   const longCache = !coldCache && !options.subagent && chance(0.35);
-  const base = { entrypoint: options.entrypoint, ...(options.attributionAgent ? { attributionAgent: options.attributionAgent } : {}), cwd, sessionId, version: options.start < Date.now() - 30 * DAY ? "2.3.0" : "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
+  const base = { entrypoint: options.entrypoint, ...(options.attributionAgent ? { attributionAgent: options.attributionAgent } : {}), cwd, sessionId, version: options.start < demoNow - 30 * DAY ? "2.3.0" : "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
   let humanStarted = state.clock;
   let parent: string | null = null;
   let spawned = 0;
@@ -561,8 +566,8 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
     if (!priced.has(model)) process.stderr.write(`Demo model ${model} is not in data/rate-cards.json and will appear unpriced.\n`);
   }
 
-  const now = Date.now();
-  const today = new Date();
+  const now = demoNow;
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const cursorSessions: Array<{ repository: Repository; start: number }> = [];
   let sessions = 0;
@@ -639,11 +644,11 @@ let sources: ReturnType<typeof generate>;
 let providerFlags: string[];
 try {
   sources = generate(root);
-  providerFlags = generateProviderDemo(root, repositorySpecs.map(({ name }) => ({ name, root: join(root, "repos", name) })), Date.now());
+  providerFlags = generateProviderDemo(root, repositorySpecs.map(({ name }) => ({ name, root: join(root, "repos", name) })), demoNow);
 
-  await seedDemoPricing(join(root, "analytics-data"));
-  seedMcpDemo(root);
-  seedHistoryDemo(root, sources.claudeRoot, Date.now());
+  await seedDemoPricing(join(root, "analytics-data"), new Date(demoNow));
+  seedMcpDemo(root, demoNow);
+  seedHistoryDemo(root, sources.claudeRoot, demoNow);
 } catch (error) {
   cleanup();
   throw error;

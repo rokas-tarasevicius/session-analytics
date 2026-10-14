@@ -2,8 +2,8 @@
 /**
  * Install a packed session-analytics tarball, or a registry spec, into a temporary prefix whose path contains a space,
  * and run it the way a user would: every command's help and version, the synthetic demo report (compared with this
- * checkout's), MCP, the dashboard with every static file, and a read-only installation. Reads synthetic data only and
- * never uses the real data directory or the global npm prefix.
+ * checkout's), MCP, the dashboard with every static file, and a read-only installation; then print the tested tarball's
+ * SHA-256 and npm integrity. Reads synthetic data only and never uses the real data directory or the global npm prefix.
  *
  *   node scripts/smoke-installed.ts release/session-analytics-X.Y.Z.tgz [--port PORT]
  *   node scripts/smoke-installed.ts session-analytics@X.Y.Z
@@ -31,14 +31,17 @@ const contentTypes: Record<string, string> = {
   ".svg": "image/svg+xml; charset=utf-8", ".woff2": "font/woff2",
 };
 
-/** Counts, provider and repository sets and cent-rounded totals: what must match between builds, run to run. */
+/**
+ * What two builds must agree on for the same synthetic data: each session's timing, tokens and cents, the repository
+ * set and cent-rounded totals. Session keys are keyed per data directory and float sums depend on order, so neither is compared.
+ */
 function stableProjection(snapshot: MachineAnalytics): unknown {
-  const byProvider: Record<string, number> = {};
-  for (const session of snapshot.sessions) byProvider[session.provider] = (byProvider[session.provider] ?? 0) + 1;
+  const cents = (value: unknown): unknown => typeof value === "number" ? Math.round(value * 100) : value;
   return {
-    sessions: snapshot.sessions.length, byProvider: Object.fromEntries(Object.entries(byProvider).sort()),
+    sessions: snapshot.sessions.map(({ provider, firstEventAt, lastEventAt, tokens, cost }) =>
+      [provider, firstEventAt, lastEventAt, tokens.inputTokens, tokens.outputTokens, cents(cost.totalUsd)].join(" ")).sort(),
     repositories: snapshot.repositories.map(({ repository }) => repository.id).sort(), warnings: [...snapshot.warnings].sort(),
-    summary: Object.fromEntries(Object.entries(snapshot.summary).sort().map(([key, value]) => [key, typeof value === "number" ? Math.round(value * 100) / 100 : value])),
+    summary: Object.fromEntries(Object.entries(snapshot.summary).sort().map(([key, value]) => [key, cents(value)])),
   };
 }
 
@@ -80,8 +83,10 @@ async function main(): Promise<void> {
   const environment: NodeJS.ProcessEnv = { PATH: path, HOME: join(work, "home"), SESSION_ANALYTICS_DATA_DIR: join(work, "data"), SESSION_ANALYTICS_OFFLINE: "1" };
   for (const key of ["LANG", "LC_ALL", "TMPDIR", "TZ"]) if (process.env[key]) environment[key] = process.env[key];
   mkdirSync(environment["HOME"]!);
+  // Every demo run generates the same sessions, so the installed build and this checkout analyze identical data.
+  const demoEnvironment: NodeJS.ProcessEnv = { ...process.env, PATH: path, SESSION_ANALYTICS_DEMO_NOW: new Date().toISOString() };
   const demo = (demoArgs: string[], label: string): string =>
-    ran(spawnSync(process.execPath, [join(root, "scripts/demo.ts"), ...demoArgs], { cwd: work, env: { ...process.env, PATH: path }, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 300_000 }), label);
+    ran(spawnSync(process.execPath, [join(root, "scripts/demo.ts"), ...demoArgs], { cwd: work, env: demoEnvironment, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 300_000 }), label);
   try {
     ran(spawnSync("npm", ["install", "--global", "--prefix", prefix, "--cache", join(work, "npm-cache"), "--ignore-scripts", "--no-audit", "--no-fund",
       ...(tarball ? ["--offline"] : []), spec], { env: { ...process.env, PATH: path }, encoding: "utf8", timeout: 300_000 }), `npm install ${spec}`);
@@ -113,7 +118,7 @@ async function main(): Promise<void> {
     check(JSON.stringify(stableProjection(installed)) === JSON.stringify(stableProjection(report("source demo report", []))), "the installed report differs from this checkout's");
     console.log(`Installed demo report matches this checkout (${installed.sessions.length} sessions, six providers, ${cursor} from the Cursor worker).`);
 
-    const mcp = spawn(process.execPath, [join(root, "scripts/demo.ts"), "mcp", "--bin", bin], { cwd: work, env: { ...process.env, PATH: path }, stdio: ["pipe", "pipe", "ignore"] });
+    const mcp = spawn(process.execPath, [join(root, "scripts/demo.ts"), "mcp", "--bin", bin], { cwd: work, env: demoEnvironment, stdio: ["pipe", "pipe", "ignore"] });
     try {
       let buffered = "";
       const responses = new Map<number, Record<string, any>>();
@@ -144,7 +149,7 @@ async function main(): Promise<void> {
 
     const port = requestedPort ?? await freePort();
     const origin = `http://127.0.0.1:${port}`;
-    const dashboard = spawn(process.execPath, [join(root, "scripts/demo.ts"), "--no-open", "--port", String(port), "--bin", bin], { cwd: work, env: { ...process.env, PATH: path }, stdio: "ignore" });
+    const dashboard = spawn(process.execPath, [join(root, "scripts/demo.ts"), "--no-open", "--port", String(port), "--bin", bin], { cwd: work, env: demoEnvironment, stdio: "ignore" });
     try {
       let health: Record<string, unknown> | null = null;
       for (const deadline = Date.now() + 120_000; !health; await delay(100)) {
@@ -177,15 +182,12 @@ async function main(): Promise<void> {
     check(report("read-only installed demo report").sessions.length === installed.sessions.length, "the read-only installation reports differently");
     console.log("A read-only installation runs the same report.");
 
-    if (tarball) {
-      const bytes = readFileSync(tarball);
-      console.log(`sha256 ${createHash("sha256").update(bytes).digest("hex")}`);
-      console.log(`integrity sha512-${createHash("sha512").update(bytes).digest("base64")}`);
-    } else {
-      const lock = JSON.parse(readFileSync(join(prefix, "lib", "node_modules", ".package-lock.json"), "utf8")) as { packages?: Record<string, { resolved?: string; integrity?: string }> };
-      const entry = lock.packages?.["node_modules/session-analytics"];
-      console.log(`resolved ${entry?.resolved ?? "unknown"}\nintegrity ${entry?.integrity ?? "unknown"}`);
-    }
+    // A registry install is hashed from the tarball npm verified into this cache, so both name the bytes that ran.
+    const tested = tarball ?? join(work, (JSON.parse(ran(spawnSync("npm", ["pack", spec, "--json", "--ignore-scripts", "--pack-destination", work, "--cache", join(work, "npm-cache"), "--prefer-offline"],
+      { cwd: work, env: { ...process.env, PATH: path }, encoding: "utf8", timeout: 300_000 }), `npm pack ${spec}`)) as Array<{ filename: string }>)[0]!.filename);
+    const bytes = readFileSync(tested);
+    console.log(`sha256 ${createHash("sha256").update(bytes).digest("hex")}`);
+    console.log(`integrity sha512-${createHash("sha512").update(bytes).digest("base64")}`);
   } finally {
     spawnSync("chmod", ["-R", "u+w", work]);
     rmSync(work, { recursive: true, force: true });
