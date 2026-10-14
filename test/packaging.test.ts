@@ -35,6 +35,12 @@ test("packaging: every runtime moduleUrl target exists in the source tree", asyn
   for (const worker of ["./analysis-worker.ts", "./cursor-worker.ts", "./worker.ts"]) assert.ok(targets.includes(worker), worker);
 });
 
+test("packaging: SQL names no ?NNN parameter, which Node.js 24.0 to 24.6 cannot bind positionally", async () => {
+  for (const file of (await readdir(sourceRoot, { recursive: true })).filter((name) => name.endsWith(".ts") && !name.endsWith(".d.ts"))) {
+    assert.doesNotMatch(await readFile(join(sourceRoot, file), "utf8"), /(?:=|\(|,)\s*\?\d+\b/, file);
+  }
+});
+
 test("packaging: the build guard finds runtime .ts references and missing moduleUrl targets, not JSDoc types", async () => {
   assert.deepEqual(typeScriptReferences('spawn(node, [fileURLToPath(new URL("./worker.ts", import.meta.url))]);'), ["./worker.ts"]);
   assert.deepEqual(typeScriptReferences('await import("../src/cli.ts"); readFileSync("./a.ts"); readFile(`./b.ts`)'), ["../src/cli.ts", "./a.ts", "./b.ts"]);

@@ -124,7 +124,7 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   assert.match(pack!, /uses: actions\/upload-artifact@/);
   assert.deepEqual(needsOf(smoke!), ["package"]);
   assert.deepEqual(/^        os: \[([^\]]+)\]$/m.exec(smoke!)?.[1]!.split(", "), ["ubuntu-latest", "macos-latest"]);
-  assert.deepEqual(/^        node: \[([^\]]+)\]$/m.exec(smoke!)?.[1]!.split(", "), ["'24'", "'26'"]);
+  assert.deepEqual(/^        node: \[([^\]]+)\]$/m.exec(smoke!)?.[1]!.split(", "), ["'24.0.0'", "'24'", "'26'"], "the engines floor, the newest 24.x and Homebrew's Node.js");
   assert.match(smoke!, /run: node scripts\/smoke-installed.ts "release\/session-analytics-\$\{GITHUB_REF_NAME#v\}.tgz"/);
   assert.doesNotMatch(smoke!, /npm ci|npm run/, "the smoke runs the packed tarball, not a fresh build");
 
@@ -191,7 +191,8 @@ test("release: the Homebrew formula installs the release tarball with Homebrew's
   assert.match(formula, /^  license "MIT"$/m);
   assert.match(formula, /^  depends_on "node"$/m);
   assert.match(formula, /^    system "npm", "install", \*std_npm_args$/m);
-  assert.match(formula, /write_env_script libexec\/"bin\/session-analytics", PATH: "#\{Formula\["node"\]\.opt_bin\}:\$PATH"/);
+  assert.match(formula, /^    env = \{ PATH: "#\{Formula\["node"\]\.opt_bin\}:\$PATH" \}\n    \(bin\/"session-analytics"\)\.write_env_script libexec\/"bin\/session-analytics", env$/m);
+  for (const line of homebrewFormula("100.100.100", sha256).split("\n")) if (!line.startsWith("  url ")) assert.ok(line.length <= 118, `Homebrew's style check allows 118 columns: ${line}`);
   assert.match(formula, /^    ENV\["HOME"\] = testpath$/m);
   assert.match(formula, /shell_output\("#\{bin\}\/session-analytics --version"\)/);
   assert.match(formula, /shell_output\("#\{bin\}\/session-analytics report --json --offline --no-index"\)/);

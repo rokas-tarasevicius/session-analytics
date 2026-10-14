@@ -109,6 +109,9 @@ async function main(): Promise<void> {
       check(!forbidden.test(json), `${label} contains private fixture content`);
       const snapshot = validateSnapshot(JSON.parse(json));
       check(providers.every((provider) => snapshot.sessions.some((session) => session.provider === provider)), `${label} lacks one of the six providers`);
+      // Every synthetic source is readable, so a read warning means this runtime lost sessions that two equal runs would both miss.
+      const unread = snapshot.warnings.filter((warning) => /could not be|unsupported schema/.test(warning));
+      check(!unread.length, `${label} could not read a synthetic source: ${unread.join(" ")}`);
       return snapshot;
     };
     const installed = report("installed demo report");

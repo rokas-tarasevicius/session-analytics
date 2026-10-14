@@ -113,7 +113,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: ['24', '26']
+        # The oldest Node.js that engines allows, the newest 24.x, and the Node.js that Homebrew's formula uses.
+        node: ['24.0.0', '24', '26']
     timeout-minutes: 15
     steps:
       - name: Check out

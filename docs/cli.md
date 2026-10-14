@@ -19,7 +19,7 @@
 
 ## Install
 
-Requirements: **Node.js 24 or newer** and **macOS** or **Linux** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)). Windows is not supported. Install with one of:
+Requirements: **Node.js 24 or newer** and **macOS** or **Linux** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)). Windows is not supported; the package declares macOS and Linux, so npm refuses to install it there with `EBADPLATFORM`. Install with one of:
 
 ```bash
 brew install rokas-tarasevicius/tap/session-analytics   # Homebrew; uses Homebrew's Node.js

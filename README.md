@@ -50,7 +50,7 @@ session-analytics             # opens http://127.0.0.1:4174
 session-analytics --offline   # disables public pricing refreshes
 ```
 
-`npx -y session-analytics` tries it once without installing. Every channel installs the same tarball, attached to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) with `SHA256SUMS` and a build provenance attestation; packaged releases start after 0.9.0. See [installation](docs/cli.md#install) for pinning a version, upgrades, uninstalling and platform limits.
+`npx -y session-analytics` tries it once without installing. Every channel installs the same tarball, attached to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) with `SHA256SUMS` and covered by a build provenance attestation; packaged releases start after 0.9.0. See [installation](docs/cli.md#install) for pinning a version, upgrades, uninstalling and platform limits.
 
 To explore synthetic data first, or to contribute, use a source checkout of `master`. Node runs its TypeScript directly; `npm ci` is needed only for the checks in [CONTRIBUTING.md](CONTRIBUTING.md).
 
