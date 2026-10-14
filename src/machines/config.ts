@@ -20,7 +20,7 @@ export interface SavedMachine {
   command?: string[];
   enabled: boolean;
   addedAt?: string;
-  /** Keyed hash of the machine and account, recorded by check, to refuse the same machine saved twice. */
+  /** Hash of the machine ID and account, recorded by check, to refuse the same machine saved twice. */
   identity?: string;
 }
 
@@ -116,7 +116,7 @@ export function remoteFor(argv: string[], environment: NodeJS.ProcessEnv, option
   const variable = !flagged && Boolean(environment["SESSION_ANALYTICS_REMOTE"]);
   if (variable) notice(`SESSION_ANALYTICS_REMOTE is deprecated; save machines with ${brand.command} machines add HOST.`);
   let saved: MachinesConfig | null = null;
-  // The file only names this machine when a flag or variable decides, so a broken one does not block that run.
+  // When a flag or variable decides, the file only supplies this machine's label, so a broken one does not block that run.
   try { saved = readMachines(options); } catch (error) { if (!flagged && !variable) throw error; }
   const remote = remoteOptionsFrom(argv, environment, saved);
   if (flagged || variable || argv.includes("--machines") || !remote.machines.length || !localOnlyAnalysis(options)) return remote;

@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 import { parseMachines, readMachines, remoteFor, writeMachines, type MachinesConfig } from "../src/machines/config.ts";
 import { OptionError, remoteOptionsFrom, type RemoteMachine } from "../src/options.ts";
 import { classifyRemote, stderrDetail, type SshResult } from "../src/remote.ts";
-import { bootstrapPath, runtimePayload } from "../src/remote/runtime.ts";
+import { bootstrapPath, buildRuntime, runtimePayload } from "../src/remote/runtime.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { remoteUnavailableWarning } from "../src/public/evidence.js";
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
@@ -195,6 +195,23 @@ test("the bootstrap installs on need-runtime, verifies its digest and refuses wh
   assert.equal(answer.status, 75);
 });
 
+test("the bundled runtime packs a compiled install too and runs its bin/session-analytics.js", async () => {
+  const root = join(directory, "compiled");
+  for (const folder of ["bin", "src/remote", "data", "schemas"]) await mkdir(join(root, folder), { recursive: true });
+  await writeFile(join(root, "package.json"), `{"type":"module"}\n`);
+  await writeFile(join(root, "bin", "session-analytics.js"), `process.stdout.write("compiled " + process.argv.slice(2).join(" ") + "\\n");\n`);
+  await writeFile(join(root, "src", "remote", "runtime.js"), "export {};\n");
+  await writeFile(join(root, "src", ".DS_Store"), "skipped");
+  const payload = buildRuntime(root);
+  assert.equal(payload.files, 3);
+  assert.notEqual(payload.digest, runtimePayload().digest);
+  const answer = spawnSync(process.execPath, ["-", "sa1", "install", payload.version, payload.digest, "report", "--json"], {
+    input: payload.install, encoding: "utf8", env: { ...process.env, XDG_CACHE_HOME: join(directory, "compiled-cache") },
+  });
+  assert.equal(answer.status, 0, answer.stderr);
+  assert.equal(answer.stdout.trim(), "compiled report --json");
+});
+
 test("exit codes and stderr map to fixed reasons with the exact fix", () => {
   const saved = machine({ user: "agents" }), adhoc = machine({ name: "server", ssh: "server", runtime: "installed", saved: false });
   const cases: Array<[RemoteMachine, SshResult, string, RegExp]> = [
@@ -202,7 +219,9 @@ test("exit codes and stderr map to fixed reasons with the exact fix", () => {
     [saved, result(255, "ssh: Could not resolve hostname box: nodename nor servname provided\n"), "connection", /ssh-copy-id box/],
     [saved, result(255, ""), "dropped", /machines check box/],
     [saved, result(1, "sudo: a password is required\n"), "sudo", /ALL=\(agents\) NOPASSWD: ALL.*sudoers\.d\/session-analytics/],
+    [saved, result(1, "sudo: interactive authentication is required\n"), "sudo", /NOPASSWD/],
     [saved, result(1, "sudo: unknown user agents\n"), "no-account", /machines check box --find-users/],
+    [saved, result(1, "sudo: user 'agents' not found\n"), "no-account", /--find-users/],
     [saved, result(127, "-bash: line 1: node: command not found\n"), "no-node", /machines set box --node \/usr\/bin\/node/],
     [saved, result(78, "sa1: node-too-old v18.19.1\n"), "node-too-old", /Node\.js 24/],
     [saved, result(80, "sa1: cache-unwritable EACCES\n"), "cache-unwritable", /machines set box --runtime installed/],
@@ -210,6 +229,8 @@ test("exit codes and stderr map to fixed reasons with the exact fix", () => {
     [saved, result(79, "sa1: bad-request\n"), "runtime", /machines check box/],
     [adhoc, result(127, "bash: line 1: session-analytics: command not found\n"), "missing-command", /machines add server.*--remote-command "node \/path/],
     [adhoc, result(126, "bash: line 1: /usr/local/bin/session-analytics: Permission denied\n"), "permission", /machines add server/],
+    [adhoc, result(1, "node:internal/modules/cjs/loader:1386\n  throw err;\nError: Cannot find module '/nope/bin/session-analytics.ts'\n    at Module._resolveFilename\n\nNode.js v24.21.0\n"), "missing-command", /--remote-command "node \/path/],
+    [adhoc, result(1, "sudo: user 'agents' not found\n"), "no-account", /--remote-command/],
     [adhoc, result(2, "Unknown session analytics argument: --no-remote\n"), "rejected", /same version/],
     [adhoc, result(1, "The local index is busy; another ingest or maintenance command is running.\n"), "busy", /retry in a minute/],
     [adhoc, result(1, "The local index was created by a newer version; upgrade or use --no-index.\n"), "index-newer", /--no-index/],
@@ -229,6 +250,8 @@ test("exit codes and stderr map to fixed reasons with the exact fix", () => {
   assert.equal(stderrDetail("Welcome!\n\u001b[31msudo: a password is required\u001b[0m\n\n"), "[31msudo: a password is required[0m");
   assert.equal(stderrDetail("\n\n\n"), "");
   assert.match(classifyRemote(saved, result(78, "sa1: node-too-old v18.19.1\n"))!.message, /v18\.19\.1/);
+  assert.equal(classifyRemote(adhoc, result(1, "sudo: user 'agents' not found\n"))!.message, "the account named after sudo does not exist there");
+  assert.equal(classifyRemote(saved, result(1, "sudo: user 'agents' not found\n"))!.message, "the account agents does not exist there");
 });
 
 test("machines.json is strict, private and decides which machines a run reads", async () => {
@@ -359,11 +382,11 @@ test("machines check is a doctor: each failure names its fix, and --find-users l
   const checked = cli(["machines", "check", "--data-dir", data, "--find-users"]);
   assert.equal(checked.status, 1);
   assert.match(checked.stdout, /server {2}\(ssh server, as agents, bundled runtime\)\n(?: {2}✓ .*\n)+ {2}✓ history {3}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}✓ accounts {2}agent history found for agents\n/);
-  assert.match(checked.stdout, /locked .*\n {2}✓ ssh .*\n {2}✗ sudo {6}sudo needs a password to run as locked\. sudo: a password is required\n {4}Fix: on that machine run: echo "\$USER ALL=\(locked\) NOPASSWD: ALL"/);
+  assert.match(checked.stdout, /locked .*\n {2}✓ ssh .*\n {2}✗ sudo {6}sudo -n could not run commands as locked without a password\. sudo: a password is required\n {4}Fix: on that machine run: echo "\$USER ALL=\(locked\) NOPASSWD: ALL"/);
   assert.match(checked.stdout, /locked[\s\S]*✓ accounts {2}agent history found for agents\n {4}Fix: session-analytics machines set locked --user agents/);
   assert.match(checked.stdout, /✗ node {6}node was not found on the SSH account's login PATH\n {4}Fix: install Node\.js 24 or later there, or point to it: session-analytics machines set nonode --node \/usr\/bin\/node/);
   assert.match(checked.stdout, /oldnode .*\n(?: {2}✓ .*\n)+ {2}✗ runtime {3}the remote Node\.js is v22\.3\.0; the bundled runtime needs 24 or later\. sa1: node-too-old v22\.3\.0\n/);
-  assert.match(checked.stdout, /missing  \(ssh server, as ssh-user, installed: \/opt\/missing\/session-analytics, disabled\)[\s\S]*✗ command {3}session-analytics was not found on the remote PATH/);
+  assert.match(checked.stdout, /missing  \(ssh server, as ssh-user, installed: \/opt\/missing\/session-analytics, disabled\)[\s\S]*✗ command {3}session-analytics was not found there/);
   assert.match(checked.stdout, /locked, nonode, oldnode, missing failed a check/);
   const json = JSON.parse(cli(["machines", "check", "server", "--json", "--data-dir", data]).stdout) as { machines: Array<{ name: string; ok: boolean; checks: Array<{ check: string; status: string }> }> };
   assert.deepEqual(json.machines.map(({ name, ok, checks }) => [name, ok, checks.map(({ check, status }) => `${check}:${status}`)]),
@@ -420,6 +443,23 @@ test("the deadline stops the remote work too, and no process is left behind", as
   assert.equal(slow.status, 0, slow.stderr);
   assert.ok(Date.now() - started < 15_000);
   assert.match(slow.stderr, /Could not read slow: no snapshot within 2 seconds\.\n {2}Fix: allow more time with --remote-timeout SECONDS/);
+  assert.deepEqual(await noLeftovers(), []);
+});
+
+test("SIGTERM stops report quietly with the signal's exit code, and the remote work with it", async () => {
+  const child: ChildProcess = spawn(process.execPath, [bin, "report", "--json", ...localFlags, "--data-dir", dataDir("slow")], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  let output = "";
+  child.stdout!.on("data", (chunk) => { output += chunk; });
+  child.stderr!.on("data", (chunk) => { output += chunk; });
+  for (let attempt = 0; attempt < 200 && !leftovers().some((line) => line.includes("analysis-worker")); attempt++) await delay(50);
+  assert.ok(leftovers().some((line) => line.includes("analysis-worker")), "the remote read is running");
+  const stopped = Date.now();
+  child.kill("SIGTERM");
+  const [code] = await once(child, "exit") as [number | null];
+  assert.equal(code, 143);
+  assert.ok(Date.now() - stopped < 4_000, `stopped in ${Date.now() - stopped} ms`);
+  // The stop is not reported as a failed analysis or an unreadable machine.
+  assert.equal(output, "");
   assert.deepEqual(await noLeftovers(), []);
 });
 

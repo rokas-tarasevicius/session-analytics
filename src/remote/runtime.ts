@@ -24,18 +24,19 @@ export interface RuntimePayload {
   install: string;
 }
 
-function files(directory: string, prefix: string): string[] {
-  return readdirSync(join(installRoot, directory), { withFileTypes: true }).flatMap((entry) => {
+function files(root: string, directory: string, prefix: string): string[] {
+  return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
     const path = `${prefix}${entry.name}`;
     if (entry.name.startsWith(".")) return [];
-    if (entry.isDirectory()) return files(join(directory, entry.name), `${path}/`);
+    if (entry.isDirectory()) return files(root, join(directory, entry.name), `${path}/`);
     return entry.isFile() && packed.test(path) ? [path] : [];
   });
 }
 
-function build(): RuntimePayload {
-  const paths = ["package.json", ...["bin", "src", "data", "schemas"].flatMap((directory) => files(directory, `${directory}/`))].sort();
-  const contents = paths.map((path) => readFileSync(join(installRoot, path)));
+/** The payload of the install at `root`: this one, or in tests another layout such as a compiled one. */
+export function buildRuntime(root = installRoot): RuntimePayload {
+  const paths = ["package.json", ...["bin", "src", "data", "schemas"].flatMap((directory) => files(root, directory, `${directory}/`))].sort();
+  const contents = paths.map((path) => readFileSync(join(root, path)));
   const hash = createHash("sha256");
   paths.forEach((path, index) => { hash.update(`${path}\0${contents[index]!.length}\0`); hash.update(contents[index]!); });
   const payload = gzipSync(Buffer.concat([Buffer.from(`${JSON.stringify(paths.map((path, index) => [path, contents[index]!.length]))}\n`), ...contents]), { level: 9 });
@@ -49,6 +50,6 @@ function build(): RuntimePayload {
 let cached: RuntimePayload | undefined;
 /** Built once per process; a dirty development worktree gets its own digest. */
 export function runtimePayload(): RuntimePayload {
-  cached ??= build();
+  cached ??= buildRuntime();
   return cached;
 }

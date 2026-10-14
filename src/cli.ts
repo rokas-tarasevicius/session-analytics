@@ -2,7 +2,7 @@ import { historyReport } from "./report/history.ts";
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, OptionError, optionErrorMessage, pricingHelp, argument, remoteBooleanFlags, remoteHelp, remoteValueFlags, type RemoteOptions } from "./options.ts";
 import { remoteFor } from "./machines/config.ts";
-import { stopOnSignals } from "./processes.ts";
+import { stopOnSignals, stopping } from "./processes.ts";
 import { analyzeMachines, type MachineRead } from "./remote.ts";
 import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
 import { loadMachineSnapshot } from "./interop/snapshot.ts";
@@ -115,6 +115,8 @@ let analytics;
 const reads: MachineRead[] = [];
 try { analytics = process.argv.includes("--share") ? null : await (snapshotFile ? loadMachineSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line, _failed, read) => { if (read) reads.push(read); process.stderr.write(`${line}\n`); })); }
 catch (error) {
+  // A signal stopped the analysis; its handler exits once the children are gone.
+  if (stopping()) await new Promise(() => {});
   process.stderr.write(`${indexErrorMessage(indexErrorCode(error)) ?? (error instanceof AnalysisHeapLimitError ? error.message : "Session analysis could not be completed.")}\n`);
   process.exit(1);
 }

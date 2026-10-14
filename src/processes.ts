@@ -22,21 +22,28 @@ export async function stopChildren(graceMs = 2_000): Promise<void> {
 }
 
 const signalNumbers = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
+let signalled = false, installed = false;
+
+/** True once a signal is stopping this process: failures it causes are not news, and its handler sets the exit code. */
+export function stopping(): boolean {
+  return signalled;
+}
 
 /**
  * Stop children before exiting on SIGINT, SIGTERM or SIGHUP, so no ssh or worker is orphaned.
- * A second signal kills them at once. `exitCode` defaults to 128 + the signal number.
+ * A second signal kills them at once. `exitCode` defaults to 128 + the signal number. Installed once per process.
  */
 export function stopOnSignals(close: () => void = () => {}, exitCode?: number): void {
-  let stopping = false;
+  if (installed) return;
+  installed = true;
   for (const signal of Object.keys(signalNumbers) as Array<keyof typeof signalNumbers>) {
     process.on(signal, () => {
       const code = exitCode ?? 128 + signalNumbers[signal];
-      if (stopping) {
+      if (signalled) {
         for (const child of live) child.kill("SIGKILL");
         process.exit(code);
       }
-      stopping = true;
+      signalled = true;
       try { close(); } catch { /* Exiting regardless. */ }
       void stopChildren().finally(() => process.exit(code));
     });

@@ -59,7 +59,7 @@ Without `npm link`, run `node bin/session-analytics.ts`. See [installation and o
 - **Groups work by repository.** Combine agents, profiles, linked worktrees and clones of the same remote in one view. Conductor can enrich the mapping when installed.
 - **Makes accounting inspectable.** Dated price snapshots, deduplicated token records and visible coverage explain each total. Unknown prices stay unpriced; missing evidence stays unavailable.
 - **Shows seven views.** Summary for totals, Velocity for trends, Costs for the value breakdown, Pricing for rate provenance, Subscription for how much of your Claude and Codex limits you use, Tools for call patterns, and Activity for session starts. Views share a time window and support repository focus.
-- **Includes your other machines.** `--remote server` adds a server or VM where agents run, read over your own SSH. Each machine analyzes its own history and returns only its content-free snapshot. [Combine machines](docs/interop.md#combine-machines).
+- **Includes your other machines.** `session-analytics machines add server` saves a server or VM where agents run, and every later launch reads it over your own SSH. Nothing needs installing there except Node.js 24: each machine runs this install's own code, analyzes its own history and returns only its content-free snapshot. `machines check` names the fix for anything that stops a read. [Combine machines](docs/interop.md#combine-machines).
 - **Works beyond the browser.** Get terminal reports, JSON, CSV/NDJSON/OTLP exports, aggregate team snapshots, and six read-only [MCP tools](docs/mcp.md). A bundled [agent skill](skills/session-analytics/SKILL.md) exposes the same metrics.
 
 **Usage value is an API list-price equivalent, not your bill.** Provider-reported figures stay separately identified. Subscriptions and discounts are not modeled. Money follows request activity dates; session, token and tool counts use session-start dates. [Metric definitions and limits](docs/metrics.md).
@@ -81,7 +81,7 @@ Profiles and archives are discovered automatically. Conductor is optional. [Sour
 
 Provider stores are opened read-only. Outputs contain allowlisted counters, model IDs, tool names, timestamps, repository display names and pseudonymous keys. Prompts, replies, reasoning text, tool arguments/results, file paths and raw session IDs are discarded during parsing.
 
-The dashboard binds to loopback, serves assets locally and has no telemetry. Optional public pricing GETs send no local evidence; `--offline` disables them. Sending an export to an OTLP endpoint requires an explicit option, independent of pricing offline mode. Reading another machine requires `--remote`, which runs your `ssh` and brings back only that machine's content-free snapshot. A separate private index retains derived facts; `--no-index` bypasses it. [Full privacy contract](docs/privacy.md).
+The dashboard binds to loopback, serves assets locally and has no telemetry. Optional public pricing GETs send no local evidence; `--offline` disables them. Sending an export to an OTLP endpoint requires an explicit option, independent of pricing offline mode. Reading another machine requires saving it with `machines add` or passing `--remote`; it runs your `ssh` and brings back only that machine's content-free snapshot. A separate private index retains derived facts; `--no-index` bypasses it. [Full privacy contract](docs/privacy.md).
 
 ## How it works
 

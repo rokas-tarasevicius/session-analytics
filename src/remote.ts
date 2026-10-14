@@ -5,7 +5,7 @@ import { combineSnapshots } from "./interop/combine.ts";
 import { maximumSnapshotBytes } from "./interop/files.ts";
 import { validateSnapshot } from "./interop/snapshot.ts";
 import { canonicalTimeZone, type RemoteMachine, type RemoteOptions } from "./options.ts";
-import { track } from "./processes.ts";
+import { stopping, track } from "./processes.ts";
 import { remoteUnavailableWarning } from "./public/evidence.js";
 import { runtimePayload } from "./remote/runtime.ts";
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
@@ -86,7 +86,7 @@ export async function runSsh(destination: string, words: string[], { input, dead
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES); });
     child.once("error", (error: NodeJS.ErrnoException) => { failure ??= error.code === "ENOENT" ? "no-ssh" : "cancelled"; finish(null); });
-    child.once("close", (code) => finish(code));
+    child.once("close", (code) => { if (code === null) failure ??= "cancelled"; finish(code); });
   });
 }
 
@@ -120,10 +120,10 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
     "no-ssh": "ssh is not available on this machine",
     connection: "SSH could not connect or log in without a prompt",
     dropped: "the SSH session ended without an exit status (connection dropped, or the remote process was killed)",
-    sudo: `sudo needs a password to run as ${account}`,
-    "no-account": `the account ${account} does not exist there`,
+    sudo: `sudo -n could not run commands as ${account} without a password`,
+    "no-account": machine?.user ? `the account ${machine.user} does not exist there` : "the account named after sudo does not exist there",
     permission: "the remote command is not executable for that account",
-    "missing-command": "session-analytics was not found on the remote PATH",
+    "missing-command": "session-analytics was not found there",
     "no-node": `node was not found on ${account}'s login PATH`,
     "node-too-old": `the remote Node.js is ${found || "too old"}; the bundled runtime needs 24 or later`,
     runtime: "the bundled runtime could not start there",
@@ -188,7 +188,7 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
 export function stderrDetail(stderr: string): string {
   const lines = stderr.split(/\r?\n/).map((line) => line.replace(/[\u0000-\u001f\u007f]/g, "").trim())
     .filter((line) => line && !/^Node\.js v\d/.test(line) && !/^at\s/.test(line) && !/^\^+$/.test(line) && !/^\[stdin\]:\d+$/.test(line) && line !== "sa1: need-runtime");
-  const telling = lines.filter((line) => /^[A-Za-z]*Error\b|^sudo:|^sa1:|denied|not found|required|refused|failed|unknown|cannot|could not|busy|newer|no such|timed out|killed|stopped/i.test(line));
+  const telling = lines.filter((line) => /^[A-Za-z]*Error\b|^sudo(?:-rs)?:|^Sorry, user|^sa1:|denied|not found|required|refused|failed|unknown|cannot|could not|busy|newer|no such|timed out|killed|stopped/i.test(line));
   return (telling.at(-1) ?? lines.at(-1) ?? "").slice(0, 300);
 }
 
@@ -214,14 +214,16 @@ export function classifyRemote(machine: RemoteMachine, result: SshResult, timeou
   if (result.code === 0) return null;
   const { stderr } = result;
   if (result.code === 255) return error(sshProblem.test(stderr) ? "connection" : "dropped");
-  if (/^sudo: .*(?:password is required|terminal is required)/m.test(stderr)) return error("sudo");
-  if (/^sudo: (?:unknown user|user .* not found|.*: unknown user)/mi.test(stderr)) return error("no-account");
+  // Classic sudo and sudo-rs word these differently.
+  if (/^sudo(?:-rs)?: .*(?:password is required|terminal is required|interactive authentication is required|I'm afraid I can't do that|is not allowed to|may not run sudo|not in the sudoers)|^Sorry, user .* (?:is not allowed|may not run)/m.test(stderr)) return error("sudo");
+  if (/^sudo(?:-rs)?: (?:unknown user|user .* not found|.*: unknown user)/mi.test(stderr)) return error("no-account");
   const bootstrap: Partial<Record<number, RemoteFailure>> = { 75: "runtime", 78: "node-too-old", 79: "runtime", 80: "cache-unwritable", 81: "corrupted" };
   const reason = machine.runtime === "bundled" ? bootstrap[result.code ?? -1] : undefined;
   if (reason) return error(reason, /^sa1: node-too-old (v[\d.]+)$/m.exec(stderr)?.[1] ?? "");
   if (result.code === 126) return error("permission");
   if (result.code === 127) return error(machine.runtime === "bundled" ? "no-node" : "missing-command");
   if (result.code === 2) return error("rejected");
+  if (machine.runtime === "installed" && /Cannot find module|ERR_MODULE_NOT_FOUND/.test(stderr)) return error("missing-command");
   if (/ERR_UNKNOWN_FILE_EXTENSION|ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING|bad option: --experimental-strip-types/.test(stderr)) return error("node-too-old");
   if (/The local index is busy/.test(stderr)) return error("busy");
   if (/The local index was created by a newer version/.test(stderr)) return error("index-newer");
@@ -313,7 +315,8 @@ export async function analyzeMachines(
       snapshot = null;
       read = { name: machine.name, state: "failed", error: error instanceof RemoteError ? error : new RemoteError("analysis", machine) };
     }
-    if (read.state === "failed" && read.error?.reason === "cancelled" && signal?.aborted) return null;
+    // Stopped because this machine failed or is shutting down: that error, not this one, is the news.
+    if (read.state === "failed" && (controller.signal.aborted || stopping())) return null;
     const line = read.state === "read"
       ? `Read ${snapshot!.summary.sessions} sessions across ${snapshot!.summary.repositories} repositories from ${machine.name} in ${(read.ms! / 1000).toFixed(1)} s.`
       : machineReadLines(read, machine);
@@ -323,6 +326,8 @@ export async function analyzeMachines(
   try {
     const own = await analyzeMachineSessionsIsolated(local).catch((error: unknown) => { controller.abort(); throw error; });
     const others = await Promise.all(reads);
+    // A stopped run never passes for this machine alone.
+    if (controller.signal.aborted || stopping()) throw new RemoteError("cancelled");
     const snapshots = [own, ...others.filter((snapshot): snapshot is MachineAnalytics => snapshot !== null)];
     return combineSnapshots(snapshots, snapshots.length <= remote.machines.length ? [remoteUnavailableWarning] : []);
   } finally {

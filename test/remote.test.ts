@@ -160,7 +160,7 @@ test("unreachable, outdated and noisy machines leave a warning and the rest of t
   assert.ok(snapshot.warnings.includes(remoteUnavailableWarning));
   assert.match(stderr, /Could not read down: SSH could not connect.*Connection refused/);
   assert.match(stderr, /Could not read old: the remote session-analytics rejected the request.*Unknown session analytics argument/);
-  assert.match(stderr, /Could not read missing: session-analytics was not found on the remote PATH\. bash: line 1: session-analytics: command not found\n {2}Fix: use the bundled runtime \(session-analytics machines add missing\), or name the command in full: --remote-command "node \/path\/to\/session-analytics\/bin\/session-analytics\.ts"/);
+  assert.match(stderr, /Could not read missing: session-analytics was not found there\. bash: line 1: session-analytics: command not found\n {2}Fix: use the bundled runtime \(session-analytics machines add missing\), or name the command in full: --remote-command "node \/path\/to\/session-analytics\/bin\/session-analytics\.ts"/);
   assert.match(stderr, /Could not read down: .*\n {2}Fix: run ssh down true once in a terminal/);
   assert.match(stderr, /Could not read noisy: the remote output was not a valid full snapshot/);
   assert.match(stderr, /Could not read elsewhere: the remote snapshot used another time zone/);

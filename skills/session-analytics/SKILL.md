@@ -23,6 +23,8 @@ For explicitly requested terminal output, run `session-analytics report`; add `-
 
 Use repository or evidence-path flags only when the user explicitly narrows the request. Otherwise scan the complete machine evidence set and include hidden optional metadata.
 
+The same command also reads every machine saved with `session-analytics machines add` over SSH. When the user asks to include another computer where agents run, run `session-analytics machines add HOST`, adding `--user NAME` only when the user names the account the agents run as there. It checks the machine first and prints a `Fix:` line for each failure; relay those lines instead of running them, because sudo rules and SSH keys change the other machine. `session-analytics machines check` repeats the checks; `--find-users` lists the accounts with agent history there. Add `--no-remote` only when the user asks for this machine alone.
+
 ## Phase 2: know where the evidence is
 
 ### Direct metrics through MCP

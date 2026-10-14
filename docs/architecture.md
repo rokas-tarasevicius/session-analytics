@@ -6,13 +6,16 @@
 
 | Path | Role |
 | --- | --- |
-| `bin/session-analytics.ts` | Dispatcher for dashboard, report, rates, export, merge, index and MCP; common help/version handling. |
+| `bin/session-analytics.ts` | Dispatcher for dashboard, report, rates, export, merge, index, MCP, limits and machines; common help/version handling. |
 | `src/server.ts` | Dashboard server: argument and environment parsing, loopback HTTP server, static files, `/api/health`, `/api/analytics`, browser opener. |
 | `src/cli.ts` | Terminal report and `--json` snapshot. |
 | `src/mcp/` | Stdio protocol, strict tool schemas, bounded snapshot worker, TTL cache, query metrics and structured evidence collector. See [MCP](mcp.md). |
 | `src/analysis-process.ts` | Runs one analysis in a child process and returns the parsed result. |
 | `src/analysis-worker.ts` | Child-process entry point: reads options on stdin, writes the snapshot JSON on stdout. |
-| `src/remote.ts` | `--remote`: runs `ssh … report --json` on each machine next to the local scan, bounds and validates the reply, and combines the snapshots. |
+| `src/remote.ts` | Reads other machines: runs `ssh … report --json` on each next to the local scan, maps every exit code and stderr line to a fixed reason and fix, bounds and validates the reply, and combines the snapshots. |
+| `src/remote/bootstrap.js`, `src/remote/runtime.ts` | The bundled runtime: a fixed plain-JS bootstrap sent on stdin to the remote `node -`, and this install's files and digest, sent once per version into that account's cache. |
+| `src/machines/` | `machines.json` (strict, private, atomic), the `machines` command, and the `check` doctor. |
+| `src/processes.ts` | Registry of child processes (ssh, analysis workers), so a signal or deadline stops them all before exit. |
 | `src/analysis-output.ts` | Streams the same snapshot JSON with pipe backpressure, avoiding a second snapshot-sized string in the worker heap. |
 | `src/cursor-worker.ts` | Child-process entry point for the Cursor database pass. |
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
@@ -65,7 +68,7 @@ The server and report never parse transcripts themselves. Each snapshot runs in 
 
 The Cursor pass runs and serializes before the Claude and Codex pass starts, so the two largest object graphs never coexist in one heap.
 
-With `--remote`, the dashboard, report or export process also starts one `ssh` per machine while the local worker scans. Each remote machine runs its own worker and returns its snapshot on stdout (at most 256 MiB, within 300 seconds); the parent validates it like an imported file and combines it with the local result. Remote stderr is reduced to its last line and shown only in the terminal; a failed machine becomes a fixed warning.
+With saved machines or `--remote`, the dashboard, report or export process also starts one `ssh` per machine while the local worker scans. Each remote machine runs its own worker and returns its snapshot on stdout (at most 256 MiB, within 300 seconds or `--remote-timeout`); the parent validates it like an imported file and combines it with the local result. With the bundled runtime, the remote bootstrap relays the report's stdout and writes an empty heartbeat line about once a second, so a closed connection fails a write and the bootstrap stops the report's process group. Every ssh and worker is registered in `src/processes.ts`; the deadline, `SIGINT`, `SIGTERM` and `SIGHUP` stop them before the process exits. Remote stderr is reduced to its most telling line and shown only in the terminal with a fixed reason and fix; a failed machine becomes a fixed warning.
 
 The MCP command serves discovery and handshakes before scanning. Its first tool call starts `src/mcp/worker.ts` with the same 1024 MiB V8 old-space limit, then caches the allowlisted snapshot for a completion-based TTL. Concurrent calls share the worker. Stdio EOF/signals abort and reap it; scans have a 300-second deadline. Output drains for at most 250 ms, then the CLI exits to release unread standard-pipe writes; the 4 MiB output overflow path skips the drain. The worker resolves the trusted launch CWD through the analyzer's existing repository assignment and returns only a repository key. Lifecycle observations are collected during the normal transcript pass in `src/mcp/evidence.ts` and `activity.ts`. The existing pricing pass supplies dated eligible/priced token operands, including unknown prices; provider source-health counts are retained before repository selection; no second transcript scan is required. MCP queries project a smaller response and never forward the full snapshot, warnings, paths or raw exceptions.
 

@@ -26,7 +26,7 @@ export interface MachineCheck {
   /** True once ssh itself worked; `add` saves only then. */
   reachable: boolean;
   checks: CheckResult[];
-  /** Keyed hash of the machine and account; never the raw machine ID. */
+  /** Hash of the machine ID and account; never the raw machine ID. */
   identity?: string;
   sessions?: number;
   accounts?: string[];
@@ -80,7 +80,12 @@ export async function checkMachine(
   { timeoutMs, others = [], findUsers = false, onCheck = () => {} }: { timeoutMs: number; others?: SavedMachine[]; findUsers?: boolean; onCheck?: (check: CheckResult) => void },
 ): Promise<MachineCheck> {
   const result: MachineCheck = { name: machine.name, ok: false, reachable: false, checks: [] };
-  const add = (check: CheckResult): boolean => { result.checks.push(check); onCheck(check); return check.status !== "fail"; };
+  const add = (check: CheckResult): boolean => {
+    if (check.ms !== undefined) check.ms = Math.round(check.ms);
+    result.checks.push(check);
+    onCheck(check);
+    return check.status !== "fail";
+  };
   const finish = async (): Promise<MachineCheck> => {
     if (findUsers && result.reachable) {
       const accounts = await findAccounts(machine);

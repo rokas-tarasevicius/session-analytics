@@ -45,6 +45,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | --- | --- | --- |
 | P3 | Persist portable repository IDs and session keys with retained index facts, so history whose sources were deleted keeps its portable identity across exports. | #62 review |
 | P3 | Show the machine as a dimension in combined snapshots and the dashboard. | #63 follow-up |
+| P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
 
 ## Distribution and release metadata
 

@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `session-analytics machines add HOST [--user NAME]` saves a machine to read over SSH, and every later dashboard, `report` and `export` reads it with this one; `list`, `check`, `set`, `rename` and `remove` manage the private `machines.json`. `--machines a,b` reads only some saved machines for a run, and `--no-remote` none. A plain `session-analytics` reuses a dashboard started with the same saved machines. See [combine machines](docs/interop.md#combine-machines).
+- Saved machines use a bundled runtime by default: nothing is installed there except Node.js 24. A small fixed bootstrap sent over SSH runs this install's own code from that account's `~/.cache/session-analytics/runtime`, copying it there (about 0.4 MB compressed) only when that exact version is missing or damaged, and verifying it against its SHA-256 digest before every run. `--runtime installed` runs your own install there instead.
+- `session-analytics machines check` is a doctor for each saved machine: SSH, sudo, Node.js, the runtime, and a real read with its session count and time. Every failure prints the exact command that fixes it, and the command exits 1. `--find-users` lists the accounts on that machine whose home has agent history, by name only.
+- `--remote-timeout SECONDS` (or `SESSION_ANALYTICS_REMOTE_TIMEOUT`) changes the 300-second limit for each machine's read.
+
+### Changed
+
+- `--user NAME` replaces hand-written `--remote-command "sudo -n -iu NAME …"`. `SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND` still work but are deprecated in favour of saved machines, with a notice. `~` after `sudo` in a remote command is refused, because the SSH user's shell would expand it to its own home.
+- A failed remote read names a fixed reason, the most telling line SSH or the remote printed (no longer Node's `Node.js v24.x` trailer) and the command that fixes it, for each of: SSH login or host key, a dropped connection, sudo needing a password, a missing account, a missing or too old Node.js, a missing or non-executable command, another version (an installed remote is asked for `--version` and both versions are named), a busy or newer remote index, a time-out and an oversized reply. A machine read with no sessions now says that its agents may run as another account. Each machine is reported as soon as its read finishes, and the `report` header names only the machines that were read.
+- `report --share` describes this machine only, because one keyed source ID covers what it shares: it no longer reads remote machines, and refuses `--remote` and `--machines`. Share from each machine and merge the files, so that merge can detect overlap.
+
+### Fixed
+
+- A remote read that times out or is interrupted no longer keeps scanning on the other machine: with the bundled runtime, the remote report and its analysis worker stop within a few seconds of the connection closing.
+- `SIGTERM`, `SIGINT` and `SIGHUP` stop the dashboard, `report` and `export` at once, together with their `ssh` and analysis workers, instead of waiting up to 300 seconds for a remote read or leaving `ssh` running. A stopped `report` exits with the signal's status and never prints a partial snapshot.
+- Repeated `--remote` flags are combined; previously only the first was read.
+
 ## [0.9.0] - 2026-10-14
 
 ### Added

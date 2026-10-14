@@ -2,7 +2,7 @@ import { InteropError } from "./error.ts";
 import { brand } from "../brand.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, argument, assertRemoteAnalysis, OptionError, remoteBooleanFlags, remoteHelp, remoteValueFlags } from "../options.ts";
 import { remoteFor } from "../machines/config.ts";
-import { stopOnSignals } from "../processes.ts";
+import { stopOnSignals, stopping } from "../processes.ts";
 import { analyzeMachines } from "../remote.ts";
 import { analyzeMachineSessionsIsolated } from "../analysis-process.ts";
 import { readJsonFile, writeNewFile, writeNewFiles } from "./files.ts";
@@ -115,6 +115,8 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
 
 /** Fixed error text only; filesystem and remote errors may contain private data. */
 export function reportInteropFailure(error?: unknown): void {
+  // A signal stopped the work; its handler sets the exit code.
+  if (stopping()) return;
   process.stderr.write((error instanceof InteropError || error instanceof OptionError) && error.message ? `${error.message}\n` : "Interchange failed: the input or output file could not be accessed safely.\n");
   process.exitCode = 1;
 }

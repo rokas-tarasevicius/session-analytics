@@ -2,7 +2,7 @@ import { brand } from "../brand.ts";
 import {
   argument, commandWords, destinationPattern, machineNamePattern, OptionError, remoteTimeout, savedMachine, type RuntimeKind,
 } from "../options.ts";
-import { stopOnSignals } from "../processes.ts";
+import { stopOnSignals, stopping } from "../processes.ts";
 import { runtimePayload } from "../remote/runtime.ts";
 import { checkHeading, checkLine, checkMachine, type MachineCheck } from "./check.ts";
 import { machineProblem, machinesPath, readMachines, writeMachines, type MachinesConfig, type SavedMachine } from "./config.ts";
@@ -24,7 +24,7 @@ Usage:
 Options:
   --name LABEL       Label for the machine (default: the host name before the first dot)
   --user NAME        Read as this account through sudo -n -iu NAME, when agents run as their own user
-  --runtime bundled  Default. Copies this session-analytics (about ${Math.round(runtimePayload().bytes / 1024)} KB) into that account's
+  --runtime bundled  Default. Copies this session-analytics (about ${Math.round(runtimePayload().bytes / 1024)} KB compressed) into that account's
                      ~/.cache/session-analytics/runtime over ssh and runs it with its Node.js 24 or later
   --runtime installed  Run a session-analytics installed there instead; --command names it (default: session-analytics)
   --node PATH        Node.js for the bundled runtime: node on the login PATH (default) or an absolute path
@@ -94,6 +94,7 @@ function validMachine(machine: SavedMachine, config: MachinesConfig, previous?: 
   if (problem) throw new OptionError(`That machine cannot be saved: ${problem}.`);
   const others = config.machines.filter((other) => other !== previous);
   if (find({ ...config, machines: others }, machine.name)) throw new OptionError(`A machine named ${machine.name} is already saved; change it with ${command} machines set ${machine.name}, or choose another --name.`);
+  if (config.local?.label.toLowerCase() === machine.name.toLowerCase()) throw new OptionError(`${machine.name} is this machine's label; choose another --name.`);
   const same = others.find((other) => other.ssh === machine.ssh && other.user === machine.user);
   if (same) throw new OptionError(`${same.name} already reads ${machine.ssh}${machine.user ? ` as ${machine.user}` : ""}.`);
   return machine;
@@ -107,7 +108,9 @@ async function check(machines: SavedMachine[], config: MachinesConfig, timeoutMs
   for (const machine of machines) {
     const target = savedMachine(machine);
     if (!json) process.stdout.write(checkHeading(target, machine.enabled));
-    results.push(await checkMachine(target, { timeoutMs, others: config.machines, findUsers, onCheck: (item) => { if (!json) process.stdout.write(checkLine(item)); } }));
+    results.push(await checkMachine(target, { timeoutMs, others: config.machines, findUsers, onCheck: (item) => { if (!json && !stopping()) process.stdout.write(checkLine(item)); } }));
+    // A signal stopped the checks; its handler exits once the children are gone.
+    if (stopping()) await new Promise(() => {});
   }
   return results;
 }
@@ -119,7 +122,7 @@ async function run(subcommand: string, args: string[]): Promise<number> {
   if (subcommand === "list") {
     const config = readOrEmpty(options);
     if (args.includes("--json")) { write(JSON.stringify(config, null, 2)); return 0; }
-    write(`This machine: ${label(config)}`);
+    write(config.local ? `This machine: ${config.local.label}` : `This machine has no label; ${command} machines rename local LABEL sets one.`);
     if (!config.machines.length) { write(`No saved machines. Add one with ${command} machines add HOST [--user NAME].`); return 0; }
     const rows = [["NAME", "SSH", "ACCOUNT", "RUNTIME", "STATE"], ...config.machines.map((machine) => [
       machine.name, machine.ssh, machine.user ?? "-", machine.runtime === "bundled" ? `bundled${machine.node ? ` (${machine.node})` : ""}` : `installed: ${(machine.command ?? ["session-analytics"]).join(" ")}`, machine.enabled ? "enabled" : "disabled",
@@ -201,7 +204,10 @@ async function run(subcommand: string, args: string[]): Promise<number> {
   if (subcommand === "rename") {
     const [name, label] = positional as [string, string];
     if (!machineNamePattern.test(label) || label.toLowerCase() === "local") throw new OptionError("A label is letters, digits, . _ - (up to 32), and not local.");
-    if (name.toLowerCase() === "local") config.local = { label };
+    if (name.toLowerCase() === "local") {
+      if (find(config, label)) throw new OptionError(`A saved machine is already named ${label}; choose another label.`);
+      config.local = { label };
+    }
     else {
       const previous = named(config, name);
       config.machines[config.machines.indexOf(previous)] = validMachine({ ...previous, name: label }, config, previous);

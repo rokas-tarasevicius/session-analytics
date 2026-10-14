@@ -8,7 +8,7 @@ A Claude or ChatGPT subscription is a fixed price for a rolling allowance. Unuse
 | --- | --- |
 | Meter | One provider allowance, reported by the provider as percent used: Claude's 5-hour and weekly limits, Codex's weekly limit (and 5-hour limit on plans that have one). |
 | Cycle | One reset window of a meter, identified by its reset instant. A Codex cycle can end early when OpenAI resets limits; that remainder is not counted as waste. |
-| Value per 1% | API-equivalent value of this machine's activity inside a cycle, divided by the meter reading at that time. The median across cycles is used. |
+| Value per 1% | API-equivalent value of the activity the dashboard reads (this machine, plus any saved or `--remote` machines) inside a cycle, divided by the meter reading at that time. The median across cycles is used. |
 | Weekly capacity | Value per 1% × 100: what one full weekly allowance is worth at list prices. |
 | Monthly potential | Weekly capacity × 30.44 / 7: the value of using every weekly reset fully. |
 | Extracted | The provider's API-equivalent value for the selected dates, from the same activity ledger as Summary, Velocity and Costs. |
@@ -86,7 +86,7 @@ Suggestions are rules over the same numbers, ranked by urgency and value at stak
 
 ## Caveats
 
-- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Local value covers this machine only, so value per percent and capacity are conservative (lower bounds), and capacity used is an upper bound.
+- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Value covers only the machines the dashboard reads, so value per percent and capacity are conservative (lower bounds), and capacity used is an upper bound, as long as those machines use the same accounts. Meters are still read from this machine only, so a saved machine on a different Claude or Codex account inflates value per percent.
 - API-equivalent value is a list-price comparison, not an invoice.
 - Projections assume the cycle's average pace continues.
 - Plan prices were reviewed on 2026-10-13 from [claude.com/pricing](https://claude.com/pricing), the [Max plan article](https://support.claude.com/en/articles/11049741-what-is-the-max-plan) and [ChatGPT pricing](https://learn.chatgpt.com/docs/pricing). Override the detected plan on each card; the choice is stored in the browser.
