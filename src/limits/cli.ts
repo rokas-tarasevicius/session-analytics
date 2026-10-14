@@ -29,7 +29,8 @@ Options:
   --data-dir PATH    Private data directory (ledger location)
   --no-index         Do not read or write the ledger
   --codex-root PATH  Read Codex sessions from PATH instead of discovered profiles
-  --claude-root PATH Explicit Claude root: skips Claude event-log and plan discovery
+  --claude-root PATH Explicit Claude projects root: skips event-log and profile discovery; only that
+                     profile's login and plan are read
   --no-codex-account Do not read banked reset credits through the local Codex app-server. By default the
                      app-server is asked at most once per 10 minutes (Codex contacts OpenAI with its own
                      login); it never redeems a reset. SESSION_ANALYTICS_CODEX_ACCOUNT=0 does the same
@@ -53,8 +54,8 @@ function options(args: string[]): LimitsOptions {
 
 const clock = (seconds: number): string => new Date(seconds * 1000).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
-function describe(live: LiveMeter, info: LimitMeterInfo | undefined, now: number): string {
-  const label = (info?.label ?? live.meter.label).padEnd(28);
+function describe(live: LiveMeter, info: LimitMeterInfo | undefined, now: number, width: number): string {
+  const label = (info?.label ?? live.meter.label).padEnd(width);
   if (info?.retired) return `  ${label} not reported since ${clock(info.lastObservedAt)}`;
   if (!live.cycle || live.cycle.last.status === "idle") return `  ${label} idle · the next request starts a new window`;
   const parts = [`${live.used.toFixed(0).padStart(3)}% used`, `resets ${clock(live.cycle.resetsAt)} (in ${formatDuration(Math.max(0, live.cycle.resetsAt - now))})`];
@@ -72,7 +73,9 @@ function describe(live: LiveMeter, info: LimitMeterInfo | undefined, now: number
 function accountFacts(account: LimitAccount, codexAccount: LimitsSnapshot["codexAccount"], now: number): string[] {
   const lines: string[] = [];
   const evidence = account.planEvidence;
-  if (account.plan === "team" && (evidence?.seatTier || evidence?.userRateLimitTier)) lines.push(`  Seat: ${[evidence.seatTier, evidence.userRateLimitTier].filter(Boolean).join(", ").replace(/_/g, " ")}`);
+  if (account.plan === "team" && (evidence?.seatTier || evidence?.userRateLimitTier)) {
+    lines.push(`  Seat: ${[evidence.seatTier && `tier ${evidence.seatTier}`, evidence.userRateLimitTier && `user rate-limit tier ${evidence.userRateLimitTier}`].filter(Boolean).join(", ")} (seat type and price not recorded locally)`);
+  }
   if (account.attribution === "unattributed") lines.push("  Readings that could not be tied to an account; left out of pace and value.");
   if (account.attribution === "weekly-phase") lines.push("  Readings whose session was not found in any profile; grouped by weekly reset time.");
   const extra = account.extraUsage;
@@ -104,10 +107,9 @@ async function report(args: string[]): Promise<number> {
       // Each account is its own series: cycles, pace and "no longer reported" never mix two accounts.
       const own = buildMeters(snapshot.observations.filter((row) => row.provider === provider && row.account === account.key), now);
       if (!own.length) lines.push("  No meter readings yet.");
-      for (const meter of own) {
-        const info = snapshot.meters.find((item) => item.provider === provider && item.account === account.key && item.meter === meter.meter);
-        lines.push(describe(liveMeter(meter, now, latestReading(own)), info, now));
-      }
+      const infos = own.map((meter) => snapshot.meters.find((item) => item.provider === provider && item.account === account.key && item.meter === meter.meter));
+      const width = Math.max(28, ...own.map((meter, index) => (infos[index]?.label ?? meter.label).length + 1));
+      for (const [index, meter] of own.entries()) lines.push(describe(liveMeter(meter, now, latestReading(own)), infos[index], now, width));
       lines.push(...accountFacts(account, snapshot.codexAccount, now), "");
     }
   }

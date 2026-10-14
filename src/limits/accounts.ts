@@ -111,8 +111,10 @@ export interface ClaudeProfileAccount {
  */
 export async function readClaudeProfile(profile: Pick<Profile, "directory" | "isDefault">, home: string): Promise<ClaudeProfileAccount> {
   const configs = profile.isDefault ? [join(home, ".claude.json"), join(profile.directory, ".claude.json")] : [join(profile.directory, ".claude.json")];
+  let found: ClaudeProfileAccount | null = null;
   for (const path of configs) {
     let oauth: Record<string, unknown> | null;
+    // Claude Code rewrites this file while running; a torn read is skipped and the ledger keeps the last known account.
     try { oauth = record(record(await readBounded(path, 8 * 1024 * 1024))?.["oauthAccount"]); } catch { continue; }
     if (!oauth) continue;
     const account = opaqueId(oauth["accountUuid"]);
@@ -121,18 +123,20 @@ export async function readClaudeProfile(profile: Pick<Profile, "directory" | "is
       userRateLimitTier: enumValue(oauth["userRateLimitTier"]), seatTier: enumValue(oauth["seatTier"]), billingType: enumValue(oauth["billingType"]), planType: null,
     };
     const plan = claudePlanOf(evidence.organizationType, evidence.organizationRateLimitTier ?? evidence.userRateLimitTier);
-    return {
+    found = {
       key: account ? claudeAccountKey(opaqueId(oauth["organizationUuid"]) ?? "", account) : null,
       plan, planSource: plan ? "claude-config" : null, planEvidence: evidence,
       extraUsageEnabled: typeof oauth["hasExtraUsageEnabled"] === "boolean" ? oauth["hasExtraUsageEnabled"] : null,
     };
+    break;
   }
+  if (found?.plan) return found;
   let plan: ClaudePlan | null = null;
   try {
     const oauth = record(record(await readBounded(join(profile.directory, ".credentials.json"), 64 * 1024))?.["claudeAiOauth"]);
     plan = claudePlanOf(enumValue(oauth?.["subscriptionType"]), enumValue(oauth?.["rateLimitTier"]));
   } catch { /* Missing or unreadable records leave the plan to the ledger and the dashboard setting. */ }
-  return { key: null, plan, planSource: plan ? "claude-credentials" : null, planEvidence: null, extraUsageEnabled: null };
+  return { key: found?.key ?? null, plan, planSource: plan ? "claude-credentials" : null, planEvidence: found?.planEvidence ?? null, extraUsageEnabled: found?.extraUsageEnabled ?? null };
 }
 
 /** Claude session IDs (`<profile>/projects/<project>/<id>.jsonl`), found by listing directories: transcripts are never opened. */

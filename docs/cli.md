@@ -127,14 +127,14 @@ Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip se
 ## Subscription limits
 
 ```sh
-session-analytics limits                 # harvest meters and print each with its reset and projection
+session-analytics limits                 # harvest meters and print each account's meters with reset and projection
 session-analytics limits --json          # content-free limits snapshot
 session-analytics limits --quiet         # harvest only, for cron: */20 * * * * session-analytics limits --quiet
 session-analytics limits statusline      # Claude Code status line: records stdin rate_limits, prints them
 session-analytics limits --no-codex-account  # skip the banked-reset read through the local Codex app-server
 ```
 
-Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. They are kept in `limits.json` in the data directory; `--no-index` neither reads nor writes it. See [Subscription limits and value](subscription.md).
+Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. Each reading is attributed to an account: two Claude logins used on one machine are reported separately, each with its plan and profile names. They are kept in `limits-v2.json` in the data directory; `--no-index` neither reads nor writes it. The 0.9.0 ledger, `limits.json`, is imported and never written. See [Subscription limits and value](subscription.md#accounts).
 
 ## MCP server and agent skill
 

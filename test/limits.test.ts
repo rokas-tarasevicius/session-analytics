@@ -133,7 +133,9 @@ test("limits statusline records readings once per change and prints them", () =>
   const dataDir = mkdtempSync(join(tmpdir(), "limits-statusline-"));
   const resets = Math.floor(Date.now() / 1000) + 3 * 3600;
   const input = JSON.stringify({ model: { display_name: "Opus" }, rate_limits: { five_hour: { used_percentage: 46, resets_at: resets } } });
-  const run = () => spawnSync(process.execPath, [join(root, "bin/session-analytics.ts"), "limits", "statusline", "--data-dir", dataDir], { input, encoding: "utf8" });
+  // A home without Claude profiles: the readings stay unattributed rather than reading this machine's logins.
+  const env = { ...process.env, HOME: dataDir, CLAUDE_CONFIG_DIR: "" };
+  const run = () => spawnSync(process.execPath, [join(root, "bin/session-analytics.ts"), "limits", "statusline", "--data-dir", dataDir], { input, encoding: "utf8", env });
   const first = run();
   assert.equal(first.status, 0);
   assert.match(first.stdout, /^5h 46% ↻[23]h/);

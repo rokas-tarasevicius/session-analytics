@@ -3,7 +3,7 @@ import { closeSync, constants, fstatSync, openSync, readFileSync, renameSync, un
 import { join } from "node:path";
 
 import { INDEX_UNAVAILABLE, secureDirectory, secureFile } from "../store/database.ts";
-import { codexPlan, enumValue, identified, nextWeeklyReset, validAccount, weeklyPhase } from "./accounts.ts";
+import { accountAttribution, codexPlan, enumValue, identified, nextWeeklyReset, validAccount, weeklyPhase } from "./accounts.ts";
 import { limitName } from "./sources.ts";
 import {
   claudePlans,
@@ -61,6 +61,8 @@ export interface Ledger {
   accounts: Record<string, LedgerAccount>;
   /** Profile key → the account it was last logged into. */
   profiles: Record<string, string>;
+  /** A profile's fallback key → the account it turned out to be logged into; applied on every merge. */
+  aliases: Record<string, string>;
   /** Codex scoped limit id → display name. */
   limitNames: Record<string, string>;
   rows: LedgerRow[];
@@ -71,7 +73,7 @@ export interface Ledger {
 }
 
 export const emptyLedger = (): Ledger => ({
-  version: 2, harvestedThrough: null, importedV1Through: null, cursors: {}, accounts: {}, profiles: {}, limitNames: {}, rows: [],
+  version: 2, harvestedThrough: null, importedV1Through: null, cursors: {}, accounts: {}, profiles: {}, aliases: {}, limitNames: {}, rows: [],
   resetCreditHistory: [], codexAccountReadAt: null,
 });
 
@@ -232,15 +234,16 @@ function mergeWeeklyPhases(observations: LimitObservation[]): void {
 /**
  * Codex reports a window that has not started at 0% with a reset one window after each reading, so the reset slides
  * forward. Such a reading starts a real cycle only when another reading confirms the same reset later or above 0%;
- * otherwise only the latest one is kept per meter, as an `idle` marker that never forms a cycle.
+ * otherwise only the latest one is kept per meter, as an `idle` marker, and only while no later reading supersedes it.
  */
 function markIdle(series: LimitObservation[]): LimitObservation[] {
   if (series[0]?.provider !== "codex") return series;
   const rolling = (item: LimitObservation) => item.usedPercent === 0 && item.windowMinutes !== null && Math.abs(item.resetsAt - item.observedAt - item.windowMinutes * 60) <= 180;
   const byReset = [...series].sort((left, right) => left.resetsAt - right.resetsAt);
   const confirmed = (item: LimitObservation) => {
-    let index = byReset.findIndex((other) => other.resetsAt >= item.resetsAt - resetToleranceSeconds);
-    for (; index >= 0 && index < byReset.length && byReset[index]!.resetsAt <= item.resetsAt + resetToleranceSeconds; index += 1) {
+    let low = 0, high = byReset.length;
+    while (low < high) { const middle = (low + high) >> 1; if (byReset[middle]!.resetsAt < item.resetsAt - resetToleranceSeconds) low = middle + 1; else high = middle; }
+    for (let index = low; index < byReset.length && byReset[index]!.resetsAt <= item.resetsAt + resetToleranceSeconds; index += 1) {
       const other = byReset[index]!;
       if (other !== item && (other.usedPercent > 0 || other.observedAt - item.observedAt > 600)) return true;
     }
@@ -253,7 +256,8 @@ function markIdle(series: LimitObservation[]): LimitObservation[] {
     else if (confirmed(item)) kept.push(item.status === "idle" ? { ...item, status: "allowed" } : item);
     else if (!idle || item.observedAt > idle.observedAt) idle = item;
   }
-  if (idle) kept.push({ ...idle, status: "idle" });
+  const marker: LimitObservation | null = idle;
+  if (marker && kept.every((item) => item.observedAt < marker.observedAt)) kept.push({ ...marker, status: "idle" });
   return kept;
 }
 
@@ -279,7 +283,7 @@ function clusterResets(series: LimitObservation[]): void {
 function quarantineInterleaved(series: LimitObservation[]): void {
   if (series[0]?.provider !== "codex" || series[0].account === "") return;
   const cycles = [...groupBy(series.filter((item) => item.status !== "idle"), (item) => String(item.resetsAt)).values()].map((items) => ({
-    items, first: Math.min(...items.map((item) => item.observedAt)), last: Math.max(...items.map((item) => item.observedAt)),
+    items, first: items.reduce((value, item) => Math.min(value, item.observedAt), Infinity), last: items.reduce((value, item) => Math.max(value, item.observedAt), 0),
   }));
   for (const cycle of cycles) {
     if (cycles.some((other) => other !== cycle && other.first < cycle.first && other.last > cycle.last && other.items.length > cycle.items.length)) {
@@ -365,13 +369,15 @@ export function readLedger(directory: string, now = Date.now() / 1000): LedgerRe
   for (const [key, cursor] of Object.entries(record(value["cursors"]) ?? {})) { const valid = cursorOf(cursor); if (valid && /^\d+:\d+$/.test(key)) cursors[key] = valid; }
   const profiles: Record<string, string> = {};
   for (const [key, account] of Object.entries(record(value["profiles"]) ?? {})) if (profileKeyPattern.test(key) && typeof account === "string" && identified(account) && (validAccount("claude", account) || validAccount("codex", account))) profiles[key] = account;
+  const aliases: Record<string, string> = {};
+  for (const [key, account] of Object.entries(record(value["aliases"]) ?? {})) if (aliasValid(key, account)) aliases[key] = account;
   const limitNames: Record<string, string> = {};
   for (const [key, name] of Object.entries(record(value["limitNames"]) ?? {})) if (/^[a-z0-9_-]{1,40}$/.test(key) && limitName(name)) limitNames[key] = name as string;
   return {
     status: "ok",
     ledger: {
       version: 2, harvestedThrough: time(value["harvestedThrough"]), importedV1Through: time(value["importedV1Through"]),
-      cursors: pruneCursors(cursors, now), accounts, profiles, limitNames,
+      cursors: pruneCursors(cursors, now), accounts, profiles, aliases, limitNames,
       rows: (value["rows"] as LedgerRow[]).map(fromRow).filter((row): row is LimitObservation => row !== null).map(toRow),
       resetCreditHistory: resetCreditHistory(value["resetCreditHistory"]),
       codexAccountReadAt: time(value["codexAccountReadAt"]),
@@ -382,6 +388,24 @@ export function readLedger(directory: string, now = Date.now() / 1000): LedgerRe
 /** Moves an unparseable ledger aside instead of replacing it, so nothing is destroyed. */
 export function setAsideLedger(directory: string, now = Date.now() / 1000): void {
   renameSync(ledgerPath(directory), `${ledgerPath(directory)}.unreadable-${Math.floor(now)}`);
+}
+
+function aliasValid(key: string, account: unknown): account is string {
+  const provider = key.startsWith("claude-") ? "claude" : "codex";
+  return validAccount(provider, key) && validAccount(provider, account) && accountAttribution(key) === "profile" && accountAttribution(account) === "account";
+}
+
+/** Readings first kept under a profile's fallback key belong to the account that profile turned out to be logged into. */
+export function applyAliases(ledger: Ledger): Ledger {
+  const alias = (key: string) => ledger.aliases[key] ?? key;
+  if (!Object.keys(ledger.aliases).length) return ledger;
+  const accounts: Record<string, LedgerAccount> = {};
+  for (const [key, account] of Object.entries(ledger.accounts)) accounts[alias(key)] = mergeAccount(accounts[alias(key)], account);
+  return {
+    ...ledger, accounts,
+    rows: ledger.rows.map((row): LedgerRow => ledger.aliases[row[1]] ? [row[0], alias(row[1]), ...row.slice(2)] as LedgerRow : row),
+    resetCreditHistory: ledger.resetCreditHistory.map((row): [LimitProvider, string, number, number] => [row[0], alias(row[1]), row[2], row[3]]),
+  };
 }
 
 const later = <T extends { observedAt: number }>(left: T | null, right: T | null): T | null =>
@@ -408,14 +432,16 @@ export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
     const current = cursors[identity];
     if (!current || cursor.offset > current.offset || (cursor.offset === current.offset && (!cursor.retry || cursor.seen >= current.seen))) cursors[identity] = cursor;
   }
-  const accounts = { ...left.accounts };
-  for (const [key, account] of Object.entries(right.accounts)) accounts[key] = mergeAccount(accounts[key], account);
+  const aliases = { ...left.aliases, ...right.aliases };
+  const [first, second] = [applyAliases({ ...left, aliases }), applyAliases({ ...right, aliases })];
+  const accounts = { ...first.accounts };
+  for (const [key, account] of Object.entries(second.accounts)) accounts[key] = mergeAccount(accounts[key], account);
   const max = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
   return {
     version: 2, harvestedThrough: max(left.harvestedThrough, right.harvestedThrough), importedV1Through: max(left.importedV1Through, right.importedV1Through),
-    cursors: pruneCursors(cursors, now), accounts, profiles: { ...left.profiles, ...right.profiles }, limitNames: { ...left.limitNames, ...right.limitNames },
-    rows: compactObservations([...left.rows, ...right.rows].map(fromRow).filter((row): row is LimitObservation => row !== null), now).map(toRow),
-    resetCreditHistory: resetCreditHistory([...left.resetCreditHistory, ...right.resetCreditHistory]),
+    cursors: pruneCursors(cursors, now), accounts, profiles: { ...left.profiles, ...right.profiles }, aliases, limitNames: { ...left.limitNames, ...right.limitNames },
+    rows: compactObservations([...first.rows, ...second.rows].map(fromRow).filter((row): row is LimitObservation => row !== null), now).map(toRow),
+    resetCreditHistory: resetCreditHistory([...first.resetCreditHistory, ...second.resetCreditHistory]),
     codexAccountReadAt: max(left.codexAccountReadAt, right.codexAccountReadAt),
   };
 }

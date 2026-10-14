@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Subscription limits are tracked per account. Two Claude logins used on one machine, such as a Max plan and a Team seat in separate `CLAUDE_CONFIG_DIR` profiles, are now separate meters with their own plan, weekly reset time and extra-usage state; profiles logged into the same account share one. Agent SDK events find their account through the session's transcript file name, status-line readings through the inherited `CLAUDE_CONFIG_DIR` or transcript path, and Codex readings through the rollout's or app-server's account ID. Account IDs are hashed where they are read. `limits` prints each account labelled with its plan and local profile names, and `limits --json` (schema version 2) adds `accounts`, `meters` and an `account` on every reading. See [Accounts](docs/subscription.md#accounts).
+- The Claude plan is detected from each profile's `.claude.json` (`oauthAccount` plan enums), so it is found on macOS, where the OAuth credentials live in the Keychain. A Team seat is reported as Team even when its user tier looks like Max 5x.
+- Codex model-scoped limits are labelled with the provider's limit name, such as "GPT-5.3-Codex-Spark · Weekly", and are no longer called "all models". Meters the provider stopped reporting are marked retired instead of idle.
+
+### Changed
+
+- The limits ledger moved to `limits-v2.json` (and `limits-inbox-v2.jsonl`) so that an older installation sharing the data directory, such as a scheduled 0.9.0 `limits --quiet`, cannot replace it. The 0.9.0 `limits.json` is imported once and on later harvests, attributed by weekly reset time, and never written; readings that match no account are kept as unattributed history.
+- Read positions are stored in the ledger, so a scheduled `limits --quiet` reads only new log lines instead of rereading every recently modified file.
+- A Claude limit reached while paid extra usage is in use is recorded as `overage` rather than a cap, and readings above 100% are kept.
+
+### Fixed
+
+- Readings from two Claude accounts were folded into one meter, so every weekly cycle looked like an early reset, one account's live week was hidden, and extra usage showed whichever account reported last.
+- A harvest that overlapped another one (two dashboard tabs, or the dashboard and cron) could erase the other's readings for good. Harvests in one process now run one at a time, the dashboard shares a harvest that is still running, and every write merges with the ledger on disk.
+- A ledger that could not be read was treated as empty and overwritten. A ledger from another version is now left untouched, and an unparseable one is set aside.
+- A provider file that failed to read was skipped for good once a later harvest had passed its modification time; it is now retried.
+- Codex windows that had not started yet, reported at 0% with a sliding reset time, created hundreds of one-reading cycles and false early resets. Reset instants a few seconds apart no longer split one cycle in two, and a capped reading keeps its own time when readings are merged.
+
 ## [0.9.0] - 2026-10-14
 
 ### Added

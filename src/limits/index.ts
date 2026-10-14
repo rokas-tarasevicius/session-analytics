@@ -1,4 +1,3 @@
-import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 
@@ -9,7 +8,7 @@ import type { AnalyzeOptions } from "../types.ts";
 import { accountAttribution, accountLabel, claudeIdentities, identified, profileFor, profilesFromRoots, rolloutAccount, weeklyPhaseKey, type Profile } from "./accounts.ts";
 import { readCodexAccount } from "./codex-account.ts";
 import {
-  LEDGER_UNREADABLE, attributeLegacy, claudeSummary, codexSummary, compactObservations, drainInbox, emptyLedger, fromRow, mergeAccount, readLedger,
+  LEDGER_UNREADABLE, applyAliases, attributeLegacy, claudeSummary, codexSummary, compactObservations, drainInbox, emptyLedger, fromRow, readLedger,
   readLegacyLedger, resetCreditHistory, restoreInbox, retentionSeconds, setAsideLedger, toRow, writeLedger, type Ledger, type LedgerAccount,
 } from "./ledger.ts";
 import { harvestClaudeEventLogs, harvestCodex, type Cursors } from "./sources.ts";
@@ -43,10 +42,6 @@ let queue: Promise<unknown> = Promise.resolve();
 
 const later = <T extends { observedAt: number }>(left: T | null | undefined, right: T | null | undefined): T | null =>
   !left ? right ?? null : !right ? left : right.observedAt >= left.observedAt ? right : left;
-
-async function directoryExists(path: string): Promise<boolean> {
-  try { return (await stat(path)).isDirectory(); } catch { return false; }
-}
 
 /**
  * Harvest provider-reported limit meters and fold them into the private ledger, attributed to accounts. Sources are
@@ -151,9 +146,7 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   const history = [...base.resetCreditHistory];
   let accountReads = 0, answered = false;
   if (accountOptIn && (codexAccountReadAt === null || now - codexAccountReadAt >= accountReadInterval)) {
-    const present: Profile[] = [];
-    for (const profile of codexHomes) if (await directoryExists(profile.directory)) present.push(profile);
-    const reads = await Promise.all((present.length ? present : [null]).map(async (profile) => ({
+    const reads = await Promise.all((codexHomes.length ? codexHomes : [null]).map(async (profile) => ({
       profile: profile ?? defaultCodexHome,
       state: await readCodexAccount(profile ? { ...environment, CODEX_HOME: profile.canonical } : environment, now),
     })));
@@ -175,16 +168,17 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     }
   }
 
-  // Readings kept under a profile's fallback key join the profile's account once that account is known.
-  const heal = new Map<string, string>();
-  for (const [profile, account] of claudeAccounts) if (accountAttribution(account) === "account") heal.set(profile.fallbackKey, account);
-  for (const profile of codexHomes) { const account = homeAccount(profile); if (accountAttribution(account) === "account") heal.set(profile.fallbackKey, account); }
-  const rekey = (account: string) => heal.get(account) ?? account;
-  let observations = [...base.rows.map(fromRow).filter((row): row is LimitObservation => row !== null), ...fresh, ...inbox]
-    .map((row) => heal.has(row.account) ? { ...row, account: rekey(row.account) } : row);
+  // Readings kept under a profile's fallback key join the profile's account once that account is known, here and in
+  // every later merge with a ledger another process wrote meanwhile.
+  const aliases = { ...base.aliases };
+  for (const [profile, account] of claudeAccounts) if (accountAttribution(account) === "account") aliases[profile.fallbackKey] = account;
+  for (const profile of codexHomes) { const account = homeAccount(profile); if (accountAttribution(account) === "account") aliases[profile.fallbackKey] = account; }
+  const rekey = (account: string) => aliases[account] ?? account;
+  const healed = applyAliases({ ...base, aliases });
+  let observations = [...healed.rows.map(fromRow).filter((row): row is LimitObservation => row !== null), ...fresh, ...inbox]
+    .map((row) => aliases[row.account] ? { ...row, account: rekey(row.account) } : row);
 
-  const accounts: Record<string, LedgerAccount> = {};
-  for (const [key, account] of Object.entries(base.accounts)) accounts[rekey(key)] = mergeAccount(accounts[rekey(key)], account);
+  const accounts: Record<string, LedgerAccount> = { ...healed.accounts };
   const touch = (key: string, provider: LimitProvider): LedgerAccount => accounts[key] ??= {
     provider, plan: null, planSource: null, planEvidence: null, planObservedAt: null, extraUsage: null, codex: null, profileKeys: [],
   };
@@ -244,7 +238,7 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   const live = new Set(rows.map((row) => row.account));
   for (const key of Object.keys(accounts)) if (!live.has(key) && !Object.values(profiles).includes(key) && ![...claudeAccounts.values()].includes(key)) delete accounts[key];
   const next: Ledger = {
-    version: 2, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, limitNames,
+    version: 2, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases, limitNames,
     rows: rows.map(toRow), resetCreditHistory: resetCreditHistory(history.map((row) => [row[0], rekey(row[1]), row[2], row[3]])), codexAccountReadAt,
   };
   let ledger = next, persisted = false;
