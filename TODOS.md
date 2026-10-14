@@ -50,10 +50,8 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Publish the compiled package that `release:check` installs and smoke-tests: attach the tarball to GitHub Releases and publish the same bytes to npm. | §6, Not in scope for 0.8.0; distribution-launch proposal |
-| P3 | Evaluate Homebrew distribution separately. | §6, Not in scope for 0.8.0 |
+| P2 | Maintainer step: claim the npm name with the first packaged release's tarball, configure trusted publishing and set `NPM_PUBLISH`; create the Homebrew tap and its `TAP_TOKEN` and set `HOMEBREW_TAP`. Until then the README's npm and Homebrew commands do not work. | [One-time maintainer steps](docs/release.md#one-time-maintainer-steps) |
 | P3 | Decide whether the package should ship declaration files; it ships none today. The release check already installs and runs the compiled artifact and requires CHANGELOG and license assets. | §4 P3; §6, Not in scope for 0.8.0 |
-| P3 | Add release compare links to CHANGELOG. | §4 P3; §6, Not in scope for 0.8.0 |
 | P3 | Upload the social preview through repository settings at release time. | §4 P3; §6 Release 0.8.0, maintainer step |
 
 ## Security tooling and product validation
@@ -65,6 +63,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Completed
 
+- **Completed: 2026-10-14 (unreleased).** The tag workflow publishes the compiled package that `release:check` installs: a GitHub Release tarball with an unversioned alias, `SHA256SUMS` and a build provenance attestation, after an installed smoke on Linux and macOS under Node.js 24 and 26; the same bytes go to npm through trusted publishing and to a Homebrew tap formula, each behind a repository variable. CHANGELOG compare links are added and required by `release:check`.
 - **Completed: 2026-10-13 (readiness candidate).** Mobile time-window selector, single-column KPIs below 400 px, and wrapped snapshot metadata: six views checked at 375, 768 and 1440 px through the collaborative preview; 375 px also checked in both themes and densities. Custom ranges focus the start date, and failed refreshes preserve the snapshot without widening the page. Synthetic mobile captures and their provenance are in `assets/SCREENSHOTS.md`.
 - **Completed: 2026-10-13 (0.8.0).** Formatter, shared type/focus/chart tokens, Summary hierarchy and view finishes (PR-E1–E4): `a383526`, `37a3e3d`, `cd65a99`, `20eadba`.
 - **Completed: 2026-10-13 (0.8.0).** Focused-repository provider breakdowns and fleet comparator: `20eadba` and current `src/public/app.js`.

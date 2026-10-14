@@ -95,7 +95,7 @@ session-analytics report --remote server,build-box    # terminal report of all t
 session-analytics --remote server --remote-command "sudo -n -iu agents session-analytics"
 ```
 
-Install session-analytics on each remote machine (Node.js 24 and a checkout, as here) so that `ssh server session-analytics --version` works without a prompt. For each machine, this machine runs
+Install the same session-analytics version on each remote machine (see [installation](cli.md#install), for example `npm install -g` with the release tarball URL) so that `ssh server session-analytics --version` works without a prompt. For each machine, this machine runs
 
 ```text
 ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -T -- server \

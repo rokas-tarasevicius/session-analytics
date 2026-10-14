@@ -17,7 +17,9 @@ interface ReleaseMetadata {
   changelog: string;
 }
 
-/** Fail before publishing when a tag names different code, or the changelog describes an older release. */
+const repositoryUrl = "https://github.com/rokas-tarasevicius/session-analytics";
+
+/** Fail before publishing when a tag names different code, or the changelog describes or links an older release. */
 export function checkReleaseMetadata(metadata: ReleaseMetadata, tag?: string): void {
   const expected = metadata.sourceVersion;
   if (!/^\d+\.\d+\.\d+$/.test(expected)) throw new Error("Source version must be a stable X.Y.Z version.");
@@ -26,6 +28,9 @@ export function checkReleaseMetadata(metadata: ReleaseMetadata, tag?: string): v
   }
   const latest = /^## \[(\d+\.\d+\.\d+)\](?:\s|$)/m.exec(metadata.changelog)?.[1];
   if (latest !== expected) throw new Error(`Latest changelog release does not match source version ${expected}.`);
+  const links = metadata.changelog.split(/\r?\n/);
+  if (!links.includes(`[Unreleased]: ${repositoryUrl}/compare/v${expected}...HEAD`)) throw new Error(`Changelog must link [Unreleased] to ${repositoryUrl}/compare/v${expected}...HEAD.`);
+  if (!links.some((line) => line.startsWith(`[${expected}]: ${repositoryUrl}/`) && line.endsWith(`v${expected}`))) throw new Error(`Changelog must link [${expected}] to its changes, ending at v${expected}.`);
   if (tag !== undefined && tag !== `v${expected}`) throw new Error(`Release tag must be v${expected}.`);
 }
 
@@ -35,7 +40,7 @@ export function extractReleaseNotes(metadata: ReleaseMetadata, tag: string): str
   const lines = metadata.changelog.split(/\r?\n/);
   const start = lines.findIndex((line) => line === heading || line.startsWith(`${heading} - `));
   if (start < 0) throw new Error(`Missing changelog section for ${tag}.`);
-  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+  const end = lines.findIndex((line, index) => index > start && (line.startsWith("## ") || /^\[[^\]]+\]: /.test(line)));
   const notes = lines.slice(start + 1, end < 0 ? undefined : end).join("\n").trim();
   if (!notes || !notes.split("\n").some((line) => line.trim() && !line.startsWith("#"))) {
     throw new Error(`Changelog section for ${tag} has no release notes.`);

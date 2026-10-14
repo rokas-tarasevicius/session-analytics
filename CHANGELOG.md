@@ -1,17 +1,21 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack.
+All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/). Versions before 0.5.0 shipped as the `machine-session-analytics` skillpack. Tags and GitHub Releases start at 0.7.0. 0.8.1 was prepared at commit `67b0281` but never tagged or released; its changes first shipped in 0.9.0, and its link below compares commits.
 
 ## [Unreleased]
 
 ### Added
 
+- Install a compiled package instead of a source checkout: `brew install rokas-tarasevicius/tap/session-analytics`, `npm install -g session-analytics`, or `npm install -g` with the release tarball's URL, which does not use the npm registry. Every GitHub Release attaches `session-analytics-X.Y.Z.tgz`, an unversioned `session-analytics.tgz` so `/releases/latest/download/session-analytics.tgz` always names the latest release, `SHA256SUMS`, and a build provenance attestation (`gh attestation verify`). npm and the Homebrew tap receive the same bytes. See [installation](docs/cli.md#install).
 - `npm run build` compiles an installable package into `dist/`: the same code as JavaScript, the dashboard files, rate card, schemas and agent skill, and a generated manifest with a `.js` command, no install scripts and no dependencies. `npm run pack:release` packs it into `release/`. Development is unchanged: Node runs the TypeScript sources directly, and the root `package.json` stays private.
 - `npm run release:check` now builds and packs that package, checks its files and manifest, and installs the tarball into a temporary prefix whose path contains a space. From the installed copy it runs every command's help and version, the synthetic report (compared with the source run), an MCP tool call, the dashboard with every static file and API route, and the report again from a read-only installation. `node scripts/smoke-installed.ts` runs the same smoke against a tarball or a registry version. `node scripts/demo.ts --bin PATH` runs the demo against any build, and `SESSION_ANALYTICS_DEMO_NOW` pins the instant the demo generates its data from, so two runs analyze the same sessions.
 - The dashboard footer shows the version it runs, and `/api/health` reports it.
 
 ### Changed
 
+- The release workflow builds and packs the package once, verifies its checksums wherever it is used, installs and runs that tarball on Linux and macOS under Node.js 24 and 26, and publishes only after platform validation, the Chrome check and every installed smoke succeed. The GitHub Release is created as a draft, receives its files, and only then becomes the latest release; a re-run resumes the draft and never changes a published release. npm publishing (trusted publishing with provenance, then a registry install of the published version) and the Homebrew tap update run only when their repository variables are set. See [releases](docs/release.md).
+- Installation guides, the MCP setup and the agent skill use the installed `session-analytics` command; a source checkout is for contributors.
+- The changelog links each tagged release to its changes, and `release:check` requires the `[Unreleased]` and current-version links.
 - Running `session-analytics` again reuses a dashboard on the same port only when it runs the same version. After an upgrade, a dashboard left running from the older version is named, with its version and how to stop it, instead of being reused silently.
 - The index revision hashes the code that runs: TypeScript sources in a checkout, JavaScript in the compiled package. The first scan after switching between a checkout and an installed copy, like the first after an upgrade, parses present sessions again once; retained history whose sources are gone is kept.
 
@@ -472,3 +476,9 @@ First standalone release.
 
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
+
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/67b0281...v0.9.0
+[0.8.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.8.0...67b0281
+[0.8.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/rokas-tarasevicius/session-analytics/releases/tag/v0.7.0

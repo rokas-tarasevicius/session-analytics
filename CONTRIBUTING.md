@@ -60,6 +60,7 @@ skills/session-analytics/    agent skill
 scripts/demo.ts              synthetic dataset and demo launcher (--bin runs another build)
 scripts/build.ts             compiles the installable package into dist/
 scripts/smoke-installed.ts   installs a packed tarball and runs it end to end
+scripts/homebrew-formula.ts  renders the Homebrew tap formula for a release
 test/                        node:test suites and fixtures
 verify/                      independent accounting oracles and verification guide
 schemas/                     closed public snapshot and sharing schemas
@@ -119,9 +120,9 @@ Public pricing fetches belong only in `src/pricing/`; analysis stays network-fre
 
 ## Changelog
 
-`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time.
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time and update the compare links at the bottom of the file.
 
-Pushing a `vX.Y.Z` tag runs the release workflow. Every release requires GitHub-hosted Ubuntu and macOS validation plus the required Ubuntu Chrome check before publication, regardless of repository visibility. Validation checks that the tag, package, source version and latest changelog release agree, then checks types, tests, schemas and a synthetic report. Only the publishing job has write permission. It creates a GitHub Release through the REST API using the matching `## [X.Y.Z]` section from `CHANGELOG.md`; missing or inconsistent metadata fails before publication. See [docs/release.md](docs/release.md) for the preflight and public launch gates.
+Pushing a `vX.Y.Z` tag runs the release workflow. Every release requires GitHub-hosted Ubuntu and macOS validation, the required Ubuntu Chrome check, and an installed smoke of the packed tarball on Ubuntu and macOS under Node.js 24 and 26 before publication. Validation checks that the tag, package, source version, latest changelog release and its compare links agree, then runs `release:check`. Only the publishing job has write permission: it attests the tarball's provenance and creates the GitHub Release with the tarball, an unversioned alias and `SHA256SUMS`, using the matching `## [X.Y.Z]` section from `CHANGELOG.md` as its notes. The same bytes then go to npm and the Homebrew tap when those channels are enabled. See [docs/release.md](docs/release.md) for the preflight, the jobs and the one-time maintainer steps.
 
 ## Style
 

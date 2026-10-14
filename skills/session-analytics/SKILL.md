@@ -17,7 +17,7 @@ For a request to show, open, run, analyze, or restart the dashboard, immediately
 session-analytics
 ```
 
-If the command is not on `PATH`, run `node <checkout>/bin/session-analytics.ts` from a local clone of the project instead. Do not ask the user to run commands. Do not run setup, preprocessing, `report`, or `--help` first. The command discovers the evidence, calculates the snapshot, starts the loopback server, and opens the browser. It is safe to rerun: when a compatible dashboard already owns the port, it reuses and opens that dashboard.
+If the command is not on `PATH`, run `node bin/session-analytics.ts` from a source checkout of the project when one is available. Otherwise report that session-analytics is not installed and name the install commands in the project's `docs/cli.md#install` (`brew install rokas-tarasevicius/tap/session-analytics` or `npm install -g session-analytics`); do not install it without the user's go-ahead. Do not ask the user to run commands. Do not run setup, preprocessing, `report`, or `--help` first. The command discovers the evidence, calculates the snapshot, starts the loopback server, and opens the browser. It is safe to rerun: when a compatible dashboard already owns the port, it reuses and opens that dashboard.
 
 For explicitly requested terminal output, run `session-analytics report`; add `--json` only when a machine-readable snapshot is requested.
 

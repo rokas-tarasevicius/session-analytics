@@ -19,19 +19,44 @@
 
 ## Install
 
-Requirements: **Node.js 24 or newer** and **macOS** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)).
+Requirements: **Node.js 24 or newer** and **macOS** or **Linux** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)). Windows is not supported. Install with one of:
+
+```bash
+brew install rokas-tarasevicius/tap/session-analytics   # Homebrew; uses Homebrew's Node.js
+npm install -g session-analytics                        # npm registry
+npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
+```
+
+Then `session-analytics --version` prints the installed version. Every channel installs the same compiled package: the `session-analytics-X.Y.Z.tgz` attached to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases), which the release workflow installed and ran on Linux and macOS before publishing it. The third line needs no npm registry: npm installs the release asset directly, and `session-analytics.tgz` always names the latest release. The package has no dependencies and runs no install scripts. Packaged releases start after 0.9.0; 0.9.0 and earlier run only from a source checkout.
+
+- **Pin a version:** `npm install -g session-analytics@X.Y.Z`, or the versioned asset `https://github.com/rokas-tarasevicius/session-analytics/releases/download/vX.Y.Z/session-analytics-X.Y.Z.tgz`.
+- **Try once without installing:** `npx -y session-analytics@X.Y.Z` (or `npx --package <tarball URL> session-analytics`). npx checks the registry on every start, so configure MCP clients and the Claude Code status line with an installed command.
+- **Verify a download:** run `shasum -a 256 -c --ignore-missing SHA256SUMS` beside the downloaded asset, and `gh attestation verify session-analytics-X.Y.Z.tgz -R rokas-tarasevicius/session-analytics` to check that this repository's release workflow built it. Versions the workflow publishes to npm carry npm provenance for the same bytes.
+
+### Upgrade, roll back and uninstall
+
+| Channel | Upgrade | Roll back | Uninstall |
+| --- | --- | --- | --- |
+| Homebrew | `brew upgrade session-analytics` | The tap keeps only the latest version; uninstall and install the older version through npm | `brew uninstall session-analytics` |
+| npm | `npm install -g session-analytics@latest` | `npm install -g session-analytics@X.Y.Z` | `npm uninstall -g session-analytics` |
+| Release tarball | Run the install command again | Install the versioned asset URL | `npm uninstall -g session-analytics` |
+
+There is no automatic update check. After an upgrade, the first scan parses present sessions again once, and a dashboard still running the old version is named instead of reused: stop it and start the command again. An older version refuses an index that a newer version migrated ("created by a newer version"); run it with `--no-index` until you upgrade again.
+
+Uninstalling removes the command only. The [data directory](#local-index) keeps the private index, pricing cache and limits ledger: `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (or `~/.local/share/session-analytics/`) on Linux, unless `--data-dir` or `SESSION_ANALYTICS_DATA_DIR` chose another; `session-analytics index path` prints the index file inside it. The sharing key stays in `$XDG_STATE_HOME/session-analytics/` (or `~/.local/state/session-analytics/`). Delete both directories to remove everything session-analytics stored; provider history is never modified. Also remove any MCP registration or status line that runs the command.
+
+### From source
 
 ```bash
 git clone https://github.com/rokas-tarasevicius/session-analytics.git
 cd session-analytics
-npm ci        # development tooling only; the runtime has no dependencies
-npm link      # puts the session-analytics command on your PATH
-session-analytics
+node bin/session-analytics.ts --version   # Node runs the TypeScript sources directly
+npm link                                  # optional: a session-analytics command for this checkout
 ```
 
-The package is not on npm. `npm install github:rokas-tarasevicius/session-analytics` or a tarball install fails on Node 24 with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` because the executable is a `.ts` file under `node_modules`. Without `npm link`, run `node bin/session-analytics.ts` from the checkout.
+A checkout runs unreleased `master`; `git checkout vX.Y.Z` runs a release. It needs no install step: `npm ci` installs TypeScript and type definitions for the checks in [CONTRIBUTING.md](../CONTRIBUTING.md) only. `npm link` and a global install share the `session-analytics` command, so use one at a time. `npm run demo` explores synthetic history without reading your own sessions.
 
-The source is publicly available. `npm run demo` explores synthetic history without reading your own sessions. [Source-release validation](release.md) documents the public launch and packaging gates.
+`npm install github:rokas-tarasevicius/session-analytics` installs the TypeScript sources under `node_modules`, where Node refuses to run them (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`); use a release channel above instead. [Releases](release.md) documents how packages are built, checked and published.
 
 ## Dashboard
 
@@ -144,19 +169,23 @@ session-analytics mcp
 
 The MCP server speaks stdio and exposes six read-only tools: usage summaries, budget status, repository profiles, tool statistics, recent sessions, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes source health and interpretation notes; budget periods carry their own pricing coverage, and typical-session baselines exclude active or unknown lifecycle evidence. No transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
 
-The repository ships an agent skill at [`skills/session-analytics`](../skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
+The package and the repository ship an agent skill at [`skills/session-analytics`](../skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
 
 ```bash
+SKILL="$(npm root -g)/session-analytics/skills/session-analytics"   # npm or release tarball install
+# SKILL="$(brew --prefix session-analytics)/libexec/lib/node_modules/session-analytics/skills/session-analytics"   # Homebrew
+# SKILL="$PWD/skills/session-analytics"   # source checkout
+
 # Claude Code
 mkdir -p ~/.claude/skills
-ln -s "$PWD/skills/session-analytics" ~/.claude/skills/session-analytics
+ln -s "$SKILL" ~/.claude/skills/session-analytics
 
 # Codex and other agents that read .agents/skills
 mkdir -p ~/.agents/skills
-ln -s "$PWD/skills/session-analytics" ~/.agents/skills/session-analytics
+ln -s "$SKILL" ~/.agents/skills/session-analytics
 ```
 
-Then ask, for example, "open my session analytics" or "compare agent usage across my repositories". The skill runs `session-analytics` (or `node <checkout>/bin/session-analytics.ts` when the command is not on `PATH`), reports the dashboard URL, session and repository counts, pricing coverage, and warnings, and keeps API-equivalent and provider-reported values separate. It uses `report` or `report --json` only when you ask for terminal or machine-readable output.
+Then ask, for example, "open my session analytics" or "compare agent usage across my repositories". The skill runs `session-analytics` (or `node bin/session-analytics.ts` in a source checkout when the command is not on `PATH`), reports the dashboard URL, session and repository counts, pricing coverage, and warnings, and keeps API-equivalent and provider-reported values separate. It uses `report` or `report --json` only when you ask for terminal or machine-readable output.
 
 ## Options
 

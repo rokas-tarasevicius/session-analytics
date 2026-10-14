@@ -4,7 +4,7 @@ Run `session-analytics mcp` to let an agent query local metrics. The server comm
 
 ## Install
 
-Install this checkout with `npm link` and use Node 24 or newer. The package is not published: do not use an `npx` package download. Alternatively, replace the command below with an absolute Node executable and the absolute path to `bin/session-analytics.ts`, followed by `mcp`.
+[Install](cli.md#install) the `session-analytics` command (Node 24 or newer) and register that command, not `npx`: npx checks the registry on every start, which slows startup and fails offline. If a client starts servers without your shell's `PATH`, use the absolute path from `command -v session-analytics` for a Homebrew install, which brings its own Node.js. An npm install looks up `node` on `PATH`, so there replace the command below with an absolute Node executable and the package's `bin/session-analytics.js` (under `npm root -g`), or a source checkout's `bin/session-analytics.ts`, followed by `mcp`.
 
 ### Claude Code
 
