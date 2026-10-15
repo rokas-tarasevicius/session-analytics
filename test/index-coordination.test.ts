@@ -12,8 +12,16 @@ const databaseModule = new URL("../src/store/database.ts", import.meta.url).href
 const gateModule = new URL("../src/store/writer-gate.ts", import.meta.url).href;
 function child(source: string, dataDir: string) {
   const process = spawn(globalThis.process.execPath, ["--input-type=module", "-e", source, dataDir], { stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  process.stderr!.setEncoding("utf8").on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
   const exited = once(process, "exit");
-  return { process, exited };
+  return { process, exited, stderr: () => stderr };
+}
+
+/** Every contender exits 0; a failure names the contender's own error instead of a bare exit code. */
+async function allSucceed(children: Array<ReturnType<typeof child>>): Promise<void> {
+  const codes = await Promise.all(children.map(({ exited }) => exited));
+  codes.forEach(([code], index) => assert.equal(code, 0, `contender ${index} exited ${code}: ${children[index]!.stderr().trim() || "(no stderr)"}`));
 }
 
 async function stop(running: ReturnType<typeof child> | undefined): Promise<void> {
@@ -33,7 +41,7 @@ test("writer filesystem mutex serializes simultaneous contenders independently o
         const fd=openSync(marker,'wx'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);
         closeSync(fd); unlinkSync(marker); release(); }`;
     const children = Array.from({ length: 6 }, () => child(source, dataDir));
-    for (const [code] of await Promise.all(children.map(({ exited }) => exited))) assert.equal(code, 0);
+    await allSucceed(children);
     assert.deepEqual(await readdir(dataDir), []);
   } finally { await rm(dataDir, { recursive: true, force: true }); }
 });
@@ -48,7 +56,7 @@ test("concurrent rebuilds quarantine corrupt writer coordination once under mutu
     const source = `import {resetIndex,openIndexDatabase} from ${JSON.stringify(databaseModule)};
       const opts={dataDir:process.argv[1]}; resetIndex(opts); openIndexDatabase(opts).close();`;
     const children = Array.from({ length: 4 }, () => child(source, dataDir));
-    for (const [code] of await Promise.all(children.map(({ exited }) => exited))) assert.equal(code, 0);
+    await allSucceed(children);
     assert.equal(indexStatus({ dataDir }).state, "ready");
     assert.equal((await readdir(dataDir)).filter((name) => /^writer.sqlite.rebuild-/.test(name)).length, 1);
   } finally { await rm(dataDir, { recursive: true, force: true }); }
