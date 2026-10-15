@@ -92,8 +92,10 @@ export interface RemoteMachine {
   name: string;
   /** SSH destination. */
   ssh: string;
-  /** Account to run as, through `sudo -n -iu`. */
+  /** Account to run as, through `sudo -n -iu` (its login shell), or `sudo -n -H -u` when `loginShell` is false. */
   user?: string;
+  /** False for an account whose login shell refuses commands (nologin, false), such as a service account. */
+  loginShell?: false;
   runtime: RuntimeKind;
   /** Node that runs the bundled runtime. */
   node: string;
@@ -168,7 +170,7 @@ export function remoteTimeout(argv: string[], environment: NodeJS.ProcessEnv): n
 
 export function machinesDigest(machines: RemoteMachine[]): string | null {
   if (!machines.length) return null;
-  return createHash("sha256").update(JSON.stringify(machines.map(({ name, ssh, user, runtime, node, command }) => [name, ssh, user ?? null, runtime, node, command]))).digest("hex");
+  return createHash("sha256").update(JSON.stringify(machines.map(({ name, ssh, user, loginShell, runtime, node, command }) => [name, ssh, user ?? null, runtime, node, command, ...(loginShell === false ? [false] : [])]))).digest("hex");
 }
 
 /**
@@ -186,7 +188,8 @@ export function remoteOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv
     return { machines: [], timeoutMs, digest: null, local };
   }
   const flagged = allArguments(argv, "--remote");
-  const raw = flagged.length ? flagged : environment["SESSION_ANALYTICS_REMOTE"] ? [environment["SESSION_ANALYTICS_REMOTE"]] : [];
+  // An explicit --machines wins over the deprecated variable, as any flag wins over the environment.
+  const raw = flagged.length ? flagged : environment["SESSION_ANALYTICS_REMOTE"] && !argv.includes("--machines") ? [environment["SESSION_ANALYTICS_REMOTE"]] : [];
   let machines: RemoteMachine[];
   if (raw.length) {
     if (argv.includes("--machines")) throw new OptionError("--machines cannot be combined with --remote.");
@@ -212,7 +215,7 @@ export function remoteOptionsFrom(argv: string[], environment: NodeJS.ProcessEnv
 /** A saved machine as a read target. */
 export function savedMachine(machine: SavedMachine): RemoteMachine {
   return {
-    name: machine.name, ssh: machine.ssh, ...(machine.user ? { user: machine.user } : {}), runtime: machine.runtime,
+    name: machine.name, ssh: machine.ssh, ...(machine.user ? { user: machine.user } : {}), ...(machine.loginShell === false ? { loginShell: false as const } : {}), runtime: machine.runtime,
     node: machine.node ?? "node", command: machine.command ?? ["session-analytics"], saved: true, ...(machine.identity ? { identity: machine.identity } : {}),
   };
 }

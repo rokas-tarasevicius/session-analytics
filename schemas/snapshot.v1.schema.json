@@ -3144,7 +3144,13 @@
               "const": "no-ssh"
             },
             {
+              "const": "unknown-host"
+            },
+            {
               "const": "connection"
+            },
+            {
+              "const": "login-refused"
             },
             {
               "const": "dropped"
@@ -3154,6 +3160,9 @@
             },
             {
               "const": "no-account"
+            },
+            {
+              "const": "login-shell"
             },
             {
               "const": "permission"
@@ -3166,6 +3175,9 @@
             },
             {
               "const": "node-too-old"
+            },
+            {
+              "const": "local-runtime"
             },
             {
               "const": "runtime"
@@ -3263,7 +3275,7 @@
         },
         "identity": {
           "type": "string",
-          "pattern": "^[0-9a-f]{16}$"
+          "pattern": "^(?:host-)?[0-9a-f]{16}$"
         },
         "warnings": {
           "type": "array",

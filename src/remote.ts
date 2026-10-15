@@ -8,10 +8,10 @@ import { validateSnapshot } from "./interop/snapshot.ts";
 import { canonicalTimeZone, type RemoteMachine, type RemoteOptions } from "./options.ts";
 import { stopping, track } from "./processes.ts";
 import { lastGoodMaxAgeMs, readLastGood, writeLastGood } from "./machines/cache.ts";
-import { localIdentity } from "./machines/identity.ts";
+import { byHostName, localIdentity } from "./machines/identity.ts";
 import { remoteUnavailableWarning, staleMachineWarning } from "./public/evidence.js";
 import { machineAge } from "./public/machines.js";
-import { runtimePayload } from "./remote/runtime.ts";
+import { runtimePayload, type RuntimePayload } from "./remote/runtime.ts";
 import type { AnalyzeOptions, MachineAnalytics, MachineReason, MachineStatus } from "./types.ts";
 import { version } from "./version.ts";
 
@@ -43,7 +43,7 @@ export interface SshResult {
   stdout: Buffer;
   stderr: string;
   /** Set when this machine ended the call rather than the remote command. */
-  failure: "no-ssh" | "timeout" | "too-large" | "cancelled" | null;
+  failure: "no-ssh" | "local-runtime" | "timeout" | "too-large" | "cancelled" | null;
   ms: number;
 }
 
@@ -54,23 +54,41 @@ export interface SshCall {
   deadline: number;
   signal?: AbortSignal;
   limit?: number;
+  /** ssh options before the destination, after the fixed ones. */
+  options?: string[];
 }
 
 /** Run plain words on a machine through the user's own ssh, without a terminal or prompts. */
-export async function runSsh(destination: string, words: string[], { input, deadline, signal, limit = maximumSnapshotBytes }: SshCall): Promise<SshResult> {
+export async function runSsh(destination: string, words: string[], { input, deadline, signal, limit = maximumSnapshotBytes, options = [] }: SshCall): Promise<SshResult> {
   const started = performance.now();
+  // Nothing new starts once a signal is stopping this process: it would outlive the exit.
+  if (stopping() || signal?.aborted) return { code: null, stdout: Buffer.alloc(0), stderr: "", failure: "cancelled", ms: 0 };
   return await new Promise((resolve) => {
-    const child = track(spawn("ssh", [...sshOptions, "--", destination, ...words], { stdio: ["pipe", "pipe", "pipe"] }));
+    const child = track(spawn("ssh", [...sshOptions, ...options, "--", destination, ...words], { stdio: ["pipe", "pipe", "pipe"] }));
     const chunks: Buffer[] = [];
-    let bytes = 0, stderr = "", settled = false;
+    let bytes = 0, stderr = "", settled = false, exitCode: number | null | undefined, grace: NodeJS.Timeout | undefined, lastData = 0;
     let failure: SshResult["failure"] = null;
     const finish = (code: number | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(grace);
       signal?.removeEventListener("abort", cancel);
       child.stdin.destroy();
       resolve({ code, stdout: Buffer.concat(chunks), stderr, failure, ms: performance.now() - started });
+    };
+    // Once ssh has exited, a helper that inherited its pipes (a ProxyCommand that backgrounds, say) must not hold
+    // the call open until the deadline: what is still arriving gets a moment, renewed while it flows, then the pipes go.
+    // Timers run before I/O, so after a busy moment the check waits one turn for output that queued behind it.
+    const linger = (): void => {
+      if (exitCode === undefined || settled) return;
+      clearTimeout(grace);
+      grace = setTimeout(() => setImmediate(() => {
+        if (settled) return;
+        if (performance.now() - lastData < 1_000) { linger(); return; }
+        child.stdout.destroy(); child.stderr.destroy(); finish(exitCode ?? null);
+      }), 1_000);
+      grace.unref();
     };
     // Killing ssh closes the channel; the bundled runtime notices and stops the remote work.
     // The pipes are dropped too, so a helper that inherited them cannot hold the call open.
@@ -91,17 +109,21 @@ export async function runSsh(destination: string, words: string[], { input, dead
       bytes += chunk.length;
       if (bytes > limit) stop("too-large");
       else if (!failure) chunks.push(chunk);
+      lastData = performance.now();
+      linger();
     });
     child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES); });
+    child.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES); lastData = performance.now(); linger(); });
     child.once("error", (error: NodeJS.ErrnoException) => { failure ??= error.code === "ENOENT" ? "no-ssh" : "cancelled"; finish(null); });
+    child.once("exit", (code) => { exitCode = code; if (code === null) failure ??= "cancelled"; linger(); });
     child.once("close", (code) => { if (code === null) failure ??= "cancelled"; finish(code); });
   });
 }
 
-/** The words before the command: `sudo -n -iu USER` when the machine names an account. */
+/** The words before the command: `sudo -n -iu USER` when the machine names an account, without -i for one with no login shell. */
 export function accountPrefix(machine: RemoteMachine): string[] {
-  return machine.user ? ["sudo", "-n", "-iu", machine.user] : [];
+  if (!machine.user) return [];
+  return machine.loginShell === false ? ["sudo", "-n", "-H", "-u", machine.user] : ["sudo", "-n", "-iu", machine.user];
 }
 
 /**
@@ -111,7 +133,9 @@ export function accountPrefix(machine: RemoteMachine): string[] {
 export async function runRemote(machine: RemoteMachine, args: string[], call: Omit<SshCall, "input">): Promise<SshResult & { installed: boolean }> {
   const prefix = accountPrefix(machine);
   if (machine.runtime === "installed") return { ...await runSsh(machine.ssh, [...prefix, ...machine.command, ...args], call), installed: false };
-  const runtime = runtimePayload();
+  let runtime: RuntimePayload;
+  // An install missing its own files cannot pack the runtime; that is this machine's problem, not the remote's.
+  try { runtime = runtimePayload(); } catch { return { code: null, stdout: Buffer.alloc(0), stderr: "", failure: "local-runtime", ms: 0, installed: false }; }
   const words = (mode: "run" | "install"): string[] => [...prefix, machine.node, "-", "sa1", mode, runtime.version, runtime.digest, ...args];
   const first = await runSsh(machine.ssh, words("run"), { ...call, input: runtime.run });
   if (first.failure || first.code !== 75 || !/^sa1: need-runtime$/m.test(first.stderr)) return { ...first, installed: false };
@@ -125,14 +149,18 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
   const account = machine?.user ?? "the SSH account";
   const texts: Record<RemoteFailure, string> = {
     "no-ssh": "ssh is not available on this machine",
-    connection: "SSH could not connect or log in without a prompt",
+    "unknown-host": `${machine?.ssh ?? "that host"} is not a host name ssh can resolve`,
+    connection: "SSH could not connect",
+    "login-refused": "SSH refused the login without a prompt",
     dropped: "the SSH session ended without an exit status (connection dropped, or the remote process was killed)",
     sudo: `sudo -n could not run commands as ${account} without a password`,
     "no-account": machine?.user ? `the account ${machine.user} does not exist there` : "the account named after sudo does not exist there",
+    "login-shell": `${account}'s login shell refuses to run commands (nologin or false)`,
     permission: "the remote command is not executable for that account",
     "missing-command": "session-analytics was not found there",
-    "no-node": `node was not found on ${account}'s login PATH`,
+    "no-node": `node was not found on ${account}'s ${machine?.loginShell === false ? "sudo" : "login"} PATH`,
     "node-too-old": `the remote Node.js is ${found || "too old"}; the bundled runtime needs 24 or later`,
+    "local-runtime": "this machine could not pack its bundled runtime (its own install is missing files)",
     runtime: "the bundled runtime could not start there",
     "cache-unwritable": `the bundled runtime cannot be stored safely in ${account}'s ~/.cache`,
     corrupted: "the bundled runtime arrived damaged",
@@ -151,27 +179,37 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
   return texts[reason];
 }
 
-/** The exact next step for each reason; empty when there is none to take. */
+/**
+ * The exact next step for each reason; empty when there is none to take. A saved machine's fix changes it with
+ * `machines set`; an unsaved one, including one `machines add` has not saved yet, is added again with other options.
+ */
 function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
   if (!machine) return "";
-  const command = brand.command, name = machine.name, as = machine.user ? ` --user ${machine.user}` : "";
-  const check = machine.saved ? `${command} machines check ${name}` : `${command} machines add ${machine.ssh}${as}`;
-  const bundled = machine.saved ? `${command} machines set ${name} --runtime bundled` : `${command} machines add ${machine.ssh}${as}`;
-  const node = machine.saved ? `${command} machines set ${name} --node /usr/bin/node` : `${command} machines add ${machine.ssh}${as} --node /usr/bin/node`;
+  const command = brand.command, name = machine.name, ssh = machine.ssh;
+  const add = `${command} machines add ${ssh}${machine.user ? ` --user ${machine.user}` : ""}${machine.loginShell === false ? " --no-login-shell" : ""}`;
+  const check = machine.saved ? `${command} machines check ${name}` : add;
+  const bundled = machine.saved ? `${command} machines set ${name} --runtime bundled` : add;
+  const node = machine.saved ? `${command} machines set ${name} --node /usr/bin/node` : `${add} --node /usr/bin/node`;
   const fixes: Record<RemoteFailure, string> = {
     "no-ssh": "install an OpenSSH client so that ssh is on PATH",
-    connection: `run ssh ${machine.ssh} true once in a terminal to accept the host key and check the login (ssh-copy-id ${machine.ssh} installs a key)`,
+    "unknown-host": `check the name: ssh -G ${ssh} shows how your ~/.ssh/config resolves it, and ssh ${ssh} true tries it`,
+    connection: `check that ${ssh} is up and its SSH server is reachable from here, then run ssh ${ssh} true once in a terminal (it also accepts a new host key)`,
+    "login-refused": `run ssh ${ssh} true in a terminal. If it asks for a key passphrase, load the key into your agent so BatchMode can use it (ssh-add ~/.ssh/KEY, with --apple-use-keychain on a Mac, or AddKeysToAgent yes in ~/.ssh/config); if it asks for a password, ssh-copy-id ${ssh} installs a key`,
     dropped: `check that the machine is up and has memory to spare, then ${check}`,
     sudo: machine.user
       ? `on that machine run: echo "$USER ALL=(${machine.user}) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/session-analytics-${machine.user} && sudo chmod 0440 /etc/sudoers.d/session-analytics-${machine.user}`
       : "allow that command through sudo without a password there",
-    "no-account": machine.saved ? `${command} machines check ${name} --find-users lists the accounts with agent history` : "check the account name in --remote-command",
+    "no-account": machine.saved ? `${command} machines check ${name} --find-users lists the accounts with agent history`
+      : machine.user ? `check the account name; ${command} machines add ${ssh} --find-users lists the accounts with agent history` : "check the account name in --remote-command",
+    "login-shell": machine.saved ? `read it without a login shell: ${command} machines set ${name} --no-login-shell (node then comes from sudo's PATH, or name it with --node)`
+      : machine.user ? `read it without a login shell: ${add} --no-login-shell` : "use sudo -n -H -u ACCOUNT rather than -iu in --remote-command, and name node by its full path",
     permission: `use the bundled runtime: ${bundled}`,
     "missing-command": machine.saved
       ? `use the bundled runtime (${bundled}), or name the command in full: ${command} machines set ${name} --command "node /path/to/session-analytics/bin/session-analytics.ts"`
       : `use the bundled runtime (${bundled}), or name the command in full: --remote-command "node /path/to/session-analytics/bin/session-analytics.ts"`,
     "no-node": `install Node.js 24 or later there, or point to it: ${node}`,
     "node-too-old": `install Node.js 24 or later there, or point to a newer one: ${node}`,
+    "local-runtime": `reinstall session-analytics on this machine, or run an install there instead: ${machine.saved ? `${command} machines set ${name} --runtime installed` : `${add} --runtime installed`}`,
     runtime: `retry; if it persists, run ${check}`,
     "cache-unwritable": machine.saved ? `${command} machines set ${name} --runtime installed, or set XDG_CACHE_HOME to a private, writable directory in that account's profile` : "set XDG_CACHE_HOME to a private, writable directory in that account's profile",
     corrupted: "retry the read",
@@ -185,7 +223,7 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
     timeout: `allow more time with --remote-timeout SECONDS, or warm its index once with ${check}`,
     "too-large": "read it with --exclude-hidden, or merge snapshot files instead (see docs/interop.md)",
     cancelled: "",
-    "same-machine": machine.saved ? `${command} machines remove ${name}` : `leave ${machine.ssh} out of --remote`,
+    "same-machine": `${machine.saved ? `${command} machines remove ${name}` : `leave ${ssh} out of --remote`}; if it is another machine cloned from the same image, set SESSION_ANALYTICS_MACHINE_ID to a different value in each account's profile instead`,
   };
   return fixes[reason];
 }
@@ -195,7 +233,7 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
  * frames and source excerpts are skipped so a crash shows its error, not `Node.js v24.x`.
  */
 export function stderrDetail(stderr: string): string {
-  const lines = stderr.split(/\r?\n/).map((line) => line.replace(/[\u0000-\u001f\u007f]/g, "").trim())
+  const lines = stderr.split(/\r?\n/).map((line) => line.replace(/[\p{Cc}\p{Cf}]/gu, "").trim())
     .filter((line) => line && !/^Node\.js v\d/.test(line) && !/^at\s/.test(line) && !/^\^+$/.test(line) && !/^\[stdin\]:\d+$/.test(line) && line !== "sa1: need-runtime");
   const telling = lines.filter((line) => /^[A-Za-z]*Error\b|^sudo(?:-rs)?:|^Sorry, user|^sa1:|denied|not found|required|refused|failed|unknown|cannot|could not|busy|newer|no such|timed out|killed|stopped/i.test(line));
   return (telling.at(-1) ?? lines.at(-1) ?? "").slice(0, 300);
@@ -218,11 +256,16 @@ const sshProblem = /^ssh:|Permission denied \(|Host key verification failed|Coul
 
 /** Map an ssh result to a reason: transport, account, runtime, then the remote analysis itself. */
 export function classifyRemote(machine: RemoteMachine, result: SshResult, timeoutMs = 0): RemoteError | null {
-  const error = (reason: RemoteFailure, found = ""): RemoteError => new RemoteError(reason, machine, reason === "no-ssh" ? "" : result.stderr, found, timeoutMs);
+  const error = (reason: RemoteFailure, found = ""): RemoteError => new RemoteError(reason, machine, reason === "no-ssh" || reason === "local-runtime" ? "" : result.stderr, found, timeoutMs);
   if (result.failure) return error(result.failure);
   if (result.code === 0) return null;
   const { stderr } = result;
-  if (result.code === 255) return error(sshProblem.test(stderr) ? "connection" : "dropped");
+  if (result.code === 255) {
+    if (!sshProblem.test(stderr)) return error("dropped");
+    return error(/Could not resolve hostname/.test(stderr) ? "unknown-host" : /Permission denied \(|Too many authentication failures/.test(stderr) ? "login-refused" : "connection");
+  }
+  // nologin says so on stdout; false says nothing at all.
+  if (result.code === 1 && /^This account is currently not available\.?$/m.test(result.stdout.subarray(0, 4096).toString("utf8"))) return error("login-shell");
   // Classic sudo and sudo-rs word these differently.
   if (/^sudo(?:-rs)?: .*(?:password is required|terminal is required|interactive authentication is required|I'm afraid I can't do that|is not allowed to|may not run sudo|not in the sudoers)|^Sorry, user .* (?:is not allowed|may not run)/m.test(stderr)) return error("sudo");
   if (/^sudo(?:-rs)?: (?:unknown user|user .* not found|.*: unknown user)/mi.test(stderr)) return error("no-account");
@@ -276,12 +319,21 @@ export function machineKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64) || "machine";
 }
 
-/** What a remote read asks for, so a last good snapshot answers only the same request; switches that do not change the result are left out. */
+/**
+ * What a remote read asks for, so a last good snapshot answers only the same request. Only --offline is left
+ * out: the remote report makes no network request either way. --no-index changes the result (no retained history).
+ */
 export function requestDigest(args: string[]): string {
-  return createHash("sha256").update(args.filter((arg) => arg !== "--offline" && arg !== "--no-index").join("\0")).digest("hex").slice(0, 32);
+  return createHash("sha256").update(args.filter((arg) => arg !== "--offline").join("\0")).digest("hex").slice(0, 32);
 }
 
-function noHistoryFix(machine: RemoteMachine): string {
+/** Which saved machine, SSH destination and account a last good snapshot came from. */
+export function targetDigest(machine: RemoteMachine): string {
+  return createHash("sha256").update(JSON.stringify([machine.ssh, machine.user ?? null])).digest("hex").slice(0, 32);
+}
+
+/** The hint for a machine read with no sessions. */
+export function noHistoryFix(machine: RemoteMachine): string {
   return machine.saved
     ? `if agents run as another account there: ${brand.command} machines set ${machine.name} --user NAME; ${brand.command} machines check ${machine.name} --find-users lists accounts with history`
     : `if agents run as another account there: ${brand.command} machines add ${machine.ssh} --user NAME`;
@@ -351,7 +403,8 @@ export function machineReads(
     return { machine, pending: null, snapshot: null, status: { key, label: machine.name, state: "reading", sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } };
   });
   const lastGood = async (reading: MachineReading): Promise<Pick<MachineReading, "snapshot" | "status" | "identity"> | null> => {
-    const found = reading.machine.saved ? await readLastGood(options, reading.status.key, request) : null;
+    const { machine } = reading;
+    const found = machine.saved ? await readLastGood(options, reading.status.key, { request, target: targetDigest(machine), ...(machine.identity ? { identity: machine.identity } : {}) }) : null;
     if (!found) return null;
     const { record, snapshot } = found;
     return { snapshot, ...(record.identity ? { identity: record.identity } : {}), status: { ...reading.status, sessions: record.sessions, repositories: record.repositories, readAt: record.readAt, durationMs: record.durationMs, version: record.producer } };
@@ -373,7 +426,8 @@ export function machineReads(
       // The bundled runtime describes itself; that entry is about the read, not part of the history.
       const { machines: [self] = [], ...snapshot } = answer;
       const identity = self?.identity ?? machine.identity;
-      if (identity && identity === localIdentity()) throw new RemoteError("same-machine", machine);
+      // A match by host name alone may be a clone or a namesake, so it is never dropped.
+      if (identity && identity === localIdentity() && !byHostName(identity)) throw new RemoteError("same-machine", machine);
       const status: MachineStatus = {
         key, label, state: "ok", ...(snapshot.summary.sessions ? {} : { reason: "no-history" as const, fix: noHistoryFix(machine) }),
         sessions: snapshot.summary.sessions, repositories: snapshot.summary.repositories, readAt: new Date().toISOString(),
@@ -381,7 +435,7 @@ export function machineReads(
       };
       Object.assign(reading, { snapshot, status, identity, twin: undefined });
       if (machine.saved) {
-        try { writeLastGood(options, key, { request, readAt: status.readAt!, durationMs: status.durationMs!, producer: status.version, sessions: status.sessions, repositories: status.repositories, ...(identity ? { identity } : {}) }, snapshot); }
+        try { writeLastGood(options, key, { request, target: targetDigest(machine), readAt: status.readAt!, durationMs: status.durationMs!, producer: status.version, sessions: status.sessions, repositories: status.repositories, ...(identity ? { identity } : {}) }, snapshot); }
         catch { /* The cache only softens a later failure. */ }
       }
     } catch (caught) {
@@ -416,7 +470,7 @@ export function machineReads(
     // A machine reached twice counts once: answers read now win, in the configured order, then stale ones.
     const seen = new Map<string, string>([[localIdentity(), remote.local]]), twins = new Map<MachineReading, string>();
     for (const reading of [...readings].sort((left, right) => Number(left.status.state !== "ok") - Number(right.status.state !== "ok"))) {
-      if (!reading.snapshot || !reading.identity) continue;
+      if (!reading.snapshot || !reading.identity || byHostName(reading.identity)) continue;
       const twin = seen.get(reading.identity);
       if (twin) twins.set(reading, twin); else seen.set(reading.identity, reading.machine.name);
     }

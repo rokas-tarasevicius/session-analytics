@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
@@ -7,9 +8,9 @@ import { fileURLToPath } from "node:url";
 
 import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
-import { remoteFor } from "./machines/config.ts";
+import { machinesPath, remoteFor } from "./machines/config.ts";
 import { stopOnSignals } from "./processes.ts";
-import { analyzeMachines, machineOptions, machineReads } from "./remote.ts";
+import { analyzeMachines, machineOptions, machineReads, type MachineReads } from "./remote.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
 import type { DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
@@ -28,8 +29,15 @@ const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, "--port", "--snapshot"]);
 const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline", "--no-codex-account"]);
+// A repeated value would otherwise be silently first-wins; only --remote adds up.
+const given = new Set<string>();
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
+  if (flag && valueFlags.has(flag) && flag !== "--remote" && given.has(flag)) {
+    process.stderr.write(`Give ${flag} once.\n`);
+    process.exit(2);
+  }
+  if (flag) given.add(flag);
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
     process.stderr.write(`Unknown session analytics server argument: ${flag ?? "<missing>"}\n`);
     process.exit(2);
@@ -195,7 +203,7 @@ if (!snapshotFile) {
   catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
 }
 const pricing = pricingConfiguration(analyzeOptions);
-const normalizedOptions = {
+const scanOptions = {
   ...analyzeOptions,
   dataDir: dataDirectory(analyzeOptions),
   includeHidden: analyzeOptions.includeHidden !== false,
@@ -205,13 +213,15 @@ const normalizedOptions = {
   pricingPolicy: pricing.policy,
   pricingSources: pricing.sources,
   pricingMaxAgeDays: pricing.maxAgeDays,
-  // Another set of machines is another dashboard; the same saved machines match a plain launch.
-  ...(remote.digest ? { machines: remote.digest } : {}),
 };
-const optionsHash = createHash("sha256").update(JSON.stringify(Object.fromEntries(
-  Object.entries(normalizedOptions).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) =>
+const hashOf = (options: object): string => createHash("sha256").update(JSON.stringify(Object.fromEntries(
+  Object.entries(options).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) =>
     [key, typeof value === "string" && (key.endsWith("Root") || key.endsWith("Path") || key === "dataDir") ? resolve(value) : value]),
 ))).digest("hex");
+// Another set of machines is another dashboard; the same saved machines match a plain launch.
+const scanHash = hashOf(scanOptions);
+const optionsHashFor = (digest: string | null): string => hashOf({ ...scanOptions, ...(digest ? { machines: digest } : {}) });
+let optionsHash = optionsHashFor(remote.digest);
 const instanceToken = randomBytes(32).toString("hex");
 
 const shutdown = new AbortController();
@@ -220,24 +230,72 @@ let analyticsPending = false;
 let snapshotReady = false;
 const machineLine = (line: string, failed: boolean): void => { (failed ? process.stderr : process.stdout).write(`${line}\n`); };
 const machineScan = machineOptions(analyzeOptions);
-// Other machines are read on their own: a snapshot is served once this machine's scan is done, with the
-// last good snapshot of a machine still reading, and is rebuilt as each machine answers.
-const machines = !snapshotFile && remote.machines.length ? machineReads(machineScan, remote, {
-  report: machineLine, signal: shutdown.signal, preload: true,
-  onSettle: () => {
-    if (!scanned || analyticsPending) return;
-    try { analyticsPromise = Promise.resolve(machines!.combine(scanned.snapshot, scanned.ms)); }
-    catch { process.stderr.write("A machine's snapshot could not be combined; the previous snapshot stays.\n"); }
-  },
-}) : null;
 let scanned: { snapshot: MachineAnalytics; ms: number } | null = null;
+// Set while this machine's latest scan failed, so a machine that answers does not bring back the snapshot before it.
+let scanFailed = false;
+// Set when the saved machines changed during a scan, so the snapshot is rebuilt with the new ones once it is done.
+let machinesChanged = false;
 
-async function scanWithMachines(reads: NonNullable<typeof machines>): Promise<MachineAnalytics> {
+/**
+ * Other machines are read on their own: a snapshot is served once this machine's scan is done, with the
+ * last good snapshot of a machine still reading, and is rebuilt as each machine answers.
+ */
+function readsFor(options: RemoteOptions): MachineReads | null {
+  if (snapshotFile || !options.machines.length) return null;
+  const reads: MachineReads = machineReads(machineScan, options, {
+    report: machineLine, signal: shutdown.signal, preload: true,
+    onSettle: () => {
+      if (reads !== machines || !scanned || analyticsPending || scanFailed) return;
+      try { analyticsPromise = Promise.resolve(reads.combine(scanned.snapshot, scanned.ms)); }
+      catch { process.stderr.write("A machine's snapshot could not be combined; the previous snapshot stays.\n"); }
+    },
+  });
+  return reads;
+}
+let machines = readsFor(remote);
+
+// A local failure fails this refresh only: reads of other machines carry on, and their last good snapshots stay.
+async function scanWithMachines(reads: MachineReads): Promise<MachineAnalytics> {
   void reads.start();
   const started = performance.now();
-  const [snapshot] = await Promise.all([analyzeMachineSessionsIsolated(machineScan).catch((error: unknown) => { reads.abort(); throw error; }), reads.loaded]);
+  const [snapshot] = await Promise.all([analyzeMachineSessionsIsolated(machineScan).catch((error: unknown) => { scanFailed = true; throw error; }), reads.loaded]);
   scanned = { snapshot, ms: performance.now() - started };
+  scanFailed = false;
   return reads.combine(snapshot, scanned.ms);
+}
+
+/** The snapshot again from this machine's last scan and the current machines; without a usable scan, the next request scans. */
+function rebuild(): void {
+  if (analyticsPending) { machinesChanged = true; return; }
+  const reads = machines;
+  if (!reads || !scanned || scanFailed) { analyticsPromise = null; return; }
+  void reads.start();
+  analyticsPromise = reads.loaded.then(() => reads.combine(scanned!.snapshot, scanned!.ms));
+}
+
+// A dashboard that reads the saved machines follows machines.json, so machines add, set, rename and remove reach it
+// on its next request, and a plain launch afterwards reuses it. --remote, --no-remote and the variable fix the set.
+const followsSaved = !snapshotFile && !process.argv.includes("--remote") && !process.argv.includes("--no-remote")
+  && (process.argv.includes("--machines") || !process.env["SESSION_ANALYTICS_REMOTE"]);
+const machinesStamp = (): string => {
+  try { const info = statSync(machinesPath(analyzeOptions)); return `${info.ino}:${info.size}:${info.mtimeMs}`; } catch { return "none"; }
+};
+let followedStamp = followsSaved ? machinesStamp() : "";
+function followMachines(): void {
+  if (!followsSaved) return;
+  const stamp = machinesStamp();
+  if (stamp === followedStamp) return;
+  followedStamp = stamp;
+  let next: RemoteOptions;
+  try { next = remoteFor(process.argv, process.env, analyzeOptions); assertRemoteAnalysis(analyzeOptions, next); }
+  catch (error) { process.stderr.write(`${optionErrorMessage(error)} This dashboard keeps reading the machines it had.\n`); return; }
+  if (next.digest === remote.digest && next.local === remote.local) return;
+  machines?.abort();
+  remote = next;
+  optionsHash = optionsHashFor(remote.digest);
+  machines = readsFor(remote);
+  process.stdout.write(`Saved machines changed; now reading ${remote.local}${remote.machines.length ? ` and ${remote.machines.map(({ name }) => name).join(", ")}` : " only"}.\n`);
+  rebuild();
 }
 
 /** Every machine as it stands now; the dashboard polls this while a machine is still reading. */
@@ -259,6 +317,7 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
       })
       .finally(() => {
         analyticsPending = false;
+        if (machinesChanged) { machinesChanged = false; rebuild(); }
       });
   }
   return analyticsPromise;
@@ -296,6 +355,7 @@ const server = createServer(async (request, response) => {
       sendJson(response, 405, { error: "Session analytics is read-only." });
       return;
     }
+    if (url.pathname.startsWith("/api/")) followMachines();
     if (url.pathname === "/api/health") {
       const health: DashboardHealth = {
         service: serviceId,
@@ -304,6 +364,7 @@ const server = createServer(async (request, response) => {
         status: "ok",
         instanceToken,
         optionsHash,
+        scanHash,
       };
       sendJson(response, 200, health);
       return;
@@ -313,6 +374,8 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/machines") {
+      // read=1 reads the other machines again without scanning this one, as after fixing one of them.
+      if (url.searchParams.get("read") === "1" && machines && scanned && !scanFailed && !analyticsPending) void machines.start();
       sendJson(response, 200, { machines: machineStatuses() });
       return;
     }
@@ -366,28 +429,32 @@ async function openDashboard(): Promise<void> {
   });
 }
 
-async function compatibleDashboardIsRunning(): Promise<boolean> {
+/** This launch's dashboard already running on the port, one with the same options but other machines, or neither. */
+async function runningDashboard(): Promise<"same" | "other-machines" | null> {
   try {
     const response = await fetch(`${dashboardUrl}/api/health`, {
       signal: AbortSignal.timeout(2_000),
     });
-    if (!response.ok) return false;
+    if (!response.ok) return null;
     const body = await response.json() as Partial<DashboardHealth>;
-    return body.service === serviceId && body.status === "ok" && body.dataSource === "live" &&
-      body.optionsHash === optionsHash && body.instanceToken === readDashboardToken(analyzeOptions, port);
+    if (body.service !== serviceId || body.status !== "ok" || body.dataSource !== "live" || body.instanceToken !== readDashboardToken(analyzeOptions, port)) return null;
+    return body.optionsHash === optionsHash ? "same" : body.scanHash === scanHash ? "other-machines" : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 server.on("error", (error: NodeJS.ErrnoException) => {
   void (async () => {
-    if (error.code === "EADDRINUSE" && !snapshotFile && await compatibleDashboardIsRunning()) {
+    const running = error.code === "EADDRINUSE" && !snapshotFile ? await runningDashboard() : null;
+    if (running === "same") {
       process.stdout.write(`${brand.name} already running: ${dashboardUrl}\n`);
       if (process.argv.includes("--open")) await openDashboard();
       process.exit(0);
     }
-    if (error.code === "EADDRINUSE") {
+    if (running === "other-machines") {
+      process.stderr.write("Session Analytics is already running on this port with other machines (--remote, --machines or --no-remote differ); stop it or choose --port.\n");
+    } else if (error.code === "EADDRINUSE") {
       process.stderr.write("Session Analytics is already running on this port with different options; stop it or choose --port.\n");
     } else {
       process.stderr.write(`${brand.name} could not start: ${safeError(error)}\n`);

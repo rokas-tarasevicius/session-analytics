@@ -332,8 +332,9 @@
       <header><h2 id="machines-title" tabindex="-1" autofocus>Machines</h2><button class="icon-button" id="machines-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
       <div class="coverage-body">
         <p class="coverage-intro" id="machines-summary"></p>
+        <p><button class="button" id="machines-read" type="button" hidden>Read them again</button></p>
         <div class="table-wrap"><table class="data-table"><thead><tr><th class="align-left">Machine</th><th class="align-left">State</th><th>Sessions</th><th>Repositories</th><th class="align-left">Read</th><th>Took</th><th class="align-left">Version</th></tr></thead><tbody id="machines-rows"></tbody></table></div>
-        <p class="coverage-intro">Sessions are those read from each machine; a session found on two machines counts once. A stale machine shows its last good snapshot until it can be read again. Run a Fix line in a terminal on this machine, then refresh.</p>
+        <p class="coverage-intro">Sessions are those read from each machine; a session found on two machines counts once. A stale machine shows its last good snapshot until it can be read again. Run a Fix line in a terminal on this machine, then read them again; this machine is not scanned again for that.</p>
       </div>
     </dialog>
 

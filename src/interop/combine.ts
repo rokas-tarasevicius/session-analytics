@@ -131,7 +131,10 @@ export function combineSnapshots(inputs: ReadonlyArray<MachineAnalytics | null>,
       remap.set(status.key, key);
       machines.push({ ...status, key, label, ...(scoped?.length ? { warnings: scoped } : {}) });
     }
-    return { snapshot, remap, fallback: remap.get(own[0]!.key)!, fresh: own.some(({ state }) => state === "ok") };
+    // Freshness is per session: a combined file read now still carries its stale machines' sessions.
+    const states = new Map(own.map(({ key, state }) => [key, state]));
+    const fresh = (machine: string | undefined): boolean => ((machine !== undefined ? states.get(machine) : undefined) ?? own[0]!.state) === "ok";
+    return { snapshot, remap, fallback: remap.get(own[0]!.key)!, fresh };
   });
   const sessions = new Map<string, { session: SessionAnalytics; fresh: boolean }>();
   const profiles: HistoryProfile[] = [], profileKeys = new Set<string>();
@@ -152,12 +155,12 @@ export function combineSnapshots(inputs: ReadonlyArray<MachineAnalytics | null>,
     }
     for (const session of snapshot.sessions) {
       const key = `${session.provider}:${session.sessionKey}`;
-      const current = sessions.get(key);
+      const current = sessions.get(key), now = fresh(session.machine);
       if (current) duplicates = true;
-      if (!current || (fresh !== current.fresh ? fresh : moreComplete(session, current.session))) {
+      if (!current || (now !== current.fresh ? now : moreComplete(session, current.session))) {
         const profileKey = session.historyProfile ? remappedProfiles.get(session.historyProfile.profileKey) : undefined;
         const { machine, ...rest } = session;
-        sessions.set(key, { fresh, session: {
+        sessions.set(key, { fresh: now, session: {
           ...rest,
           ...(profileKey && profileKey !== session.historyProfile?.profileKey ? { historyProfile: { profileKey, days: session.historyProfile!.days } } : {}),
           ...(described ? { machine: machineOf(machine) } : {}),

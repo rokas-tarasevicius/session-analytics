@@ -1,4 +1,8 @@
-// session-analytics remote bootstrap, protocol sa1. Sent on ssh stdin to `node -`; never imported.
+/**
+ * The remote bootstrap, protocol sa1: plain old JavaScript sent on ssh stdin to the remote node, never run here.
+ * It is a string in a module, not a file read from disk, so every install carries it, compiled or not.
+ */
+export const bootstrap = String.raw`// session-analytics remote bootstrap, protocol sa1. Sent on ssh stdin to node -; never imported.
 // Old syntax on purpose: any Node must parse this far enough to say it is too old.
 // argv: sa1 run|install VERSION DIGEST [report arguments...]. Exit codes: 75 need-runtime,
 // 78 node-too-old, 79 bad-request, 80 cache-unwritable, 81 digest-mismatch; otherwise the runtime's own.
@@ -22,18 +26,43 @@
   var allowed = /^(?:package\.json|(?:bin|src|data|schemas)(?:\/[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*)+)$/;
   var uid = process.getuid ? process.getuid() : -1;
 
-  // Only this account may change what runs between verification and start: both runtime directories are
-  // its own, private and not links, and their parent is its own or root's and not open to everyone unless sticky.
+  function unsafe(target) {
+    var error = new Error("unsafe");
+    error.code = "not-private " + target;
+    return error;
+  }
+
+  // Group write is private too when the group is this account's own and no one else's, as with a user private group.
+  function ownGroup(stats) {
+    if (!process.getgid || stats.uid !== uid || stats.gid !== process.getgid()) return false;
+    try {
+      var user = os.userInfo().username;
+      return fs.readFileSync("/etc/group", "utf8").split("\n").some(function (line) {
+        var fields = line.split(":");
+        return fields[0] === user && fields[2] === String(stats.gid) && (fields[3] || "").split(",").every(function (member) { return !member || member === user; });
+      });
+    } catch (error) { return false; }
+  }
+
+  // Only this account may change what runs between verification and start, as with OpenSSH's StrictModes: every
+  // directory above the runtime belongs to it or root and is writable by no one else unless sticky, and the
+  // runtime directories are its own and not links. One that others could write to is emptied, never trusted.
   function secure() {
-    var unsafe = new Error("unsafe");
-    unsafe.code = "not-private";
     fs.mkdirSync(root, { recursive: true, mode: 448 });
-    var parent = fs.statSync(cache);
-    if ((uid >= 0 && parent.uid !== uid && parent.uid !== 0) || ((parent.mode & 2) && !(parent.mode & 512))) throw unsafe;
-    [path.dirname(root), root].forEach(function (target) {
-      var stats = fs.lstatSync(target);
-      if (!stats.isDirectory() || (uid >= 0 && stats.uid !== uid)) throw unsafe;
-      if (stats.mode & 63) fs.chmodSync(target, 448);
+    for (var current = fs.realpathSync(cache); ; current = path.dirname(current)) {
+      var stats = fs.statSync(current);
+      if ((uid >= 0 && stats.uid !== uid && stats.uid !== 0) || (!(stats.mode & 512) && ((stats.mode & 2) || ((stats.mode & 16) && !ownGroup(stats))))) throw unsafe(current);
+      if (path.dirname(current) === current) break;
+    }
+    [path.dirname(root), root, directory].forEach(function (target) {
+      var stats;
+      try { stats = fs.lstatSync(target); } catch (error) { if (target === directory && error.code === "ENOENT") return; throw error; }
+      var own = stats.isDirectory() && (uid < 0 || stats.uid === uid);
+      if (!own && target !== directory) throw unsafe(target);
+      if (!own || (stats.mode & 18)) {
+        fs.rmSync(target, { recursive: true, force: true });
+        if (target !== directory) fs.mkdirSync(root, { recursive: true, mode: 448 });
+      } else if (stats.mode & 63) fs.chmodSync(target, 448);
     });
   }
 
@@ -47,16 +76,17 @@
     return hash.digest("hex");
   }
 
+  // The manifest of a complete runtime that matches the digest, or null.
   function verified(target) {
     try {
-      if (fs.readFileSync(path.join(target, ".complete"), "utf8") !== digest) return false;
+      if (fs.readFileSync(path.join(target, ".complete"), "utf8") !== digest) return null;
       var entries = JSON.parse(fs.readFileSync(path.join(target, ".manifest"), "utf8"));
       return manifestDigest(entries, function (index) {
         var bytes = fs.readFileSync(path.join(target, entries[index][0]));
         if (bytes.length !== entries[index][1]) throw new Error("size");
         return bytes;
-      }) === digest;
-    } catch (error) { return false; }
+      }) === digest ? entries : null;
+    } catch (error) { return null; }
   }
 
   function install() {
@@ -74,7 +104,7 @@
     var temporary;
     try {
       secure();
-      if (verified(directory)) return;
+      if (verified(directory)) return entries;
       temporary = fs.mkdtempSync(path.join(root, ".tmp-"));
       for (var file = 0; file < entries.length; file++) {
         var target = path.join(temporary, entries[file][0]);
@@ -93,6 +123,7 @@
       fail(80, "cache-unwritable " + (error && error.code ? error.code : "error"));
     }
     prune();
+    return entries;
   }
 
   // Keep the newest three runtimes and anything used in the last 14 days.
@@ -110,14 +141,17 @@
     } catch (error) { /* Pruning never fails a read. */ }
   }
 
-  if (mode === "install") install();
+  var manifest;
+  if (mode === "install") manifest = install();
   else {
     try { secure(); } catch (error) { fail(80, "cache-unwritable " + (error && error.code ? error.code : "error")); }
-    if (!verified(directory)) fail(75, "need-runtime");
+    manifest = verified(directory);
+    if (!manifest) fail(75, "need-runtime");
   }
   try { var now = new Date(); fs.utimesSync(directory, now, now); } catch (error) { /* Recency only guides pruning. */ }
 
-  var entry = fs.existsSync(path.join(directory, "bin", "session-analytics.js")) ? "session-analytics.js" : "session-analytics.ts";
+  // Only a file the verified manifest lists runs: a compiled install's .js, else the source's .ts.
+  var entry = manifest.some(function (item) { return item[0] === "bin/session-analytics.js"; }) ? "session-analytics.js" : "session-analytics.ts";
   var child = childProcess.spawn(process.execPath, [path.join(directory, "bin", entry)].concat(rest), { stdio: ["ignore", "pipe", "inherit"], detached: true });
   var lineEnd = true, stopped = false;
 
@@ -149,3 +183,4 @@
     process.exit(code === null ? 1 : code);
   });
 })();
+`;

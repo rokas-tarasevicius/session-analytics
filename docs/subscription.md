@@ -8,7 +8,7 @@ A Claude or ChatGPT subscription is a fixed price for a rolling allowance. Unuse
 | --- | --- |
 | Meter | One provider allowance, reported by the provider as percent used: Claude's 5-hour and weekly limits, Codex's weekly limit (and 5-hour limit on plans that have one). |
 | Cycle | One reset window of a meter, identified by its reset instant. A Codex cycle can end early when OpenAI resets limits; that remainder is not counted as waste. |
-| Value per 1% | API-equivalent value of the activity the dashboard reads (this machine, plus any saved or `--remote` machines) inside a cycle, divided by the meter reading at that time. The median across cycles is used. |
+| Value per 1% | API-equivalent value of the activity the dashboard reads (this machine, plus any saved or `--remote` machines, whatever the Machines strip shows; the view names them) inside a cycle, divided by the meter reading at that time. The median across cycles is used. |
 | Weekly capacity | Value per 1% × 100: what one full weekly allowance is worth at list prices. |
 | Monthly potential | Weekly capacity × 30.44 / 7: the value of using every weekly reset fully. |
 | Extracted | The provider's API-equivalent value for the selected dates, from the same activity ledger as Summary, Velocity and Costs. |

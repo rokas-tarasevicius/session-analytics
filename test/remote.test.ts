@@ -162,7 +162,7 @@ test("unreachable, outdated and noisy machines leave a warning and the rest of t
   assert.match(stderr, /Could not read down: SSH could not connect.*Connection refused/);
   assert.match(stderr, /Could not read old: the remote session-analytics rejected the request.*Unknown session analytics argument/);
   assert.match(stderr, /Could not read missing: session-analytics was not found there\. bash: line 1: session-analytics: command not found\n {2}Fix: use the bundled runtime \(session-analytics machines add missing\), or name the command in full: --remote-command "node \/path\/to\/session-analytics\/bin\/session-analytics\.ts"/);
-  assert.match(stderr, /Could not read down: .*\n {2}Fix: run ssh down true once in a terminal/);
+  assert.match(stderr, /Could not read down: .*\n {2}Fix: check that down is up and its SSH server is reachable from here, then run ssh down true once in a terminal/);
   assert.match(stderr, /Could not read noisy: the remote output was not a valid full snapshot/);
   assert.match(stderr, /Could not read elsewhere: the remote snapshot used another time zone/);
   // The warning survives a filtered export like other discovery failures.
@@ -180,7 +180,7 @@ test("unreachable, outdated and noisy machines leave a warning and the rest of t
   const strict = spawnSync(process.execPath, [bin, "report", ...localFlags, "--remote", "down,copied", "--strict"], { env: environment, encoding: "utf8" });
   assert.equal(strict.status, 3, strict.stderr);
   assert.match(strict.stdout, /^Session Analytics · this machine and copied \(not read: down\)\n/);
-  assert.match(strict.stdout, /\n {2}down {10}not read: unreachable\n {4}Fix: run ssh down true once/);
+  assert.match(strict.stdout, /\n {2}down {10}not read: unreachable\n {4}Fix: check that down is up/);
   assert.match(strict.stdout, /\nWarnings\n/);
   const output = join(directory, "strict-export");
   const exported = spawnSync(process.execPath, [bin, "export", "--format", "csv", "--out", output, ...localFlags, "--remote", "down", "--strict"], { env: environment, encoding: "utf8" });
@@ -274,6 +274,11 @@ test("repeated --remote flags are merged in report and export, and --share stays
   assert.equal((await readFile(join(output, "sessions.csv"), "utf8")).trim().split("\r\n").length - 1, localSnapshot.summary.sessions + copiedSessions);
   assert.deepEqual((await calls()).map(({ destination }) => destination).sort(), ["copied", "server"]);
   assert.throws(() => remoteOptionsFrom(["--remote", "copied", "--remote", "copied"], {}), OptionError);
+  // Any other value flag given twice is refused rather than silently first-wins.
+  for (const command of [[bin, "report"], [new URL("../src/server.ts", import.meta.url).pathname]]) {
+    const repeated = spawnSync(process.execPath, [...command, "--no-remote", "--time-zone", "UTC", "--time-zone", "Asia/Tokyo"], { env: environment, encoding: "utf8" });
+    assert.deepEqual([repeated.status, repeated.stderr], [2, "Give --time-zone once.\n"]);
+  }
   assert.throws(() => remoteOptionsFrom(["--remote", "a", "--remote-command", "x", "--remote-command", "y"], {}), OptionError);
   // One keyed source ID covers a share, so other machines share their own and merge detects overlap.
   await rm(sshLog, { force: true });

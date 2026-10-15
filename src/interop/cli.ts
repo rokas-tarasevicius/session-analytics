@@ -112,7 +112,7 @@ export async function runInterop(command: "export" | "merge", argv: string[]): P
     await postOtlp(endpoint, files["otlp-logs.json"]!);
     process.stderr.write("OTLP collector acknowledged the saved payload.\n");
   }
-  const unread = (snapshot.machines ?? []).filter(({ state }) => state === "failed" || state === "stale");
+  const unread = (snapshot.machines ?? []).filter(({ state }) => state !== "ok");
   if (argv.includes("--strict") && unread.length) {
     process.stderr.write(`--strict: ${unread.map(({ label }) => label).join(", ")} ${unread.length === 1 ? "was" : "were"} not read now; exiting with 3.\n`);
     process.exitCode = 3;

@@ -33,7 +33,7 @@ async function rendered(list = machines()) {
 }
 
 test("reasons, ages and notes are short and cover every reason", () => {
-  assert.equal(Object.keys(machineReasons).length, 24);
+  assert.equal(Object.keys(machineReasons).length, 28);
   assert.equal(machineAge(null), null);
   assert.equal(machineAge(new Date(Date.now() - 30_000).toISOString()), "just now");
   assert.equal(machineAge(hoursAgo(2)), "2 h ago");
@@ -77,9 +77,10 @@ test("the strip lists every machine; a failed one opens its reason and fix; the 
   const chips = document.querySelector("#machine-chips")!.children;
   assert.deepEqual(chips.map((chip) => chip.tagName.toLowerCase()), ["label", "label", "button"]);
   assert.deepEqual(chips.map((chip) => chip.dataset["state"]), ["ok", "stale", "failed"]);
-  assert.equal(chips[1]!.querySelector("input")!.getAttribute("aria-label"), "agentbox: 1 sessions, unreachable · showing 2 h ago");
+  assert.equal(chips[1]!.querySelector("input")!.getAttribute("aria-label"), "agentbox: 1 sessions, all time, unreachable · showing 2 h ago");
+  assert.equal(chips[1]!.getAttribute("title"), "1 sessions read from agentbox, all time");
   assert.equal(chips[2]!.getAttribute("aria-label"), "boxa: not read: sudo needs a password. Show machine details");
-  assert.match(document.querySelector("#machine-strip-meta")!.textContent, /^read \d\d:\d\d$/);
+  assert.match(document.querySelector("#machine-strip-meta")!.textContent, /^snapshot \d\d:\d\d$/);
   const sync = document.querySelector("#sync-context")!;
   assert.equal(sync.dataset["state"], "warn");
   assert.equal(document.querySelector("#sync-label")!.textContent, `1 of 3 machines ready · boxa not read · agentbox stale · ${run("integer(activeView().summary.workingSnapshots)")} live`);
@@ -160,4 +161,51 @@ test("while a machine is reading, the dashboard polls /api/machines and fetches 
   assert.deepEqual(requests, ["/api/machines", "/api/machines", "/api/analytics"]);
   assert.equal(run("fullSnapshot.machines.every(({ state }) => state === 'ok')"), true);
   assert.match(document.querySelector("#sync-label")!.textContent, /^2 of 2 machines ready · \d+ live$/);
+});
+
+test("Subscription counts every machine read, whatever the strip shows, and names them", async () => {
+  const { context, document, run } = await rendered();
+  const calls: Array<{ sessions: SessionAnalytics[]; scope: { label: string; machines: number } }> = [];
+  context["renderSubscription"] = (_container: unknown, options: { sessions: SessionAnalytics[]; scope: { label: string; machines: number } }) => { calls.push(options); };
+  context["fetch"] = async () => ({ ok: false, json: async () => ({}) });
+  run("setMachine('agentbox', false)");
+  assert.equal(run("snapshot.sessions.length"), 1);
+  run("switchView('subscription')");
+  assert.equal(calls.at(-1)!.sessions.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)!.scope)), { label: "laptop and agentbox", machines: 2 });
+  assert.equal(document.querySelector("#machine-strip-meta")!.textContent, "Subscription counts every machine");
+  run("switchView('summary')");
+  assert.match(document.querySelector("#machine-strip-meta")!.textContent, /^snapshot \d\d:\d\d$/);
+});
+
+test("Read them again re-reads the machines without a full refresh, and a failed fetch keeps polling", async () => {
+  const { context, document } = await rendered();
+  const ticks: Array<() => void> = [], requests: string[] = [];
+  let state = "reading", analytics = 0;
+  context["setInterval"] = (callback: () => void) => { ticks.push(callback); return ticks.length; };
+  context["clearInterval"] = () => {};
+  context["fetch"] = async (url: string) => {
+    requests.push(url);
+    if (url === "/api/analytics") {
+      analytics += 1;
+      // The first fetch of the new snapshot fails; polling carries on rather than leave the machine shown as reading.
+      return analytics === 1 ? { ok: false, json: async () => ({}) } : { ok: true, json: async () => ({ ...context["fixture"] as object, machines: machines().map((machine) => ({ ...machine, state: "ok", reason: undefined, fix: undefined })) }) };
+    }
+    return { ok: true, json: async () => ({ machines: machines().map((machine) => machine.key === "boxa" ? { ...machine, state } : machine) }) };
+  };
+  const button = document.querySelector("#machines-read")!;
+  assert.equal(button.hidden, false);
+  button.listeners.get("click")!();
+  for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(requests, ["/api/machines?read=1"]);
+  assert.equal(button.disabled, true);
+  state = "ok";
+  ticks.at(-1)!();
+  for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(requests.slice(1), ["/api/machines", "/api/analytics"]);
+  assert.equal(ticks.length, 2);
+  ticks.at(-1)!();
+  for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(requests.slice(3), ["/api/machines", "/api/analytics"]);
+  assert.equal(document.querySelector("#machines-read")!.hidden, true);
 });

@@ -21,9 +21,10 @@ const record = (values: Schema) => ({ type: "object", additionalProperties: valu
 const enumeration = <T extends string>(values: Record<T, true>) => ({ anyOf: Object.keys(values).map((value) => ({ const: value })) });
 const machineKey = { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" };
 const machineReasons: Record<MachineReason, true> = {
-  "no-ssh": true, connection: true, dropped: true, sudo: true, "no-account": true, permission: true, "missing-command": true, "no-node": true, "node-too-old": true,
-  runtime: true, "cache-unwritable": true, corrupted: true, "version-skew": true, rejected: true, busy: true, "index-newer": true, analysis: true, invalid: true, "time-zone": true,
-  timeout: true, "too-large": true, cancelled: true, "no-history": true, "same-machine": true,
+  "no-ssh": true, "unknown-host": true, connection: true, "login-refused": true, dropped: true, sudo: true, "no-account": true, "login-shell": true, permission: true,
+  "missing-command": true, "no-node": true, "node-too-old": true, "local-runtime": true, runtime: true, "cache-unwritable": true, corrupted: true, "version-skew": true,
+  rejected: true, busy: true, "index-newer": true, analysis: true, invalid: true, "time-zone": true, timeout: true, "too-large": true, cancelled: true, "no-history": true,
+  "same-machine": true,
 };
 function object<T>(properties: { [K in keyof T]-?: Schema }, optional: Array<keyof T> = []): Schema {
   return { type: "object", properties, required: Object.keys(properties).filter((key) => !optional.includes(key as keyof T)), additionalProperties: false };
@@ -90,7 +91,7 @@ export function snapshotSchemas(): Record<string, Schema> {
       key: machineKey, label: { type: "string", minLength: 1, maxLength: 256 },
       state: enumeration<MachineStatus["state"]>({ ok: true, stale: true, failed: true, reading: true }), reason: enumeration(machineReasons),
       fix: { type: "string", minLength: 1, maxLength: 1024 }, sessions: integer, repositories: integer, readAt: nullable(text), durationMs: nullable(number),
-      version: nullable({ type: "string", pattern: "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$" }), identity: { type: "string", pattern: "^[0-9a-f]{16}$" }, warnings: array(warning),
+      version: nullable({ type: "string", pattern: "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$" }), identity: { type: "string", pattern: "^(?:host-)?[0-9a-f]{16}$" }, warnings: array(warning),
     }, ["reason", "fix", "identity", "warnings"]),
     RepositoryRollup: object<RepositoryRollup>({ repository: ref("Repository"), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }),
     RepositoryAnalytics: object<RepositoryAnalytics>({ velocity: ref("VelocityMetadata"), schemaVersion: { const: 1 }, generatedAt: text, rateCard: ref("RateCard"), repository: ref("Repository"), sessions: array(ref("SessionAnalytics")), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }, ["velocity"]),

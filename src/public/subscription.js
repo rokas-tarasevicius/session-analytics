@@ -358,7 +358,7 @@ function recommendationList(items) {
   return list;
 }
 
-function sourcesPanel(limits, fmt) {
+function sourcesPanel(limits, fmt, scope) {
   const panel = el("article", null, "panel subscription-sources");
   panel.append(el("h3", "Sources and method"));
   const table = el("table", null, "data-table");
@@ -379,7 +379,8 @@ function sourcesPanel(limits, fmt) {
     "Meters are the provider's own usage percentages, copied from records already on this machine. Nothing is requested from Anthropic or OpenAI.",
     `Readings are kept in a private ledger${limits.persisted ? "" : " (off: --no-index)"} so reset history outlives provider log rotation. Run \`session-analytics limits --quiet\` every 20 minutes (cron or launchd) to keep it continuous.`,
     "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline`. It records the documented rate_limits field and prints the meters.",
-    "Value per percent divides the API-equivalent value of this machine's activity in a window by the meter's reading. Usage on other machines, the web app or the desktop app also moves the meter, so capacity is a conservative lower bound and utilization an upper bound.",
+    `Value per percent divides the API-equivalent value of the activity read here (${scope.label}) in a window by the meter's reading. Usage elsewhere, the web app or the desktop app also moves the meter, so capacity is a conservative lower bound and utilization an upper bound.`,
+    ...(scope.machines > 1 ? ["Meters are read on this machine only, and value counts every machine read, whatever the Machines strip shows. A machine signed in to another account adds value these meters never saw, which inflates value per percent."] : []),
     `Plan prices were reviewed on ${plansReviewedAt}. Override the detected plan on each card; the choice stays in this browser.`,
   ]) list.append(el("li", text));
   panel.append(list);
@@ -389,8 +390,9 @@ function sourcesPanel(limits, fmt) {
 /**
  * Render the Subscription view. `sessions` must be every session: limits are account-wide, so a repository focus does not apply.
  * `extractedByProvider` is API-equivalent value per provider for the selected dates, from the shared ledger.
+ * `scope` names the machines whose activity that is.
  */
-export function renderSubscription(container, { limits, sessions, timeZone, days, extractedByProvider, rangeLabel, onPlanChange, now = Date.now() / 1000 }) {
+export function renderSubscription(container, { limits, sessions, timeZone, days, extractedByProvider, rangeLabel, onPlanChange, scope = { label: "this machine", machines: 1 }, now = Date.now() / 1000 }) {
   container.replaceChildren();
   if (!limits) { container.append(note("Loading limit meters…")); return; }
   if (limits.unavailable) { container.append(note("Limit meters could not be loaded. Check the terminal running the dashboard.", "empty-state")); return; }
@@ -427,7 +429,7 @@ export function renderSubscription(container, { limits, sessions, timeZone, days
   hero.append(
     kpi("Monthly potential", usd(monthlyPotential), monthlyPotential === null ? "Needs a 5% weekly reading" : bankedValue ? `${monthlyPrice ? `${(monthlyPotential / monthlyPrice).toFixed(0)}× price · ` : ""}+${usd(bankedValue)} banked` : monthlyPrice ? `${(monthlyPotential / monthlyPrice).toFixed(0)}× the ${usd(monthlyPrice)}/mo price` : "Full use of every reset",
       { accent: true, title: `API-equivalent value of using 100% of each weekly allowance for a month, calibrated from your own meters.${bankedValue ? ` Banked resets add up to ${usd(bankedValue)} more if each is redeemed near 100%.` : ""}` }),
-    kpi("Extracted", usd(extracted), `≈ ${usd(extracted * MONTH_DAYS / Math.max(1, days))}/mo pace`, { title: `API-equivalent value of Claude and Codex activity on this machine, ${rangeLabel}` }),
+    kpi("Extracted", usd(extracted), `≈ ${usd(extracted * MONTH_DAYS / Math.max(1, days))}/mo pace`, { title: `API-equivalent value of Claude and Codex activity on ${scope.label}, ${rangeLabel}` }),
     kpi("Capacity used", pace !== null ? percent(pace, 0) : DASH, pace === null ? "Needs calibration" : pace > 1 ? `${pace.toFixed(1)}× the refill rate` : `of ${usd(potential)} for these dates`,
       { title: `Extracted value ÷ calibrated capacity for the same dates (${usd(potential)}). Over 100% means usage outpaces what the weekly limits refill, so limits will be hit.` }),
     kpi("Weekly resets used", resetScores.length ? pct(sum(resetScores.map((item) => item.utilization.mean)) / resetScores.length) : DASH, "Mean closing level", { title: "Meter only: how full each weekly allowance was when it reset, with the live cycle's projection" }),
@@ -461,7 +463,7 @@ export function renderSubscription(container, { limits, sessions, timeZone, days
   windowsChart(windowsBody, items, fmt, now);
   redrawOnResize(windowsBody, () => windowsChart(windowsBody, items, fmt, Date.now() / 1000));
 
-  container.append(sourcesPanel(limits, fmt));
+  container.append(sourcesPanel(limits, fmt, scope));
 }
 
 export const subscriptionRefreshMilliseconds = 2 * 60 * 1000;

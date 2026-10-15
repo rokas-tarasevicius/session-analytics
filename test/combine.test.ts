@@ -182,6 +182,20 @@ test("machine statuses list every machine, a copy read now beats a stale one, an
   assert.throws(() => combineSnapshots([local, null]), /status for a machine without a snapshot/);
 });
 
+test("merging combined files judges each session by its own machine's state, in either order", () => {
+  const stale = structuredClone(local);
+  const target = stale.sessions[0]!;
+  target.lastEventAt = new Date(Date.parse(target.lastEventAt ?? target.updatedAt) + 3_600_000).toISOString();
+  // A file read now for its own machine, carrying agentbox's last good snapshot with a more complete copy.
+  const file = combineSnapshots([otherMachine(), validateSnapshot(stale)], { machines: [
+    status("local", "laptop", "ok", { readAt: local.generatedAt }), status("agentbox", "agentbox", "stale", { reason: "timeout", readAt: "2026-07-20T00:00:00Z" }),
+  ] });
+  for (const inputs of [[file, local], [local, file]]) {
+    const merged = combineSnapshots(inputs);
+    assert.equal(merged.sessions.find((session) => identity(session) === identity(target))!.lastEventAt, local.sessions[0]!.lastEventAt);
+  }
+});
+
 test("snapshots without machines still validate, and machine fields are checked when present", () => {
   assert.equal(validateSnapshot(structuredClone(local)).machines, undefined);
   const combined = JSON.parse(JSON.stringify(combineSnapshots([local, otherMachine()]))) as MachineAnalytics;

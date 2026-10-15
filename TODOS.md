@@ -47,12 +47,14 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | P3 | Persist portable repository IDs and session keys with retained index facts, so history whose sources were deleted keeps its portable identity across exports. | #62 review |
 | P3 | Compare pricing freshness across machines: each machine prices its own sessions with its own cache, and a remote's stale or older rate card is not flagged. | Machines review (no-cross-machine-consistency) |
 | P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
+| P3 | Compare ad-hoc `--remote` machines, and installed ones without a recorded check, for the same machine twice; needs `--identify-machine` there, which older versions reject. Return compact JSON from installed runtimes for the same reason. | Machines review (same-machine-twice, uncompressed-pretty-json) |
+| P3 | Add a Machines column (or filter chips) to the repository table. | Machines review (no-machine-dimension) |
 
 ## Distribution and release metadata
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P1 | Release builds must ship `src/remote/bootstrap.js`, which is read from disk rather than imported, so a compiled install can build the bundled runtime; the installed-artifact smoke test should read a machine through it. Blocks the first compiled release that includes saved machines. | Machines review |
+| P2 | The installed-artifact smoke test (release branch) should run `machines --help` and read a saved machine through a fake `ssh`, so a compiled install's bundled runtime is exercised before publication. The bootstrap is now a module (`src/remote/bootstrap.ts`) that tsc emits, so a compiled install carries it. | Machines review (release-bootstrap-missing) |
 | P3 | Pass the compiled installed-artifact gate before npm publication. | §6, Not in scope for 0.8.0; distribution-launch proposal |
 | P3 | Evaluate Homebrew distribution separately. | §6, Not in scope for 0.8.0 |
 | P3 | Review declaration files and verify compiled installed artifacts before npm publication. CHANGELOG and required license assets are checked by the source-release preflight. | §4 P3; §6, Not in scope for 0.8.0 |

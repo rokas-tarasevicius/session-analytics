@@ -350,9 +350,9 @@ export interface RepositoryAnalytics {
 }
 
 /** Why a machine was not read, or read with a caveat: a fixed reason, never remote text. */
-export type MachineReason = "no-ssh" | "connection" | "dropped" | "sudo" | "no-account" | "permission" | "missing-command" | "no-node" | "node-too-old"
-  | "runtime" | "cache-unwritable" | "corrupted" | "version-skew" | "rejected" | "busy" | "index-newer" | "analysis" | "invalid" | "time-zone"
-  | "timeout" | "too-large" | "cancelled" | "no-history" | "same-machine";
+export type MachineReason = "no-ssh" | "unknown-host" | "connection" | "login-refused" | "dropped" | "sudo" | "no-account" | "login-shell" | "permission"
+  | "missing-command" | "no-node" | "node-too-old" | "local-runtime" | "runtime" | "cache-unwritable" | "corrupted" | "version-skew" | "rejected" | "busy"
+  | "index-newer" | "analysis" | "invalid" | "time-zone" | "timeout" | "too-large" | "cancelled" | "no-history" | "same-machine";
 
 /**
  * One machine behind a combined snapshot. `stale` carries its last good snapshot after a failed read;
@@ -373,7 +373,7 @@ export interface MachineStatus {
   durationMs: number | null;
   /** The session-analytics version that produced it, when known. */
   version: string | null;
-  /** Hash of the machine ID and account; only a single machine's own report carries it. */
+  /** Hash of the machine ID and account (`host-` when only the host name told it); only a single machine's own report carries it. */
   identity?: string;
   /** Fixed discovery warnings that came from this machine. */
   warnings?: string[];
@@ -465,7 +465,10 @@ export interface DashboardHealth {
   snapshot: "ready" | "building" | "not-started";
   status: "ok";
   instanceToken: string;
+  /** Every option that changes the snapshot, including the machines read. */
   optionsHash: string;
+  /** The same without the machines, so a launch can tell that only the machines differ. */
+  scanHash: string;
 }
 
 export interface ProviderEvidence {

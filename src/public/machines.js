@@ -4,9 +4,10 @@ import { discoveryWarnings, remoteUnavailableWarning, staleMachineWarning } from
 
 /** A few words for each reason; the terminal that read the machine printed the full sentence and its detail. */
 export const machineReasons = {
-  "no-ssh": "ssh is missing here", connection: "unreachable", dropped: "connection dropped", sudo: "sudo needs a password",
-  "no-account": "no such account", permission: "command not executable", "missing-command": "session-analytics not found",
-  "no-node": "Node.js not found", "node-too-old": "Node.js too old", runtime: "runtime did not start", "cache-unwritable": "cache not writable or not private",
+  "no-ssh": "ssh is missing here", "unknown-host": "host name not found", connection: "unreachable", "login-refused": "SSH login refused",
+  dropped: "connection dropped", sudo: "sudo needs a password", "no-account": "no such account", "login-shell": "account has no login shell",
+  permission: "command not executable", "missing-command": "session-analytics not found", "no-node": "Node.js not found", "node-too-old": "Node.js too old",
+  "local-runtime": "runtime incomplete here", runtime: "runtime did not start", "cache-unwritable": "cache not writable or not private",
   corrupted: "runtime damaged in transit", "version-skew": "another version", rejected: "request rejected", busy: "index busy",
   "index-newer": "index from a newer version", analysis: "analysis failed", invalid: "invalid output", "time-zone": "another time zone",
   timeout: "timed out", "too-large": "snapshot too large", cancelled: "read stopped", "no-history": "no history for this account",
@@ -36,16 +37,22 @@ export function machineNote(machine, now = Date.now()) {
   return reason ?? "";
 }
 
+/** Each discovery warning prefixed with the machines that raised it, when the snapshot combines machines. */
+export function machineWarningSources(machines, warnings) {
+  if (!machines || machines.length < 2) return warnings;
+  return warnings.map((warning) => {
+    const from = discoveryWarnings.includes(warning) ? machines.filter((machine) => machine.warnings?.includes(warning)).map(({ label }) => label) : [];
+    return from.length ? `${from.join(", ")}: ${warning}` : warning;
+  });
+}
+
 /**
  * Coverage notes that name machines: a discovery warning says which machines raised it, and each
  * machine that is missing, stale, still reading or empty says so. One machine's snapshot is unchanged.
  */
 export function machineWarnings(machines, warnings, now = Date.now()) {
   if (!machines || machines.length < 2) return warnings;
-  const notes = warnings.filter((warning) => warning !== remoteUnavailableWarning && warning !== staleMachineWarning).map((warning) => {
-    const from = discoveryWarnings.includes(warning) ? machines.filter((machine) => machine.warnings?.includes(warning)).map(({ label }) => label) : [];
-    return from.length ? `${from.join(", ")}: ${warning}` : warning;
-  });
+  const notes = machineWarningSources(machines, warnings.filter((warning) => warning !== remoteUnavailableWarning && warning !== staleMachineWarning));
   for (const machine of machines) {
     const reason = machine.reason ? machineReasons[machine.reason] ?? machine.reason : "not read", age = machineAge(machine.readAt, now);
     if (machine.reason === "same-machine") notes.push(`${machine.label} is the same machine and account as another one; its sessions are counted once.`);

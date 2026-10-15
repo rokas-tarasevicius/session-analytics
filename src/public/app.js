@@ -44,7 +44,7 @@ const elements = {
   generated: $("#generated-at"), help: $("#help-overlay"), helpButton: $("#help-button"), helpClose: $("#help-close"),
   machineChips: $("#machine-chips"), machineDetails: $("#machine-details"), machineSpend: $("#machine-spend"), machineSpendPanel: $("#machine-spend-panel"),
   machineStrip: $("#machine-strip"), machineStripMeta: $("#machine-strip-meta"), machinesClose: $("#machines-close"), machinesDialog: $("#machines-dialog"),
-  machinesRows: $("#machines-rows"), machinesSummary: $("#machines-summary"),
+  machinesRead: $("#machines-read"), machinesRows: $("#machines-rows"), machinesSummary: $("#machines-summary"),
   input: $("#metric-input"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
   coverageUsageNote: $("#coverage-usage-note"), coverageSessionNote: $("#coverage-session-note"), coverageLiveNote: $("#coverage-live-note"), coverageCostNote: $("#coverage-cost-note"), retentionNote: $("#retention-note"),
@@ -746,13 +746,18 @@ function scheduleLimits(active) {
   if (typeof setInterval === "function") limitsTimer ??= setInterval(() => { if (document.visibilityState !== "hidden") void loadLimits(false); }, subscriptionRefreshMilliseconds);
 }
 
-/** Subscription is account-wide: it reads every session, ignoring the repository focus, over the selected dates. */
+/**
+ * Subscription is account-wide: it reads every session of every machine read, ignoring the repository focus and the
+ * Machines strip, over the selected dates, and says which machines that is.
+ */
 function renderSubscriptionView() {
   const restoreFocus = rememberFocus();
-  const context = velocityContext();
-  const totals = buildVelocity(snapshot.sessions, { start: context.start, end: context.end, group: "provider", metric: "value", limit: 50 }).allSeries;
+  const context = velocityContext(), all = fullSnapshot ?? snapshot;
+  const counted = (all.machines ?? []).filter(({ state, readAt }) => state !== "failed" && readAt).map(({ label }) => label);
+  const totals = buildVelocity(all.sessions, { start: context.start, end: context.end, group: "provider", metric: "value", limit: 50 }).allSeries;
   renderSubscription($("#subscription-view"), {
-    limits, sessions: snapshot.sessions, timeZone: context.timeZone,
+    limits, sessions: all.sessions, timeZone: context.timeZone,
+    scope: counted.length > 1 ? { label: `${counted.slice(0, -1).join(", ")} and ${counted.at(-1)}`, machines: counted.length } : { label: "this machine", machines: 1 },
     days: daysBetween(context.start, context.end).length,
     extractedByProvider: Object.fromEntries(totals.map((series) => [series.id, series.total])),
     rangeLabel: dateRange(context.start, context.end),
@@ -1038,6 +1043,12 @@ function setMachine(key, on) {
   applyMachines(); renderMachines(); renderView();
 }
 
+/** The strip's note: the snapshot's time, or on Subscription, that the strip does not narrow it. */
+function renderStripMeta() {
+  if (!fullSnapshot || (fullSnapshot.machines?.length ?? 0) < 2) return;
+  elements.machineStripMeta.textContent = currentViewName() === "subscription" ? "Subscription counts every machine" : `snapshot ${timeLabel(fullSnapshot.generatedAt, snapshotTimeZone())}`;
+}
+
 /**
  * The Machines strip and its dialog. A machine with sessions to show is a chip that filters every view;
  * one without is a button to its reason and fix. Shown only when the snapshot combines machines.
@@ -1055,7 +1066,8 @@ function renderMachines() {
     if (counted) {
       const input = node("input"); input.type = "checkbox"; input.checked = !hiddenMachines.has(machine.key);
       input.dataset.focusKey = `machine:${machine.key}`;
-      input.setAttribute("aria-label", `${machine.label}: ${integer(machine.sessions)} sessions${note ? `, ${note}` : ""}`);
+      chip.setAttribute("title", `${integer(machine.sessions)} sessions read from ${machine.label}, all time`);
+      input.setAttribute("aria-label", `${machine.label}: ${integer(machine.sessions)} sessions, all time${note ? `, ${note}` : ""}`);
       input.addEventListener("change", () => setMachine(machine.key, input.checked));
       chip.append(input, node("span", machine.label), node("small", integer(machine.sessions)));
     } else {
@@ -1067,9 +1079,11 @@ function renderMachines() {
     if (note) chip.append(node("small", note, "machine-note"));
     elements.machineChips.append(chip);
   }
-  elements.machineStripMeta.textContent = `read ${timeLabel(fullSnapshot.generatedAt, timeZone)}`;
+  renderStripMeta();
   const { ok, total } = machineTally(machines);
-  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows.`;
+  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows, except Subscription, which counts every machine.`;
+  elements.machinesRead.hidden = !machines.some(({ state }) => state === "failed" || state === "stale");
+  elements.machinesRead.disabled = false; elements.machinesRead.textContent = "Read them again";
   for (const machine of machines) {
     const row = node("tr"), cell = (value, left = false) => { const item = node("td", value); if (left) item.className = "align-left"; return item; };
     const state = machine.state === "ok" ? (machine.reason ? machineReasons[machine.reason] ?? machine.reason : "read") : machineNote(machine);
@@ -1096,10 +1110,12 @@ function renderMachineSpend(view, context) {
   }).sort((left, right) => right.value - left.value), money, machines.length);
 }
 
-/** While a machine is still reading, ask the server every 2 s; once one answers, fetch the snapshot that includes it. */
-function watchMachines() {
+/**
+ * While a machine is still reading, ask the server every 2 s; once one answers, fetch the snapshot that includes it.
+ * A fetch that fails starts the polling again, so one error does not leave a machine shown as reading.
+ */
+function watchMachines(reading = (fullSnapshot?.machines ?? []).filter(({ state }) => state === "reading").map(({ key }) => key)) {
   if (machinePoll !== null) { clearInterval(machinePoll); machinePoll = null; }
-  const reading = (fullSnapshot?.machines ?? []).filter(({ state }) => state === "reading").map(({ key }) => key);
   if (!reading.length || typeof setInterval !== "function") return;
   machinePoll = setInterval(() => void (async () => {
     const response = await fetch("/api/machines");
@@ -1107,8 +1123,23 @@ function watchMachines() {
     const { machines } = await response.json();
     if (!machines.some(({ key, state }) => reading.includes(key) && state !== "reading")) return;
     clearInterval(machinePoll); machinePoll = null;
-    await load(false, true);
+    if (!(await quietLoad())) watchMachines(reading);
   })().catch(() => { /* The next poll asks again. */ }), 2000);
+}
+
+/** Read the machines that failed again, without scanning this one: after fixing one, this takes seconds, not a full refresh. */
+async function readMachinesAgain() {
+  elements.machinesRead.disabled = true; elements.machinesRead.textContent = "Reading…";
+  try {
+    const response = await fetch("/api/machines?read=1");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { machines } = await response.json();
+    // A dashboard showing a saved snapshot file reads no machine.
+    if (!machines.length) { elements.machinesRead.hidden = true; return; }
+    const reading = machines.filter(({ state }) => state === "reading").map(({ key }) => key);
+    if (reading.length) { watchMachines(reading); return; }
+  } catch { /* The button comes back; Refresh reads everything. */ }
+  elements.machinesRead.disabled = false; elements.machinesRead.textContent = "Read them again";
 }
 
 function renderRateCards(rateCard) {
@@ -1410,6 +1441,7 @@ function renderView() {
   renderViewStatus(view);
   renderWarnings(view.warnings);
   renderSharedView(view);
+  renderStripMeta();
   renderProviderEvidence($("#provider-evidence-rows"), view.sessions);
   renderCoverageSummary(view);
   if (windowEmpty && currentViewName() !== "pricing") {
@@ -1702,6 +1734,7 @@ for (const dialog of [elements.palette, elements.help, elements.coverageDialog, 
 elements.coverageButton.addEventListener("click", openCoverage);
 elements.coverageClose.addEventListener("click", closeCoverage);
 elements.machineDetails.addEventListener("click", openMachines);
+elements.machinesRead.addEventListener("click", () => void readMachinesAgain());
 elements.machinesClose.addEventListener("click", closeMachines);
 elements.commandButton.addEventListener("click", openPalette);
 elements.helpButton.addEventListener("click", openHelp);
@@ -1822,17 +1855,20 @@ function render(data) {
   watchMachines();
 }
 
-/** `quiet` fetches the snapshot a machine just completed, without the loading state or an error banner. */
-async function loadSnapshot(refresh = false, quiet = false) {
+/** Fetch the snapshot a machine just completed, without the loading state or an error banner; false when it failed. */
+async function loadQuietly() {
+  try {
+    const response = await fetch("/api/analytics");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    render(await response.json()); showReady(snapshot ? activeView() : null);
+    return true;
+  } catch { return false; /* The snapshot on screen stays. */ }
+}
+// Its own flight, so a Refresh clicked meanwhile is not folded into it.
+const quietLoad = singleFlight(loadQuietly);
+
+async function loadSnapshot(refresh = false) {
   const previous = snapshot ?? sharedSnapshot;
-  if (quiet) {
-    try {
-      const response = await fetch("/api/analytics");
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      render(await response.json()); showReady(snapshot ? activeView() : null);
-    } catch { /* The snapshot on screen stays; Refresh asks again. */ }
-    return;
-  }
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;

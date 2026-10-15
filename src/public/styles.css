@@ -393,6 +393,8 @@ main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 /* Machines strip: one chip per machine behind a combined snapshot; a chip filters every view, a button opens the reason and fix. */
 .machine-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; color: var(--muted); font-size: var(--fs-xs); }
 .machine-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+/* A long state note wraps inside the pill on a narrow screen instead of spilling over its border. */
+.machine-chip { height: auto; min-height: var(--control); padding-block: 4px; flex-wrap: wrap; max-width: 100%; }
 .machine-chip small { color: var(--muted); font: 500 var(--fs-xs) var(--font-mono); font-variant-numeric: tabular-nums; }
 .machine-chip .machine-note { font-family: var(--font-sans); }
 .machine-chip[data-state="failed"], .machine-chip[data-state="stale"] { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn-text); }

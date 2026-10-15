@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 import { version } from "../version.ts";
+import { bootstrap } from "./bootstrap.ts";
 
 /** The install root this process runs from: a source checkout (.ts) or a compiled install (.js). */
 export const installRoot = fileURLToPath(new URL("../../", import.meta.url));
-export const bootstrapPath = fileURLToPath(new URL("./bootstrap.js", import.meta.url));
 const packed = /^(?:package\.json|(?:bin|src|data|schemas)(?:\/[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*)+)$/;
 
 export interface RuntimePayload {
@@ -40,7 +40,6 @@ export function buildRuntime(root = installRoot): RuntimePayload {
   const hash = createHash("sha256");
   paths.forEach((path, index) => { hash.update(`${path}\0${contents[index]!.length}\0`); hash.update(contents[index]!); });
   const payload = gzipSync(Buffer.concat([Buffer.from(`${JSON.stringify(paths.map((path, index) => [path, contents[index]!.length]))}\n`), ...contents]), { level: 9 });
-  const bootstrap = readFileSync(bootstrapPath, "utf8");
   return {
     version, digest: hash.digest("hex"), files: paths.length, bytes: payload.length,
     run: bootstrap, install: `globalThis.SA_RUNTIME = "${payload.toString("base64")}";\n${bootstrap}`,

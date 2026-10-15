@@ -1,8 +1,8 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { readJsonFile } from "../interop/files.ts";
+import { readBoundedFile, readJsonFile } from "../interop/files.ts";
 import { validateSnapshot } from "../interop/snapshot.ts";
 import { dataDirectory, secureDirectory, secureFile } from "../store/database.ts";
 import type { AnalyzeOptions, MachineAnalytics } from "../types.ts";
@@ -18,6 +18,10 @@ export interface LastGood {
   tool: string;
   /** Digest of the request (time zone, pricing and scan switches); another request does not reuse it. */
   request: string;
+  /** Digest of the SSH destination and account read; a machine pointed elsewhere does not reuse it. */
+  target: string;
+  /** SHA-256 of the snapshot file's bytes, so a record never vouches for another read's snapshot. */
+  digest: string;
   readAt: string;
   durationMs: number;
   /** The version that produced the snapshot there, when it said. */
@@ -39,22 +43,32 @@ function writePrivate(path: string, content: string): void {
   finally { try { unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
 }
 
-/** Store a machine's validated snapshot after a good read; the snapshot is written before the record that points to it. */
-export function writeLastGood(options: Pick<AnalyzeOptions, "dataDir">, key: string, record: Omit<LastGood, "version" | "tool">, snapshot: MachineAnalytics): void {
+const sha256 = (bytes: Buffer | string): string => createHash("sha256").update(bytes).digest("hex");
+
+/** Store a machine's validated snapshot after a good read; the snapshot is written before the record that names its digest. */
+export function writeLastGood(options: Pick<AnalyzeOptions, "dataDir">, key: string, record: Omit<LastGood, "version" | "tool" | "digest">, snapshot: MachineAnalytics): void {
   secureDirectory(directory(options));
-  const [meta, data] = paths(options, key);
-  writePrivate(data, JSON.stringify(snapshot));
-  writePrivate(meta, `${JSON.stringify({ version: 1, tool: version, ...record } satisfies LastGood, null, 2)}\n`);
+  const [meta, data] = paths(options, key), text = JSON.stringify(snapshot);
+  writePrivate(data, text);
+  writePrivate(meta, `${JSON.stringify({ version: 1, tool: version, ...record, digest: sha256(text) } satisfies LastGood, null, 2)}\n`);
 }
 
-/** The last good snapshot of a machine for this request, validated again; null when there is none to trust. */
-export async function readLastGood(options: Pick<AnalyzeOptions, "dataDir">, key: string, request: string, now = Date.now()): Promise<{ record: LastGood; snapshot: MachineAnalytics } | null> {
+/**
+ * The last good snapshot of a machine for this request and target, validated again; null when there is none
+ * to trust. A known identity that differs from the recorded one means another machine answered back then.
+ */
+export async function readLastGood(
+  options: Pick<AnalyzeOptions, "dataDir">, key: string, expected: { request: string; target: string; identity?: string }, now = Date.now(),
+): Promise<{ record: LastGood; snapshot: MachineAnalytics } | null> {
   const [meta, data] = paths(options, key);
   try {
     const record = await readJsonFile(meta, 64 * 1024) as LastGood;
     const age = now - Date.parse(record.readAt);
-    if (record.version !== 1 || record.tool !== version || record.request !== request || !(age >= 0 && age <= lastGoodMaxAgeMs)) return null;
-    const snapshot = validateSnapshot(await readJsonFile(data));
+    if (record.version !== 1 || record.tool !== version || record.request !== expected.request || record.target !== expected.target || !(age >= 0 && age <= lastGoodMaxAgeMs)) return null;
+    if (expected.identity && record.identity && expected.identity !== record.identity) return null;
+    const bytes = await readBoundedFile(data);
+    if (sha256(bytes) !== record.digest) return null;
+    const snapshot = validateSnapshot(JSON.parse(bytes.toString("utf8")));
     return snapshot.summary.sessions === record.sessions && !snapshot.machines ? { record, snapshot } : null;
   } catch { return null; }
 }

@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { type ChildProcess, execFile, spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { parseMachines, readMachines, remoteFor, writeMachines, type MachinesConfig } from "../src/machines/config.ts";
 import { OptionError, remoteOptionsFrom, type RemoteMachine } from "../src/options.ts";
-import { classifyRemote, stderrDetail, type SshResult } from "../src/remote.ts";
-import { bootstrapPath, buildRuntime, runtimePayload } from "../src/remote/runtime.ts";
+import { classifyRemote, requestDigest, runSsh, stderrDetail, type SshResult } from "../src/remote.ts";
+import { bootstrap as bootstrapSource } from "../src/remote/bootstrap.ts";
+import { buildRuntime, runtimePayload } from "../src/remote/runtime.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { remoteUnavailableWarning, staleMachineWarning } from "../src/public/evidence.js";
 import type { MachineAnalytics } from "../src/types.ts";
@@ -24,7 +26,7 @@ const bin = new URL("../bin/session-analytics.ts", import.meta.url).pathname;
 const server = new URL("../src/server.ts", import.meta.url).pathname;
 
 /** Pinned: a change to the bootstrap is a protocol change; review it, then update this hash. */
-const bootstrapSha256 = "87659a8907cfd117321acf2b9e632dca5fcc95ad3f5b06c2e8ffd937c311c0eb";
+const bootstrapSha256 = "068f7720e267658f88ee9db64fabf71b921d8d494c9e18f529a01d5c6b701bf6";
 
 /**
  * A stand-in for `ssh` that runs the remote words on this machine the way sshd does: through pipes
@@ -39,22 +41,36 @@ const args = process.argv.slice(2), at = args.indexOf("--");
 let [destination, ...words] = args.slice(at + 1);
 appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ destination, words: words.filter((word) => word.length < 80).slice(0, 12) }) + "\\n");
 const fail = (code, text) => { if (text) process.stderr.write(text + "\\n"); process.exit(code); };
-if (destination === "down") fail(255, "ssh: connect to host down port 22: Connection refused");
+const listed = (name) => (process.env[name] || "").split(",").includes(destination);
+if (destination === "down" || listed("FAKE_SSH_DOWN")) fail(255, "ssh: connect to host " + destination + " port 22: Connection refused");
 if (destination === "dropped") fail(255);
+// "shared" logs in only through a ControlMaster someone else opened.
+if (args.includes("-O")) process.exit(destination === "shared" ? 0 : 255);
+if (destination === "shared" && args.includes("ControlPath=none")) fail(255, "fake@shared: Permission denied (publickey).");
+// "helper" leaves a process holding ssh's stdout and stderr, as a ProxyCommand that backgrounds can.
+if (destination === "helper") spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)", "fake-ssh-helper"], { stdio: ["ignore", "inherit", "inherit"], detached: true }).unref();
 const machine = join(process.env.FAKE_SSH_HOMES, destination);
-let account = "ssh-user";
+let account = "ssh-user", login = true;
 if (words[0] === "sudo") {
-  account = words[3]; words = words.slice(4);
+  const flag = words.findIndex((word) => word === "-iu" || word === "-u");
+  login = words[flag] === "-iu"; account = words[flag + 1]; words = words.slice(flag + 2);
   if (account === "locked") fail(1, "sudo: a password is required");
   if (account === "ghost") fail(1, "sudo: unknown user ghost");
+  // A service account: its login shell is nologin.
+  if (account === "svc" && login) { process.stdout.write("This account is currently not available.\\n"); process.exit(1); }
 }
 const home = join(machine, account);
 mkdirSync(home, { recursive: true });
 writeFileSync(join(machine, "machine-id"), "id-" + destination.replace(/-again$/, "") + "\\n");
-writeFileSync(join(machine, "passwd"), ["root:x:0:0::" + join(machine, "root") + ":/bin/bash", "daemon:x:1:1::/usr/sbin:/usr/sbin/nologin", "agents:x:995:995::" + join(machine, "agents") + ":/bin/bash", "ssh-user:x:1000:1000::" + join(machine, "ssh-user") + ":/bin/bash"].join("\\n") + "\\n");
+writeFileSync(join(machine, "passwd"), ["root:x:0:0::" + join(machine, "root") + ":/bin/bash", "daemon:x:1:1::/usr/sbin:/usr/sbin/nologin", "agents:x:995:995::" + join(machine, "agents") + ":/bin/bash", "svc:x:990:990::" + join(machine, "svc") + ":/usr/sbin/nologin", "ssh-user:x:1000:1000::" + join(machine, "ssh-user") + ":/bin/bash"].join("\\n") + "\\n");
 mkdirSync(join(machine, "agents", ".claude"), { recursive: true });
+mkdirSync(join(machine, "svc", ".codex"), { recursive: true });
 const env = { ...process.env, HOME: home, SESSION_ANALYTICS_MACHINE_ID: "id-" + destination.replace(/-again$/, ""), ...(JSON.parse(process.env.FAKE_SSH_ENVS)[destination] || {}) };
 delete env.XDG_CACHE_HOME;
+// "hostonly-*" machines have no machine ID, and clones share one host name.
+const hostOnly = destination.startsWith("hostonly");
+if (hostOnly) delete env.SESSION_ANALYTICS_MACHINE_ID;
+if (listed("FAKE_SSH_HANG")) env.NODE_OPTIONS = "--require " + process.env.FAKE_SSH_HANG_SCRIPT;
 if (words[0] === "true") process.exit(0);
 // A login profile that prints, as some do.
 if (destination === "chatty") process.stdout.write("Welcome to chatty!\\n");
@@ -70,7 +86,11 @@ child.stdin.on("error", () => {});
 if (program === "sh") {
   let script = "";
   process.stdin.on("data", (chunk) => { script += chunk; }).on("end", () => child.stdin.end(script
-    .replaceAll("/etc/machine-id", join(machine, "machine-id"))
+    .replaceAll("/etc/machine-id", hostOnly ? join(machine, "no-machine-id") : join(machine, "machine-id"))
+    .replaceAll("/var/lib/dbus/machine-id", join(machine, "no-machine-id"))
+    .replaceAll("/usr/sbin/ioreg", "false")
+    .replaceAll("$(hostname)", hostOnly ? "clone" : "$(hostname)")
+    .replace("\\nid -un\\n", "\\necho " + account + "\\n")
     .replace("\\nid -u\\n", "\\necho " + [...account].reduce((sum, letter) => sum + letter.charCodeAt(0), 1000) + "\\n")
     .replaceAll("command -v node", destination === "nonode" ? "command -v sa-no-such-node" : "command -v node")
     .replace("getent passwd", "cat " + join(machine, "passwd"))
@@ -118,11 +138,15 @@ before(async () => {
   const empty = join(directory, "nothing");
   environment = {
     ...process.env, PATH: `${shim}:${process.env["PATH"] ?? ""}`, TZ: "UTC",
-    FAKE_SSH_LOG: sshLog, FAKE_SSH_HOMES: join(directory, "homes"), FAKE_SSH_OLD_NODE: join(directory, "old-node.cjs"), FAKE_SSH_BIN: bin,
+    FAKE_SSH_LOG: sshLog, FAKE_SSH_HOMES: join(directory, "homes"), FAKE_SSH_OLD_NODE: join(directory, "old-node.cjs"), FAKE_SSH_BIN: bin, FAKE_SSH_HANG_SCRIPT: join(directory, "hang.cjs"),
     FAKE_SSH_ENVS: JSON.stringify({
       server: fixtureEnvironment(remote, join(directory, "remote-data")),
       "server-again": fixtureEnvironment(remote, join(directory, "remote-data")),
       slow: { ...fixtureEnvironment(remote, join(directory, "slow-data")), NODE_OPTIONS: `--require ${join(directory, "hang.cjs")}` },
+      helper: fixtureEnvironment(remote, join(directory, "helper-data")),
+      shared: fixtureEnvironment(remote, join(directory, "shared-data")),
+      "hostonly-a": fixtureEnvironment(remote, join(directory, "hostonly-a-data")),
+      "hostonly-b": fixtureEnvironment(remote, join(directory, "hostonly-b-data")),
       empty: { SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0", SESSION_ANALYTICS_DATA_DIR: join(directory, "empty-data"), SESSION_ANALYTICS_CLAUDE_ROOT: empty,
         SESSION_ANALYTICS_CODEX_ROOT: empty, SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: empty, SESSION_ANALYTICS_CONDUCTOR_DATABASE: join(empty, "db"), SESSION_ANALYTICS_CURSOR_DATABASE: join(empty, "cursor") },
     }),
@@ -149,11 +173,22 @@ async function noLeftovers(): Promise<string[]> {
   for (let attempt = 0; attempt < 100 && leftovers().length; attempt++) await delay(50);
   return leftovers();
 }
+/** The bootstrap's rule: a group of this account's own name with no other member. */
+function privateGroup(gid: number): boolean {
+  if (gid !== process.getgid?.()) return false;
+  try {
+    const user = userInfo().username;
+    return readFileSync("/etc/group", "utf8").split("\n").some((line) => {
+      const [name, , id, members = ""] = line.split(":");
+      return name === user && id === String(gid) && members.split(",").every((member) => !member || member === user);
+    });
+  } catch { return false; }
+}
 const machine = (fields: Partial<RemoteMachine> = {}): RemoteMachine => ({ name: "box", ssh: "box", runtime: "bundled", node: "node", command: ["session-analytics"], saved: true, ...fields });
 const result = (code: number | null, stderr = "", failure: SshResult["failure"] = null): SshResult => ({ code, stderr, failure, stdout: Buffer.alloc(0), ms: 1 });
 
-test("the bootstrap is pinned and parses on old Node", async () => {
-  const source = await readFile(bootstrapPath, "utf8");
+test("the bootstrap is pinned and parses on old Node", () => {
+  const source = bootstrapSource;
   assert.equal(createHash("sha256").update(source).digest("hex"), bootstrapSha256);
   // Syntax newer than Node 8 would hide the node-too-old message behind a SyntaxError.
   for (const modern of ["??", "?.", "catch {", "...", "class ", "async ", "await ", "**", "#"]) assert.ok(!source.split("\n").filter((line) => !line.trimStart().startsWith("//")).join("\n").includes(modern), modern);
@@ -203,20 +238,47 @@ test("the bootstrap installs on need-runtime, verifies its digest and refuses wh
   const shared = join(directory, "shared-cache");
   await mkdir(shared);
   await chmod(shared, 0o777);
-  for (const unsafe of [linked, shared]) {
+  // So is one inside a directory others can write to, at any level, as OpenSSH's StrictModes would say.
+  const open = join(directory, "open-parent"), below = join(open, "cache");
+  await mkdir(below, { recursive: true });
+  await chmod(open, 0o777);
+  // The message names the directory at fault: the link itself, or the open directory as the walk up resolved it.
+  for (const [unsafe, named] of [[linked, join(linked, "session-analytics")], [shared, await realpath(shared)], [below, await realpath(open)]] as const) {
     for (const [mode, input] of [["run", payload.run], ["install", payload.install]] as const) {
       answer = bootstrap(mode, [payload.version, payload.digest, "--version"], input, { XDG_CACHE_HOME: unsafe });
-      assert.deepEqual([answer.status, answer.stderr], [80, "sa1: cache-unwritable not-private\n"], `${unsafe} ${mode}`);
+      assert.deepEqual([answer.status, answer.stderr], [80, `sa1: cache-unwritable not-private ${named}\n`], `${unsafe} ${mode}`);
     }
   }
+  // A group-writable parent is refused too, unless the group is this account's own private group.
+  const grouped = join(directory, "group-cache");
+  await mkdir(grouped);
+  await chmod(grouped, 0o770);
+  answer = bootstrap("install", [payload.version, payload.digest, "--version"], payload.install, { XDG_CACHE_HOME: grouped });
+  assert.equal(answer.status, privateGroup((await stat(grouped)).gid) ? 0 : 80, answer.stderr);
   // A shared sticky directory such as /tmp is fine: no one else can rename what this account creates there.
   await chmod(shared, 0o1777);
   answer = bootstrap("install", [payload.version, payload.digest, "--version"], payload.install, { XDG_CACHE_HOME: shared });
   assert.deepEqual([answer.status, answer.stdout.trim()], [0, payload.version], answer.stderr);
-  // Runtime directories opened up by hand are made private again.
+  // Runtime directories opened up by hand are made private again; one others could write to is emptied, not trusted.
   await chmod(root, 0o755);
   assert.equal(bootstrap("run", [payload.version, payload.digest, "--version"], payload.run).status, 75);
   assert.equal((await stat(root)).mode & 0o777, 0o700);
+  const sharedRoot = join(shared, "session-analytics", "runtime");
+  assert.deepEqual((await readdir(sharedRoot)).filter((entry) => !entry.startsWith(".")), [name]);
+  await chmod(sharedRoot, 0o777);
+  assert.equal(bootstrap("run", [payload.version, payload.digest, "--version"], payload.run, { XDG_CACHE_HOME: shared }).status, 75);
+  assert.deepEqual(await readdir(sharedRoot), []);
+  assert.equal((await stat(sharedRoot)).mode & 0o777, 0o700);
+  // A runtime directory that is a link is removed rather than followed.
+  await symlink(join(root, name), join(sharedRoot, name));
+  assert.equal(bootstrap("run", [payload.version, payload.digest, "--version"], payload.run, { XDG_CACHE_HOME: shared }).status, 75);
+  assert.deepEqual(await readdir(sharedRoot), []);
+  // Only an entry point the verified manifest lists runs: a stray bin/session-analytics.js next to the source is ignored.
+  answer = bootstrap("install", [payload.version, payload.digest, "--version"], payload.install, { XDG_CACHE_HOME: shared });
+  assert.equal(answer.status, 0, answer.stderr);
+  await writeFile(join(sharedRoot, name, "bin", "session-analytics.js"), `process.stdout.write("planted\\n");\n`);
+  answer = bootstrap("run", [payload.version, payload.digest, "--version"], payload.run, { XDG_CACHE_HOME: shared });
+  assert.deepEqual([answer.status, answer.stdout.trim()], [0, payload.version], answer.stderr);
   // A relative XDG_CACHE_HOME is ignored in favour of ~/.cache, like the XDG specification says.
   answer = bootstrap("run", [payload.version, payload.digest], payload.run, { XDG_CACHE_HOME: "relative", HOME: join(directory, "relative-home") });
   assert.equal(answer.status, 75);
@@ -243,7 +305,11 @@ test("exit codes and stderr map to fixed reasons with the exact fix", () => {
   const saved = machine({ user: "agents" }), adhoc = machine({ name: "server", ssh: "server", runtime: "installed", saved: false });
   const cases: Array<[RemoteMachine, SshResult, string, RegExp]> = [
     [saved, result(255, "Host key verification failed.\n"), "connection", /ssh box true once in a terminal/],
-    [saved, result(255, "ssh: Could not resolve hostname box: nodename nor servname provided\n"), "connection", /ssh-copy-id box/],
+    [saved, result(255, "ssh: connect to host box port 22: Connection refused\n"), "connection", /check that box is up/],
+    [saved, result(255, "ssh: Could not resolve hostname box: nodename nor servname provided\n"), "unknown-host", /ssh -G box/],
+    [saved, result(255, "fake@box: Permission denied (publickey).\n"), "login-refused", /key passphrase.*ssh-add.*ssh-copy-id box/],
+    [saved, { ...result(1), stdout: Buffer.from("This account is currently not available.\n") }, "login-shell", /machines set box --no-login-shell/],
+    [adhoc, result(null, "", "local-runtime"), "local-runtime", /reinstall session-analytics on this machine/],
     [saved, result(255, ""), "dropped", /machines check box/],
     [saved, result(1, "sudo: a password is required\n"), "sudo", /ALL=\(agents\) NOPASSWD: ALL.*sudoers\.d\/session-analytics/],
     [saved, result(1, "sudo: interactive authentication is required\n"), "sudo", /NOPASSWD/],
@@ -275,6 +341,8 @@ test("exit codes and stderr map to fixed reasons with the exact fix", () => {
   // The useful line, never Node's version trailer or a stack frame.
   assert.equal(classifyRemote(adhoc, result(1, "TypeError: boom\n    at main (file.ts:1:1)\n\nNode.js v24.21.0\n"))!.detail, "TypeError: boom");
   assert.equal(stderrDetail("Welcome!\n\u001b[31msudo: a password is required\u001b[0m\n\n"), "[31msudo: a password is required[0m");
+  // C1 controls (an 8-bit CSI) and bidirectional overrides never reach the terminal either.
+  assert.equal(stderrDetail("Error: boom \u009b2J\u202eevil\u200b\n"), "Error: boom 2Jevil");
   assert.equal(stderrDetail("\n\n\n"), "");
   assert.match(classifyRemote(saved, result(78, "sa1: node-too-old v18.19.1\n"))!.message, /v18\.19\.1/);
   assert.equal(classifyRemote(adhoc, result(1, "sudo: user 'agents' not found\n"))!.message, "the account named after sudo does not exist there");
@@ -338,6 +406,11 @@ test("machines.json is strict, private and decides which machines a run reads", 
   assert.deepEqual(remoteOptionsFrom(["--no-remote"], { SESSION_ANALYTICS_REMOTE: "elsewhere" }, valid).machines, []);
   assert.deepEqual(remoteOptionsFrom(["--remote", "a"], { SESSION_ANALYTICS_REMOTE: "elsewhere" }, valid).machines.map(({ ssh, runtime, saved: own }) => [ssh, runtime, own]), [["a", "installed", false]]);
   assert.deepEqual(remoteOptionsFrom([], { SESSION_ANALYTICS_REMOTE: "elsewhere" }, valid).machines.map(({ ssh }) => ssh), ["elsewhere"]);
+  // An explicit --machines wins over the deprecated variable, which still gets its notice.
+  assert.deepEqual(remoteOptionsFrom(["--machines", "build"], { SESSION_ANALYTICS_REMOTE: "elsewhere" }, valid).machines.map(({ name }) => name), ["build"]);
+  const deprecated: string[] = [];
+  assert.deepEqual(remoteFor(["--machines", "build"], { SESSION_ANALYTICS_REMOTE: "elsewhere" }, { dataDir: data }, (line) => deprecated.push(line)).machines.map(({ name }) => name), ["build"]);
+  assert.match(deprecated.join(), /SESSION_ANALYTICS_REMOTE is deprecated/);
   for (const argv of [["--no-remote", "--machines", "build"], ["--remote", "a", "--machines", "build"], ["--remote-command", "session-analytics"], ["--remote-timeout", "0"], ["--remote-timeout", "1.5"]]) {
     assert.throws(() => remoteOptionsFrom(argv, {}, valid), OptionError, argv.join(" "));
   }
@@ -362,17 +435,47 @@ test("machines add, list, set, rename and remove keep a valid private file", asy
   assert.deepEqual(config.machines.map(({ name, ssh, user, runtime, enabled }) => ({ name, ssh, user, runtime, enabled })), [{ name: "server", ssh: "server", user: "agents", runtime: "bundled", enabled: true }]);
   assert.match(config.machines[0]!.identity!, /^[0-9a-f]{16}$/);
   // The same machine and account under another alias, this machine itself, and an unreachable one are not saved.
+  // While adding, a fix never names a machine that is not saved.
   const twin = cli(["machines", "add", "server-again", "--user", "agents", "--data-dir", data]);
   assert.equal(twin.status, 1);
-  assert.match(twin.stdout, /✗ machine {3}the same machine and account as server/);
+  assert.match(twin.stdout, /✗ machine {3}the same machine and account as server; reading both would count its history twice\n {4}Fix: it is already saved as server; if they are different machines cloned from one image, set SESSION_ANALYTICS_MACHINE_ID/);
   const down = cli(["machines", "add", "down", "--data-dir", data]);
   assert.equal(down.status, 1);
-  assert.match(down.stdout, /✗ ssh .*SSH could not connect.*Connection refused\n {4}Fix: run ssh down true once in a terminal/);
+  assert.match(down.stdout, /✗ ssh .*SSH could not connect.*Connection refused\n {4}Fix: check that down is up and its SSH server is reachable from here, then run ssh down true once in a terminal/);
   assert.match(down.stderr, /Not saved/);
+  // A mistyped account is not saved either, and the accounts with history are listed with the command to use one.
+  const typo = cli(["machines", "add", "server", "--user", "ghost", "--name", "ghostbox", "--data-dir", data]);
+  assert.equal(typo.status, 1, typo.stdout);
+  assert.match(typo.stdout, /✗ sudo {6}the account ghost does not exist there\. sudo: unknown user ghost\n {4}Fix: check the account name; session-analytics machines add server --find-users lists the accounts with agent history\n {2}✓ accounts {2}agent history found for agents, svc \(no login shell\)\n {4}Fix: session-analytics machines add server --user ACCOUNT, where ACCOUNT is one of agents, svc\n/);
+  assert.doesNotMatch(typo.stdout, /bundled runtime is|Saved/);
+  assert.match(typo.stderr, /Not saved/);
+  // Read as the SSH account with no history: saved, and the closing line names the accounts that have some.
+  const empty = cli(["machines", "add", "empty", "--data-dir", data]);
+  assert.equal(empty.status, 0, empty.stderr);
+  assert.match(empty.stdout, /! history {3}no agent history for ssh-user \(0 sessions in \d+\.\d s\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user ACCOUNT, where ACCOUNT is one of agents, svc\n/);
+  assert.match(empty.stdout, /\nSaved empty\. A plain session-analytics now reads this machine and server, empty\.\nIt has no agent history for that account yet; if agents run as another account there: session-analytics machines set empty --user ACCOUNT/);
+  assert.equal(cli(["machines", "remove", "empty", "--data-dir", data]).status, 0);
+  // A service account's nologin shell refuses sudo -i: saved with the fix, and read without a login shell after it.
+  const service = cli(["machines", "add", "server", "--user", "svc", "--name", "svcbox", "--data-dir", data]);
+  assert.equal(service.status, 0, service.stderr);
+  assert.match(service.stdout, /✗ sudo {6}svc's login shell refuses to run commands \(nologin or false\)\n {4}Fix: read it without a login shell: session-analytics machines set svcbox --no-login-shell/);
+  assert.match(service.stdout, /\nSaved svcbox, but it cannot be read until this is fixed: read it without a login shell/);
+  assert.doesNotMatch(service.stdout, /bundled runtime is/);
+  assert.equal(cli(["machines", "set", "svcbox", "--no-login-shell", "--data-dir", data]).status, 0);
+  const serviceCheck = cli(["machines", "check", "svcbox", "--data-dir", data]);
+  assert.equal(serviceCheck.status, 0, serviceCheck.stdout);
+  assert.match(serviceCheck.stdout, /^svcbox {2}\(ssh server, as svc without a login shell, bundled runtime\)\n {2}✓ ssh .*\n {2}✓ sudo {6}sudo -n -H -u svc works without a password\n/);
+  assert.ok((await calls()).some(({ words }) => words.slice(0, 5).join(" ") === "sudo -n -H -u svc"));
+  assert.equal(cli(["machines", "remove", "svcbox", "--data-dir", data]).status, 0);
+  // An address names itself rather than by its first octet.
+  const address = cli(["machines", "add", "192.168.1.20", "--no-check", "--data-dir", data]);
+  assert.match(address.stdout, /Saved 192-168-1-20\./);
+  assert.match(address.stdout, /copied on the first read into your ~\/\.cache/);
+  assert.equal(cli(["machines", "remove", "192-168-1-20", "--data-dir", data]).status, 0);
   const duplicate = cli(["machines", "add", "other@server", "--name", "SERVER", "--data-dir", data, "--no-check"]);
   assert.equal(duplicate.status, 2);
   assert.match(duplicate.stderr, /already saved/);
-  for (const args of [["add", "-oProxyCommand=x"], ["add", "box", "--user", "Bad User"], ["add", "box", "--node", "~/node"], ["add", "box", "--command", "x", "--runtime", "bundled"], ["add", "box", "--user", "a", "--command", "node ~/sa.ts"], ["add", "box", "--name", "local"], ["add", "box", "--no-check", "--no-check"], ["set", "missing", "--enable"], ["rename", "server", "bad label"], ["frobnicate"]]) {
+  for (const args of [["add", "-oProxyCommand=x"], ["add", "box", "--user", "Bad User"], ["add", "box", "--no-login-shell", "--no-check"], ["set", "server", "--login-shell", "--no-login-shell"], ["add", "box", "--node", "~/node"], ["add", "box", "--command", "x", "--runtime", "bundled"], ["add", "box", "--user", "a", "--command", "node ~/sa.ts"], ["add", "box", "--name", "local"], ["add", "box", "--no-check", "--no-check"], ["set", "missing", "--enable"], ["rename", "server", "bad label"], ["frobnicate"]]) {
     const refused = cli(["machines", ...args, "--data-dir", data]);
     assert.equal(refused.status, 2, args.join(" "));
   }
@@ -406,12 +509,16 @@ test("machines check is a doctor: each failure names its fix, and --find-users l
     { name: "oldnode", ssh: "oldnode", runtime: "bundled", enabled: true },
     { name: "chatty", ssh: "chatty", runtime: "bundled", enabled: true },
     { name: "missing", ssh: "server", user: "ssh-user", runtime: "installed", command: ["/opt/missing/session-analytics"], enabled: false },
+    { name: "shared", ssh: "shared", runtime: "bundled", enabled: true },
   ] });
   const checked = cli(["machines", "check", "--data-dir", data, "--find-users"]);
   assert.equal(checked.status, 1);
-  assert.match(checked.stdout, /server {2}\(ssh server, as agents, bundled runtime\)\n(?: {2}✓ .*\n)+ {2}✓ history {3}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}✓ accounts {2}agent history found for agents\n/);
+  assert.match(checked.stdout, /server {2}\(ssh server, as agents, bundled runtime\)\n(?: {2}✓ .*\n)+ {2}✓ history {3}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}✓ accounts {2}agent history found for agents, svc \(no login shell\)\n(?! {4}Fix)/);
   assert.match(checked.stdout, /locked .*\n {2}✓ ssh .*\n {2}✗ sudo {6}sudo -n could not run commands as locked without a password\. sudo: a password is required\n {4}Fix: on that machine run: echo "\$USER ALL=\(locked\) NOPASSWD: ALL"/);
-  assert.match(checked.stdout, /locked[\s\S]*✓ accounts {2}agent history found for agents\n {4}Fix: session-analytics machines set locked --user agents/);
+  assert.match(checked.stdout, /locked[\s\S]*✓ accounts {2}agent history found for agents, svc \(no login shell\)\n {4}Fix: session-analytics machines set locked --user ACCOUNT, where ACCOUNT is one of agents, svc\n/);
+  // A login that works only through a shared connection someone else opened is a warning with its fix, not a pass.
+  assert.match(checked.stdout, /shared {2}\(ssh shared, bundled runtime\)\n {2}! ssh {7}connected in \d+\.\d s, but only through an open shared connection; on its own: SSH refused the login without a prompt\. fake@shared: Permission denied \(publickey\)\.\n {4}Fix: run ssh shared true in a terminal\. If it asks for a key passphrase, load the key into your agent/);
+  assert.match(checked.stdout, /shared[^]*✓ history/);
   assert.match(checked.stdout, /✗ node {6}node was not found on the SSH account's login PATH\n {4}Fix: install Node\.js 24 or later there, or point to it: session-analytics machines set nonode --node \/usr\/bin\/node/);
   assert.match(checked.stdout, /oldnode .*\n(?: {2}✓ .*\n)+ {2}✗ runtime {3}the remote Node\.js is v22\.3\.0; the bundled runtime needs 24 or later\. sa1: node-too-old v22\.3\.0\n/);
   assert.match(checked.stdout, /missing  \(ssh server, as ssh-user, installed: \/opt\/missing\/session-analytics, disabled\)[\s\S]*✗ command {3}session-analytics was not found there/);
@@ -442,7 +549,7 @@ test("a plain report reads saved machines with the bundled runtime: install once
   assert.match(first.stderr, /empty: no agent history for this account \(0 sessions read\)\.\n {2}Fix: if agents run as another account there: session-analytics machines set empty --user NAME/);
   assert.match(first.stderr, /Could not read down: SSH could not connect/);
   // The header lists what was read, with counts and timing, and each machine not read with its reason and fix.
-  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: run ssh down true once/);
+  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: check that down is up/);
   assert.deepEqual((await calls()).filter(({ destination }) => destination === "server").map(({ words }) => words[7]), ["run", "install"]);
   assert.deepEqual((await calls()).find(({ destination }) => destination === "server")!.words.slice(0, 6), ["sudo", "-n", "-iu", "agents", "node", "-"]);
   await rm(sshLog, { force: true });
@@ -524,8 +631,9 @@ test("a plain launch reuses the dashboard started with the same saved machines",
   });
   const child: ChildProcess = spawn(process.execPath, [server, "--port", String(port), ...localFlags, "--data-dir", data], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
   try {
-    let stdout = "";
+    let stdout = "", stderr = "";
     child.stdout!.on("data", (chunk) => { stdout += chunk; });
+    child.stderr!.on("data", (chunk) => { stderr += chunk; });
     // This machine's snapshot is served first; the server's sessions follow when it answers.
     for (let attempt = 0; attempt < 400 && !/from server/.test(stdout); attempt++) await delay(25);
     assert.match(stdout, /Analyzed \d+\/\d+ sessions/);
@@ -533,10 +641,34 @@ test("a plain launch reuses the dashboard started with the same saved machines",
     const again = cli(["dashboard", "--no-open", "--port", String(port), ...localFlags, "--data-dir", data]);
     assert.equal(again.status, 0, again.stderr);
     assert.match(again.stdout, /already running/);
-    writeMachines({ dataDir: data }, { version: 1, machines: [{ name: "server", ssh: "server", user: "agents", runtime: "bundled", enabled: false }] });
-    const changed = cli(["dashboard", "--no-open", "--port", String(port), ...localFlags, "--data-dir", data]);
-    assert.equal(changed.status, 1);
-    assert.match(changed.stderr, /different options/);
+    // machines add, set and remove reach the running dashboard, so a plain launch still reuses it.
+    const get = async <T>(path: string): Promise<T> => (await (await fetch(`http://127.0.0.1:${port}${path}`)).json()) as T;
+    assert.equal(cli(["machines", "add", "empty", "--no-check", "--data-dir", data]).status, 0);
+    const added = cli(["dashboard", "--no-open", "--port", String(port), ...localFlags, "--data-dir", data]);
+    assert.equal(added.status, 0, added.stderr);
+    assert.match(added.stdout, /already running/);
+    let statuses = await get<{ machines: MachineAnalytics["machines"] }>("/api/machines");
+    for (let attempt = 0; attempt < 400 && (statuses.machines!.some(({ state }) => state === "reading") || !/empty: no agent history/.test(stderr)); attempt++) { await delay(25); statuses = await get("/api/machines"); }
+    assert.deepEqual(statuses.machines!.map(({ key }) => key), ["local", "server", "empty"]);
+    assert.match(stdout, /Saved machines changed; now reading this machine and server, empty\./);
+    const combined = validateSnapshot(await get("/api/analytics"));
+    assert.deepEqual(combined.machines!.map(({ key, state }) => [key, state]), [["local", "ok"], ["server", "ok"], ["empty", "ok"]]);
+    assert.equal(cli(["machines", "set", "empty", "--disable", "--data-dir", data]).status, 0);
+    statuses = await get("/api/machines");
+    assert.deepEqual(statuses.machines!.map(({ key }) => key), ["local", "server"]);
+    for (let attempt = 0; attempt < 400 && statuses.machines!.some(({ state }) => state === "reading"); attempt++) { await delay(25); statuses = await get("/api/machines"); }
+    // Reading the machines again does not scan this machine again.
+    const scans = (stdout.match(/Analyzed /g) ?? []).length;
+    assert.deepEqual((await get<{ machines: MachineAnalytics["machines"] }>("/api/machines?read=1")).machines!.map(({ key, state }) => [key, state]), [["local", "ok"], ["server", "reading"]]);
+    for (let attempt = 0; attempt < 400 && statuses.machines!.some(({ state }) => state === "reading"); attempt++) { await delay(25); statuses = await get("/api/machines"); }
+    assert.equal((stdout.match(/Analyzed /g) ?? []).length, scans);
+    // Other machines chosen on the command line are another dashboard, and the message says so.
+    const other = cli(["dashboard", "--no-open", "--port", String(port), ...localFlags, "--data-dir", data, "--no-remote"]);
+    assert.equal(other.status, 1);
+    assert.match(other.stderr, /already running on this port with other machines/);
+    const options = cli(["dashboard", "--no-open", "--port", String(port), ...localFlags, "--data-dir", data, "--exclude-hidden"]);
+    assert.equal(options.status, 1);
+    assert.match(options.stderr, /different options/);
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");
@@ -561,28 +693,41 @@ test("a machine that fails is shown from its last good snapshot, marked stale, a
   assert.equal(fresh.machines![1]!.version, version);
   assert.ok(fresh.machines!.every(({ identity }) => identity === undefined));
   for (const name of ["server.json", "server.snapshot.json"]) assert.equal((await stat(join(data, "machines", name))).mode & 0o777, 0o600);
-  // The same name now reaches a machine that is down.
-  writeMachines({ dataDir: data }, saved("down"));
-  const text = cli(["report", ...localFlags, "--data-dir", data, "--strict"]);
+  // The machine is down now.
+  const down = { FAKE_SSH_DOWN: "server" };
+  const text = cli(["report", ...localFlags, "--data-dir", data, "--strict"], down);
   assert.equal(text.status, 3, text.stderr);
   assert.match(text.stdout, /^Session Analytics · laptop and server \(stale\)\n/);
-  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 from a last good snapshot\n.*\n {2}server {2}unreachable; its last good snapshot from (?:just now|\d+ min ago) \(5 sessions, 3 repositories\)\n {4}Fix: run ssh down true once/);
+  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 from a last good snapshot\n.*\n {2}server {2}unreachable; its last good snapshot from (?:just now|\d+ min ago) \(5 sessions, 3 repositories\)\n {4}Fix: check that server is up/);
   assert.match(text.stderr, /Could not read server: SSH could not connect.*\n {2}Fix: .*\n {2}Using its last good snapshot from (?:just now|\d+ min ago) \(5 sessions\)\./);
   assert.match(text.stderr, /--strict: server was not read now; exiting with 3\.\n$/);
-  const stale = validateSnapshot(JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data]).stdout));
+  const stale = validateSnapshot(JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data], down).stdout));
   assert.deepEqual(stale.machines!.map(({ state, reason }) => [state, reason ?? null]), [["ok", null], ["stale", "connection"]]);
   assert.equal(stale.machines![1]!.readAt, fresh.machines![1]!.readAt);
   assert.ok(stale.warnings.includes(staleMachineWarning) && !stale.warnings.includes(remoteUnavailableWarning));
   // Another version, or another request, reads the machine again rather than reuse its snapshot.
   const meta = join(data, "machines", "server.json"), record = await readFile(meta, "utf8");
-  const state = (args: string[] = []): string | undefined => (JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data, ...args]).stdout) as MachineAnalytics).machines![1]!.state;
+  const state = (args: string[] = [], extra: NodeJS.ProcessEnv = down): string | undefined => (JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data, ...args], extra).stdout) as MachineAnalytics).machines![1]!.state;
   await writeFile(meta, JSON.stringify({ ...JSON.parse(record), tool: "0.0.1" }));
   assert.equal(state(), "failed");
   await writeFile(meta, record);
   assert.equal(state(["--time-zone", "Asia/Tokyo"]), "failed");
+  // --no-index leaves retained history out, so an indexed read's snapshot does not stand in for it.
+  assert.equal(requestDigest(["report", "--no-index"]) === requestDigest(["report"]), false);
+  assert.equal(requestDigest(["report", "--offline"]), requestDigest(["report"]));
+  // A record never vouches for another read's snapshot.
+  const snapshotFile = join(data, "machines", "server.snapshot.json"), bytes = await readFile(snapshotFile, "utf8");
+  await writeFile(snapshotFile, `${bytes} `);
+  assert.equal(state(), "failed");
+  await writeFile(snapshotFile, bytes);
+  assert.equal(state(), "stale");
+  // A machine pointed elsewhere by hand (or by a dashboard that still holds the old one) never shows the old host's snapshot.
+  writeMachines({ dataDir: data }, saved("down"));
+  assert.equal(state([], {}), "failed");
+  writeMachines({ dataDir: data }, saved("server"));
   assert.equal(state(), "stale");
   // Pointing the machine elsewhere, or removing it, forgets its snapshot.
-  assert.equal(cli(["machines", "set", "server", "--ssh", "server", "--data-dir", data]).status, 0);
+  assert.equal(cli(["machines", "set", "server", "--ssh", "server-again", "--data-dir", data]).status, 0);
   assert.deepEqual(await readdir(join(data, "machines")), []);
 });
 
@@ -595,7 +740,7 @@ test("the same machine reached twice is counted once, and this machine is never 
   const text = cli(["report", ...localFlags, "--data-dir", data, "--strict"]);
   assert.equal(text.status, 3, text.stderr);
   assert.match(text.stdout, /^Session Analytics · this machine and server \(not read: again\)\n/);
-  assert.match(text.stdout, /\n {2}again {9}not read: same machine as another\n {4}Fix: session-analytics machines remove again\n/);
+  assert.match(text.stdout, /\n {2}again {9}not read: same machine as another\n {4}Fix: session-analytics machines remove again; if it is another machine cloned from the same image, set SESSION_ANALYTICS_MACHINE_ID to a different value in each account's profile instead\n/);
   assert.match(text.stderr, /Not counting again: the same machine and account as server, so its history is counted once\.\n {2}Fix: session-analytics machines remove again/);
   const snapshot = validateSnapshot(JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data]).stdout));
   assert.deepEqual(snapshot.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [["local", "ok", null], ["server", "ok", null], ["again", "failed", "same-machine"]]);
@@ -609,10 +754,9 @@ test("the dashboard serves this machine first, shows a slow machine's last good 
   const data = dataDir("progressive");
   await machinesFile("progressive", { version: 1, machines: [{ name: "server", ssh: "server", user: "agents", runtime: "bundled", enabled: true }] });
   assert.equal(cli(["report", "--json", ...localFlags, "--data-dir", data]).status, 0);
-  // The same name now reaches a machine whose analysis never finishes.
-  writeMachines({ dataDir: data }, { version: 1, machines: [{ name: "server", ssh: "slow", runtime: "bundled", enabled: true }] });
+  // The machine's analysis now never finishes.
   const port = await freePort();
-  const child: ChildProcess = spawn(process.execPath, [server, "--port", String(port), ...localFlags, "--data-dir", data, "--remote-timeout", "8"], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  const child: ChildProcess = spawn(process.execPath, [server, "--port", String(port), ...localFlags, "--data-dir", data, "--remote-timeout", "8"], { env: { ...environment, FAKE_SSH_HANG: "server" }, stdio: ["ignore", "pipe", "pipe"] });
   try {
     let output = "";
     child.stdout!.on("data", (chunk) => { output += chunk; });
@@ -639,3 +783,74 @@ test("the dashboard serves this machine first, shows a slow machine's last good 
   assert.deepEqual(await noLeftovers(), []);
 });
 
+
+test("an ssh that exits while a helper holds its pipes settles at once, not at the deadline", async () => {
+  const data = dataDir("helper");
+  await machinesFile("helper", { version: 1, machines: [{ name: "helper", ssh: "helper", runtime: "bundled", enabled: true }] });
+  try {
+    const started = Date.now();
+    const read = cli(["report", "--json", ...localFlags, "--data-dir", data, "--remote-timeout", "15", "--strict"]);
+    assert.equal(read.status, 0, read.stderr);
+    assert.ok(Date.now() - started < 12_000, `took ${Date.now() - started} ms`);
+    assert.match(read.stderr, /Read 5 sessions across 3 repositories from helper/);
+  } finally { spawnSync("pkill", ["-f", "fake-ssh-helper"]); }
+});
+
+test("machines commands change machines.json from the file as it is, so a long check keeps a concurrent add", async () => {
+  const data = dataDir("concurrent");
+  await machinesFile("concurrent", { version: 1, machines: [{ name: "slow", ssh: "slow", runtime: "bundled", enabled: true }] });
+  const checking = spawn(process.execPath, [bin, "machines", "check", "slow", "--data-dir", data, "--remote-timeout", "4"], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  let output = "";
+  checking.stdout!.on("data", (chunk) => { output += chunk; });
+  for (let attempt = 0; attempt < 400 && !/✓ runtime/.test(output); attempt++) await delay(25);
+  const added = cli(["machines", "add", "boxb", "--no-check", "--data-dir", data]);
+  assert.equal(added.status, 0, added.stderr);
+  const [code] = await once(checking, "exit") as [number | null];
+  assert.equal(code, 1);
+  const config = readMachines({ dataDir: data })!;
+  assert.deepEqual(config.machines.map(({ name }) => name), ["slow", "boxb"]);
+  assert.match(config.machines[0]!.identity!, /^[0-9a-f]{16}$/);
+  assert.deepEqual((await readdir(data)).filter((name) => name.startsWith("machines.json")), ["machines.json"]);
+});
+
+test("a match by host name alone warns rather than refuses, and names the override", async () => {
+  const data = dataDir("hostonly");
+  const first = cli(["machines", "add", "hostonly-a", "--data-dir", data]);
+  assert.equal(first.status, 0, first.stdout);
+  assert.match(readMachines({ dataDir: data })!.machines[0]!.identity!, /^host-[0-9a-f]{16}$/);
+  const clone = cli(["machines", "add", "hostonly-b", "--data-dir", data]);
+  assert.equal(clone.status, 0, clone.stdout);
+  assert.match(clone.stdout, /! machine {3}the same host name and account as hostonly-a, with no machine ID there to tell them apart\n {4}Fix: if it is hostonly-a, it is already read; otherwise set SESSION_ANALYTICS_MACHINE_ID to a unique value in that account's profile there\n/);
+  assert.deepEqual(readMachines({ dataDir: data })!.machines.map(({ name }) => name), ["hostonly-a", "hostonly-b"]);
+});
+
+test("--strict counts a machine still reading in a saved dashboard snapshot as not read now", async () => {
+  const data = dataDir("reading");
+  await machinesFile("reading", { version: 1, machines: [{ name: "server", ssh: "server", user: "agents", runtime: "bundled", enabled: true }] });
+  const good = cli(["report", "--json", ...localFlags, "--data-dir", data]);
+  assert.equal(good.status, 0, good.stderr);
+  const snapshot = JSON.parse(good.stdout) as MachineAnalytics;
+  snapshot.machines![1]!.state = "reading";
+  const file = join(directory, "reading-snapshot.json");
+  await writeFile(file, JSON.stringify(snapshot));
+  const text = cli(["report", "--snapshot", file, "--strict"]);
+  assert.equal(text.status, 3, text.stderr);
+  assert.match(text.stdout, /^Session Analytics · this machine and server \(reading\)\n/);
+  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 still reading when this snapshot was made\n.*\n {2}server {8}still reading; its last good snapshot from/);
+  assert.match(text.stderr, /--strict: server was not read now; exiting with 3\.\n$/);
+});
+
+test("SIGTERM during machines check --find-users starts no new ssh and leaves none behind", async () => {
+  const data = dataDir("slow-find");
+  await machinesFile("slow-find", { version: 1, machines: [{ name: "slow", ssh: "slow", runtime: "bundled", enabled: true }] });
+  const child: ChildProcess = spawn(process.execPath, [bin, "machines", "check", "slow", "--find-users", "--data-dir", data, "--remote-timeout", "60"], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  for (let attempt = 0; attempt < 200 && !leftovers().some((line) => line.includes("analysis-worker")); attempt++) await delay(50);
+  assert.ok(leftovers().some((line) => line.includes("analysis-worker")), "the remote read is running");
+  child.kill("SIGTERM");
+  const [code] = await once(child, "exit") as [number | null];
+  assert.equal(code, 143);
+  await delay(500);
+  const shim = join(directory, "bin", "ssh");
+  assert.deepEqual(spawnSync("ps", ["-A", "-o", "pid=,args="], { encoding: "utf8" }).stdout.split("\n").filter((line) => line.includes(shim)), []);
+  assert.deepEqual(await noLeftovers(), []);
+});

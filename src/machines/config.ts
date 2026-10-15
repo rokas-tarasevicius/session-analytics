@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, constants, fstatSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { brand } from "../brand.ts";
@@ -15,12 +15,14 @@ export interface SavedMachine {
   name: string;
   ssh: string;
   user?: string;
+  /** False: run as `user` with `sudo -n -H -u`, for an account whose login shell refuses commands. */
+  loginShell?: false;
   node?: string;
   runtime: RuntimeKind;
   command?: string[];
   enabled: boolean;
   addedAt?: string;
-  /** Hash of the machine ID and account, recorded by check, to refuse the same machine saved twice. */
+  /** Hash of the machine ID and account, recorded by check, to refuse the same machine saved twice; `host-` when only the host name told it. */
   identity?: string;
 }
 
@@ -43,11 +45,12 @@ const isObject = (value: unknown): value is Record<string, unknown> => Boolean(v
 
 /** Validate one machine; the reason is a fixed phrase. */
 export function machineProblem(value: unknown): string | null {
-  if (!isObject(value) || !keysOnly(value, ["name", "ssh", "user", "node", "runtime", "command", "enabled", "addedAt", "identity"])) return "a machine has unknown fields";
-  const { name, ssh, user, node, runtime, command, enabled, addedAt, identity } = value;
+  if (!isObject(value) || !keysOnly(value, ["name", "ssh", "user", "loginShell", "node", "runtime", "command", "enabled", "addedAt", "identity"])) return "a machine has unknown fields";
+  const { name, ssh, user, loginShell, node, runtime, command, enabled, addedAt, identity } = value;
   if (typeof name !== "string" || !machineNamePattern.test(name) || name.toLowerCase() === "local") return "a machine name is not a plain label";
   if (typeof ssh !== "string" || !destinationPattern.test(ssh)) return "an SSH destination is not plain";
   if (user !== undefined && (typeof user !== "string" || !accountPattern.test(user))) return "an account name is not valid";
+  if (loginShell !== undefined && (loginShell !== false || user === undefined)) return "loginShell is not false for a machine with an account";
   if (runtime !== "bundled" && runtime !== "installed") return "a runtime is not bundled or installed";
   if (node !== undefined && (typeof node !== "string" || !nodePattern.test(node) || runtime !== "bundled")) return "a node path is not node or an absolute path";
   if (command !== undefined) {
@@ -57,7 +60,7 @@ export function machineProblem(value: unknown): string | null {
   }
   if (typeof enabled !== "boolean") return "enabled is not true or false";
   if (addedAt !== undefined && (typeof addedAt !== "string" || addedAt.length > 40 || Number.isNaN(Date.parse(addedAt)))) return "addedAt is not a timestamp";
-  if (identity !== undefined && (typeof identity !== "string" || !/^[0-9a-f]{16}$/.test(identity))) return "an identity is not a 16-digit hash";
+  if (identity !== undefined && (typeof identity !== "string" || !/^(?:host-)?[0-9a-f]{16}$/.test(identity))) return "an identity is not a 16-digit hash";
   return null;
 }
 
@@ -107,14 +110,45 @@ export function writeMachines(options: Pick<AnalyzeOptions, "dataDir">, config: 
   finally { try { unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
 }
 
+/** Run `action` holding `machines.json.lock`, so two commands never write the file from stale copies. */
+function locked<T>(options: Pick<AnalyzeOptions, "dataDir">, action: () => T): T {
+  secureDirectory(dataDirectory(options));
+  const lock = `${machinesPath(options)}.lock`, deadline = Date.now() + 10_000;
+  for (;;) {
+    try { closeSync(openSync(lock, "wx", 0o600)); break; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      // A lock left by a command that crashed is broken after 30 seconds.
+      try { if (Date.now() - statSync(lock).mtimeMs > 30_000) { rmSync(lock, { force: true }); continue; } } catch { continue; }
+      if (Date.now() > deadline) throw new OptionError(`Another ${brand.command} machines command is changing ${machinesPath(options)}; try again in a moment.`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  try { return action(); } finally { rmSync(lock, { force: true }); }
+}
+
+/**
+ * Read, change and write the saved machines under a lock, from the file as it is now rather than as it was
+ * when a long check started. `change` returns false to leave the file as it is.
+ */
+export function updateMachines<T>(options: Pick<AnalyzeOptions, "dataDir">, change: (config: MachinesConfig) => T): T {
+  return locked(options, () => {
+    const config = readMachines(options) ?? { version: 1, machines: [] };
+    const result = change(config);
+    if (result !== false) writeMachines(options, config);
+    return result;
+  });
+}
+
 /**
  * The machines a dashboard, report or export reads. The saved file is read only when no flag or
  * variable decides, and saved machines step aside for options that describe this machine alone.
  */
 export function remoteFor(argv: string[], environment: NodeJS.ProcessEnv, options: AnalyzeOptions, notice: (line: string) => void = () => {}): RemoteOptions {
   const flagged = argv.includes("--no-remote") || argv.includes("--remote");
-  const variable = !flagged && Boolean(environment["SESSION_ANALYTICS_REMOTE"]);
-  if (variable) notice(`SESSION_ANALYTICS_REMOTE is deprecated; save machines with ${brand.command} machines add HOST.`);
+  if (!flagged && environment["SESSION_ANALYTICS_REMOTE"]) notice(`SESSION_ANALYTICS_REMOTE is deprecated; save machines with ${brand.command} machines add HOST.`);
+  // --machines picks saved machines, so the deprecated variable decides only without it.
+  const variable = !flagged && !argv.includes("--machines") && Boolean(environment["SESSION_ANALYTICS_REMOTE"]);
   let saved: MachinesConfig | null = null;
   // When a flag or variable decides, the file only supplies this machine's label, so a broken one does not block that run.
   try { saved = readMachines(options); } catch (error) { if (!flagged && !variable) throw error; }

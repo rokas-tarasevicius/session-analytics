@@ -137,9 +137,10 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.ok(["building", "not-started", "ready"].includes(String(healthBody.snapshot)));
     assert.match(health.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     await t.test("health exposes only content-free launch identity and stores a private per-port token", async () => {
-      assert.deepEqual(Object.keys(healthBody).sort(), ["dataSource", "instanceToken", "optionsHash", "service", "snapshot", "status"]);
+      assert.deepEqual(Object.keys(healthBody).sort(), ["dataSource", "instanceToken", "optionsHash", "scanHash", "service", "snapshot", "status"]);
       assert.match(String(healthBody.instanceToken), /^[a-f0-9]{64}$/);
       assert.match(String(healthBody.optionsHash), /^[a-f0-9]{64}$/);
+      assert.match(String(healthBody.scanHash), /^[a-f0-9]{64}$/);
       const tokenFile = join(childEnvironment.SESSION_ANALYTICS_DATA_DIR, `dashboard-${port}.token`);
       assert.equal(await readFile(tokenFile, "utf8"), healthBody.instanceToken);
       assert.equal((await stat(tokenFile)).mode & 0o777, 0o600);

@@ -10,15 +10,16 @@ export function track<T extends ChildProcess>(child: T): T {
   return child;
 }
 
-/** SIGTERM every tracked child, then SIGKILL the ones still running after the grace period. */
+/** SIGTERM every tracked child, including any started meanwhile, then SIGKILL the ones still running after the grace period. */
 export async function stopChildren(graceMs = 2_000): Promise<void> {
-  const children = [...live];
-  for (const child of children) child.kill("SIGTERM");
+  const signalled = new Set<ChildProcess>(), running = (child: ChildProcess): boolean => child.exitCode === null && child.signalCode === null;
   const deadline = Date.now() + graceMs;
-  while (children.some((child) => child.exitCode === null && child.signalCode === null) && Date.now() < deadline) {
+  for (;;) {
+    for (const child of live) if (!signalled.has(child)) { signalled.add(child); child.kill("SIGTERM"); }
+    if (![...live].some(running) || Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  for (const child of new Set([...signalled, ...live])) if (running(child)) child.kill("SIGKILL");
 }
 
 const signalNumbers = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;

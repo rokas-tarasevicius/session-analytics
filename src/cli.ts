@@ -11,14 +11,21 @@ import { InteropError } from "./interop/error.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
-import { machineAge, machineReasons, machineTally } from "./public/machines.js";
+import { machineAge, machineReasons, machineTally, machineWarningSources } from "./public/machines.js";
 import type { MachineAnalytics, MachineStatus } from "./types.ts";
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, ...shareValueFlags]);
 const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--share", "--strict", "--identify-machine", "--version", "--no-additional-providers", "--offline"]);
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
+// A repeated value would otherwise be silently first-wins; only --remote adds up.
+const given = new Set<string>();
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
+  if (flag && valueFlags.has(flag) && flag !== "--remote" && given.has(flag)) {
+    process.stderr.write(`Give ${flag} once.\n`);
+    process.exit(2);
+  }
+  if (flag) given.add(flag);
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
     process.stderr.write(`Unknown session analytics argument: ${flag ?? "<missing>"}\n`);
     process.exit(2);
@@ -143,12 +150,13 @@ const machines = analytics?.machines && analytics.machines.length > 1 ? analytic
 
 /** Which machines the report covers, with counts and timing, and each one not read now with its reason and fix. */
 function machineLines(list: MachineStatus[]): string {
-  const width = Math.max(...list.map(({ label }) => label.length)), { ok, stale, total } = machineTally(list);
-  const lines = [`Machines: ${ok} of ${total} read now${stale ? `, ${stale} from a last good snapshot` : ""}`];
+  const width = Math.max(...list.map(({ label }) => label.length)), { ok, stale, reading, total } = machineTally(list);
+  const lines = [`Machines: ${ok} of ${total} read now${stale ? `, ${stale} from a last good snapshot` : ""}${reading ? `, ${reading} still reading when this snapshot was made` : ""}`];
   for (const machine of list) {
     const reason = machine.reason ? machineReasons[machine.reason] : "", counts = `${machine.sessions} sessions, ${machine.repositories} repositories`;
     lines.push(`  ${machine.label.padEnd(width)}  ${machine.state === "failed" ? `not read: ${reason}`
       : machine.state === "stale" ? `${reason}; its last good snapshot from ${machineAge(machine.readAt) ?? "an earlier read"} (${counts})`
+      : machine.state === "reading" ? (machine.readAt ? `still reading; its last good snapshot from ${machineAge(machine.readAt) ?? "an earlier read"} (${counts})` : "still reading; not included")
       : `${counts}${machine.durationMs !== null ? ` in ${(machine.durationMs / 1000).toFixed(1)} s` : ""}${reason ? ` (${reason})` : ""}`}`);
     if (machine.fix) lines.push(`    Fix: ${machine.fix}`);
   }
@@ -156,10 +164,13 @@ function machineLines(list: MachineStatus[]): string {
 }
 
 if (analytics && process.argv.includes("--json")) {
-  process.stdout.write(`${JSON.stringify(analytics, null, 2)}\n`);
+  // A reading machine's runtime answers compactly; a person or a file gets the indented form.
+  process.stdout.write(`${JSON.stringify(analytics, null, process.argv.includes("--identify-machine") ? undefined : 2)}\n`);
 } else if (analytics) {
-  const counted = machines?.filter(({ state }) => state === "ok" || state === "stale").map(({ label, state }) => state === "stale" ? `${label} (stale)` : label) ?? [];
-  const missing = machines?.filter(({ state }) => state === "failed").map(({ label }) => label) ?? [];
+  // A machine still reading when a saved dashboard snapshot was made counts with its last good snapshot, like a stale one.
+  const shown = ({ state, readAt }: MachineStatus): boolean => state === "ok" || state === "stale" || (state === "reading" && readAt !== null);
+  const counted = machines?.filter(shown).map(({ label, state }) => state === "ok" ? label : `${label} (${state})`) ?? [];
+  const missing = machines?.filter((machine) => !shown(machine)).map(({ label }) => label) ?? [];
   const names = counted.length > 1 ? `${counted.slice(0, -1).join(", ")} and ${counted.at(-1)}` : counted[0];
   process.stdout.write(`${brand.name} · ${machines ? `${names}${missing.length ? ` (not read: ${missing.join(", ")})` : ""}` : "all locally evidenced repositories"}\n`);
   process.stdout.write(`Generated: ${analytics.generatedAt}\n`);
@@ -216,10 +227,10 @@ if (analytics && process.argv.includes("--json")) {
   }
   if (analytics.warnings.length > 0) {
     process.stdout.write("\nWarnings\n");
-    for (const warning of analytics.warnings) process.stdout.write(`- ${warning}\n`);
+    for (const warning of machineWarningSources(analytics.machines, analytics.warnings)) process.stdout.write(`- ${warning}\n`);
   }
 }
-const unread = machines?.filter(({ state }) => state === "failed" || state === "stale") ?? [];
+const unread = machines?.filter(({ state }) => state !== "ok") ?? [];
 if (process.argv.includes("--strict") && unread.length) {
   process.stderr.write(`--strict: ${unread.map(({ label }) => label).join(", ")} ${unread.length === 1 ? "was" : "were"} not read now; exiting with 3.\n`);
   process.exitCode = 3;
