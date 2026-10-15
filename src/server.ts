@@ -316,7 +316,7 @@ function limits(refresh: boolean): Promise<LimitsSnapshot> {
   // Machines that changed since the last harvest are read now rather than at the next one.
   if (reads && (!fresh || reads.readings.some(({ pending, status }) => !pending && status.state === "reading"))) void reads.start(harvest.then(({ snapshot }) => snapshot, () => null));
   return Promise.all([harvest, reads?.loaded]).then(([{ snapshot, ms }]) =>
-    mergeMachineLimits(snapshot, localLimitsMachine(remote.local, snapshot, ms), reads?.readings ?? [], machines?.profileKeys() ?? null));
+    mergeMachineLimits(snapshot, localLimitsMachine(remote.local, snapshot, ms), reads?.current() ?? [], machines?.profileKeys() ?? null));
 }
 
 process.on("unhandledRejection", () => {

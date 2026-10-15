@@ -138,6 +138,8 @@ export interface LimitsMachine {
   /** When the limits in use were read; null when there are none. */
   readAt: string | null;
   durationMs: number | null;
+  /** Hash of the machine ID and account (`host-` when only the host name told it); only a single machine's own `--identify-machine` answer carries it. */
+  identity?: string;
 }
 
 /** Per account and meter: display label and whether the provider still reports it. */
@@ -180,6 +182,6 @@ export interface LimitsSnapshot {
   resetCreditHistory: Array<[LimitProvider, string, number, number]>;
   /** Whether the opt-in Codex account read (banked resets) is enabled. */
   codexAccount: "off" | "ok" | "unavailable";
-  /** Only when limits were read from other machines too: this machine first, then the others in configured order. */
+  /** Only when limits were read from other machines too: this machine first, then the others in configured order. With `--identify-machine`, this machine alone. */
   machines?: LimitsMachine[];
 }

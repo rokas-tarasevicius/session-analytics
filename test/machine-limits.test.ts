@@ -16,9 +16,9 @@ import { combineSnapshots, historyProfileKeys, profileKeyRemaps } from "../src/i
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { writeMachines, type MachinesConfig } from "../src/machines/config.ts";
 import { claudeAccountKey, codexAccountKey } from "../src/limits/accounts.ts";
-import { emptyLimitsSnapshot } from "../src/limits/index.ts";
+import { collectLimits, emptyLimitsSnapshot } from "../src/limits/index.ts";
 import { readLedger } from "../src/limits/ledger.ts";
-import { mergeMachineLimits, validateLimitsSnapshot, type MachineLimits } from "../src/limits/machines.ts";
+import { foldMachineLimits, mergeMachineLimits, validateLimitsSnapshot, type MachineLimits } from "../src/limits/machines.ts";
 import type { LimitAccount, LimitObservation, LimitsMachine, LimitsSnapshot } from "../src/limits/types.ts";
 import { filterSnapshot } from "../src/public/export-data.js";
 import { filteredWarning } from "../src/public/evidence.js";
@@ -188,6 +188,10 @@ test("limits reads every saved machine: one account across machines is one accou
   assert.equal(alone.machines, undefined);
   assert.deepEqual(weekly(alone, keys.max), [30, 35, 40, 45]);
   assert.ok(alone.accounts.some((account) => account.key === keys.other));
+  // That history is not this machine's login: its Codex sessions still join the only Codex account logged in here.
+  assert.deepEqual(attributeSessions([{ provider: "codex" }], alone.accounts).byAccount.get(keys.codex)!.length, 1);
+  const spentHere = { provider: "codex", velocity: { version: 1, dimensions: [], undated: [], buckets: [[iso(now - 2 * 3600).slice(0, 10), Number(iso(now - 2 * 3600).slice(11, 13)), 0, [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } };
+  assert.equal(subscriptionModel({ limits: alone, sessions: [spentHere], timeZone: "UTC", now, range: { from: now - 86_400, to: now } }).accounts.find((item) => item.key === keys.codex)!.value.basis, "provider");
   for (const file of ["agentbox.limits.json", "box2.limits.json"]) assert.equal(statSync(join(dir, "machines", file)).mode & 0o777, 0o600);
   const cached = JSON.parse(readFileSync(join(dir, "machines", "agentbox.limits.json"), "utf8")) as { limits: LimitsSnapshot };
   assert.ok(cached.limits.accounts.every((item) => !item.profileNames.length && !/ · (?:default|fluxary)$/.test(item.label)), "profile names are never stored");
@@ -243,8 +247,9 @@ test("a machine that cannot be read shows its last good limits, marked stale; wi
 test("the deadline and SIGTERM stop a machine's limits read there too, and leave no process behind", async () => {
   const dir = saved("stuck", [{ name: "stuck", ssh: "stuck", runtime: "bundled", enabled: true }]);
   const started = Date.now();
-  const timed = json(cli(["limits", "--json", "--data-dir", dir, "--remote-timeout", "2"]));
+  const late = cli(["limits", "--json", "--data-dir", dir, "--remote-timeout", "2"]), timed = json(late);
   assert.ok(Date.now() - started < 20_000);
+  assert.match(late.stderr, /^Could not read limits from stuck: no limits within 2 seconds\.\n {2}Fix: allow more time with --remote-timeout SECONDS: a machine's limits read may use all of it until one has answered/);
   assert.deepEqual(timed.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [["local", "ok", null], ["stuck", "failed", "timeout"]]);
   assert.deepEqual(await noLeftovers(), []);
 
@@ -378,4 +383,79 @@ test("another machine's colliding profile keys are remapped as the combined snap
   }
   const unmapped = mergeMachineLimits(login(now - 120), status("local"), others, new Map([["agentbox", new Map()]]), now);
   assert.ok(!attributeSessions(combined.sessions, unmapped.accounts, { read: limitMachines(unmapped) }).byAccount.get(keys.max)!.some((row) => row.machine === "agentbox"), "without the remap they would not");
+});
+
+test("the merged plan is the latest change on any machine, and a Max plan guessed without its tier never beats one read with it", () => {
+  const evidence = (tier: string | null) => ({ organizationType: "claude_max", organizationRateLimitTier: tier, userRateLimitTier: null, seatTier: null, billingType: null, planType: null });
+  const read = (plan: "max-5x" | "max-20x", tier: string | null, at: number, profile: string) => limitsOf([account("claude", keys.max, { profileKeys: [profile], plan, planSource: "claude-config", planEvidence: evidence(tier), planObservedAt: at })],
+    [reading("claude", keys.max, now - 600, 40)]);
+  const plan = (local: LimitsSnapshot, remote: LimitsSnapshot, state: LimitsMachine["state"]) =>
+    accountOf(mergeMachineLimits(local, status("local"), [{ status: status("agentbox", state), snapshot: validateLimitsSnapshot(JSON.parse(JSON.stringify(remote))) }], null, now), keys.max).plan;
+  const here = (plan: "max-5x" | "max-20x", tier: string | null, at: number) => read(plan, tier, at, "profile-aaaaaaaaaaaaaaaaaaaa");
+  const there = (plan: "max-5x" | "max-20x", tier: string | null, at: number) => read(plan, tier, at, "profile-bbbbbbbbbbbbbbbbbbbb");
+  // This machine reads the organization type without its tier; agentbox reads the tier. Read now or from its last good limits, agentbox's wins.
+  for (const [at, state] of [[now + 1, "ok"], [now - 1800, "stale"]] as const) assert.equal(plan(here("max-5x", null, now), there("max-20x", "default_claude_max_20x", at), state), "max-20x", state);
+  // Both read a tier but disagree: the plan first read more recently is the change, whichever machine was read last.
+  const before = (machine: typeof here) => machine("max-5x", "default_claude_max_5x", now - 30 * 86_400), after = (machine: typeof here) => machine("max-20x", "default_claude_max_20x", now - 86_400);
+  for (const state of ["ok", "stale"] as const) {
+    assert.equal(plan(before(here), after(there), state), "max-20x", state);
+    assert.equal(plan(after(here), before(there), state), "max-20x", state);
+  }
+});
+
+test("a plan keeps the time it was first read here, and another machine's plan never replaces this machine's in its ledger", async () => {
+  const home = join(directory, "plan-home"), dir = data("plan");
+  const login = (tier: string) => claudeProfile(home, ".claude-max", { ...max, orgTier: tier }, []);
+  login("default_claude_max_5x");
+  const options = { dataDir: dir, claudeRoot: join(home, ".claude-max", "projects"), codexRoot: join(home, "no-codex", "sessions"), codexAccount: false };
+  const harvest = async (at: number) => { const found = accountOf(await collectLimits(options, { HOME: home }, at), keys.max); return [found.plan, found.planObservedAt]; };
+  assert.deepEqual(await harvest(now - 600), ["max-5x", now - 600]);
+  assert.deepEqual(await harvest(now - 300), ["max-5x", now - 600], "read again unchanged, it keeps the time it was first read");
+  foldMachineLimits(dir, limitsOf([account("claude", keys.max, { plan: "max-20x", planSource: "claude-config", planObservedAt: now - 60 })], [reading("claude", keys.max, now - 120, 40)]), now - 50);
+  assert.deepEqual([readLedger(dir, now).ledger!.accounts[keys.max]!.plan, readLedger(dir, now).ledger!.accounts[keys.max]!.planObservedAt], ["max-5x", now - 600], "the fold leaves this machine's plan alone");
+  assert.deepEqual(await harvest(now - 30), ["max-5x", now - 600]);
+  login("default_claude_max_20x");
+  assert.deepEqual(await harvest(now), ["max-20x", now], "a change is stamped when it is first read");
+  // An account this machine never read a plan for takes the plan another machine read.
+  foldMachineLimits(dir, limitsOf([account("claude", keys.team, { plan: "team", planSource: "claude-config", planObservedAt: now - 60 })], [reading("claude", keys.team, now - 120, 40, { resetsAt: weekTeam })]), now);
+  assert.deepEqual([readLedger(dir, now).ledger!.accounts[keys.team]!.plan, readLedger(dir, now).ledger!.accounts[keys.team]!.planObservedAt], ["team", null]);
+});
+
+test("Sources describe this machine: readings folded in from another machine never count as its own", async () => {
+  const home = join(directory, "sources-home");
+  rollout(home, "SECRET-CODEX", weekCodex, [[now - 3600, 20]]);
+  const options = (dir: string, codex = join(home, ".codex", "sessions")) => ({ dataDir: data(dir), claudeRoot: join(home, "no-claude", "projects"), codexRoot: codex, codexAccount: false });
+  const codexSource = async (dir: string, at: number, codex?: string) => (await collectLimits(options(dir, codex), { HOME: home }, at)).sources.find((item) => item.source === "codex-session")!;
+  const elsewhere = limitsOf([account("codex", keys.codex), account("codex", keys.other)], [reading("codex", keys.codex, now - 120, 30, { resetsAt: weekCodex }), reading("codex", keys.other, now - 120, 50, { resetsAt: weekOther })]);
+  assert.deepEqual([(await codexSource("sources", now - 60)).status, (await codexSource("sources", now - 60)).latest], ["ok", now - 3600]);
+  foldMachineLimits(data("sources"), elsewhere, now - 50);
+  assert.equal((await codexSource("sources", now)).latest, now - 3600, "agentbox's later reading is not this machine's");
+  assert.ok((await collectLimits(options("sources"), { HOME: home }, now)).observations.some((row) => row.account === keys.other), "its history is still shown");
+  // A machine without Codex shows another machine's Codex readings, but no Codex source of its own.
+  foldMachineLimits(data("sources-bare"), elsewhere, now - 50);
+  const bare = await codexSource("sources-bare", now, join(home, "no-codex", "sessions"));
+  assert.deepEqual([bare.status, bare.latest], ["unavailable", null]);
+  // A ledger from before other machines were folded in holds only this machine's readings, so they are its sources' too.
+  const path = join(data("sources-old"), "limits-v2.json");
+  await collectLimits(options("sources-old"), { HOME: home }, now - 60);
+  const { sourceLatest: _, ...older } = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  writeFileSync(path, JSON.stringify(older));
+  assert.equal((await codexSource("sources-old", now)).latest, now - 3600);
+});
+
+test("a machine reached twice, or this machine reached as another, counts once", () => {
+  const environment2 = { FAKE_SSH_ENVS: JSON.stringify({ ...JSON.parse(environment["FAKE_SSH_ENVS"]!), "agentbox-again": { ...remoteEnvironment("agentbox-data", join(directory, "codex-agentbox")), HOME: agentHome } }) };
+  const dir = saved("twice", [both[0]!, { name: "agentbox-again", ssh: "agentbox-again", user: "agent-t3", runtime: "bundled", enabled: true }, both[1]!]);
+  const twice = cli(["limits", "--json", "--data-dir", dir], environment2), merged = json(twice);
+  assert.deepEqual(merged.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [["local", "ok", null], ["agentbox", "ok", null], ["agentbox-again", "failed", "same-machine"], ["box2", "ok", null]]);
+  assert.deepEqual(machinesOf(merged, keys.max), ["local", "agentbox"]);
+  assert.equal(merged.accounts.filter((item) => item.attribution === "profile").length, 0, "its profile-keyed readings are not counted twice");
+  assert.match(twice.stderr, /^Not counting limits from agentbox-again: the same machine and account as agentbox, so its history is counted once\.\n {2}Fix: .*machines remove agentbox-again/m);
+  // This machine, reached over SSH as box2, is this machine's harvest already.
+  const self = json(cli(["limits", "--json", "--data-dir", dir, "--machines", "box2"], { ...environment2, SESSION_ANALYTICS_MACHINE_ID: "id-box2" }));
+  assert.deepEqual(self.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [["local", "ok", null], ["box2", "failed", "same-machine"]]);
+  assert.equal(self.accounts.some((item) => item.key === keys.other && item.machines?.length), false);
+  const own = cli(["limits", "--json", "--no-remote", "--identify-machine", "--data-dir", dir], { SESSION_ANALYTICS_MACHINE_ID: "fixture-machine" });
+  assert.match(JSON.parse(own.stdout).machines[0].identity, /^[0-9a-f]{16}$/);
+  assert.match(cli(["limits", "--json", "--identify-machine", "--data-dir", dir]).stderr, /--identify-machine describes this machine's own readings; use it with --json --no-remote/);
 });

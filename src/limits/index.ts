@@ -8,7 +8,7 @@ import type { AnalyzeOptions } from "../types.ts";
 import { accountAttribution, accountLabel, claudeIdentities, identified, profileFor, profilesFromRoots, rolloutAccount, weeklyPhaseKey, type Profile } from "./accounts.ts";
 import { readCodexAccount } from "./codex-account.ts";
 import {
-  LEDGER_UNREADABLE, applyAliases, attributeLegacy, claudeSummary, codexSummary, compactObservations, emptyLedger, fromRow, readLedger,
+  LEDGER_UNREADABLE, advanceSources, applyAliases, attributeLegacy, claudeSummary, codexSummary, compactObservations, emptyLedger, fromRow, readLedger,
   readLegacyLedger, resetCreditHistory, retentionSeconds, setAsideLedger, toRow, writeLedger, type Ledger, type LedgerAccount,
 } from "./ledger.ts";
 import { harvestClaudeEventLogs, harvestCodex, type Cursors } from "./sources.ts";
@@ -202,7 +202,9 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     const account = touch(key, "claude");
     if (!account.profileKeys.includes(profile.profileKey)) account.profileKeys = [...account.profileKeys, profile.profileKey];
     if (detail.key) profiles[profile.profileKey] = key;
-    if (detail.plan) Object.assign(account, { plan: detail.plan, planSource: detail.planSource, planEvidence: detail.planEvidence, planObservedAt: Math.floor(now) });
+    // The plan's time is when it was first read as it is, so another machine still reading an older plan never outranks a change.
+    const same = account.planObservedAt !== null && account.plan === detail.plan && account.planSource === detail.planSource && JSON.stringify(account.planEvidence) === JSON.stringify(detail.planEvidence);
+    if (detail.plan) Object.assign(account, { plan: detail.plan, planSource: detail.planSource, planEvidence: detail.planEvidence, planObservedAt: same ? account.planObservedAt : Math.floor(now) });
     else if (detail.planEvidence) account.planEvidence = detail.planEvidence;
     if (detail.extraUsageEnabled !== null) seeds.set(key, detail.extraUsageEnabled || seeds.get(key) === true);
   }
@@ -229,14 +231,15 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   }
 
   // Version 1 ledgers (`limits.json`) are imported, never written: older binaries may keep appending to them.
-  let importedV1Through = base.importedV1Through;
+  let importedV1Through = base.importedV1Through, imported: LimitObservation[] = [];
   if (persist) {
     const legacy = readLegacyLedger(directory);
     if (legacy) {
       const pending = legacy.observations.filter((row) => row.observedAt > (importedV1Through ?? 0));
       const codexKeys = [...new Set([...observations.filter((row) => row.provider === "codex").map((row) => row.account),
         ...Object.entries(accounts).filter(([, account]) => account.provider === "codex").map(([key]) => key)].filter(identified))];
-      observations = [...observations, ...attributeLegacy(pending, observations, codexKeys)];
+      imported = attributeLegacy(pending, observations, codexKeys);
+      observations = [...observations, ...imported];
       importedV1Through = legacy.observations.reduce((latest, row) => Math.max(latest, row.observedAt), importedV1Through ?? 0) || null;
       if (codexKeys.length === 1) {
         const account = touch(codexKeys[0]!, "codex");
@@ -260,6 +263,7 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     version: 2, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases,
     creators: { ...base.creators, ...homes }, limitNames,
     rows: rows.map(toRow), resetCreditHistory: resetCreditHistory(history.map((row) => [row[0], rekey(row[1]), row[2], row[3]])), codexAccountReadAt,
+    sourceLatest: advanceSources(base.sourceLatest, [...fresh, ...imported]),
   };
   let ledger = next, persisted = false, inbox = 0;
   if (writable) {
@@ -282,7 +286,7 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   const summary = snapshotAccounts(kept, ledger, names, seeds, now);
   return {
     schemaVersion: 2, generatedAt: new Date(now * 1000).toISOString(), dataSource: "live", persisted, ledger: ledgerStatus,
-    ...summary, sources: sourceHealth(kept, read, available), observations: options.settle === false ? kept : resolveCaps(kept, summary.accounts),
+    ...summary, sources: sourceHealth(ledger.sourceLatest, read, available, now), observations: options.settle === false ? kept : resolveCaps(kept, summary.accounts),
     resetCreditHistory: ledger.resetCreditHistory, codexAccount,
   };
 }
@@ -303,9 +307,10 @@ export function resolveCaps(rows: LimitObservation[], accounts: Pick<LimitAccoun
   });
 }
 
-function sourceHealth(rows: LimitObservation[], read: Record<LimitSource, number>, available: Record<LimitSource, boolean>): LimitSourceHealth[] {
+/** This machine's sources only: `latest` is each one's newest reading here, never another machine's folded into the ledger. */
+function sourceHealth(newest: Ledger["sourceLatest"], read: Record<LimitSource, number>, available: Record<LimitSource, boolean>, now: number): LimitSourceHealth[] {
   return (Object.keys(read) as LimitSource[]).map((source) => {
-    const latest = rows.reduce<number | null>((value, row) => row.source === source ? Math.max(value ?? 0, row.observedAt) : value, null);
+    const latest = (newest[source] ?? 0) >= now - retentionSeconds ? newest[source]! : null;
     return { source, status: latest !== null || read[source] > 0 ? "ok" : available[source] ? "empty" : "unavailable", read: read[source], latest };
   });
 }

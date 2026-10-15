@@ -320,22 +320,39 @@ export function zonedDayStart(day, timeZone = "UTC") {
  */
 export const limitMachines = (limits) => limits?.machines ? new Set(limits.machines.filter((machine) => machine.state !== "failed" && machine.readAt).map(({ key }) => key)) : null;
 
+/** The machines whose sessions a snapshot holds, by key: each one read now or from its last good snapshot; null before it arrives. */
+export const sessionMachines = (snapshot) => snapshot
+  ? new Set(snapshot.machines?.length ? snapshot.machines.filter((machine) => machine.state !== "failed" && machine.readAt).map(({ key }) => key) : [localMachine]) : null;
+
+/**
+ * The machines whose value counts: limits in (`limitMachines`) and sessions in (`sessions`, as `sessionMachines`; null while
+ * unknown). A machine whose limits are in but whose sessions are not still moves the meters; its value is not counted.
+ */
+export function valuedMachines(limits, sessions) {
+  const read = limitMachines(limits);
+  return read && sessions ? new Set([...read].filter((key) => sessions.has(key))) : read;
+}
+
 /**
  * Which account each Claude or Codex session's value belongs to. Only sessions from machines whose limits were read can be
  * matched to the meters they moved: `read` is that set of machine keys (`limitMachines`), or null when limits are this
  * machine's alone; sessions from any other machine are `elsewhere`. A session's machine is its `machine`, else this one.
  * A Claude session joins the account logged into its profile on its machine (`historyProfile.profileKey` among the account's
  * profile keys there); one without a profile key (every Codex session today, Claude sessions without a native transcript)
- * joins the only account of its provider on its machine. Without `read`, every account is this machine's, its
- * `profileKeys` are this machine's, and the only account is the only identified one. Everything else is unattributed.
- * Neither unattributed nor elsewhere sessions calibrate a meter.
+ * joins the only account of its provider on its machine. Without `read`, the accounts are this machine's and their
+ * `profileKeys` this machine's; those logged in here (with profile keys or names) are its accounts, unless none of a
+ * provider is, since the ledger also keeps the history of accounts read on other machines. Everything else is
+ * unattributed. Neither unattributed nor elsewhere sessions calibrate a meter.
  */
 export function attributeSessions(sessions, accounts, { read = null } = {}) {
   const byProfile = new Map(), byAccount = new Map(), only = new Map();
+  const here = (account) => identified(account.key) && Boolean(account.profileKeys?.length || account.profileNames?.length);
+  const loggedIn = new Set((accounts ?? []).filter(here).map(({ provider }) => provider));
   for (const account of accounts ?? []) {
     byAccount.set(account.key, []);
     if (!identified(account.key)) continue;
-    for (const { key: machine, profileKeys } of read ? account.machines ?? [] : [{ key: localMachine, profileKeys: account.profileKeys ?? [] }]) {
+    const places = read ? account.machines ?? [] : here(account) || !loggedIn.has(account.provider) ? [{ key: localMachine, profileKeys: account.profileKeys ?? [] }] : [];
+    for (const { key: machine, profileKeys } of places) {
       const place = `${account.provider}|${machine}`;
       only.set(place, only.has(place) ? null : account.key);
       for (const profile of profileKeys) if (!byProfile.has(`${place}|${profile}`)) byProfile.set(`${place}|${profile}`, account.key);

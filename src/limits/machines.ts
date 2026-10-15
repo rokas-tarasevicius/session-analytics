@@ -15,7 +15,10 @@ import { accountActivity, accountOrder, activePlans, meterInfos, resolveCaps, ty
 import { compactObservations, emptyLedger, ledgerAccount, resetCreditHistory, toRow, validObservation, writeLedger, type LedgerAccount } from "./ledger.ts";
 import type { ClaudeAccountSummary, CodexAccountSummary, LimitAccount, LimitObservation, LimitsMachine, LimitsSnapshot } from "./types.ts";
 
-/** A harvest takes seconds; a machine that has not answered in a minute (or in --remote-timeout, if shorter) is stopped. */
+/**
+ * A harvest after a machine's first takes seconds: once it has answered, a read that has not answered in a minute (or in
+ * --remote-timeout, if shorter) is stopped.
+ */
 export const limitsTimeoutMs = 60_000;
 const maximumLimitsBytes = 64 * 1024 * 1024;
 
@@ -82,34 +85,46 @@ export function validateLimitsSnapshot(value: unknown): LimitsSnapshot {
   };
 }
 
-/** One machine's validated limits. An installed remote that fails as if it ran another version is asked which. */
-export async function fetchRemoteLimits(machine: RemoteMachine, args: string[], { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal }): Promise<LimitsSnapshot> {
+const identityPattern = /^(?:host-)?[0-9a-f]{16}$/;
+
+/**
+ * One machine's validated limits, and the hash of the machine and account that answered when it was asked
+ * (`--identify-machine`). An installed remote that fails as if it ran another version is asked which.
+ */
+export async function fetchRemoteLimits(machine: RemoteMachine, args: string[], { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal }): Promise<{ snapshot: LimitsSnapshot; identity: string | null }> {
   const result = await runRemote(machine, args, { deadline: Date.now() + timeoutMs, signal, limit: maximumLimitsBytes });
   let failure = classifyRemote(machine, result, timeoutMs);
-  let snapshot: LimitsSnapshot | null = null;
+  // A limits read's time-out and size limit are its own, and so are their fixes.
+  if (failure?.reason === "timeout" || failure?.reason === "too-large") failure = new RemoteError(failure.reason, machine, result.stderr, "limits", timeoutMs);
+  let snapshot: LimitsSnapshot | null = null, identity: string | null = null;
   if (!failure) {
-    try { snapshot = validateLimitsSnapshot(JSON.parse(result.stdout.toString("utf8"))); }
-    catch { failure = new RemoteError("invalid", machine, "", "limits --json"); }
+    try {
+      const value: unknown = JSON.parse(result.stdout.toString("utf8"));
+      snapshot = validateLimitsSnapshot(value);
+      const self = record(list(record(value)?.["machines"] ?? [], 1)[0])?.["identity"];
+      identity = typeof self === "string" && identityPattern.test(self) ? self : null;
+    } catch { failure = new RemoteError("invalid", machine, "", "limits --json"); }
   }
   if (failure && machine.runtime === "installed" && ["rejected", "invalid", "analysis"].includes(failure.reason)) {
     const found = await remoteVersion(machine, signal);
     if (found && found !== version) throw new RemoteError("version-skew", machine, result.stderr, found);
   }
   if (failure) throw failure;
-  return snapshot!;
+  return { snapshot: snapshot!, identity };
 }
 
 /**
  * Another machine's readings and plans, kept in this machine's ledger so their history outlives that machine and its log
  * rotation. Only real accounts (keys of a login, which are the same on every machine) are kept, under that key; a
  * machine is irrelevant to an account-wide meter. Profile keys, profile names and current account state stay with the
- * machine that reported them. The ledger merges and compacts them like any other writer's readings.
+ * machine that reported them. Its plans carry no time, so they fill in only an account this machine never read a plan
+ * for: the ledger's plan stays this machine's own reading. The ledger merges and compacts them like any other writer's.
  */
 export function foldMachineLimits(directory: string, snapshot: LimitsSnapshot, now = Date.now() / 1000): void {
   const accounts: Record<string, LedgerAccount> = {};
   for (const account of snapshot.accounts) {
     if (account.attribution !== "account") continue;
-    accounts[account.key] = { provider: account.provider, plan: account.plan, planSource: account.planSource, planEvidence: account.planEvidence, planObservedAt: account.planObservedAt, extraUsage: null, codex: null, profileKeys: [] };
+    accounts[account.key] = { provider: account.provider, plan: account.plan, planSource: account.planSource, planEvidence: account.planEvidence, planObservedAt: null, extraUsage: null, codex: null, profileKeys: [] };
   }
   const rows = snapshot.observations.filter((row) => accounts[row.account]?.provider === row.provider).map(toRow);
   if (!rows.length) return;
@@ -139,10 +154,18 @@ function freshestCodex(summaries: CodexAccountSummary[]): CodexAccountSummary | 
     ordinaryUsageAllowed: newest(summaries.filter((item) => item.ordinaryUsageAllowed !== null))?.ordinaryUsageAllowed ?? null };
 }
 
-/** Accounts with one key from several machines are one account: the newest plan, the freshest state, the first machine's profile names. */
+/** A Max plan inferred from the organization type without its rate-limit tier (`claudePlanOf`) is a guess another machine's tier settles. */
+const guessed = ({ plan, planSource, planEvidence }: LimitAccount): boolean =>
+  plan === "max-5x" && planSource === "claude-config" && !/max_5x/.test(`${planEvidence?.organizationRateLimitTier} ${planEvidence?.userRateLimitTier}`);
+
+/**
+ * Accounts with one key from several machines are one account: the newest plan that is not a guess, the freshest state, the
+ * first machine's profile names. A Claude plan's time is when that machine first read it as it is, and a Codex plan's when
+ * Codex reported it, so the newest is the latest change, however recently each machine was read.
+ */
 function mergeAccount(versions: Array<{ account: LimitAccount; generatedAt: string }>, names: string[]): Omit<LimitAccount, "label" | "weeklyAnchor" | "lastSeen"> {
   const accounts = versions.map(({ account }) => account), first = accounts[0]!;
-  const planned = accounts.filter((account) => account.planObservedAt !== null).sort((left, right) => right.planObservedAt! - left.planObservedAt!)[0]
+  const planned = accounts.filter((account) => account.planObservedAt !== null).sort((left, right) => Number(guessed(left)) - Number(guessed(right)) || right.planObservedAt! - left.planObservedAt!)[0]
     ?? accounts.find((account) => account.plan) ?? first;
   const extra = versions.flatMap(({ account, generatedAt }) => account.extraUsage ? [{ summary: account.extraUsage, event: !profileDefault(account.extraUsage, generatedAt) }] : []);
   const events = extra.filter((item) => item.event);
@@ -219,6 +242,10 @@ export interface LimitsReading extends MachineLimits {
   pending: Promise<void> | null;
   /** Null until known: true when it reports a Codex account whose banked resets this machine's own account read does not know. */
   codexAccount: boolean | null;
+  /** Hash of the machine ID and account that answered, else the one `machines check` recorded. */
+  identity?: string;
+  /** The machine this one duplicates, once reported; reported again only after it stopped being one. */
+  twin?: string;
 }
 
 export interface LimitsReads {
@@ -231,6 +258,8 @@ export interface LimitsReads {
    */
   start(local: Promise<LimitsSnapshot | null>): Promise<void>;
   abort(): void;
+  /** Every machine's limits as they stand, for `mergeMachineLimits`: a machine reached twice counts once. */
+  current(): MachineLimits[];
 }
 
 /** Codex accounts a machine reports whose banked resets this machine's harvest does not know. */
@@ -247,7 +276,8 @@ export function limitsReadLines(machine: RemoteMachine, status: LimitsMachine, e
  * Reads other machines' limits through the same ssh and bundled runtime as their snapshots, each on its own. A failed read
  * keeps the machine's last good limits (from this process, else from the data directory for a saved machine), marked
  * stale. A fresh read is folded into this machine's ledger (`foldMachineLimits`) unless the ledger is off. A failure is
- * reported once, until its reason changes.
+ * reported once, until its reason changes. A machine's first harvest reads weeks of records, so until it has answered
+ * once (or has last good limits), its read may take the whole --remote-timeout; later reads stop after a minute.
  */
 export function limitsReads(
   options: LimitsOptions, remote: RemoteOptions,
@@ -258,7 +288,7 @@ export function limitsReads(
   // The user's switches apply everywhere: no machine asks its app-server with --no-codex-account or --offline.
   const accountRead = options.codexAccount !== false && !offline && environment["SESSION_ANALYTICS_CODEX_ACCOUNT"] !== "0";
   const args = (codexAccount: boolean): string[] => limitsArguments({ offline, noIndex: !persist }, codexAccount);
-  const request = requestDigest(args(true)), timeoutMs = Math.min(remote.timeoutMs, limitsTimeoutMs);
+  const request = requestDigest(args(true));
   let controller = new AbortController();
   const abort = (): void => { controller.abort(); controller = new AbortController(); };
   signal?.addEventListener("abort", abort, { once: true });
@@ -279,22 +309,29 @@ export function limitsReads(
   const read = async (reading: LimitsReading, stop: AbortSignal, local: Promise<LimitsSnapshot | null>): Promise<void> => {
     const { machine } = reading, { key, label } = reading.status;
     const started = performance.now();
+    const self = (identity: string | null | undefined): boolean => Boolean(identity && !byHostName(identity) && identity === localIdentity());
     try {
-      if (machine.identity && !byHostName(machine.identity) && machine.identity === localIdentity()) throw new RemoteError("same-machine", machine);
-      if (reading.codexAccount === null) reading.codexAccount = (await lastGood(reading))?.codexAccount ?? false;
+      if (self(machine.identity)) throw new RemoteError("same-machine", machine);
+      let answered = reading.snapshot !== null;
+      if (reading.codexAccount === null) { const found = await lastGood(reading); reading.codexAccount = found?.codexAccount ?? false; answered ||= found !== null; }
+      const timeoutMs = answered ? Math.min(remote.timeoutMs, limitsTimeoutMs) : remote.timeoutMs;
+      // The bundled runtime says which machine and account answered, so one reached twice counts once.
+      const ask = (codexAccount: boolean): string[] => [...args(codexAccount), ...(machine.runtime === "bundled" ? ["--identify-machine"] : [])];
       const asked = accountRead && reading.codexAccount;
-      let answer = await fetchRemoteLimits(machine, args(asked), { timeoutMs, signal: stop });
+      const fetched = await fetchRemoteLimits(machine, ask(asked), { timeoutMs, signal: stop }), identity = fetched.identity ?? machine.identity;
+      if (self(identity)) throw new RemoteError("same-machine", machine);
+      let answer = fetched.snapshot;
       let ms = performance.now() - started;
       const own = await local;
       // Banked resets are account-wide: a machine asks its own app-server only for an account this machine's read does not know.
       reading.codexAccount = own ? unknownBankedResets(answer, own) : reading.codexAccount;
       if (accountRead && reading.codexAccount && !asked) {
         const first = answer, again = performance.now();
-        answer = await fetchRemoteLimits(machine, args(true), { timeoutMs, signal: stop }).catch((error: unknown) => { if (stop.aborted || stopping()) throw error; return first; });
+        answer = await fetchRemoteLimits(machine, ask(true), { timeoutMs, signal: stop }).then((retried) => retried.snapshot, (error: unknown) => { if (stop.aborted || stopping()) throw error; return first; });
         ms += performance.now() - again;
       }
       const status: LimitsMachine = { key, label, state: "ok", readAt: new Date().toISOString(), durationMs: Math.round(ms) };
-      Object.assign(reading, { snapshot: answer, status });
+      Object.assign(reading, { snapshot: answer, status, identity });
       if (machine.saved) {
         // Profile directory names are local-only: they are shown while read, never stored.
         const limits = { ...answer, accounts: answer.accounts.map((item) => ({ ...item, profileNames: [], label: accountLabel(item.provider, item.key, item.plan, [], item.weeklyAnchor) })) };
@@ -312,7 +349,7 @@ export function limitsReads(
         : stopped ? null : await lastGood(reading);
       const fix = error.fix ? { fix: error.fix } : {};
       if (kept) Object.assign(reading, kept, { status: { ...kept.status, state: "stale", reason: error.reason, ...fix } });
-      else Object.assign(reading, { snapshot: null, status: { key, label, state: "failed", reason: error.reason, ...fix, readAt: null, durationMs: null } });
+      else Object.assign(reading, { snapshot: null, identity: undefined, status: { key, label, state: "failed", reason: error.reason, ...fix, readAt: null, durationMs: null } });
       if (!stopped && reported.get(reading) !== error.reason) { reported.set(reading, error.reason); report(limitsReadLines(machine, reading.status, error)); }
     }
   };
@@ -328,7 +365,25 @@ export function limitsReads(
     return Promise.all(readings.map(({ pending }) => pending)).then(() => {});
   };
 
-  return { readings, loaded, start, abort };
+  const current = (): MachineLimits[] => {
+    // As for snapshots: answers read now win, in the configured order, then stale ones.
+    const seen = new Map<string, string>([[localIdentity(), remote.local]]), twins = new Map<LimitsReading, string>();
+    for (const reading of [...readings].sort((left, right) => Number(left.status.state !== "ok") - Number(right.status.state !== "ok"))) {
+      const identity = reading.identity ?? reading.machine.identity;
+      if (!reading.snapshot || !identity || byHostName(identity)) continue;
+      const twin = seen.get(identity);
+      if (twin) twins.set(reading, twin); else seen.set(identity, reading.machine.name);
+    }
+    return readings.map((reading) => {
+      const twin = twins.get(reading);
+      if (!twin) { reading.twin = undefined; return reading; }
+      const error = new RemoteError("same-machine", reading.machine, "", twin), { key, label } = reading.status;
+      if (reading.twin !== twin) { reading.twin = twin; report(`Not counting limits from ${reading.machine.name}: ${error.message}.${error.fix ? `\n  Fix: ${error.fix}` : ""}`); }
+      return { snapshot: null, status: { key, label, state: "failed", reason: "same-machine", ...(error.fix ? { fix: error.fix } : {}), readAt: null, durationMs: null } };
+    });
+  };
+
+  return { readings, loaded, start, abort, current };
 }
 
 /** This machine's status in a merge, from its own harvest. */

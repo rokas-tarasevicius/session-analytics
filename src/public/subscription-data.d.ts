@@ -110,6 +110,8 @@ export function latestReading(meters: Meter[]): number | null;
 export function hourlyValue(sessions: unknown[], timeZone?: string): HourlyValue;
 export function zonedDayStart(day: string, timeZone?: string): number;
 export function limitMachines(limits: Pick<LimitsSnapshot, "machines"> | null | undefined): Set<string> | null;
+export function sessionMachines(snapshot: { machines?: Array<{ key: string; state: string; readAt: string | null }> } | null | undefined): Set<string> | null;
+export function valuedMachines(limits: Pick<LimitsSnapshot, "machines"> | null | undefined, sessions: Set<string> | null): Set<string> | null;
 export function attributeSessions<S extends SessionLike>(
   sessions: S[], accounts: LimitAccount[], options?: { read?: Set<string> | null },
 ): { byAccount: Map<string, S[]>; unattributed: { claude: S[]; codex: S[] }; elsewhere: { claude: S[]; codex: S[] } };

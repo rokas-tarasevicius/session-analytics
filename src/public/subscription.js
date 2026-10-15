@@ -7,9 +7,10 @@ import { providerMark } from "./providers.js";
 import { chartWidth, dataTable, el, redrawOnResize, DASH } from "./ui.js";
 import {
   DAY, HOUR, calibrationMinimum, compareUrgency, extraUsageOff, formatDuration, limitMachines, limitStatus, meterPace, providerNames,
-  recommendations, subscriptionModel, visibleMeters, zonedDayStart,
+  recommendations, subscriptionModel, valuedMachines, visibleMeters, zonedDayStart,
 } from "./subscription-data.js";
 import { planFor, plansReviewedAt, subscriptionPlans } from "./subscription-plans.js";
+import { machineAge } from "./machines.js";
 
 /** Explanatory paragraphs wrap freely; one-line `.chart-note` captions are reserved for short labels. */
 const note = (text, className = "subscription-note") => el("p", text, className);
@@ -154,11 +155,21 @@ function idleSentence(live, fmt) {
     : `No reading on this machine${since}; other machines and the web still move this meter.${next}`;
 }
 
+/** A machine whose limits in use are its last good ones rather than read now, with their age (`aged`) or marked stale. */
+function limitsLabel(key, scope, aged = false) {
+  const machine = scope.machines.get(key), label = machine?.label ?? key;
+  if (!machine || machine.state === "ok") return label;
+  return aged ? `${label} (last good limits, ${machineAge(machine.readAt, scope.now * 1000) ?? "an earlier read"})` : `${label} (stale)`;
+}
+
 /** The machines whose limits report an account, by label; null when limits are this machine's alone. */
 function reportedBy(item, scope) {
   if (!scope.limits || !item.identified) return null;
-  return item.account.machines?.length ? `Reported by ${names(item.account.machines.map(({ key }) => scope.labels.get(key) ?? key))}` : "No machine read now is logged into it; shown from saved history";
+  return item.account.machines?.length ? `Reported by ${names(item.account.machines.map(({ key }) => limitsLabel(key, scope)))}` : "No machine read now is logged into it; shown from saved history";
 }
+
+/** Machines whose limits are in but whose sessions are not, in a sentence. */
+const sessionless = (scope) => `${names(scope.sessionless)}'s sessions were not read: ${scope.sessionless.length === 1 ? "its" : "their"} usage moves these meters, but ${scope.sessionless.length === 1 ? "its" : "their"} value is not counted`;
 
 /** One sentence per meter, in plain words. */
 function meterSentence(live, fmt, now) {
@@ -256,7 +267,9 @@ function limitsNow(entries, fmt, now, generatedAt, scope) {
   section.setAttribute("aria-labelledby", "limits-now-title");
   const header = el("header");
   const title = el("h3", "Limits now"); title.id = "limits-now-title";
-  const from = scope.limits ? ` · meters and value from ${scope.read.join(" + ")}${scope.pending.length ? `; reading ${names(scope.pending)}` : ""}${scope.unread.length ? `; ${names(scope.unread)} not read` : ""}` : "";
+  const aged = [...scope.machines.keys()].filter((key) => scope.counted.has(key)).map((key) => limitsLabel(key, scope, true)).join(" + ");
+  const from = scope.limits ? ` · ${scope.sessionless.length ? `meters from ${aged}, value from ${scope.value.join(" + ")} (${names(scope.sessionless)}: sessions not read)` : `meters and value from ${aged}`}`
+    + `${scope.pending.length ? `; reading ${names(scope.pending)}` : ""}${scope.unread.length ? `; ${names(scope.unread)} not read` : ""}` : "";
   header.append(title, el("span", `Read ${generatedAt ? fmt.when(generatedAt) : "now"} · refreshes every 2 minutes · times in ${fmt.zone}${from}`, "panel-meta"));
   section.append(header);
   const list = el("ol", null, "limit-rows");
@@ -456,7 +469,7 @@ function accountCard(item, status, fmt, now, { onPlanChange, codexAccount, later
 }
 
 /** Labels of the machines whose limits report the account and were read. */
-const accountMachines = (item, scope) => (item.account.machines ?? []).filter(({ key }) => scope.counted.has(key)).map(({ key }) => scope.labels.get(key) ?? key);
+const accountMachines = (item, scope) => (item.account.machines ?? []).filter(({ key }) => scope.valued.has(key)).map(({ key }) => scope.machines.get(key)?.label ?? key);
 
 const valueScope = (item, scope) => scope.limits ? ({
   profiles: `${plural(item.value.sessions, "session")} in these dates, in this account's profiles on ${names(accountMachines(item, scope))}`,
@@ -519,6 +532,7 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide, sco
     totals.capacityUsed !== null ? `${percentText(totals.capacityUsed * 100)} of one full week every week${totals.capacityUsed > 1 ? " (early resets and extra usage add more)" : ""}` : "",
     totals.beforeReadings >= 1 ? `${usd(totals.beforeReadings)} before the first meter readings is not counted` : "",
     totals.unattributed ? `${usd(totals.unattributed)} more matched no account` : "",
+    scope.sessionless.length ? sessionless(scope) : "",
     elsewhere < 1 ? "" : scope.limits ? `${usd(elsewhere)} on ${names([...scope.unread, ...scope.pending]) || "other machines"} is not counted: ${scope.unread.length + scope.pending.length === 1 ? "its" : "their"} limits ${scope.unread.length ? "could not be read" : "are still being read"}`
       : `${usd(elsewhere)} on ${names(scope.others) || "other machines"} is not counted: limits are read on ${scope.label} only`,
   ].filter(Boolean).join("; "));
@@ -713,9 +727,11 @@ function sourcesSection(limits, items, fmt, scope) {
   const unidentified = accounts.filter((account) => account.attribution === "weekly-phase" || account.attribution === "unattributed").length;
   details.append(note(`Accounts found: ${found.length ? found.join("; ") : "none"}${unidentified ? `; ${plural(unidentified, "group")} of readings without an account` : ""}. Times are shown in ${fmt.zone}.`));
   const unread = (scope.unread.length ? `; ${names(scope.unread)} could not be read, so ${scope.unread.length === 1 ? "its" : "their"} sessions are not counted` : "")
-    + (scope.pending.length ? `; ${names(scope.pending)} ${scope.pending.length === 1 ? "is" : "are"} still being read` : "");
+    + (scope.pending.length ? `; ${names(scope.pending)} ${scope.pending.length === 1 ? "is" : "are"} still being read` : "")
+    + (scope.sessionless.length ? `; ${sessionless(scope)}` : "");
+  const from = scope.sessionless.length ? `Meters come from ${names(scope.read)} and value from ${names(scope.value)}` : `Meters and value come from ${names(scope.read)}`;
   details.append(note(scope.limits
-    ? `${scope.others.length ? `This dashboard reads ${names([scope.label, ...scope.others])}. ` : ""}Meters and value come from ${names(scope.read)}, each machine's limits read through its own harvest${unread}. Usage on the web, in the desktop apps and on machines not read moves the same meters, so value per 1% is a lower bound.`
+    ? `${scope.others.length ? `This dashboard reads ${names([scope.label, ...scope.others])}. ` : ""}${from}, each machine's limits read through its own harvest${unread}. Usage on the web, in the desktop apps and on machines not read moves the same meters, so value per 1% is a lower bound.`
     : scope.others.length
       ? `This dashboard reads ${names([scope.label, ...scope.others])}. Limits are read on ${scope.label} only, so value counts only its sessions; run \`session-analytics limits\` on the others for theirs. Usage there, on the web and in the desktop apps moves the same meters, so value per 1% is a lower bound.`
       : "Limits are read on this machine. Usage on other machines, the web and the desktop apps moves the same meters, so value per 1% is a lower bound."));
@@ -755,21 +771,28 @@ function emptyState(limits) {
  * Render the Subscription view. Limits are account-wide, so `sessions` must be every session (a repository focus does not
  * apply); `null` while the session scan is still running, when the meters render and value waits. `timeZone` is the
  * snapshot's zone for value; times are shown in `displayTimeZone` (the viewer's). `range` is the selected dates in Unix
- * seconds. `scope` names this machine and the other machines the sessions come from; only sessions from machines whose limits
- * were read (`limits.machines`, else this machine alone) count.
+ * seconds. `scope` names this machine and the other machines the sessions come from, and holds the keys of the machines
+ * whose sessions the snapshot holds (`sessions`, as `sessionMachines`; null while unknown). Only sessions from machines whose
+ * limits were read (`limits.machines`, else this machine alone) count; a machine whose limits are in but whose sessions are
+ * not is named as moving the meters without its value.
  */
-export function renderSubscription(container, { limits, sessions = null, timeZone = "UTC", displayTimeZone = null, range = null, scope: given = { label: "this machine", others: [] }, onPlanChange, now = Date.now() / 1000, wide = null }) {
+export function renderSubscription(container, { limits, sessions = null, timeZone = "UTC", displayTimeZone = null, range = null, scope: given = { label: "this machine", others: [], sessions: null }, onPlanChange, now = Date.now() / 1000, wide = null }) {
   container.replaceChildren();
   if (!limits) { container.append(note("Reading limit meters…")); return; }
   if (limits.unavailable) { container.append(note("Limit meters could not be loaded. Check the terminal running the dashboard; the next refresh retries.", "empty-state")); return; }
   if (limits.dataSource === "snapshot") { container.append(note("Limit meters are live-only and are not part of saved snapshots. Run `session-analytics limits` on the machine that recorded this snapshot.", "empty-state")); return; }
-  const counted = limitMachines(limits) ?? new Set();
-  const labels = new Map((limits.machines ?? []).map(({ key, label }) => [key, label]));
-  const read = (limits.machines ?? []).filter(({ key }) => counted.has(key)).map(({ label }) => label);
-  const waiting = (limits.machines ?? []).filter(({ key, state }) => state === "reading" && !counted.has(key)).map(({ label }) => label);
+  const counted = limitMachines(limits) ?? new Set(), valued = valuedMachines(limits, given.sessions ?? null) ?? new Set();
+  const machines = new Map((limits.machines ?? []).map((machine) => [machine.key, machine]));
+  const labelsOf = (keys) => [...machines.values()].filter(({ key }) => keys.has(key)).map(({ label }) => label);
+  const read = labelsOf(counted);
+  const waiting = [...machines.values()].filter(({ key, state }) => state === "reading" && !counted.has(key)).map(({ label }) => label);
   // Machines with sessions here whose limits are not in: their value is reported as not counted.
   const unread = limits.machines ? given.others.filter((label) => !read.includes(label) && !waiting.includes(label)) : [];
-  const scope = { ...given, limits: Boolean(limits.machines), counted, labels, read, pending: waiting, unread };
+  // Machines whose limits are in but whose sessions are not: their usage moves the meters, but their value cannot be counted.
+  const scope = {
+    ...given, limits: Boolean(limits.machines), machines, counted, valued, read, value: labelsOf(valued), pending: waiting, unread, now,
+    sessionless: labelsOf(new Set([...counted].filter((key) => !valued.has(key)))),
+  };
   const fmt = { ...formatters(displayTimeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC", now), read };
   const accounts = limits.accounts ?? [];
   const plans = Object.fromEntries(accounts.map((account) => [account.key, readSetting(planKey(account.key))]));

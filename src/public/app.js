@@ -15,7 +15,7 @@ import { providerMark, renderProviderEvidence, metricCoverage } from "./provider
 import { renderPricingPanel } from "./pricing.js";
 import { renderToolsView } from "./tools.js";
 import { renderSubscription, subscriptionRefreshMilliseconds } from "./subscription.js";
-import { limitMachines, zonedDayStart } from "./subscription-data.js";
+import { sessionMachines, valuedMachines, zonedDayStart } from "./subscription-data.js";
 import { toolsDays } from "./tools-data.js";
 import { renderVelocity, velocityProviders } from "./velocity.js";
 import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity, shiftDay } from "./velocity-data.js";
@@ -756,9 +756,9 @@ function scheduleLimits(active) {
 
 /**
  * Subscription is account-wide: it reads every session, ignoring the repository focus and the Machines strip, over the
- * selected dates. Value counts the sessions of every machine whose limits were read, and the view names the machines it
- * leaves out. Before the snapshot arrives it shows the meters alone. Each refresh keeps focus, open disclosures and the
- * scroll position.
+ * selected dates. Value counts the sessions of every machine whose limits and sessions were both read, and the view names
+ * the machines it leaves out. Before the snapshot arrives it shows the meters alone. Each refresh keeps focus, open
+ * disclosures and the scroll position.
  */
 function renderSubscriptionView() {
   const restoreFocus = rememberFocus();
@@ -770,6 +770,7 @@ function renderSubscriptionView() {
     scope: {
       label: machines.find(({ key }) => key === localMachine)?.label ?? "this machine",
       others: machines.filter(({ key, state, readAt }) => key !== localMachine && state !== "failed" && readAt).map(({ label }) => label),
+      sessions: sessionMachines(all),
     },
     onPlanChange: () => renderSubscriptionView(),
   });
@@ -1057,7 +1058,8 @@ function setMachine(key, on) {
 /** The strip's note: the snapshot's time, or on Subscription, which machines it counts whatever the strip shows. */
 function renderStripMeta() {
   if (!fullSnapshot || (fullSnapshot.machines?.length ?? 0) < 2) return;
-  const counted = limitMachines(limits), read = limits?.machines?.filter(({ key }) => counted?.has(key)).map(({ label }) => label) ?? [];
+  // A machine whose sessions are not in the snapshot moves the meters but adds no value, so it is not counted here.
+  const counted = valuedMachines(limits, sessionMachines(fullSnapshot)), read = limits?.machines?.filter(({ key }) => counted?.has(key)).map(({ label }) => label) ?? [];
   elements.machineStripMeta.textContent = currentViewName() !== "subscription" ? `snapshot ${timeLabel(fullSnapshot.generatedAt, snapshotTimeZone())}`
     : read.length > 1 ? `Subscription counts ${read.join(" + ")}` : "Subscription counts this machine only";
 }
@@ -1094,7 +1096,7 @@ function renderMachines() {
   }
   renderStripMeta();
   const { ok, total } = machineTally(machines);
-  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows, except Subscription, which counts every machine whose limits were read.`;
+  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows, except Subscription, which counts every machine whose limits and sessions were read.`;
   elements.machinesRead.hidden = !machines.some(({ state }) => state === "failed" || state === "stale");
   elements.machinesRead.disabled = false; elements.machinesRead.textContent = "Read them again";
   for (const machine of machines) {

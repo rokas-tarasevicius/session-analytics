@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { brand } from "../brand.ts";
 import { remoteFor } from "../machines/config.ts";
+import { localIdentity } from "../machines/identity.ts";
 import { argument, optionErrorMessage, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, type RemoteOptions } from "../options.ts";
 import { stopOnSignals, stopping } from "../processes.ts";
 import { dataDirectory, secureDirectory, secureFile } from "../store/database.ts";
@@ -41,15 +42,18 @@ Options:
   --offline          No network reads, including the Codex account read
   --unsettled        With --json --no-remote: leave full Claude readings that do not say whether work went on
                      unsettled, for a machine that merges them with other machines' readings first
+  --identify-machine With --json --no-remote: list this machine with a hash of its machine ID and account,
+                     so a machine reading it counts it once
 
 Other machines: saved machines (see machines --help) are read too, over the same SSH and bundled runtime as
 reports. Each runs its own harvest and ledger; readings merge by account, since a login has the same key on
-every machine, and are kept in this machine's ledger. --no-codex-account and --offline apply on every machine,
-and a machine's read stops after 60 seconds, or --remote-timeout when that is shorter.
+every machine, and are kept in this machine's ledger. --no-codex-account and --offline apply on every machine.
+A machine's first read harvests weeks of records and may take all of --remote-timeout; once it has answered, its
+reads stop after 60 seconds, or --remote-timeout when that is shorter. A machine reached twice counts once.
 ${remoteHelp}`;
 
 const valueFlags = new Set(["--data-dir", "--codex-root", "--codex-archive-root", "--claude-root", ...remoteValueFlags]);
-const booleanFlags = new Set(["--json", "--quiet", "--no-index", "--help", "--no-codex-account", "--offline", "--unsettled", ...remoteBooleanFlags]);
+const booleanFlags = new Set(["--json", "--quiet", "--no-index", "--help", "--no-codex-account", "--offline", "--unsettled", "--identify-machine", ...remoteBooleanFlags]);
 
 function options(args: string[]): LimitsOptions {
   return {
@@ -134,7 +138,11 @@ async function collect(settings: LimitsOptions, args: string[]): Promise<LimitsS
   let remote: RemoteOptions;
   try { remote = remoteFor(args, process.env, settings, (line) => process.stderr.write(`${line}\n`)); }
   catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); return 2; }
-  if (!remote.machines.length) return await collectLimits(settings);
+  if (!remote.machines.length) {
+    const started = performance.now(), own = await collectLimits(settings);
+    // A reading machine asks which machine and account answered, so one it reaches twice counts once.
+    return args.includes("--identify-machine") ? { ...own, machines: [{ ...localLimitsMachine(remote.local, own, performance.now() - started), identity: localIdentity() }] } : own;
+  }
   stopOnSignals();
   const started = performance.now();
   const local = collectLimits({ ...settings, settle: false }).then((own) => ({ own, ms: performance.now() - started }));
@@ -145,19 +153,20 @@ async function collect(settings: LimitsOptions, args: string[]): Promise<LimitsS
   await settled;
   // A signal stopped the reads; its handler exits once the children are gone, and a partial result is never printed.
   if (stopping()) await new Promise(() => {});
-  return mergeMachineLimits(harvest.own, localLimitsMachine(remote.local, harvest.own, harvest.ms), reads.readings);
+  return mergeMachineLimits(harvest.own, localLimitsMachine(remote.local, harvest.own, harvest.ms), reads.current());
 }
 
 async function report(args: string[]): Promise<number> {
-  if (args.includes("--unsettled") && (!args.includes("--json") || !args.includes("--no-remote"))) {
-    process.stderr.write("--unsettled describes this machine's own readings; use it with --json --no-remote.\n");
+  for (const flag of ["--unsettled", "--identify-machine"]) {
+    if (!args.includes(flag) || (args.includes("--json") && args.includes("--no-remote"))) continue;
+    process.stderr.write(`${flag} describes this machine's own readings; use it with --json --no-remote.\n`);
     return 2;
   }
   const snapshot = await collect(options(args), args);
   if (typeof snapshot === "number") return snapshot;
   if (args.includes("--quiet")) return 0;
   // A reading machine gets compact JSON; a person or a file gets the indented form.
-  if (args.includes("--json")) { process.stdout.write(`${JSON.stringify(snapshot, null, args.includes("--unsettled") ? undefined : 2)}\n`); return 0; }
+  if (args.includes("--json")) { process.stdout.write(`${JSON.stringify(snapshot, null, args.includes("--unsettled") || args.includes("--identify-machine") ? undefined : 2)}\n`); return 0; }
   const now = Date.now() / 1000;
   const machines = snapshot.machines ?? null, label = (key: string) => machines?.find((machine) => machine.key === key)?.label ?? key;
   const shown = machines?.filter(({ state, readAt }) => state === "ok" || readAt !== null) ?? [], missing = machines?.filter((machine) => !shown.includes(machine)) ?? [];

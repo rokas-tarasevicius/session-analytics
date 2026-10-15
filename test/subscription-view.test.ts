@@ -224,3 +224,37 @@ test("with limits from several machines, value counts every machine read, accoun
   render(container, { limits: { ...machines, accounts: machines.accounts.map((item) => item.key === codex ? { ...item, machines: [] } : item) }, sessions: [spent("local", 40)], scope: { label: "laptop", others: ["agentbox"] } });
   assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "No machine read now is logged into it; shown from saved history");
 });
+
+test("a machine whose limits are in but whose sessions are not moves the meters, and its value is said not to be counted", () => {
+  const spent = (machine: string, value: number) => ({ provider: "codex", machine, velocity: { version: 1, dimensions: [], undated: [],
+    buckets: [["2026-10-13", 10, 0, [value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } });
+  const base = limits(), readAt = new Date(now * 1000).toISOString();
+  const machines = { ...base, machines: [{ key: "local", label: "laptop", state: "ok" as const, readAt, durationMs: 900 }, { key: "agentbox", label: "agentbox", state: "ok" as const, readAt, durationMs: 900 }],
+    accounts: base.accounts.map((item) => ({ ...item, machines: [{ key: "local", profileKeys: [] }, ...item.key === codex ? [{ key: "agentbox", profileKeys: [] }] : []] })) };
+  const container = new Element();
+  // agentbox's limits were read, but its snapshot failed: none of its sessions are here.
+  render(container, { limits: machines, sessions: [spent("local", 40)], scope: { label: "laptop", others: [], sessions: new Set(["local"]) } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters from laptop \+ agentbox, value from laptop \(agentbox: sessions not read\)$/);
+  assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop and agentbox", "its meters still come from it");
+  const worth = container.querySelector(".subscription-worth")!.textContent;
+  assert.match(worth, /agentbox's sessions were not read: its usage moves these meters, but its value is not counted/, "said even though no value of it is here");
+  assert.match(worth, /\$40 1 Codex session on laptop in these dates; the only Codex account there/);
+  assert.match(container.querySelector(".subscription-sources")!.textContent, /Meters come from laptop and agentbox and value from laptop, each machine's limits read through its own harvest; agentbox's sessions were not read/);
+  // Once its sessions arrive, it counts like any other machine.
+  render(container, { limits: machines, sessions: [spent("local", 40), spent("agentbox", 25)], scope: { label: "laptop", others: ["agentbox"], sessions: new Set(["local", "agentbox"]) } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters and value from laptop \+ agentbox$/);
+  assert.doesNotMatch(container.textContent, /sessions were not read|sessions not read/);
+});
+
+test("another machine's last good limits say how old they are", () => {
+  const base = limits(), readAt = new Date(now * 1000).toISOString(), earlier = new Date((now - 2 * HOUR) * 1000).toISOString();
+  const machines = { ...base, machines: [{ key: "local", label: "laptop", state: "ok" as const, readAt, durationMs: 900 }, { key: "agentbox", label: "agentbox", state: "stale" as const, reason: "connection" as const, readAt: earlier, durationMs: 900 }],
+    accounts: base.accounts.map((item) => ({ ...item, machines: [{ key: "local", profileKeys: [] }, ...item.key === codex ? [{ key: "agentbox", profileKeys: [] }] : []] })) };
+  const container = new Element();
+  render(container, { limits: machines, scope: { label: "laptop", others: ["agentbox"], sessions: new Set(["local", "agentbox"]) } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters and value from laptop \+ agentbox \(last good limits, 2 h ago\)$/);
+  const row = container.querySelectorAll(".limit-row").find((item) => /ChatGPT/.test(item.textContent))!;
+  assert.equal(row.querySelector(".limit-machines")!.textContent, "laptop and agentbox (stale)");
+  assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop and agentbox (stale)");
+  assert.equal(cardOf(container, team).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop");
+});
