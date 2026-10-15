@@ -222,8 +222,13 @@ export function liveMeter(meter, now, reportedUntil = null, { project = true } =
   const lastRate = used / Math.max(minimum, last.t - segment.start);
   // The same evidence a projection needs, measured up to the last reading: a burst right after a reset says nothing.
   const evidenced = segment.samples.length >= 2 && last.t - segment.start >= Math.max(HOUR, window * 0.1);
+  // Too early to project, but already well past the allowance: half of it used, or 15% (about a day's even share of a week) at three times the even pace.
+  const burning = project && !levelsOnly && tooEarly && !stale && state === "active" && window > 0 && segment.samples.length >= 2 && rate > 0
+    && (used >= 50 || (used >= 15 && rate * window >= 300));
+  const runsOut = burning ? now + (100 - used) / rate : null;
+  const burnAt = runsOut !== null && runsOut < resetsAt - 15 * 60 ? runsOut : null;
   return {
-    meter, cycle, segment, state, used, rate, remaining, projected, tooEarly, stale, capAt, levelsOnly, confirmedIdle: false, lastResetAt: null,
+    meter, cycle, segment, state, used, rate, remaining, projected, tooEarly, stale, capAt, burnAt, levelsOnly, confirmedIdle: false, lastResetAt: null,
     elapsed: Math.min(1, Math.max(0, (now - segment.start) / Math.max(1, resetsAt - segment.start))),
     capsEarly: state === "active" && capAt !== null && capAt < resetsAt - 15 * 60,
     // No recent reading, but the pace before the last one would have used the allowance up by now.
@@ -537,14 +542,18 @@ export function visibleMeters(item) {
   return {
     weekly: shown(item.weekly) ? item.weekly : null,
     session: shown(item.session) ? item.session : null,
-    extra: item.live.filter((live) => live !== item.weekly && live !== item.session && shown(live)
-      && live.meter.cycles.some((cycle) => cycle.samples.some((sample) => sample.used > 0))),
+    extra: item.live.filter((live) => live !== item.weekly && live !== item.session && shown(live) && !unusedExtraMeter(live.meter)),
   };
 }
 
+/** A model-specific or other extra limit that never moved off 0%: the view and `limits` leave it out. */
+export const unusedExtraMeter = (meter) => meter.meter !== weeklyMeter && meter.meter !== sessionMeter
+  && !meter.cycles.some((cycle) => cycle.samples.some((sample) => sample.used > 0));
+
 /**
- * One status per account and its urgency (lower `rank` first): a cap, extra usage, then the soonest run-out; on-track
- * accounts by how full they are; stale, idle and unidentified accounts last. `used` is the weekly level, capped at 100.
+ * One status per account and its urgency (lower `rank` first): a cap, extra usage, then the soonest run-out, including a
+ * week used up fast before a projection has evidence (`early-burn`, `since` its start); on-track accounts by how full they
+ * are; stale, idle and unidentified accounts last. `used` is the weekly level, capped at 100.
  */
 export function limitStatus(item, now) {
   const open = (live) => live?.cycle && live.state !== "retired" ? live : null;
@@ -556,6 +565,7 @@ export function limitStatus(item, now) {
   if (session?.state === "capped" && session.cycle.resetsAt > now) return status("capped", "danger", 1, { until: session.cycle.resetsAt, meter: "session" });
   if (weekly?.state === "overage") return status("overage", "warn", 2, { until: weekly.cycle.resetsAt });
   if (weekly?.capsEarly) return status("runs-out", "warn", 3, { at: weekly.capAt, early: weekly.cycle.resetsAt - weekly.capAt });
+  if (weekly?.burnAt) return status("early-burn", "warn", weekly.used >= 50 ? 3 : 4, { at: weekly.burnAt, since: weekly.segment.start });
   if (weekly?.mayBeUsedUp) return status("may-be-used-up", "warn", 4, { since: weekly.observedAt });
   if (session?.capsEarly && !session.stale) return status("runs-out", "warn", 5, { at: session.capAt, early: session.cycle.resetsAt - session.capAt, meter: "session" });
   if (weekly && (weekly.stale || weekly.state === "unreported")) return status("stale", "muted", 7, { since: weekly.observedAt });
@@ -764,7 +774,7 @@ export function recommendations(items, { now, sources = [], persisted = true, le
     return named ? `the ${named} profile` : "the default profile";
   };
   const headroom = (item) => 100 - Math.min(100, item.weekly.projected ?? item.weekly.used);
-  const roomy = (item) => item.weekly?.cycle && !item.weekly.stale && item.weekly.state === "active" && !item.weekly.capsEarly && headroom(item) >= 15;
+  const roomy = (item) => item.weekly?.cycle && !item.weekly.stale && item.weekly.state === "active" && !item.weekly.capsEarly && !item.weekly.burnAt && headroom(item) >= 15;
   // Where work can go when this account runs out: another account with room, the same provider first.
   const alternative = (item) => accounts.filter((other) => other !== item && roomy(other))
     .sort((left, right) => (left.provider === item.provider ? 0 : 1) - (right.provider === item.provider ? 0 : 1) || headroom(right) - headroom(left))[0] ?? null;
@@ -791,6 +801,14 @@ export function recommendations(items, { now, sources = [], persisted = true, le
             : `${name} weekly allowance runs out in ${duration(weekly.capAt - now)}, ${duration(early)} before it resets`,
           detail: `At this pace it runs out ${formatTime(weekly.capAt)}. You are using about ${rate(weekly.rate * DAY)} a day; the allowance supports ${rate(weekly.dailyBudget)} a day until ${formatTime(weekly.cycle.resetsAt)}. ` +
             (other ? `Point background agents and long-running work at ${target(other, item)}, and keep this account for interactive work. ` : "Keep the remaining allowance for interactive work, and run subagents and bulk jobs on cheaper models.") + afterCap(item),
+        });
+      } else if (weekly.burnAt) {
+        // Too early for a projection: the pace so far, not a forecast, and no stronger than the level behind it.
+        push(item, "early-burn", {
+          tone: weekly.used >= 50 ? "act" : "watch", score: 950,
+          title: `${name}: ${Math.round(weekly.used)}% used in ${duration(now - weekly.segment.start)}; at this pace it runs out ${formatTime(weekly.burnAt)}`,
+          detail: `You are using about ${rate(weekly.rate * DAY)} a day; the allowance supports ${rate(weekly.dailyBudget)} a day until ${formatTime(weekly.cycle.resetsAt)}. It is too early in the week to project, so this is the pace so far, not a forecast. ` +
+            (other ? `Point background agents and long-running work at ${target(other, item)}. ` : "Keep the remaining allowance for interactive work, and run subagents and bulk jobs on cheaper models.") + afterCap(item),
         });
       } else if (weekly.mayBeUsedUp) {
         push(item, "may-be-used-up", {
@@ -830,10 +848,11 @@ export function recommendations(items, { now, sources = [], persisted = true, le
       detail: "Their last readings came long before the reset, so how much was left unused is unknown; they are left out of the averages and plan advice. A scheduled `session-analytics limits --quiet` every 20 minutes records each close this machine can see, including the Codex account read.",
     });
     if (item.windows && item.windows.capped > 0) {
-      const weeklyBinding = weekly?.capsEarly || weekly?.state === "capped";
+      // Past lockouts are worth watching, never acting on now; past 100% on extra usage, the weekly limit is the tighter one.
+      const weeklyBinding = weekly?.capsEarly || weekly?.state === "capped" || weekly?.state === "overage";
       const other = alternative(item);
       push(item, "lockouts", {
-        tone: weeklyBinding ? "watch" : "act", score: 600 + item.windows.lockedSeconds / 60,
+        tone: "watch", score: 600 + Math.min(99, item.windows.lockedSeconds / HOUR),
         title: `Hit the ${name} 5-hour limit ${item.windows.capped} time${item.windows.capped === 1 ? "" : "s"} in 7 days (${duration(item.windows.lockedSeconds)} locked out)`,
         detail: weeklyBinding
           ? "The weekly allowance is the tighter limit this week, so these lockouts mostly pace you. Spread heavy work across more windows rather than pushing through one."

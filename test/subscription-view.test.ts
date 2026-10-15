@@ -258,3 +258,42 @@ test("another machine's last good limits say how old they are", () => {
   assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop and agentbox (stale)");
   assert.equal(cardOf(container, team).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop");
 });
+
+test("a week used up fast says so before a projection, and a week on extra usage is past the allowance in History too", () => {
+  const base = limits(), codexReset = now + 7 * DAY - 12.5 * HOUR;
+  const snapshot: LimitsSnapshot = {
+    ...base,
+    observations: [
+      ...base.observations.filter((row) => row.account !== codex && !(row.account === team && row.status === "rejected")),
+      reading("claude", team, "seven_day", at("2026-10-16T03:00:00Z"), now - 2 * HOUR, 102, "overage"),
+      ...[[8, 20], [4, 45], [0.5, 66]].map(([hours, level]) => reading("codex", codex, "seven_day", codexReset, now - hours! * HOUR, level!)),
+    ],
+  };
+  const container = new Element();
+  render(container, { limits: snapshot });
+  const row = container.querySelectorAll(".limit-row").find((item) => /ChatGPT/.test(item.textContent))!;
+  assert.match(row.querySelector(".status-chip")!.textContent, /^66% used in 12h · runs out 18:\d\d at this pace$/);
+  assert.equal(row.dataset["tone"], "warn");
+  assert.match(cardOf(container, codex).querySelector(".meter-status")!.textContent, /^66% used in 12h: at this pace it runs out 18:\d\d, \d+d \d+h before it resets .*\. Too early in the window for a projection\.$/);
+  assert.ok(container.querySelector(".subscription-next")!.querySelectorAll(".next-title").some((title) => /66% used in 12h; at this pace it runs out 18:\d\d$/.test(title.textContent)));
+  const lane = container.querySelector(".closes-chart")!.querySelectorAll(".history-lane").find((item) => /Team/.test(item.querySelector(".lane-label")!.textContent))!;
+  const readout = lane.querySelector(".subscription-readout")!.textContent;
+  assert.match(readout, /This week · resets Fri 03:00 Past the included allowance, on paid extra usage since 10:00$/, "as the card says, not 100% used so far");
+  assert.match(cardOf(container, team).querySelector(".meter-status")!.textContent, /^Past the included allowance, on paid extra usage/);
+});
+
+test("value used says 'first reading' only for a provider whose accounts start at their first reading, not at the start of the dates", () => {
+  const spent = (provider: string, value: number, profileKey?: string) => ({ provider, machine: "local", ...(profileKey ? { historyProfile: { profileKey, days: [] } } : {}),
+    velocity: { version: 1, dimensions: [], undated: [], buckets: [["2026-10-13", 10, 0, [value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } });
+  const base = limits();
+  // Max's first reading is 13 Oct 02:00, Codex's 11 Oct 20:00; Max's sessions are in its profile.
+  const snapshot = { ...base, accounts: base.accounts.map((item) => item.key === max ? { ...item, profileKeys: ["profile-max"] } : item) };
+  const container = new Element();
+  const worth = (from: number) => {
+    render(container, { limits: snapshot, sessions: [spent("claude", 30, "profile-max"), spent("codex", 40)], range: { from, to: now } });
+    return container.querySelector(".worth-totals")!.querySelector("small")!.textContent;
+  };
+  assert.match(worth(at("2026-10-01T00:00:00Z")), /^Claude since 13 Oct \(first reading\), Codex since 11 Oct \(first reading\), to now, matched to accounts/);
+  // The dates start after Codex's first reading: Codex is counted from the start of the dates, which is no reading.
+  assert.match(worth(at("2026-10-11T22:00:00Z")), /^Claude since 13 Oct \(first reading\), Codex since 11 Oct, to now, matched to accounts/);
+});

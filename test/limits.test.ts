@@ -129,6 +129,23 @@ test("--no-index harvests without writing the ledger", async () => {
   assert.equal(snapshot.sources.find((source) => source.source === "codex-session")?.status, "unavailable");
 });
 
+test("limits leaves out extra limits that never moved off 0%, as the dashboard does", () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-quiet-meters-"));
+  const sessions = join(home, "codex", "sessions"), clock = Math.floor(Date.now() / 1000);
+  mkdirSync(sessions, { recursive: true });
+  const weekly = (id: string, name: string, used: number) => codexLine(new Date((clock - 600) * 1000).toISOString(),
+    { limit_id: id, limit_name: name, plan_type: "pro", primary: { used_percent: used, window_minutes: 10_080, resets_at: clock + 3 * 86_400 } });
+  writeFileSync(join(sessions, "rollout-a.jsonl"), [JSON.stringify({ type: "session_meta", payload: { creator_account_id: "account" } }),
+    weekly("codex", "Codex", 30), weekly("codex_bengalfox", "GPT-5.3-Codex-Spark", 12), weekly("gpt_reserve", "GPT-Reserve", 0)].join("\n") + "\n");
+  const result = spawnSync(process.execPath, [join(root, "bin/session-analytics.ts"), "limits", "--no-remote", "--offline", "--data-dir", join(home, "data"), "--codex-root", sessions], {
+    encoding: "utf8", env: { HOME: home, CLAUDE_CONFIG_DIR: join(home, "no-claude"), SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: join(home, "no-logs") },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^ {2}Weekly · all models +30% used/m);
+  assert.match(result.stdout, /^ {2}GPT-5\.3-Codex-Spark · Weekly +12% used/m);
+  assert.doesNotMatch(result.stdout, /GPT-Reserve/);
+});
+
 test("limits statusline records readings once per change and prints them", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "limits-statusline-"));
   const resets = Math.floor(Date.now() / 1000) + 3 * 3600;
