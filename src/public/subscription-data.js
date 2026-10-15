@@ -13,6 +13,7 @@
 import { ledgerCells } from "./velocity-data.js";
 import { planFor, topRank } from "./subscription-plans.js";
 import { integer, zonedHourKey } from "./format.js";
+import { localMachine } from "./machines.js";
 
 export const HOUR = 3600;
 export const DAY = 86_400;
@@ -314,26 +315,40 @@ export function zonedDayStart(day, timeZone = "UTC") {
 }
 
 /**
- * Which account each Claude or Codex session's value belongs to. Meters are read on this machine only, so only its sessions
- * can move them: `local` is null when every session is this machine's, else a test for this machine's sessions, and the
- * others are `elsewhere`. A session joins the account whose `profileKeys` hold its `historyProfile.profileKey`; one without
- * a profile key (every Codex session today, Claude sessions without a native transcript) joins its provider's only account.
- * Everything else is unattributed. Neither unattributed nor elsewhere sessions calibrate a meter.
+ * The machines whose limits are in a limits snapshot, by key: every machine that answered or has last good limits, when
+ * limits were read from several machines; null when they are this machine's alone.
  */
-export function attributeSessions(sessions, accounts, { local = null } = {}) {
-  const byProfile = new Map(), byAccount = new Map(), only = {};
+export const limitMachines = (limits) => limits?.machines ? new Set(limits.machines.filter((machine) => machine.state !== "failed" && machine.readAt).map(({ key }) => key)) : null;
+
+/**
+ * Which account each Claude or Codex session's value belongs to. Only sessions from machines whose limits were read can be
+ * matched to the meters they moved: `read` is that set of machine keys (`limitMachines`), or null when limits are this
+ * machine's alone; sessions from any other machine are `elsewhere`. A session's machine is its `machine`, else this one.
+ * A Claude session joins the account logged into its profile on its machine (`historyProfile.profileKey` among the account's
+ * profile keys there); one without a profile key (every Codex session today, Claude sessions without a native transcript)
+ * joins the only account of its provider on its machine. Without `read`, every account is this machine's, its
+ * `profileKeys` are this machine's, and the only account is the only identified one. Everything else is unattributed.
+ * Neither unattributed nor elsewhere sessions calibrate a meter.
+ */
+export function attributeSessions(sessions, accounts, { read = null } = {}) {
+  const byProfile = new Map(), byAccount = new Map(), only = new Map();
   for (const account of accounts ?? []) {
     byAccount.set(account.key, []);
     if (!identified(account.key)) continue;
-    only[account.provider] = only[account.provider] === undefined ? account.key : null;
-    for (const profile of account.profileKeys ?? []) if (!byProfile.has(`${account.provider}|${profile}`)) byProfile.set(`${account.provider}|${profile}`, account.key);
+    for (const { key: machine, profileKeys } of read ? account.machines ?? [] : [{ key: localMachine, profileKeys: account.profileKeys ?? [] }]) {
+      const place = `${account.provider}|${machine}`;
+      only.set(place, only.has(place) ? null : account.key);
+      for (const profile of profileKeys) if (!byProfile.has(`${place}|${profile}`)) byProfile.set(`${place}|${profile}`, account.key);
+    }
   }
+  const counted = read ?? new Set([localMachine]);
   const unattributed = { claude: [], codex: [] }, elsewhere = { claude: [], codex: [] };
   for (const session of sessions ?? []) {
     if (!(session.provider in unattributed)) continue;
-    if (local !== null && !local(session)) { elsewhere[session.provider].push(session); continue; }
-    const profile = session.historyProfile?.profileKey;
-    const key = profile ? byProfile.get(`${session.provider}|${profile}`) : only[session.provider];
+    const machine = session.machine ?? localMachine;
+    if (!counted.has(machine)) { elsewhere[session.provider].push(session); continue; }
+    const place = `${session.provider}|${machine}`, profile = session.historyProfile?.profileKey;
+    const key = profile ? byProfile.get(`${place}|${profile}`) : only.get(place);
     (key ? byAccount.get(key) : unattributed[session.provider]).push(session);
   }
   return { byAccount, unattributed, elsewhere };
@@ -646,18 +661,19 @@ export function subscriptionTotals(items, unattributed = { claude: 0, codex: 0 }
 
 /**
  * The Subscription view's model: one entry per account, totals, the value nobody's account could claim and the value of
- * other machines, whose meters are not read here. `plans` and `payers` hold per-account overrides by account key
- * (`"none"` excludes an account from value totals but keeps its meters); `local` is as in `attributeSessions`.
+ * machines whose limits were not read. `plans` and `payers` hold per-account overrides by account key (`"none"` excludes
+ * an account from value totals but keeps its meters).
  */
-export function subscriptionModel({ limits, sessions, timeZone = "UTC", now, range, plans = {}, payers = {}, local = null }) {
-  const accounts = limits?.accounts ?? [];
+export function subscriptionModel({ limits, sessions, timeZone = "UTC", now, range, plans = {}, payers = {} }) {
+  const accounts = limits?.accounts ?? [], read = limitMachines(limits);
   const meters = buildMeters(limits?.observations ?? [], now, limits?.meters ?? []);
-  const { byAccount, unattributed, elsewhere } = attributeSessions(sessions, accounts, { local });
+  const { byAccount, unattributed, elsewhere } = attributeSessions(sessions, accounts, { read });
   const items = accounts.map((account) => {
     const own = byAccount.get(account.key) ?? [], override = plans[account.key];
+    const keyed = (read ? account.machines ?? [] : [account]).some(({ profileKeys }) => profileKeys?.length);
     // Whether this account's value can be measured at all: an account with no attributable sessions has unknown value, not zero.
     const basis = !identified(account.key) || !own.length ? "none"
-      : own.some((session) => session.historyProfile) || (account.provider === "claude" && account.profileKeys?.length) ? "profiles" : "provider";
+      : own.some((session) => session.historyProfile) || (account.provider === "claude" && keyed) ? "profiles" : "provider";
     return {
       ...accountUtilization({
         account, meters, sessions: own, timeZone, now, range, planId: override === "none" ? null : override || account.plan,

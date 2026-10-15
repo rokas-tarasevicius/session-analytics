@@ -20,6 +20,8 @@ import type {
 export type LimitsOptions = Pick<AnalyzeOptions, "dataDir" | "noIndex" | "codexRoot" | "codexArchiveRoot" | "claudeRoot" | "offline"> & {
   /** Read banked reset credits through the local Codex app-server (Codex contacts OpenAI). On unless `false`. */
   codexAccount?: boolean;
+  /** `false` leaves full Claude readings unsettled (`resolveCaps`), for a reader that merges them with other machines' first. */
+  settle?: boolean;
 };
 
 /** First harvest on a machine: Codex keeps weeks of sessions, and T3 Code keeps several days of events. */
@@ -280,7 +282,7 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   const summary = snapshotAccounts(kept, ledger, names, seeds, now);
   return {
     schemaVersion: 2, generatedAt: new Date(now * 1000).toISOString(), dataSource: "live", persisted, ledger: ledgerStatus,
-    ...summary, sources: sourceHealth(kept, read, available), observations: resolveCaps(kept, summary.accounts),
+    ...summary, sources: sourceHealth(kept, read, available), observations: options.settle === false ? kept : resolveCaps(kept, summary.accounts),
     resetCreditHistory: ledger.resetCreditHistory, codexAccount,
   };
 }
@@ -318,20 +320,45 @@ function meterTitle(meter: string, limitNames: Record<string, string>): string {
 const providerOrder = (provider: LimitProvider): number => provider === "claude" ? 0 : 1;
 const attributionOrder: Record<LimitAccount["attribution"], number> = { account: 0, profile: 0, "weekly-phase": 1, unattributed: 2 };
 
-function snapshotAccounts(rows: LimitObservation[], ledger: Ledger, names: Map<string, string[]>, seeds: Map<string, boolean>, now: number): Pick<LimitsSnapshot, "accounts" | "meters" | "plans"> {
-  const lastSeen = new Map<string, number>(), anchors = new Map<string, number>(), meters = new Map<string, LimitMeterInfo>();
+/** Claude first, then accounts before groups of readings without one, the most recently active first. */
+export const accountOrder = (left: LimitAccount, right: LimitAccount): number =>
+  providerOrder(left.provider) - providerOrder(right.provider) || attributionOrder[left.attribution] - attributionOrder[right.attribution] ||
+  (right.lastSeen ?? 0) - (left.lastSeen ?? 0) || left.key.localeCompare(right.key);
+
+/** Each account's latest reading and latest weekly reset, by `provider|account`. */
+export function accountActivity(rows: LimitObservation[]): { lastSeen: Map<string, number>; anchors: Map<string, number> } {
+  const lastSeen = new Map<string, number>(), anchors = new Map<string, number>();
   for (const row of rows) {
     const id = `${row.provider}|${row.account}`;
     lastSeen.set(id, Math.max(lastSeen.get(id) ?? 0, row.observedAt));
     if (row.meter === "seven_day" && row.status !== "idle") anchors.set(id, Math.max(anchors.get(id) ?? 0, row.resetsAt));
-    const meter = meters.get(`${id}|${row.meter}`);
-    if (!meter) meters.set(`${id}|${row.meter}`, { provider: row.provider, account: row.account, meter: row.meter, label: meterTitle(row.meter, ledger.limitNames), windowMinutes: row.windowMinutes, lastObservedAt: row.observedAt, retired: false });
+  }
+  return { lastSeen, anchors };
+}
+
+/** One entry per account and meter. A meter is retired when its account kept reporting other meters for longer than its window. */
+export function meterInfos(rows: LimitObservation[], title: (row: LimitObservation) => string): LimitMeterInfo[] {
+  const { lastSeen } = accountActivity(rows), meters = new Map<string, LimitMeterInfo>();
+  for (const row of rows) {
+    const id = `${row.provider}|${row.account}|${row.meter}`, meter = meters.get(id);
+    if (!meter) meters.set(id, { provider: row.provider, account: row.account, meter: row.meter, label: title(row), windowMinutes: row.windowMinutes, lastObservedAt: row.observedAt, retired: false });
     else { meter.lastObservedAt = Math.max(meter.lastObservedAt, row.observedAt); meter.windowMinutes ??= row.windowMinutes; }
   }
   for (const meter of meters.values()) {
     const window = meter.windowMinutes ? meter.windowMinutes * 60 : 7 * 86_400;
     meter.retired = (lastSeen.get(`${meter.provider}|${meter.account}`) ?? 0) - meter.lastObservedAt > window;
   }
+  return [...meters.values()].sort((left, right) => left.provider.localeCompare(right.provider) || left.account.localeCompare(right.account) || left.meter.localeCompare(right.meter));
+}
+
+/** Deprecated `plans`: the plan of each provider's most recently active account, from accounts in `accountOrder`. */
+export function activePlans(accounts: LimitAccount[]): LimitsSnapshot["plans"] {
+  const active = (provider: LimitProvider) => accounts.find((account) => account.provider === provider && identified(account.key))?.plan ?? null;
+  return { claude: active("claude") as LimitsSnapshot["plans"]["claude"], codex: active("codex") as LimitsSnapshot["plans"]["codex"] };
+}
+
+function snapshotAccounts(rows: LimitObservation[], ledger: Ledger, names: Map<string, string[]>, seeds: Map<string, boolean>, now: number): Pick<LimitsSnapshot, "accounts" | "meters" | "plans"> {
+  const { lastSeen, anchors } = accountActivity(rows);
   const keys = new Map<string, LimitProvider>();
   for (const row of rows) keys.set(`${row.provider}|${row.account}`, row.provider);
   for (const [key, account] of Object.entries(ledger.accounts)) if (names.has(key) && accountAttribution(key) === "account") keys.set(`${account.provider}|${key}`, account.provider);
@@ -342,18 +369,13 @@ function snapshotAccounts(rows: LimitObservation[], ledger: Ledger, names: Map<s
     const seed = seeds.get(key);
     return {
       key, provider, attribution: accountAttribution(key), label: accountLabel(provider, key, plan, profileNames, weeklyAnchor), profileNames,
-      profileKeys: record?.profileKeys ?? [], plan, planSource: record?.planSource ?? null, planEvidence: record?.planEvidence ?? null,
+      profileKeys: record?.profileKeys ?? [], plan, planSource: record?.planSource ?? null, planEvidence: record?.planEvidence ?? null, planObservedAt: record?.planObservedAt ?? null,
       extraUsage: provider === "claude" ? claudeSummary(record?.extraUsage) ?? (seed === undefined ? null : { observedAt: Math.floor(now), extraUsage: seed ? "enabled" : "disabled", disabledReason: null }) : null,
       codex: provider === "codex" ? codexSummary(record?.codex) : null,
       weeklyAnchor, lastSeen: lastSeen.get(id) ?? null,
     };
-  }).sort((left, right) => providerOrder(left.provider) - providerOrder(right.provider) || attributionOrder[left.attribution] - attributionOrder[right.attribution] ||
-    (right.lastSeen ?? 0) - (left.lastSeen ?? 0) || left.key.localeCompare(right.key));
-  const active = (provider: LimitProvider) => accounts.find((account) => account.provider === provider && identified(account.key))?.plan ?? null;
-  return {
-    accounts, meters: [...meters.values()].sort((left, right) => left.provider.localeCompare(right.provider) || left.account.localeCompare(right.account) || left.meter.localeCompare(right.meter)),
-    plans: { claude: active("claude") as LimitsSnapshot["plans"]["claude"], codex: active("codex") as LimitsSnapshot["plans"]["codex"] },
-  };
+  }).sort(accountOrder);
+  return { accounts, meters: meterInfos(rows, (row) => meterTitle(row.meter, ledger.limitNames)), plans: activePlans(accounts) };
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>

@@ -138,7 +138,7 @@ export function resetCreditHistory(value: unknown): Ledger["resetCreditHistory"]
   return [...rows.values()].sort((left, right) => left[2] - right[2]).slice(-500);
 }
 
-function planEvidence(value: unknown): PlanEvidence | null {
+export function planEvidence(value: unknown): PlanEvidence | null {
   const evidence = record(value);
   return evidence ? {
     organizationType: enumValue(evidence["organizationType"]), organizationRateLimitTier: enumValue(evidence["organizationRateLimitTier"]),
@@ -150,7 +150,8 @@ function planEvidence(value: unknown): PlanEvidence | null {
 const planSources = new Set<string>(["claude-config", "claude-credentials", "codex-account", "codex-session"]);
 const profileKeyPattern = /^profile-[0-9a-f]{20}$/;
 
-function ledgerAccount(key: string, value: unknown): LedgerAccount | null {
+/** An account record from the ledger or another machine, through the same allowlists. */
+export function ledgerAccount(key: string, value: unknown): LedgerAccount | null {
   const account = record(value);
   const provider = providerOf(account?.["provider"]);
   if (!account || !provider || key === "" || !validAccount(provider, key)) return null;

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { brand } from "./brand.ts";
-import { combineSnapshots } from "./interop/combine.ts";
+import { combineSnapshots, historyProfileKeys, profileKeyRemaps } from "./interop/combine.ts";
 import { maximumSnapshotBytes } from "./interop/files.ts";
 import { validateSnapshot } from "./interop/snapshot.ts";
 import { canonicalTimeZone, type RemoteMachine, type RemoteOptions } from "./options.ts";
@@ -319,6 +319,17 @@ export function machineKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64) || "machine";
 }
 
+/** Each machine's key, in order: its `machineKey`, numbered `-2`, `-3`… when another machine or `local` has it already. */
+export function machineKeys(machines: ReadonlyArray<Pick<RemoteMachine, "name">>): string[] {
+  const keys = new Set<string>([localMachine]);
+  return machines.map(({ name }) => {
+    let key = machineKey(name);
+    for (let attempt = 2; keys.has(key); attempt++) key = `${machineKey(name).slice(0, 60)}-${attempt}`;
+    keys.add(key);
+    return key;
+  });
+}
+
 /**
  * What a remote read asks for, so a last good snapshot answers only the same request. Only --offline is left
  * out: the remote report makes no network request either way. --no-index changes the result (no retained history).
@@ -373,6 +384,8 @@ export interface MachineReads {
   abort(): void;
   /** This machine's snapshot with each other machine's current one, and how each was read. */
   combine(local: MachineAnalytics, localMs: number): MachineAnalytics;
+  /** Each machine's Claude profile keys as the last combined snapshot names them, by machine key; null before the first. */
+  profileKeys(): Map<string, Map<string, string>> | null;
 }
 
 /** The options every machine is read with: this machine's zone and portable repository IDs, so snapshots combine. */
@@ -395,13 +408,10 @@ export function machineReads(
   let controller = new AbortController();
   const abort = (): void => { controller.abort(); controller = new AbortController(); };
   signal?.addEventListener("abort", abort, { once: true });
-  const keys = new Set<string>([localMachine]);
-  const readings: MachineReading[] = remote.machines.map((machine) => {
-    let key = machineKey(machine.name);
-    for (let attempt = 2; keys.has(key); attempt++) key = `${machineKey(machine.name).slice(0, 60)}-${attempt}`;
-    keys.add(key);
-    return { machine, pending: null, snapshot: null, status: { key, label: machine.name, state: "reading", sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } };
-  });
+  const keys = machineKeys(remote.machines);
+  const readings: MachineReading[] = remote.machines.map((machine, index) =>
+    ({ machine, pending: null, snapshot: null, status: { key: keys[index]!, label: machine.name, state: "reading", sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } }));
+  let remapped: Map<string, Map<string, string>> | null = null;
   const lastGood = async (reading: MachineReading): Promise<Pick<MachineReading, "snapshot" | "status" | "identity"> | null> => {
     const { machine } = reading;
     const found = machine.saved ? await readLastGood(options, reading.status.key, { request, target: targetDigest(machine), ...(machine.identity ? { identity: machine.identity } : {}) }) : null;
@@ -486,10 +496,13 @@ export function machineReads(
       inputs.push(null);
     }
     const warnings = [...(statuses.some(({ state }) => state === "failed") ? [remoteUnavailableWarning] : []), ...(statuses.some(({ state }) => state === "stale") ? [staleMachineWarning] : [])];
-    return combineSnapshots(inputs, { machines: statuses, warnings });
+    const combined = combineSnapshots(inputs, { machines: statuses, warnings });
+    const remaps = profileKeyRemaps(inputs.map(historyProfileKeys));
+    remapped = new Map(statuses.map(({ key }, index) => [key, new Map(remaps[index])]));
+    return combined;
   };
 
-  return { readings, loaded, start, abort, combine };
+  return { readings, loaded, start, abort, combine, profileKeys: () => remapped };
 }
 
 /**

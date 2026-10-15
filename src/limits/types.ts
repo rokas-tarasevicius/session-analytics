@@ -1,5 +1,7 @@
 /** Subscription limit meters: provider-reported "used percent" of a reset window, never content. */
 
+import type { MachineReason } from "../types.ts";
+
 export type LimitProvider = "claude" | "codex";
 export type LimitSource = "codex-session" | "codex-account" | "claude-sdk-log" | "claude-statusline";
 /**
@@ -106,6 +108,8 @@ export interface LimitAccount {
   plan: ClaudePlan | CodexPlan | null;
   planSource: PlanSource | null;
   planEvidence: PlanEvidence | null;
+  /** When the plan was last read, Unix seconds; null when no plan was read. */
+  planObservedAt: number | null;
   /** Claude only. */
   extraUsage: ClaudeAccountSummary | null;
   /** Codex only: credit balance and banked resets. */
@@ -114,6 +118,26 @@ export interface LimitAccount {
   weeklyAnchor: number | null;
   /** Latest reading on any meter, Unix seconds. */
   lastSeen: number | null;
+  /**
+   * Only when limits were read from several machines: each machine logged into the account (a Claude profile or Codex home
+   * there), this machine first, with those profile keys as the combined snapshot names them, so sessions join by
+   * (`session.machine`, `historyProfile.profileKey`).
+   */
+  machines?: Array<{ key: string; profileKeys: string[] }>;
+}
+
+/** How one machine's limits were read, when limits are read from several machines. Content-free, like `MachineStatus`. */
+export interface LimitsMachine {
+  /** The same key as the combined snapshot's `MachineStatus.key`: `local` for this machine. */
+  key: string;
+  label: string;
+  /** `stale`: not read now, its last good limits are used; `reading`: not answered yet, its last good limits (if any) are used. */
+  state: "ok" | "stale" | "failed" | "reading";
+  reason?: MachineReason;
+  fix?: string;
+  /** When the limits in use were read; null when there are none. */
+  readAt: string | null;
+  durationMs: number | null;
 }
 
 /** Per account and meter: display label and whether the provider still reports it. */
@@ -156,4 +180,6 @@ export interface LimitsSnapshot {
   resetCreditHistory: Array<[LimitProvider, string, number, number]>;
   /** Whether the opt-in Codex account read (banked resets) is enabled. */
   codexAccount: "off" | "ok" | "unavailable";
+  /** Only when limits were read from other machines too: this machine first, then the others in configured order. */
+  machines?: LimitsMachine[];
 }

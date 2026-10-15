@@ -91,6 +91,26 @@ export interface CombineOptions {
   machines?: Array<MachineStatus | undefined>;
 }
 
+/**
+ * The key each input's Claude profiles take once combined, as [original, combined] pairs in profile order. The first
+ * input keeps its keys; a later key that is already taken becomes a hash of itself, its input's position and an attempt,
+ * because matching directory hashes do not identify a shared source across machines. Limits read from the same machines
+ * remap their profile keys with it, so their accounts join the combined snapshot's sessions.
+ */
+export function profileKeyRemaps(inputs: ReadonlyArray<readonly string[] | null>): Array<Array<[string, string]>> {
+  const taken = new Set<string>();
+  return inputs.map((keys, position) => (keys ?? []).map((original): [string, string] => {
+    let key = original, attempt = 0;
+    while (taken.has(key)) key = `profile-${createHash("sha256").update(`${original}:${position}:${attempt++}`).digest("hex").slice(0, 20)}`;
+    taken.add(key);
+    return [original, key];
+  }));
+}
+
+/** An input's Claude profile keys in profile order, as `profileKeyRemaps` takes them. */
+export const historyProfileKeys = (snapshot: MachineAnalytics | null): string[] | null =>
+  snapshot ? (snapshot.historyCoverage?.profiles ?? []).map(({ profileKey }) => profileKey) : null;
+
 /** Keys and labels stay unique when combined files name the same machine. */
 function uniqueIn(taken: Set<string>, value: string, suffix: (attempt: number) => string): string {
   let result = value;
@@ -137,21 +157,18 @@ export function combineSnapshots(inputs: ReadonlyArray<MachineAnalytics | null>,
     return { snapshot, remap, fallback: remap.get(own[0]!.key)!, fresh };
   });
   const sessions = new Map<string, { session: SessionAnalytics; fresh: boolean }>();
-  const profiles: HistoryProfile[] = [], profileKeys = new Set<string>();
+  const profiles: HistoryProfile[] = [];
+  const remaps = profileKeyRemaps(inputs.map(historyProfileKeys));
   let generatedAt = first.generatedAt;
   let duplicates = false;
   for (const [position, { snapshot, remap, fallback, fresh }] of sources.entries()) {
     if (!snapshot) continue;
     if (timestampMilliseconds(snapshot.generatedAt) > timestampMilliseconds(generatedAt)) generatedAt = snapshot.generatedAt;
     const machineOf = (key: string | undefined): string => (key !== undefined ? remap.get(key) : undefined) ?? fallback;
-    const remappedProfiles = new Map<string, string>();
-    for (const profile of snapshot.historyCoverage?.profiles ?? []) {
-      let key = profile.profileKey, attempt = 0;
-      // Matching directory hashes do not identify a shared source across machines.
-      while (profileKeys.has(key)) key = `profile-${createHash("sha256").update(`${profile.profileKey}:${position}:${attempt++}`).digest("hex").slice(0, 20)}`;
-      profileKeys.add(key); remappedProfiles.set(profile.profileKey, key);
+    const keys = remaps[position]!, remappedProfiles = new Map(keys);
+    for (const [index, profile] of (snapshot.historyCoverage?.profiles ?? []).entries()) {
       const { machine, ...rest } = profile;
-      profiles.push({ ...rest, profileKey: key, ordinal: profiles.length + 1, ...(described ? { machine: machineOf(machine) } : {}) });
+      profiles.push({ ...rest, profileKey: keys[index]![1], ordinal: profiles.length + 1, ...(described ? { machine: machineOf(machine) } : {}) });
     }
     for (const session of snapshot.sessions) {
       const key = `${session.provider}:${session.sessionKey}`;

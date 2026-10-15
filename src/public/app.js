@@ -15,7 +15,7 @@ import { providerMark, renderProviderEvidence, metricCoverage } from "./provider
 import { renderPricingPanel } from "./pricing.js";
 import { renderToolsView } from "./tools.js";
 import { renderSubscription, subscriptionRefreshMilliseconds } from "./subscription.js";
-import { zonedDayStart } from "./subscription-data.js";
+import { limitMachines, zonedDayStart } from "./subscription-data.js";
 import { toolsDays } from "./tools-data.js";
 import { renderVelocity, velocityProviders } from "./velocity.js";
 import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity, shiftDay } from "./velocity-data.js";
@@ -731,6 +731,7 @@ function clearInactiveAnalyticsViews(activeName) {
 // Limit meters come from their own endpoint: they are account-wide, cheap to re-harvest, and refresh while the view is open.
 let limits = null;
 let limitsTimer = null;
+let limitsPoll = null;
 async function loadLimitsNow(refresh = false) {
   try {
     const response = await fetch(`/api/limits${refresh ? "?refresh=1" : ""}`);
@@ -740,21 +741,24 @@ async function loadLimitsNow(refresh = false) {
     limits ??= { schemaVersion: 2, dataSource: "live", persisted: false, plans: { claude: null, codex: null }, sources: [], observations: [], accounts: [], meters: [], resetCreditHistory: [], unavailable: true };
   }
   // Meters need no sessions, so they render as soon as they arrive, before the session scan finishes.
-  if (!sharedSnapshot && !loadFailed && currentViewName() === "subscription") renderSubscriptionView();
+  if (!sharedSnapshot && !loadFailed && currentViewName() === "subscription") { renderSubscriptionView(); renderStripMeta(); }
+  // Another machine's limits arrive after this machine's: ask again in 2 s while one is still reading.
+  if (limitsPoll !== null) { clearTimeout(limitsPoll); limitsPoll = null; }
+  if (limits.machines?.some(({ state }) => state === "reading") && limitsTimer !== null && typeof setTimeout === "function") limitsPoll = setTimeout(() => void loadLimits(false), 2000);
 }
 const loadLimits = singleFlight(loadLimitsNow);
 
 function scheduleLimits(active) {
-  if (!active) { if (limitsTimer !== null) clearInterval(limitsTimer); limitsTimer = null; return; }
+  if (!active) { if (limitsTimer !== null) clearInterval(limitsTimer); limitsTimer = null; if (limitsPoll !== null) clearTimeout(limitsPoll); limitsPoll = null; return; }
   if (!limits) void loadLimits(false);
   if (typeof setInterval === "function") limitsTimer ??= setInterval(() => { if (document.visibilityState !== "hidden") void loadLimits(false); }, subscriptionRefreshMilliseconds);
 }
 
 /**
  * Subscription is account-wide: it reads every session, ignoring the repository focus and the Machines strip, over the
- * selected dates. Limits are read on this machine only, so value counts only its sessions, and the view names the other
- * machines read. Before the snapshot arrives it shows the meters alone. Each refresh keeps focus, open disclosures and
- * the scroll position.
+ * selected dates. Value counts the sessions of every machine whose limits were read, and the view names the machines it
+ * leaves out. Before the snapshot arrives it shows the meters alone. Each refresh keeps focus, open disclosures and the
+ * scroll position.
  */
 function renderSubscriptionView() {
   const restoreFocus = rememberFocus();
@@ -763,7 +767,6 @@ function renderSubscriptionView() {
   renderSubscription($("#subscription-view"), {
     limits, sessions: all ? all.sessions : null, timeZone: context?.timeZone ?? "UTC",
     range: context ? { from: zonedDayStart(context.start, context.timeZone), to: zonedDayStart(shiftDay(context.end, 1), context.timeZone) } : null,
-    local: machines.length ? (session) => sessionMachine(session, machines) === localMachine : null,
     scope: {
       label: machines.find(({ key }) => key === localMachine)?.label ?? "this machine",
       others: machines.filter(({ key, state, readAt }) => key !== localMachine && state !== "failed" && readAt).map(({ label }) => label),
@@ -1051,10 +1054,12 @@ function setMachine(key, on) {
   applyMachines(); renderMachines(); renderView();
 }
 
-/** The strip's note: the snapshot's time, or on Subscription, that the strip does not narrow it. */
+/** The strip's note: the snapshot's time, or on Subscription, which machines it counts whatever the strip shows. */
 function renderStripMeta() {
   if (!fullSnapshot || (fullSnapshot.machines?.length ?? 0) < 2) return;
-  elements.machineStripMeta.textContent = currentViewName() === "subscription" ? "Subscription counts this machine only" : `snapshot ${timeLabel(fullSnapshot.generatedAt, snapshotTimeZone())}`;
+  const counted = limitMachines(limits), read = limits?.machines?.filter(({ key }) => counted?.has(key)).map(({ label }) => label) ?? [];
+  elements.machineStripMeta.textContent = currentViewName() !== "subscription" ? `snapshot ${timeLabel(fullSnapshot.generatedAt, snapshotTimeZone())}`
+    : read.length > 1 ? `Subscription counts ${read.join(" + ")}` : "Subscription counts this machine only";
 }
 
 /**
@@ -1089,7 +1094,7 @@ function renderMachines() {
   }
   renderStripMeta();
   const { ok, total } = machineTally(machines);
-  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows, except Subscription, whose limits and value are this machine's.`;
+  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows, except Subscription, which counts every machine whose limits were read.`;
   elements.machinesRead.hidden = !machines.some(({ state }) => state === "failed" || state === "stale");
   elements.machinesRead.disabled = false; elements.machinesRead.textContent = "Read them again";
   for (const machine of machines) {
@@ -1861,6 +1866,8 @@ function render(data) {
   renderView();
   finishUrlStartup();
   watchMachines();
+  // Limits name other machines' profiles as this snapshot does, so a new snapshot gets them again.
+  if (limits?.machines && currentViewName() === "subscription") void loadLimits(false);
 }
 
 /** Fetch the snapshot a machine just completed, without the loading state or an error banner; false when it failed. */

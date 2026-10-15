@@ -2,7 +2,7 @@ import type { MachineAnalytics, MachineReason, MachineStatus, SessionAnalytics }
 export const localMachine: "local";
 export const machineReasons: Record<MachineReason, string>;
 export function machineAge(readAt: string | null | undefined, now?: number): string | null;
-export function machineTally(machines: MachineStatus[]): { total: number; ok: number; stale: number; failed: number; reading: number };
+export function machineTally(machines: Array<Pick<MachineStatus, "state">>): { total: number; ok: number; stale: number; failed: number; reading: number };
 export function machineNote(machine: MachineStatus, now?: number): string;
 export function machineWarningSources(machines: MachineStatus[] | undefined, warnings: string[]): string[];
 export function machineWarnings(machines: MachineStatus[] | undefined, warnings: string[], now?: number): string[];

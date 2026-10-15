@@ -2,7 +2,7 @@
 // coverage notes that name the machine, and the machine filter. Content-free: labels, counts and times.
 import { discoveryWarnings, remoteUnavailableWarning, staleMachineWarning } from "./evidence.js";
 
-/** This machine's key in a snapshot that combines machines: the machine that read the others, and the only one whose limits are read. */
+/** This machine's key in a snapshot that combines machines, and in limits read from several machines: the machine that read the others. */
 export const localMachine = "local";
 
 /** A few words for each reason; the terminal that read the machine printed the full sentence and its detail. */
