@@ -12,7 +12,7 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 - [ ] Validate the proposed repository investigation workflow with consenting pilot users and synthetic tasks; collect no automatic telemetry or real histories.
 - [ ] Resolve the documented comparison/denominator/context prerequisites and agree shared schema semantics before promoting new ratios or period comparisons.
 - [x] Build a compiled package and gate it on installing and running the packed tarball (`npm run release:check`).
-- [x] Publish that package from the tag workflow as a GitHub Release tarball with `SHA256SUMS` and a build provenance attestation.
+- [ ] Publish that package from the tag workflow as a GitHub Release tarball with `SHA256SUMS` and a build provenance attestation. The workflow is ready; the first packaged release is pending (0.9.0, the latest release, has no package).
 - [ ] Publish the same bytes on npm and in a Homebrew tap. The tag workflow is ready; the [one-time setup](release.md#one-time-maintainer-steps) and the first publish are pending.
 - [ ] Evaluate standalone executable packaging separately.
 
@@ -71,12 +71,13 @@ Local histories already record tool errors, exit codes, timeouts, durations, MCP
 - [x] Bound provider model labels and report errors; distinguish imputed cache rates in coverage/provenance; index retained price history and deduplicate unchanged rate tables without deleting observations.
 - [x] Per-session peak context fill from paired per-request input/window evidence.
 
-An earlier limits and cache analysis (quota headroom, cache-break events, context curves, subscription leverage) and the insights price scenarios have been removed. The items below are not shipped.
+An earlier limits and cache analysis (quota headroom, cache-break events, context curves, subscription leverage) and the insights price scenarios were removed. The [Subscription view](subscription.md) and `limits`, shipped in 0.9.0, brought back limit headroom and subscription value; the other items below are not shipped.
 
-- [ ] Rate-limit headroom over time from Codex rate-limit snapshots and Claude quota records: time to limit, sessions that hit limits, and usage-limit errors.
+- [x] Rate-limit headroom over time from Codex `rate_limits` records, Claude Agent SDK rate-limit events and the Claude Code status line: meters with pace, time to the limit, reset history and 5-hour lockouts. Separate meters per account and limits read from other machines are unreleased.
+- [ ] Which sessions hit a limit, and usage-limit errors per session.
 - [ ] Cache-break events with their cause (provider-reported cache-miss reason, idle gap longer than the TTL, model switch, tool-set change) and the cost of re-caching.
 - [ ] Context fill curve, compaction before and after sizes, and turns between compactions.
-- [ ] Subscription leverage per profile: API-equivalent value against plan price.
+- [x] Subscription leverage: API-equivalent value against plan price, value per 1% of the week and a month of full use (per account, unreleased).
 - [ ] Counterfactual pricing: the same tokens at another model's rates.
 
 ## M2: Outcomes
