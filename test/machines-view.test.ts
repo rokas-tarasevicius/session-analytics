@@ -1,5 +1,6 @@
 // The Machines strip, its dialog, the machine filter and the coverage notes that name machines.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { remoteUnavailableWarning, staleMachineWarning } from "../src/public/evidence.js";
@@ -102,6 +103,7 @@ test("the strip lists every machine; a failed one opens its reason and fix; the 
   assert.ok(warnings.some((warning) => /^boxa could not be read \(sudo needs a password\)/.test(warning)));
   assert.ok(!warnings.includes(remoteUnavailableWarning) && !warnings.includes(staleMachineWarning));
   assert.ok(run("paletteItems().some((item) => item.label === 'Machine details')"));
+  assert.equal(document.querySelector("#coverage-machines-note")!.hidden, true, "with machines saved, Coverage does not suggest adding one");
 });
 
 test("switching a machine off narrows every view, its breakdown and exports, and survives a refresh", async () => {
@@ -125,10 +127,14 @@ test("switching a machine off narrows every view, its breakdown and exports, and
   assert.equal(run("snapshot.sessions.length"), 2);
 });
 
-test("one machine keeps the plain sync label and no strip", async () => {
+test("one machine keeps the plain sync label and no strip, and Coverage says where other machines are added", async () => {
   const { document, run } = await harness(sessions().map(({ machine: _, ...session }) => session));
   run("fixture.rateCard = { effectiveDate: '2026-10-01', models: [] }; render(fixture); showReady(activeView())");
   assert.equal(document.querySelector("#machine-strip")!.hidden, true);
+  const hint = document.querySelector("#coverage-machines-note")!;
+  assert.equal(hint.hidden, false);
+  assert.match(readFileSync(new URL("../src/public/index.html", import.meta.url), "utf8"), /id="coverage-machines-note" hidden>Agents on a server or VM too\? Run <code>session-analytics machines add HOST<\/code>/);
+  assert.equal(document.querySelector("#coverage-machines-link")!.getAttribute("href"), "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/interop.md#combine-machines");
   assert.equal(document.querySelector("#machine-spend-panel")!.hidden, true);
   assert.match(document.querySelector("#sync-label")!.textContent, /^Local snapshot ready · \d+ live$/);
   assert.equal(document.querySelector("#sync-context")!.dataset["state"], "live");
@@ -163,7 +169,7 @@ test("while a machine is reading, the dashboard polls /api/machines and fetches 
   assert.match(document.querySelector("#sync-label")!.textContent, /^2 of 2 machines ready · \d+ live$/);
 });
 
-test("Subscription values this machine's sessions only, whatever the strip shows, and names the others", async () => {
+test("Subscription counts every machine whose limits and sessions were read, whatever the strip shows, and names the others", async () => {
   const { context, document, run } = await rendered();
   type Options = { sessions: SessionAnalytics[]; scope: { label: string; others: string[]; sessions: Set<string> | null } };
   const calls: Options[] = [];
