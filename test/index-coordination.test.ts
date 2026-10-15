@@ -37,10 +37,10 @@ test("writer filesystem mutex serializes simultaneous contenders independently o
     const source = `import {acquireWriterGate} from ${JSON.stringify(gateModule)};
       import {openSync,closeSync,unlinkSync} from 'node:fs'; import {join} from 'node:path';
       const dir=process.argv[1], marker=join(dir,'critical');
-      for(let i=0;i<5;i++){ const release=acquireWriterGate(dir);
-        const fd=openSync(marker,'wx'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);
+      for(let i=0;i<20;i++){ const release=acquireWriterGate(dir);
+        const fd=openSync(marker,'wx'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2);
         closeSync(fd); unlinkSync(marker); release(); }`;
-    const children = Array.from({ length: 6 }, () => child(source, dataDir));
+    const children = Array.from({ length: 8 }, () => child(source, dataDir));
     await allSucceed(children);
     assert.deepEqual(await readdir(dataDir), []);
   } finally { await rm(dataDir, { recursive: true, force: true }); }

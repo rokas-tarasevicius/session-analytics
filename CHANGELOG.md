@@ -61,6 +61,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Two scans writing the private index at the same moment could fail with "The local index writer coordination is damaged" although nothing was damaged: while one process replaced its writer ticket, another could read the replaced file with no links left and treat that as tampering. The gate now reads such a ticket again.
 - On Node.js 24.0 through 24.6, Conductor's database could not be read, because those versions cannot bind the query's numbered parameter. Claude sessions recorded only there were left out with the warning "A provider evidence fallback could not be read", and older Conductor sessions without a provider session ID stopped the whole scan. Both now work on every Node.js 24 release, so session counts and totals on those versions rise to match newer Node.js.
 - On Node.js older than 24, the command now stops with "needs Node.js 24 or newer" instead of failing later with a generic analysis error. When an analysis worker cannot start because a module is missing, `node:sqlite` is unavailable or TypeScript runs from `node_modules`, `report`, the MCP tools and the dashboard server's terminal output and API error give that fixed reason instead of a generic failure such as "Session analysis could not be completed."
 - Readings from two Claude accounts were folded into one meter, so every weekly cycle looked like an early reset, one account's live week was hidden, and extra usage showed whichever account reported last.

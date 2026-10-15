@@ -31,15 +31,19 @@ export function acquireWriterGate(directory: string): () => void {
     if (!match) return null;
     const file = join(directory, entry);
     if (!alive(Number(match[1]))) { remove(file); remove(`${file}.next`); return null; }
-    try {
-      const info = lstatSync(file);
-      if (!info.isFile() || info.nlink !== 1 || (process.getuid && info.uid !== process.getuid())) throw new Error(COORDINATION_ERROR);
-      const value = readFileSync(file, "utf8");
-      if (!/^\d{1,32}$/.test(value)) throw new Error(COORDINATION_ERROR);
-      return BigInt(value);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
+    for (;;) {
+      try {
+        const info = lstatSync(file);
+        // While its owner renames a new ticket over it, the replaced file can briefly show no links: read it again.
+        if (info.nlink === 0) { wait(); continue; }
+        if (!info.isFile() || info.nlink !== 1 || (process.getuid && info.uid !== process.getuid())) throw new Error(COORDINATION_ERROR);
+        const value = readFileSync(file, "utf8");
+        if (!/^\d{1,32}$/.test(value)) throw new Error(COORDINATION_ERROR);
+        return BigInt(value);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      }
     }
   };
   const wait = (): void => {
