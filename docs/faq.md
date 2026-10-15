@@ -5,7 +5,7 @@
 <details>
 <summary><strong>Can I install from npm, Homebrew, or a tarball?</strong></summary>
 
-From the first packaged release (after 0.9.0), each GitHub Release attaches a compiled package. Install it with `npm install -g` and the release tarball's URL, which needs no npm registry; see [installation](cli.md#install) for pinning, upgrades and uninstalling. npm registry and Homebrew packages of the same tarball are planned but not published yet. While 0.9.0 is the latest release, no packaged release exists yet: run a source checkout with `node bin/session-analytics.ts` until the first one. `npm install github:rokas-tarasevicius/session-analytics` installs the TypeScript sources instead, which Node refuses to run under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
+Each GitHub Release from 0.10.0 attaches a compiled package. Install it with `npm install -g` and the release tarball's URL, which needs no npm registry; see [installation](cli.md#install) for pinning, upgrades and uninstalling. npm registry and Homebrew packages of the same tarball are planned but not published yet. `npm install github:rokas-tarasevicius/session-analytics` installs the TypeScript sources instead, which Node refuses to run under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
 </details>
 
 <details>

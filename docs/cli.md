@@ -22,7 +22,7 @@
 
 Requirements: **Node.js 24 or newer** and **macOS** or **Linux** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)). Windows is not supported; the package declares macOS and Linux, so npm refuses to install it there with `EBADPLATFORM`.
 
-From the first packaged release (after 0.9.0), each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) attaches the compiled package, and npm installs the latest one directly from the release, without the npm registry. While 0.9.0 is the latest release, no packaged release exists yet and this command fails with a 404: run session-analytics [from source](#from-source) until the first one.
+Each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) from 0.10.0 attaches the compiled package, and npm installs the latest one directly from the release, without the npm registry:
 
 ```bash
 npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz

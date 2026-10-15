@@ -142,7 +142,7 @@ test("the bootstrap installs on need-runtime, verifies its digest and refuses wh
   answer = bootstrap("install", [payload.version, payload.digest, "--version"], payload.install);
   assert.equal(answer.status, 0, answer.stderr);
   assert.equal(answer.stdout.trim(), payload.version);
-  assert.deepEqual((await readdir(root)).sort(), ["0.3.0-cccccccccccccccc", "0.4.0-dddddddddddddddd", name]);
+  assert.deepEqual((await readdir(root)).sort(), ["0.3.0-cccccccccccccccc", "0.4.0-dddddddddddddddd", name].sort());
   assert.equal((await stat(join(root, name))).mode & 0o777, 0o700);
   answer = bootstrap("run", [payload.version, payload.digest, "--version"], payload.run);
   assert.deepEqual([answer.status, answer.stdout.trim()], [0, payload.version]);
