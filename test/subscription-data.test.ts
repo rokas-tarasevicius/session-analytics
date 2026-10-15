@@ -644,6 +644,12 @@ test("a week used up fast before a projection has evidence warns with the pace s
   assert.deepEqual([advice[0]!.kind, advice[0]!.tone], ["early-burn", "act"]);
   assert.match(advice[0]!.title, new RegExp(`: 66% used in 12h; at this pace it runs out ${Math.round(live.burnAt!)}$`));
   assert.match(advice[0]!.detail, /too early in the week to project, so this is the pace so far, not a forecast/);
+  // Half used, it ranks with confident run-outs by how early it runs out, as in Limits now: before one that runs out later.
+  const max = account("claude", "claude-aaaaaaaaaaaaaaaa", { plan: "max-20x" }), maxReset = fast.now + 2 * DAY;
+  const later = utilization(max, [reading("claude", "seven_day", maxReset, maxReset - WEEK + DAY, 20, "allowed", max.key), reading("claude", "seven_day", maxReset, fast.now - HOUR, 85, "allowed", max.key)], fast.now);
+  assert.ok(later.weekly!.capsEarly && later.weekly!.capAt! > live.burnAt!);
+  assert.ok(compareUrgency(limitStatus(fast.item, fast.now), limitStatus(later, fast.now)) < 0);
+  assert.deepEqual(recommendations([later, fast.item], { now: fast.now }).map((entry) => entry.kind).filter((kind) => kind === "early-burn" || kind === "runs-out"), ["early-burn", "runs-out"]);
   // Under half used but at more than three times the even pace: watch, ranked after a confident run-out.
   const rising = week(6, [10, 30]);
   assert.deepEqual([limitStatus(rising.item, rising.now).kind, limitStatus(rising.item, rising.now).rank], ["early-burn", 4]);
@@ -658,6 +664,32 @@ test("a week used up fast before a projection has evidence warns with the pace s
   const other = account("codex", "codex-bbbbbbbbbbbbbbbb", { plan: "pro" });
   const capped = utilization(other, [reading("codex", "seven_day", start + DAY, start + 2 * HOUR, 40, "allowed", other.key), reading("codex", "seven_day", start + DAY, fast.now - HOUR, 100, "rejected", other.key)], fast.now);
   assert.doesNotMatch(recommendations([fast.item, capped], { now: fast.now }).find((entry) => entry.kind === "weekly-used-up")!.detail, /Point background agents/);
+});
+
+test("a 5-hour window used up fast in its first minutes warns in Limits now after every weekly status, and not in Next", () => {
+  const now = start + 3 * DAY, key = "claude-aaaaaaaaaaaaaaaa", owner = account("claude", key, { plan: "max-20x" }), resetsAt = now + 5 * HOUR - 8 * 60;
+  const item = utilization(owner, [
+    reading("claude", "seven_day", start + WEEK, start + DAY, 10, "allowed", key), reading("claude", "seven_day", start + WEEK, now - HOUR, 20, "allowed", key),
+    reading("claude", "five_hour", resetsAt, now - 4 * 60, 8, "allowed", key), reading("claude", "five_hour", resetsAt, now, 15, "allowed", key),
+  ], now);
+  const session = item.session!;
+  assert.deepEqual([session.tooEarly, session.projected, session.capsEarly, item.weekly!.burnAt], [true, null, false, null]);
+  assert.ok(Math.abs(session.burnAt! - (now + 85 / 15 * 8 * 60)) < 1, "15% in 8 minutes runs out 45 minutes from now");
+  assert.deepEqual(limitStatus(item, now), { kind: "early-burn", tone: "warn", rank: 5, used: 20, at: session.burnAt, until: null, since: now - 8 * 60, early: null, meter: "session" });
+  assert.ok(recommendations([item], { now }).every((entry) => entry.kind !== "early-burn"));
+});
+
+test("a 5-hour lockout going on now says where to work while the week has room; the week's lockouts are only watched", () => {
+  const now = start + 3 * DAY, locked = account("claude", "claude-aaaaaaaaaaaaaaaa", { plan: "max-20x", profileNames: ["default"] });
+  const personal = account("claude", "claude-bbbbbbbbbbbbbbbb", { plan: "max-20x", profileNames: ["personal"] });
+  const week = (key: string, level: number) => [reading("claude", "seven_day", start + WEEK, start + DAY, level / 2, "allowed", key), reading("claude", "seven_day", start + WEEK, now - HOUR, level, "allowed", key)];
+  const observations = [...week(locked.key, 30), reading("claude", "five_hour", now + 2 * HOUR, now - 2 * HOUR, 60, "allowed", locked.key), reading("claude", "five_hour", now + 2 * HOUR, now - HOUR, 100, "rejected", locked.key)];
+  const advice = (at: number, others = true) => recommendations([utilization(locked, observations, at), ...(others ? [utilization(personal, week(personal.key, 20), at)] : [])], { now: at, formatTime: (seconds) => String(seconds) });
+  const current = advice(now);
+  assert.deepEqual(current.filter((entry) => entry.kind === "locked-out" || entry.kind === "lockouts").map((entry) => [entry.kind, entry.tone]), [["locked-out", "act"], ["lockouts", "watch"]]);
+  assert.equal(current[0]!.title, `claude ${locked.key} is locked out by its 5-hour limit until ${now + 2 * HOUR}; switch to the personal profile`);
+  assert.ok(advice(now, false).every((entry) => entry.kind !== "locked-out"), "nowhere to switch to");
+  assert.ok(advice(now + 3 * HOUR).every((entry) => entry.kind !== "locked-out"), "the window has reset");
 });
 
 test("past 5-hour lockouts are watched, never acted on, ordered by time locked out; extra usage makes the weekly limit the tighter one", () => {

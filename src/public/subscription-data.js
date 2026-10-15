@@ -222,7 +222,8 @@ export function liveMeter(meter, now, reportedUntil = null, { project = true } =
   const lastRate = used / Math.max(minimum, last.t - segment.start);
   // The same evidence a projection needs, measured up to the last reading: a burst right after a reset says nothing.
   const evidenced = segment.samples.length >= 2 && last.t - segment.start >= Math.max(HOUR, window * 0.1);
-  // Too early to project, but already well past the allowance: half of it used, or 15% (about a day's even share of a week) at three times the even pace.
+  // Too early to project, but already used up fast: half of it, or 15% (a day's even share of a week) at three times the even pace.
+  // Any window: in a 5-hour one, a burst in its first 30 minutes, which on real readings mostly went on to hit the limit.
   const burning = project && !levelsOnly && tooEarly && !stale && state === "active" && window > 0 && segment.samples.length >= 2 && rate > 0
     && (used >= 50 || (used >= 15 && rate * window >= 300));
   const runsOut = burning ? now + (100 - used) / rate : null;
@@ -552,8 +553,9 @@ export const unusedExtraMeter = (meter) => meter.meter !== weeklyMeter && meter.
 
 /**
  * One status per account and its urgency (lower `rank` first): a cap, extra usage, then the soonest run-out, including a
- * week used up fast before a projection has evidence (`early-burn`, `since` its start); on-track accounts by how full they
- * are; stale, idle and unidentified accounts last. `used` is the weekly level, capped at 100.
+ * week used up fast before a projection has evidence (`early-burn`, `since` its start), then a 5-hour run-out, projected or
+ * used up fast; on-track accounts by how full they are; stale, idle and unidentified accounts last. `used` is the weekly
+ * level, capped at 100.
  */
 export function limitStatus(item, now) {
   const open = (live) => live?.cycle && live.state !== "retired" ? live : null;
@@ -568,6 +570,7 @@ export function limitStatus(item, now) {
   if (weekly?.burnAt) return status("early-burn", "warn", weekly.used >= 50 ? 3 : 4, { at: weekly.burnAt, since: weekly.segment.start });
   if (weekly?.mayBeUsedUp) return status("may-be-used-up", "warn", 4, { since: weekly.observedAt });
   if (session?.capsEarly && !session.stale) return status("runs-out", "warn", 5, { at: session.capAt, early: session.cycle.resetsAt - session.capAt, meter: "session" });
+  if (session?.burnAt) return status("early-burn", "warn", 5, { at: session.burnAt, since: session.segment.start, meter: "session" });
   if (weekly && (weekly.stale || weekly.state === "unreported")) return status("stale", "muted", 7, { since: weekly.observedAt });
   if (weekly) return status(weekly.tooEarly ? "too-early" : "on-track", weekly.tooEarly ? "muted" : "ok", 6);
   return status("idle", "muted", 8, { until: item.weekly?.nextResetAt ?? null, confirmed: item.weekly?.confirmedIdle ?? false });
@@ -803,9 +806,11 @@ export function recommendations(items, { now, sources = [], persisted = true, le
             (other ? `Point background agents and long-running work at ${target(other, item)}, and keep this account for interactive work. ` : "Keep the remaining allowance for interactive work, and run subagents and bulk jobs on cheaper models.") + afterCap(item),
         });
       } else if (weekly.burnAt) {
-        // Too early for a projection: the pace so far, not a forecast, and no stronger than the level behind it.
+        // Too early for a projection: the pace so far, not a forecast, and no stronger than the level behind it. Acted on, it
+        // ranks with confident run-outs by how early it runs out, below a used-up week.
+        const act = weekly.used >= 50;
         push(item, "early-burn", {
-          tone: weekly.used >= 50 ? "act" : "watch", score: 950,
+          tone: act ? "act" : "watch", score: act ? Math.min(1099, 1000 + (weekly.cycle.resetsAt - weekly.burnAt) / HOUR) : 950,
           title: `${name}: ${Math.round(weekly.used)}% used in ${duration(now - weekly.segment.start)}; at this pace it runs out ${formatTime(weekly.burnAt)}`,
           detail: `You are using about ${rate(weekly.rate * DAY)} a day; the allowance supports ${rate(weekly.dailyBudget)} a day until ${formatTime(weekly.cycle.resetsAt)}. It is too early in the week to project, so this is the pace so far, not a forecast. ` +
             (other ? `Point background agents and long-running work at ${target(other, item)}. ` : "Keep the remaining allowance for interactive work, and run subagents and bulk jobs on cheaper models.") + afterCap(item),
@@ -848,9 +853,15 @@ export function recommendations(items, { now, sources = [], persisted = true, le
       detail: "Their last readings came long before the reset, so how much was left unused is unknown; they are left out of the averages and plan advice. A scheduled `session-analytics limits --quiet` every 20 minutes records each close this machine can see, including the Codex account read.",
     });
     if (item.windows && item.windows.capped > 0) {
-      // Past lockouts are worth watching, never acting on now; past 100% on extra usage, the weekly limit is the tighter one.
+      // Past 100% on extra usage, the weekly limit is the tighter one.
       const weeklyBinding = weekly?.capsEarly || weekly?.state === "capped" || weekly?.state === "overage";
-      const other = alternative(item);
+      const other = alternative(item), session = item.session;
+      // Locked out now, like a used-up week, when another account has room: switch. The week's lockouts are only watched.
+      if (session?.state === "capped" && session.cycle.resetsAt > now && !weeklyBinding && other) push(item, "locked-out", {
+        tone: "act", score: 1100,
+        title: `${name} is locked out by its 5-hour limit until ${formatTime(session.cycle.resetsAt)}; switch to ${target(other, item)}`,
+        detail: `This account's weekly allowance still has room, but no work runs on it until the 5-hour window resets. ${elsewhere(other)}.`,
+      });
       push(item, "lockouts", {
         tone: "watch", score: 600 + Math.min(99, item.windows.lockedSeconds / HOUR),
         title: `Hit the ${name} 5-hour limit ${item.windows.capped} time${item.windows.capped === 1 ? "" : "s"} in 7 days (${duration(item.windows.lockedSeconds)} locked out)`,

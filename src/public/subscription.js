@@ -212,7 +212,8 @@ function statusText(status, fmt, now) {
     capped: () => `${session ? "5-hour limit capped" : "Capped"} until ${fmt.when(status.until)}`,
     overage: () => "Using extra usage",
     "runs-out": () => `${session ? "5-hour limit runs" : "Runs"} out ${fmt.when(status.at)} · ${formatDuration(status.early)} early`,
-    "early-burn": () => `${percentText(status.used)} used in ${formatDuration(now - status.since)} · runs out ${fmt.when(status.at)} at this pace`,
+    "early-burn": () => session ? `5-hour limit runs out ${fmt.when(status.at)} at this pace`
+      : `${percentText(status.used)} used in ${formatDuration(now - status.since)} · runs out ${fmt.when(status.at)} at this pace`,
     "may-be-used-up": () => "May be used up",
     stale: () => `Last seen ${formatDuration(now - status.since)} ago`,
     "too-early": () => "Too early to tell",

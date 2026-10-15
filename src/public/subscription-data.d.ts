@@ -65,7 +65,7 @@ export interface BankedResets {
   upToUsd: number | null; fullValue(credit: BankedCredit): number | null; nowValue(credit: BankedCredit): number | null;
 }
 export interface ValueRange { from: number; to: number }
-/** `profiles`: sessions in the account's profiles; `provider`: the provider's only account takes this machine's sessions; `none`: nothing attributable. */
+/** `profiles`: sessions in the account's profiles; `provider`: the provider's only account on a machine whose limits were read takes that machine's sessions; `none`: nothing attributable. */
 export type ValueBasis = "profiles" | "provider" | "none";
 export interface AccountUtilization {
   account: LimitAccount; key: string; provider: LimitProvider; label: string; identified: boolean; planId: string | null;
@@ -90,9 +90,9 @@ export interface SubscriptionTotals {
 }
 export interface SubscriptionModel {
   meters: Meter[]; accounts: Array<AccountUtilization & { excluded: boolean }>; totals: SubscriptionTotals;
-  /** Value of this machine's sessions no account could claim. */
+  /** Value of sessions from the machines whose limits were read that no account could claim. */
   unattributed: { claude: number; codex: number };
-  /** Value of other machines' sessions: their meters are not read here, so no account counts it. */
+  /** Value of sessions from machines whose limits were not read: no account counts it. */
   elsewhere: { claude: number; codex: number };
 }
 export interface Recommendation {
@@ -134,7 +134,7 @@ export function unusedExtraMeter(meter: Meter): boolean;
 export interface AccountStatus {
   kind: "capped" | "overage" | "runs-out" | "early-burn" | "may-be-used-up" | "stale" | "too-early" | "on-track" | "idle" | "levels-only";
   tone: "danger" | "warn" | "ok" | "muted"; rank: number; used: number; meter: "weekly" | "session";
-  /** Run-out instant; `until`: the reset that ends a cap or an idle week; `since`: the last reading, or the start of a fast week; `early`: seconds before the reset. */
+  /** Run-out instant; `until`: the reset that ends a cap or an idle week; `since`: the last reading, or the start of a fast week or 5-hour window; `early`: seconds before the reset. */
   at: number | null; until: number | null; since: number | null; early: number | null;
   /** Idle only: the provider confirmed the week has not started, rather than no reading since the reset. */
   confirmed?: boolean;
