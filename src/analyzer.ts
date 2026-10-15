@@ -2179,8 +2179,15 @@ function aggregate(
   };
 }
 
+/** Callbacks the analysis process passes; they never travel with the serialized options. */
+export interface AnalysisHooks {
+  /** The index parses every present session again: it was cold, or its code or prices changed. */
+  onFullParse?: () => void;
+}
+
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
+  hooks: AnalysisHooks = {},
 ): Promise<{ historyCoverage?: MachineAnalytics["historyCoverage"]; rateCard: PricingCatalog; repositories: RepositoryAnalytics[]; providerWarnings: string[]; mcpContext?: MachineAnalytics["mcpContext"]; mcpSourceHealth: MachineAnalytics["mcpSourceHealth"] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
@@ -2202,6 +2209,7 @@ async function analyzeSelectedRepositories(
     );
     const includeHidden = options.includeHidden ?? true;
     index = await IndexScan.open(options, rateCard, includeHidden);
+    if (index?.fullParse) hooks.onFullParse?.();
     const availableRepositories = database
       ? database
           .prepare(
@@ -2639,8 +2647,9 @@ function aggregateMachine(
 /** Analyze every locally evidenced repository unless an explicit repository filter is supplied. */
 export async function analyzeMachineSessions(
   options: AnalyzeOptions = {},
+  hooks: AnalysisHooks = {},
 ): Promise<MachineAnalytics> {
-  const result = await analyzeSelectedRepositories(options);
+  const result = await analyzeSelectedRepositories(options, hooks);
   const machine = aggregateMachine(result.repositories, result.rateCard);
   machine.warnings = [...new Set([...machine.warnings, ...result.providerWarnings])];
   if (result.historyCoverage) machine.historyCoverage = result.historyCoverage;

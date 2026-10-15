@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { brand } from "../brand.ts";
 import { version } from "../version.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, optionErrorMessage, setting } from "../options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, machineHelp, optionErrorMessage, pricingHelp, setting, sourceHelp } from "../options.ts";
 import { serveMcp } from "./server.ts";
 
 const argv = process.argv.slice(2);
@@ -34,13 +34,8 @@ The first tool call scans local history; initialize, discovery, tools/list and p
   --repo-name NAME       Restrict all requests to one uniquely named repository
   --repo-root PATH       Restrict all requests to this canonical repository root
   --repo-remote URL      Restrict all requests to this registered remote
-  --exclude-hidden      Exclude hidden optional metadata
-  --claude-root PATH     Override Claude projects; replaces provider discovery
-  --codex-root PATH      Override Codex sessions; replaces provider discovery
-  --codex-archive-root PATH Override archived Codex sessions
-  --cursor-database PATH Override the Cursor history database
-  --database PATH        Override optional Conductor metadata
-  --rate-card PATH       Override the reviewed rate card
+  --exclude-hidden       Exclude hidden optional metadata
+${sourceHelp}${pricingHelp}${machineHelp}  --no-index             Full scan without reading or writing the index
   --version              Print the version
   --help                 Show this help
 

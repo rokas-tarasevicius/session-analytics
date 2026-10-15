@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { appendFile, mkdtemp, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
+import { analyzeMachineSessionsIsolated, fullParseNotice, fullParseSignal, noticeFullParse } from "../src/analysis-process.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { indexStatus, openIndexDatabase } from "../src/store/database.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
@@ -55,5 +57,35 @@ test("integration: cold and warm indexes replay the complete projection and pric
     const deleted = retained.sessions.find((s) => s.provider === "claude" && s.transcript.sourceDeleted);
     assert.ok(deleted);
     assert.deepEqual(deleted.historyProfile, claude.historyProfile);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a cold or re-revisioned index says once, and only on a terminal, that this scan parses everything", async () => {
+  const root = await mkdtemp(join(tmpdir(), "full-parse-notice-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const options = { ...fixture, noIndex: false, offline: true };
+    let notices = 0;
+    const scan = () => analyzeMachineSessionsIsolated(options, { onFullParse: () => { notices += 1; } });
+    await scan();
+    assert.equal(notices, 1, "a cold index parses every session");
+    await scan();
+    assert.equal(notices, 1, "a warm index says nothing");
+    const connection = openIndexDatabase(options);
+    try { connection.database.prepare("UPDATE metadata SET value='an earlier version' WHERE key LIKE 'parser:%'").run(); } finally { connection.close(); }
+    await scan();
+    assert.equal(notices, 2, "other code or prices parse every session again");
+
+    const written: string[] = [];
+    for (const isTTY of [true, false, undefined]) noticeFullParse({ isTTY, write: (text: string) => written.push(text) });
+    assert.deepEqual(written, [`${fullParseNotice}\n`], "a terminal hears it once; a pipe or a file never");
+    // A report into a pipe on a cold index: stdout is the JSON alone, and stderr carries neither the notice nor the signal.
+    const bin = join(dirname(new URL(import.meta.url).pathname), "../bin/session-analytics.ts");
+    const report = spawnSync(process.execPath, [bin, "report", "--json", "--no-remote", "--offline", "--no-additional-providers", "--data-dir", join(root, "cold"),
+      "--claude-root", fixture.claudeRoot, "--codex-root", fixture.codexRoot, "--codex-archive-root", fixture.codexArchiveRoot,
+      "--cursor-database", fixture.cursorDatabasePath, "--database", fixture.databasePath], { encoding: "utf8", env: { ...process.env, HOME: root } });
+    assert.equal(report.status, 0, report.stderr);
+    assert.ok(JSON.parse(report.stdout).sessions.length > 0);
+    assert.ok(!report.stderr.includes(fullParseNotice) && !report.stderr.includes(fullParseSignal) && !report.stdout.includes(fullParseSignal), report.stderr);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
