@@ -25,6 +25,7 @@ import { reuseRefusal } from "./dashboard-reuse.ts";
 import { collectLimits, emptyLimitsSnapshot } from "./limits/index.ts";
 import type { LimitsSnapshot } from "./limits/types.ts";
 import { staticRoutes } from "./static-routes.ts";
+import { localMachine } from "./public/machines.js";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
@@ -257,7 +258,7 @@ function followMachines(): void {
 /** Every machine as it stands now; the dashboard polls this while a machine is still reading. */
 function machineStatuses(): MachineStatus[] {
   if (!machines) return [];
-  const local: MachineStatus = { key: "local", label: remote.local, state: scanned && !analyticsPending ? "ok" : "reading", sessions: scanned?.snapshot.summary.sessions ?? 0,
+  const local: MachineStatus = { key: localMachine, label: remote.local, state: scanned && !analyticsPending ? "ok" : "reading", sessions: scanned?.snapshot.summary.sessions ?? 0,
     repositories: scanned?.snapshot.summary.repositories ?? 0, readAt: scanned?.snapshot.generatedAt ?? null, durationMs: scanned ? Math.round(scanned.ms) : null, version };
   return [local, ...machines.readings.map(({ status }) => status)];
 }
@@ -341,8 +342,7 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/limits") {
-      // The Subscription view must know when the session snapshot combines other machines, whose sessions are not this machine's.
-      sendJson(response, 200, { ...await limits(url.searchParams.get("refresh") === "1"), remoteMachines: remote.machines.length });
+      sendJson(response, 200, await limits(url.searchParams.get("refresh") === "1"));
       return;
     }
     const path = staticFiles.get(url.pathname);

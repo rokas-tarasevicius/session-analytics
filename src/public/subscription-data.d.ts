@@ -88,8 +88,10 @@ export interface SubscriptionTotals {
 }
 export interface SubscriptionModel {
   meters: Meter[]; accounts: Array<AccountUtilization & { excluded: boolean }>; totals: SubscriptionTotals;
-  /** Value of sessions no account could claim, and whether other machines' sessions are combined in. */
-  unattributed: { claude: number; codex: number; remote: boolean };
+  /** Value of this machine's sessions no account could claim. */
+  unattributed: { claude: number; codex: number };
+  /** Value of other machines' sessions: their meters are not read here, so no account counts it. */
+  elsewhere: { claude: number; codex: number };
 }
 export interface Recommendation {
   /** The rule that made it; with `provider` and `account` it identifies the suggestion across refreshes. */
@@ -98,7 +100,7 @@ export interface Recommendation {
   title: string; detail: string; impactUsd: number | null;
 }
 export interface HourlyValue { between(from: number, to: number): number; empty: boolean }
-export interface SessionLike { provider: string; historyProfile?: { profileKey: string } }
+export interface SessionLike { provider: string; historyProfile?: { profileKey: string }; machine?: string }
 
 export function meterLabel(meter: string): string;
 export function meterBase(meter: string): string;
@@ -109,7 +111,7 @@ export function hourlyValue(sessions: unknown[], timeZone?: string): HourlyValue
 export function zonedDayStart(day: string, timeZone?: string): number;
 export function attributeSessions<S extends SessionLike>(
   sessions: S[], accounts: LimitAccount[], options?: { local?: ((session: S) => boolean) | null },
-): { byAccount: Map<string, S[]>; unattributed: { claude: S[]; codex: S[] } };
+): { byAccount: Map<string, S[]>; unattributed: { claude: S[]; codex: S[] }; elsewhere: { claude: S[]; codex: S[] } };
 export function calibrate(meter: Meter | null, value: { between(from: number, to: number): number }): Calibration;
 export function resetHistory(meter: Meter | null, perPercent?: number | null, creditHistory?: LimitsSnapshot["resetCreditHistory"]): ResetCycle[];
 export function inPlaceResets(meter: Meter, cycle: Cycle, perPercent?: number | null, creditHistory?: LimitsSnapshot["resetCreditHistory"]): InPlaceReset[];

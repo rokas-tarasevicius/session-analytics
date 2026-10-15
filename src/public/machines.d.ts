@@ -1,4 +1,5 @@
 import type { MachineAnalytics, MachineReason, MachineStatus, SessionAnalytics } from "../types.ts";
+export const localMachine: "local";
 export const machineReasons: Record<MachineReason, string>;
 export function machineAge(readAt: string | null | undefined, now?: number): string | null;
 export function machineTally(machines: MachineStatus[]): { total: number; ok: number; stale: number; failed: number; reading: number };

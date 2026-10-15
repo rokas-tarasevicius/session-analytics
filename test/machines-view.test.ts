@@ -163,17 +163,20 @@ test("while a machine is reading, the dashboard polls /api/machines and fetches 
   assert.match(document.querySelector("#sync-label")!.textContent, /^2 of 2 machines ready · \d+ live$/);
 });
 
-test("Subscription counts every machine read, whatever the strip shows, and names them", async () => {
+test("Subscription values this machine's sessions only, whatever the strip shows, and names the others", async () => {
   const { context, document, run } = await rendered();
-  const calls: Array<{ sessions: SessionAnalytics[]; scope: { label: string; machines: number } }> = [];
-  context["renderSubscription"] = (_container: unknown, options: { sessions: SessionAnalytics[]; scope: { label: string; machines: number } }) => { calls.push(options); };
+  type Options = { sessions: SessionAnalytics[]; local: ((session: SessionAnalytics) => boolean) | null; scope: { label: string; others: string[] } };
+  const calls: Options[] = [];
+  context["renderSubscription"] = (_container: unknown, options: Options) => { calls.push(options); };
   context["fetch"] = async () => ({ ok: false, json: async () => ({}) });
-  run("setMachine('agentbox', false)");
+  run("setMachine('local', false)");
   assert.equal(run("snapshot.sessions.length"), 1);
   run("switchView('subscription')");
-  assert.equal(calls.at(-1)!.sessions.length, 2);
-  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)!.scope)), { label: "laptop and agentbox", machines: 2 });
-  assert.equal(document.querySelector("#machine-strip-meta")!.textContent, "Subscription counts every machine");
+  const { sessions: all, local, scope } = calls.at(-1)!;
+  assert.equal(all.length, 2, "the strip does not narrow Subscription");
+  assert.deepEqual(all.filter((session) => local!(session)).map(({ machine }) => machine), ["local"], "limits are read on this machine, so only its sessions are matched");
+  assert.deepEqual(JSON.parse(JSON.stringify(scope)), { label: "laptop", others: ["agentbox"] }, "a machine that was not read is not named");
+  assert.equal(document.querySelector("#machine-strip-meta")!.textContent, "Subscription counts this machine only");
   run("switchView('summary')");
   assert.match(document.querySelector("#machine-strip-meta")!.textContent, /^snapshot \d\d:\d\d$/);
 });

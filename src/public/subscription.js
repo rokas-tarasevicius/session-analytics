@@ -61,6 +61,7 @@ const leftOf = (live) => Math.max(0, 100 - Math.min(100, live.used));
 const rate = (value) => `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}%/h`;
 const shortPlan = (plan) => plan.label.replace(/^Claude /, "").replace(/ \(seat type unknown\)$/, " seat");
 const plural = (count, word) => `${integer(count)} ${word}${count === 1 ? "" : "s"}`;
+const names = (list) => list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0] ?? "";
 
 function disclosure(key, summary, { open = false, className = "" } = {}) {
   const details = el("details", null, className);
@@ -442,9 +443,9 @@ function accountCard(item, status, fmt, now, { onPlanChange, codexAccount, later
   return card;
 }
 
-const valueScope = (item) => ({
-  profiles: `${plural(item.value.sessions, "session")} in these dates, in this account's profiles`,
-  provider: `this machine's ${plural(item.value.sessions, `${providerNames[item.provider]} session`)} in these dates; the only ${providerNames[item.provider]} account`,
+const valueScope = (item, scope) => ({
+  profiles: `${plural(item.value.sessions, "session")} in these dates, in this account's profiles${scope.others.length ? ` on ${scope.label}` : ""}`,
+  provider: `${scope.label}'s ${plural(item.value.sessions, `${providerNames[item.provider]} session`)} in these dates; the only ${providerNames[item.provider]} account`,
   none: "no sessions matched, so its value is unknown",
 })[item.value.basis];
 
@@ -482,14 +483,14 @@ function periodText(items, fmt, now) {
 }
 
 /** Value per account and totals that compare like with like; secondary, so it starts open only on wide screens. */
-function worthSection(model, items, fmt, now, { pending, onPlanChange, wide }) {
+function worthSection(model, items, fmt, now, { pending, onPlanChange, wide, scope }) {
   const section = el("section", null, "panel subscription-worth");
   const details = disclosure("worth", [el("h3", "What it's worth"), el("span", "API-equivalent value of each allowance, from your own sessions", "panel-meta")], { open: wide, className: "section-disclosure" });
   section.append(details);
   if (pending) { details.append(note("Calibrating from history… Value appears when the session scan finishes; the limits above are already live.")); return section; }
   const accounts = items.filter((item) => item.identified);
   if (!accounts.length) { details.append(note("No account to value yet.")); return section; }
-  const { totals } = model;
+  const { totals } = model, elsewhere = model.elsewhere.claude + model.elsewhere.codex;
   const totalsList = el("dl", null, "worth-totals");
   const total = (term, value, detail) => { const row = el("div"); row.append(el("dt", term), el("dd", value), el("small", detail)); totalsList.append(row); };
   const counted = accounts.filter((item) => !item.excluded && item.economics.extracted !== null && item.period.days > 0);
@@ -499,6 +500,7 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide }) {
     totals.capacityUsed !== null ? `${percentText(totals.capacityUsed * 100)} of one full week every week${totals.capacityUsed > 1 ? " (early resets and extra usage add more)" : ""}` : "",
     totals.beforeReadings >= 1 ? `${usd(totals.beforeReadings)} before the first meter readings is not counted` : "",
     totals.unattributed ? `${usd(totals.unattributed)} more matched no account` : "",
+    elsewhere >= 1 ? `${usd(elsewhere)} on ${names(scope.others) || "other machines"} is not counted: limits are read on ${scope.label} only` : "",
   ].filter(Boolean).join("; "));
   total("Value multiple", totals.priced.multiple !== null ? times(totals.priced.multiple) : DASH,
     totals.priced.multiple !== null ? `${usd(totals.priced.extracted)} for ${usd(totals.priced.price)} of plan price: ${pricedNames.join(", ")}` : "Needs a plan you pay for with matched value");
@@ -521,7 +523,7 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide }) {
         : { text: DASH, detail: `needs ${calibrationMinimum} cycles (${calibration.cycles} so far)` },
       { text: usd(value.weeklyCapacity), detail: value.weeklyCapacity !== null ? "a full week" : "" },
       empty ? { text: DASH, detail: "no meter readings in these dates" }
-        : value.extracted !== null ? { text: usd(value.extracted), detail: valueScope(item) } : { text: "Unknown", detail: valueScope(item) },
+        : value.extracted !== null ? { text: usd(value.extracted), detail: valueScope(item, scope) } : { text: "Unknown", detail: valueScope(item, scope) },
       value.multiple !== null ? { text: times(value.multiple), detail: `for ${usd(value.price)} of plan price` }
         : { text: DASH, detail: empty ? "no meter readings in these dates" : value.payer === "organization" ? "employer pays: value only" : value.monthlyPrice === 0 ? "free plan" : value.plan?.monthlyUsd === null ? "no list price" : value.plan ? "no matched value" : "choose a plan" },
     ];
@@ -538,7 +540,6 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide }) {
     "The value multiple divides only the value of plans you pay for by their price, prorated from each account's first reading to now.",
     aside.length ? `Not in the multiple: ${aside.join(" and ")}.` : "",
     excluded.length ? `Excluded from totals: ${excluded.join(", ")}.` : "",
-    model.unattributed.remote ? "Other machines are combined into this snapshot; their sessions cannot be matched to accounts yet, so Codex value is left out." : "",
     "Value before an account's first meter reading is not counted, because no price or capacity can be prorated over it.",
   ].filter(Boolean).join(" ")));
   return section;
@@ -679,7 +680,7 @@ function historySection(items, fmt, now, later) {
   return section;
 }
 
-function sourcesSection(limits, items, fmt, { remote, scope }) {
+function sourcesSection(limits, items, fmt, scope) {
   const section = el("section", null, "panel subscription-sources");
   const details = disclosure("sources", [el("h3", "Sources and method"), el("span", "Where the readings come from and what they cover", "panel-meta")], { className: "section-disclosure" });
   section.append(details);
@@ -691,8 +692,8 @@ function sourcesSection(limits, items, fmt, { remote, scope }) {
   }).filter(Boolean);
   const unidentified = accounts.filter((account) => account.attribution === "weekly-phase" || account.attribution === "unattributed").length;
   details.append(note(`Accounts found: ${found.length ? found.join("; ") : "none"}${unidentified ? `; ${plural(unidentified, "group")} of readings without an account` : ""}. Times are shown in ${fmt.zone}.`));
-  details.append(note(remote
-    ? `This dashboard combines ${scope.machines > 1 ? scope.label : limits.remoteMachines ? `this machine and ${plural(limits.remoteMachines, "other machine")}` : "other machines"}. Limits are read on this machine only: run \`session-analytics limits\` on the others. Their sessions cannot be matched to accounts yet, so Codex value is left out.`
+  details.append(note(scope.others.length
+    ? `This dashboard reads ${names([scope.label, ...scope.others])}. Limits are read on ${scope.label} only, so value counts only its sessions; run \`session-analytics limits\` on the others for theirs. Usage there, on the web and in the desktop apps moves the same meters, so value per 1% is a lower bound.`
     : "Limits are read on this machine. Usage on other machines, the web and the desktop apps moves the same meters, so value per 1% is a lower bound."));
   details.append(dataTable([{ text: "Source", align: "left" }, { text: "Status", align: "left" }, "Last reading", "New readings"],
     (limits.sources ?? []).map((source) => [sourceLabels[source.source] ?? source.source,
@@ -704,7 +705,7 @@ function sourcesSection(limits, items, fmt, { remote, scope }) {
     "Meters are the provider's own usage percentages, copied from records already on this machine. Nothing is requested from Anthropic; the Codex account read asks the local Codex app-server.",
     `Readings are kept in a private ledger${limits.persisted ? "" : { off: " (off: --no-index)", unreadable: " (left untouched: written by another version or not replaceable)", unwritable: " (not saved this time)" }[limits.ledger] ?? ""} so reset history outlives provider log rotation. Run \`session-analytics limits --quiet\` every 20 minutes (cron or launchd) to keep it continuous.`,
     "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline` in each profile's settings.json. It records the documented rate_limits field for that profile's account and prints the meters.",
-    "Value per 1% divides the API-equivalent value of an account's own sessions (matched through its Claude profiles, or every Codex session when there is one Codex account) by the meter's reading.",
+    "Value per 1% divides the API-equivalent value of an account's own sessions on this machine (matched through its Claude profiles, or every Codex session when there is one Codex account) by the meter's reading.",
     `Plan prices were reviewed on ${plansReviewedAt}. Team, Enterprise and Business seats are treated as paid by the employer: they show API value without a personal multiple unless you say you pay. Plan and payer choices stay in this browser.`,
   ]) list.append(el("li", text));
   details.append(list);
@@ -729,10 +730,10 @@ function emptyState(limits) {
  * Render the Subscription view. Limits are account-wide, so `sessions` must be every session (a repository focus does not
  * apply); `null` while the session scan is still running, when the meters render and value waits. `timeZone` is the
  * snapshot's zone for value; times are shown in `displayTimeZone` (the viewer's). `range` is the selected dates in Unix
- * seconds. `local` is null when every session is this machine's, else a test for this machine's sessions. `scope` names the
- * machines the sessions come from.
+ * seconds. `local` is null when every session is this machine's, else a test for this machine's sessions; only those count.
+ * `scope` names this machine and the other machines the sessions come from.
  */
-export function renderSubscription(container, { limits, sessions = null, timeZone = "UTC", displayTimeZone = null, range = null, local = null, scope = { label: "this machine", machines: 1 }, onPlanChange, now = Date.now() / 1000, wide = null }) {
+export function renderSubscription(container, { limits, sessions = null, timeZone = "UTC", displayTimeZone = null, range = null, local = null, scope = { label: "this machine", others: [] }, onPlanChange, now = Date.now() / 1000, wide = null }) {
   container.replaceChildren();
   if (!limits) { container.append(note("Reading limit meters…")); return; }
   if (limits.unavailable) { container.append(note("Limit meters could not be loaded. Check the terminal running the dashboard; the next refresh retries.", "empty-state")); return; }
@@ -748,7 +749,7 @@ export function renderSubscription(container, { limits, sessions = null, timeZon
     // Unidentified history without an open cycle stays out of the live view; Sources says it exists.
     .filter(({ item }) => item.identified || item.live.some((live) => live.cycle))
     .sort((left, right) => compareUrgency(left.status, right.status));
-  if (!entries.length) { container.append(emptyState(limits)); container.append(sourcesSection(limits, [], fmt, { remote: model.unattributed.remote, scope })); return; }
+  if (!entries.length) { container.append(emptyState(limits)); container.append(sourcesSection(limits, [], fmt, scope)); return; }
   const items = entries.map(({ item }) => item);
   const generatedAt = Date.parse(limits.generatedAt) / 1000;
   const later = [];
@@ -761,9 +762,9 @@ export function renderSubscription(container, { limits, sessions = null, timeZon
     limitsNow(entries, fmt, now, Number.isFinite(generatedAt) ? generatedAt : null),
     nextActions(advice),
     cards,
-    worthSection(model, items, fmt, now, { pending, onPlanChange, wide: open }),
+    worthSection(model, items, fmt, now, { pending, onPlanChange, wide: open, scope }),
     historySection(items, fmt, now, later),
-    sourcesSection(limits, items, fmt, { remote: model.unattributed.remote, scope }),
+    sourcesSection(limits, items, fmt, scope),
   );
   // Charts measure their slot, so they draw once the whole view is in place.
   for (const draw of later) draw();

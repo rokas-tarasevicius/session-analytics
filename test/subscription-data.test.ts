@@ -282,12 +282,15 @@ test("hero ratios compare like with like and prorate only the time since the fir
   assert.ok(Math.abs(totals.organization.extracted - teamItem!.economics.extracted!) < 1e-9);
   assert.equal(subscriptionTotals(model.accounts.map((item) => item === codexItem ? { ...item, excluded: true } : item)).priced.multiple, null, "an excluded account leaves no price behind");
 
-  // With other machines combined, Codex sessions cannot be matched to the local account: its value is unknown, and so is its multiple.
-  const combined = subscriptionModel({ limits: { accounts: [claude, team, codex], observations, meters: [], resetCreditHistory: [] }, sessions, timeZone: "UTC", now, range: { from: start, to: now }, local: () => false });
-  const remoteCodex = combined.accounts[2]!;
-  assert.deepEqual([remoteCodex.value.basis, remoteCodex.economics.extracted, remoteCodex.economics.multiple, remoteCodex.calibration.perPercent], ["none", null, null, null]);
-  assert.deepEqual([combined.totals.priced.accounts, combined.totals.priced.multiple], [0, null]);
-  assert.ok(Math.abs(combined.totals.unattributed - 5 * 7 * 24) < 1e-6, "the unmatched value is reported, not dropped");
+  // With other machines combined, only this machine's sessions join its accounts; the others' value is reported beside them.
+  const remote = { ...spending("codex", start - 10 * DAY, now, 3), machine: "agentbox" }, here = sessions.map((session) => ({ ...session, machine: "local" }));
+  const combined = subscriptionModel({ limits: { accounts: [claude, team, codex], observations, meters: [], resetCreditHistory: [] }, sessions: [...here, remote], timeZone: "UTC", now, range: { from: start, to: now }, local: (session) => session.machine === "local" });
+  const localCodex = combined.accounts[2]!;
+  assert.equal(localCodex.value.basis, "provider", "the only Codex account takes this machine's Codex sessions");
+  assert.ok(Math.abs(localCodex.economics.extracted! - codexItem!.economics.extracted!) < 1e-6, "another machine's Codex value never joins it");
+  assert.equal(combined.totals.priced.accounts, 1);
+  assert.ok(Math.abs(combined.elsewhere.codex - 3 * 7 * 24) < 1e-6, "the other machine's value is reported, not dropped");
+  assert.deepEqual([combined.elsewhere.claude, combined.totals.unattributed], [0, 0]);
   assert.equal(combined.accounts[0]!.value.basis, "profiles", "Claude sessions still join through this machine's profiles");
 });
 
@@ -321,8 +324,12 @@ test("sessions join accounts by profile key; other machines' sessions never cali
     ["claude-aaaaaaaaaaaaaaaa", 1], ["claude-bbbbbbbbbbbbbbbb", 1], ["claude-w-100", 0], ["codex-aaaaaaaaaaaaaaaa", 2], ["", 0],
   ]);
   assert.deepEqual([local.unattributed.claude.length, local.unattributed.codex.length], [2, 0], "two Claude accounts: a session without a profile is not guessed");
-  const combined = attributeSessions(sessions, accounts, { local: () => false });
-  assert.deepEqual([combined.byAccount.get("codex-aaaaaaaaaaaaaaaa")!.length, combined.unattributed.codex.length], [0, 2], "with other machines combined, Codex sessions cannot be told apart");
+  const machines = sessions.map((session, index) => ({ ...session, machine: index % 2 ? "agentbox" : "local" }));
+  const combined = attributeSessions(machines, accounts, { local: (session) => session.machine === "local" });
+  assert.deepEqual([...combined.byAccount].map(([key, list]) => [key, list.map(({ machine }) => machine)]), [
+    ["claude-aaaaaaaaaaaaaaaa", ["local"]], ["claude-bbbbbbbbbbbbbbbb", []], ["claude-w-100", []], ["codex-aaaaaaaaaaaaaaaa", ["local"]], ["", []],
+  ], "Claude joins by profile key and machine, Codex by machine");
+  assert.deepEqual([combined.elsewhere.claude.length, combined.elsewhere.codex.length, combined.unattributed.claude.length], [2, 1, 1], "other machines' sessions are set apart, never guessed");
   const single = attributeSessions(sessions, [accounts[0]!]);
   assert.equal(single.byAccount.get("claude-aaaaaaaaaaaaaaaa")!.length, 2, "the only Claude account takes this machine's sessions without a profile");
 });

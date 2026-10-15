@@ -10,7 +10,7 @@ import { stopping, track } from "./processes.ts";
 import { lastGoodMaxAgeMs, readLastGood, writeLastGood } from "./machines/cache.ts";
 import { byHostName, localIdentity } from "./machines/identity.ts";
 import { remoteUnavailableWarning, staleMachineWarning } from "./public/evidence.js";
-import { machineAge } from "./public/machines.js";
+import { localMachine, machineAge } from "./public/machines.js";
 import { runtimePayload, type RuntimePayload } from "./remote/runtime.ts";
 import type { AnalyzeOptions, MachineAnalytics, MachineReason, MachineStatus } from "./types.ts";
 import { version } from "./version.ts";
@@ -395,7 +395,7 @@ export function machineReads(
   let controller = new AbortController();
   const abort = (): void => { controller.abort(); controller = new AbortController(); };
   signal?.addEventListener("abort", abort, { once: true });
-  const keys = new Set<string>(["local"]);
+  const keys = new Set<string>([localMachine]);
   const readings: MachineReading[] = remote.machines.map((machine) => {
     let key = machineKey(machine.name);
     for (let attempt = 2; keys.has(key); attempt++) key = `${machineKey(machine.name).slice(0, 60)}-${attempt}`;
@@ -474,7 +474,7 @@ export function machineReads(
       const twin = seen.get(reading.identity);
       if (twin) twins.set(reading, twin); else seen.set(reading.identity, reading.machine.name);
     }
-    const statuses: MachineStatus[] = [{ key: "local", label: remote.local, state: "ok", sessions: local.summary.sessions, repositories: local.summary.repositories, readAt: local.generatedAt, durationMs: Math.round(localMs), version }];
+    const statuses: MachineStatus[] = [{ key: localMachine, label: remote.local, state: "ok", sessions: local.summary.sessions, repositories: local.summary.repositories, readAt: local.generatedAt, durationMs: Math.round(localMs), version }];
     const inputs: Array<MachineAnalytics | null> = [local];
     for (const reading of readings) {
       const twin = twins.get(reading);

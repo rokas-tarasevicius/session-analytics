@@ -11,7 +11,7 @@ import { InteropError } from "./interop/error.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
-import { machineAge, machineReasons, machineTally, machineWarningSources } from "./public/machines.js";
+import { localMachine, machineAge, machineReasons, machineTally, machineWarningSources } from "./public/machines.js";
 import type { MachineAnalytics, MachineStatus } from "./types.ts";
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, ...shareValueFlags]);
@@ -143,7 +143,7 @@ if (analytics?.rateCard.pricing?.stale && !analytics.rateCard.pricing.offline) {
 const metricValue = (value: number, metric: Metric, format = compactNumber, sessions = analytics?.sessions ?? []): string => coveredValue(value, metricCoverage(sessions, metric), format);
 
 if (analytics && process.argv.includes("--identify-machine")) {
-  analytics = { ...analytics, machines: [{ key: "local", label: remote.local, state: "ok" as const, sessions: analytics.summary.sessions, repositories: analytics.summary.repositories,
+  analytics = { ...analytics, machines: [{ key: localMachine, label: remote.local, state: "ok" as const, sessions: analytics.summary.sessions, repositories: analytics.summary.repositories,
     readAt: analytics.generatedAt, durationMs: Math.round(performance.now() - started), version, identity: localIdentity() }] };
 }
 const machines = analytics?.machines && analytics.machines.length > 1 ? analytics.machines : null;

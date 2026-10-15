@@ -183,3 +183,16 @@ test("an open 'Why?' follows its suggestion when a refresh re-ranks the list", (
   assert.equal(reopened.open, true);
   assert.equal(why().filter((details) => details.open).length, 1, "no other suggestion opened in its place");
 });
+
+test("with other machines combined, value counts this machine's sessions and names the machines it leaves out", () => {
+  const spent = (machine: string, value: number) => ({ provider: "codex", machine, velocity: { version: 1, dimensions: [], undated: [],
+    buckets: [["2026-10-13", 10, 0, [value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } });
+  const container = new Element();
+  render(container, { sessions: [spent("local", 40), spent("agentbox", 25)], local: (session: { machine: string }) => session.machine === "local", scope: { label: "laptop", others: ["agentbox"] } });
+  const worth = container.querySelector(".subscription-worth")!.textContent;
+  assert.match(worth, /\$25 on agentbox is not counted: limits are read on laptop only/);
+  assert.match(worth, /\$40 laptop's 1 Codex session in these dates; the only Codex account/);
+  assert.match(container.querySelector(".subscription-sources")!.textContent, /This dashboard reads laptop and agentbox\. Limits are read on laptop only, so value counts only its sessions/);
+  render(container, { sessions: [spent("local", 40)] });
+  assert.doesNotMatch(container.textContent, /not counted: limits are read|This dashboard reads/, "one machine says nothing about others");
+});

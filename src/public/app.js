@@ -20,8 +20,8 @@ import { toolsDays } from "./tools-data.js";
 import { renderVelocity, velocityProviders } from "./velocity.js";
 import { buildVelocity, comparePeriods, ledgerCells, localDay, periodFromVelocity, shiftDay } from "./velocity-data.js";
 import { normalizeTimestamp } from "./timestamps.js";
-import { duplicateMachineWarning, remoteUnavailableWarning, scanWarnings } from "./evidence.js";
-import { machineAge, machineNote, machineReasons, machineTally, machineView, machineWarnings, sessionMachine } from "./machines.js";
+import { duplicateMachineWarning, scanWarnings } from "./evidence.js";
+import { localMachine, machineAge, machineNote, machineReasons, machineTally, machineView, machineWarnings, sessionMachine } from "./machines.js";
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
@@ -751,23 +751,23 @@ function scheduleLimits(active) {
 }
 
 /**
-/**
- * Subscription is account-wide: it reads every session of every machine read, ignoring the repository focus and the
- * Machines strip, over the selected dates, and says which machines that is. Before the snapshot arrives it shows the
- * meters alone. Each refresh keeps focus, open disclosures and the scroll position.
+ * Subscription is account-wide: it reads every session, ignoring the repository focus and the Machines strip, over the
+ * selected dates. Limits are read on this machine only, so value counts only its sessions, and the view names the other
+ * machines read. Before the snapshot arrives it shows the meters alone. Each refresh keeps focus, open disclosures and
+ * the scroll position.
  */
 function renderSubscriptionView() {
   const restoreFocus = rememberFocus();
   const scroll = window.scrollY;
-  const all = fullSnapshot ?? snapshot, context = all ? velocityContext() : null;
-  const counted = (all?.machines ?? []).filter(({ state, readAt }) => state !== "failed" && readAt).map(({ label }) => label);
-  // Other machines' sessions carry no machine yet, so while any are combined none can be told apart from this machine's.
-  const remote = (limits?.remoteMachines ?? 0) > 0 || Boolean(all?.warnings?.includes(remoteUnavailableWarning));
+  const all = fullSnapshot ?? snapshot, context = all ? velocityContext() : null, machines = all?.machines ?? [];
   renderSubscription($("#subscription-view"), {
     limits, sessions: all ? all.sessions : null, timeZone: context?.timeZone ?? "UTC",
     range: context ? { from: zonedDayStart(context.start, context.timeZone), to: zonedDayStart(shiftDay(context.end, 1), context.timeZone) } : null,
-    local: remote ? () => false : null,
-    scope: counted.length > 1 ? { label: `${counted.slice(0, -1).join(", ")} and ${counted.at(-1)}`, machines: counted.length } : { label: "this machine", machines: 1 },
+    local: machines.length ? (session) => sessionMachine(session, machines) === localMachine : null,
+    scope: {
+      label: machines.find(({ key }) => key === localMachine)?.label ?? "this machine",
+      others: machines.filter(({ key, state, readAt }) => key !== localMachine && state !== "failed" && readAt).map(({ label }) => label),
+    },
     onPlanChange: () => renderSubscriptionView(),
   });
   if (typeof scroll === "number" && window.scrollY !== scroll) window.scrollTo?.({ top: scroll, left: 0, behavior: "instant" });
@@ -1054,7 +1054,7 @@ function setMachine(key, on) {
 /** The strip's note: the snapshot's time, or on Subscription, that the strip does not narrow it. */
 function renderStripMeta() {
   if (!fullSnapshot || (fullSnapshot.machines?.length ?? 0) < 2) return;
-  elements.machineStripMeta.textContent = currentViewName() === "subscription" ? "Subscription counts every machine" : `snapshot ${timeLabel(fullSnapshot.generatedAt, snapshotTimeZone())}`;
+  elements.machineStripMeta.textContent = currentViewName() === "subscription" ? "Subscription counts this machine only" : `snapshot ${timeLabel(fullSnapshot.generatedAt, snapshotTimeZone())}`;
 }
 
 /**
@@ -1089,7 +1089,7 @@ function renderMachines() {
   }
   renderStripMeta();
   const { ok, total } = machineTally(machines);
-  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows, except Subscription, which counts every machine.`;
+  elements.machinesSummary.textContent = `${ok} of ${total} machines read now. Switch a machine off in the strip to see the others alone; every view, export and total follows, except Subscription, whose limits and value are this machine's.`;
   elements.machinesRead.hidden = !machines.some(({ state }) => state === "failed" || state === "stale");
   elements.machinesRead.disabled = false; elements.machinesRead.textContent = "Read them again";
   for (const machine of machines) {

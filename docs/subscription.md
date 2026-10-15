@@ -13,7 +13,7 @@ The view leads with **Limits now**, one row per account with the most urgent fir
 | Extra usage (overage) | A Claude limit passed while paid extra usage is on. Work continues at API rates and the meter reads above 100% (it stops counting at about 102%); the reading is recorded as `overage`, not as a cap. A lockout ends at the first reading on extra usage, so time after work resumed is not counted as locked out. |
 | Cycle | One reset window of a meter, identified by its reset instant. Instants within three minutes of each other are one cycle, because providers report them with a few seconds of drift. A cycle can end early when the provider resets limits or a banked reset is redeemed; that remainder is not counted as waste. |
 | Segment | Part of a cycle. A provider can restart a meter at 0% without moving its reset (an in-place reset); the readings after it are a new segment of the same cycle. Pace, projection and the closing level use the latest segment. |
-| Value per 1% | API-equivalent value of the account's own sessions inside a segment, divided by the meter reading at that time: the last reading, or the first one at or past 100% (a cap or the start of extra usage), because value after it did not move the meter. Segments whose value per 1% is under a quarter of the median moved mostly elsewhere (another machine, the web app) and are dropped. The median of the rest is used and needs at least two segments; with fewer, the view says there is not enough history. |
+| Value per 1% | API-equivalent value of the account's own sessions on this machine inside a segment, divided by the meter reading at that time: the last reading, or the first one at or past 100% (a cap or the start of extra usage), because value after it did not move the meter. Segments whose value per 1% is under a quarter of the median moved mostly elsewhere (another machine, the web app) and are dropped. The median of the rest is used and needs at least two segments; with fewer, the view says there is not enough history. |
 | Weekly capacity | Value per 1% × 100: what one full weekly allowance is worth at list prices. |
 | A month of full use | Weekly capacity × 30.44 / 7 (monthly potential): the value of using every weekly reset fully. The headline adds up the plans you pay for and compares them with their monthly price; employer-paid seats, free plans and plans without a price are reported beside it. |
 | Value used | The account's API-equivalent value for the selected dates, from the same activity ledger as Summary, Velocity and Costs, counted from the account's first meter reading up to the end of the dates or now. Value before an account's first reading is reported as not counted, and an account without a reading in the selected dates is left out of the totals. |
@@ -48,12 +48,12 @@ Each account is labelled with its plan and the names of its profile directories,
 
 ### Which value belongs to which account
 
-Value is matched to accounts through sessions, never by provider alone:
+Value is matched to accounts through sessions, never by provider alone, and only sessions from the machine whose limits are read count. Limits are read on this machine only, so when the dashboard combines other machines (saved machines or `--remote`), a session counts only when its `machine` is `local`, this machine's key in the snapshot:
 
-- A Claude session belongs to the account whose profile holds its transcript: its `historyProfile.profileKey` is one of the account's `profileKeys`.
+- A Claude session belongs to the account whose profile holds its transcript: its `historyProfile.profileKey` is one of the account's `profileKeys` and it was read on this machine.
 - Codex sessions do not record their account yet. With one Codex account, every Codex session on this machine is that account's; with two or more, Codex value is not calibrated.
 - A session without a profile key joins its provider's only account, if there is exactly one.
-- When the dashboard combines other machines (`--remote`), their sessions cannot yet be told apart from this machine's. Claude sessions still match through this machine's profiles; Codex value is left out of every account, and the view says so. The dashboard's `/api/limits` reports the number of combined machines as `remoteMachines`.
+- Sessions from other machines are left out of every account, whatever the Machines strip shows: those machines may be signed in to other accounts, whose meters are not read here. What it's worth reports their value as not counted and names the machines.
 - Sessions that match no account are reported as unattributed value. They never calibrate a meter. Readings without an account (weekly-phase groups and unattributed history) are shown as reported, without pace, value or advice.
 
 An account with no matched sessions has unknown value, not zero: it is left out of the headline ratios.
@@ -121,7 +121,7 @@ Provider logs rotate: T3 Code keeps several days of events, and Claude Code dele
   { "statusLine": { "type": "command", "command": "session-analytics limits statusline" } }
   ```
 
-- Limits are read on the machine that runs the command. With `--remote`, schedule the same harvest on the other machines; their ledgers stay on those machines.
+- Limits are read on the machine that runs the command. With saved machines or `--remote`, schedule the same harvest on the other machines; their ledgers stay on those machines, and the dashboard here values only this machine's sessions.
 
 `session-analytics limits` prints each account with its plan and every meter's reset time and projection; `--json` prints the content-free snapshot (`schemaVersion` 2: `accounts`, `meters` and `observations` carry the account key).
 
@@ -143,7 +143,7 @@ Suggestions are rules over the same numbers, made per account. They are ranked b
 
 ## Caveats
 
-- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Local value covers this machine's matched sessions only, so value per percent and capacity are conservative (lower bounds), and the share of a full week every week is an upper bound. The outlier rule drops cycles that another client moved almost entirely, but not weeks where another machine did most of the work every week.
+- Meters count usage from every client on the account: other machines, claude.ai, the desktop apps, Codex cloud tasks. Local value covers this machine's matched sessions only, also when the dashboard combines other machines, so value per percent and capacity are conservative (lower bounds), and the share of a full week every week is an upper bound. The outlier rule drops cycles that another client moved almost entirely, but not weeks where another machine did most of the work every week.
 - API-equivalent value is a list-price comparison, not an invoice.
 - Projections assume the current segment's pace, measured through now, continues.
 - Headline ratios compare like with like. The value multiple divides the value of accounts you pay for by their prorated price; a month of full use adds up the monthly potential of the same accounts and divides it by their monthly price. Value and potential on employer-paid seats, free plans, plans without a price and outside any account are reported beside them, never divided by another account's price. Price and capacity are prorated over the time since each account's first meter reading, up to now, so days before the ledger and the rest of today are not counted.

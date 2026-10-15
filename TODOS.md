@@ -43,7 +43,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P2 | Read subscription limits from other machines: run `limits --json` there through the same bootstrap and merge the observations by account key, so Subscription meters match value read from every machine. Needs per-account meters first. | Machines review (limits-never-read-remote) |
+| P2 | Read subscription limits from other machines: run `limits --json` there through the same bootstrap and merge the observations by account key (the same login has the same key on every machine), then let the Subscription value join count each machine whose limits were read, not only `local`. Per-account meters and session `machine` are in place. | Machines review (limits-never-read-remote) |
 | P3 | Persist portable repository IDs and session keys with retained index facts, so history whose sources were deleted keeps its portable identity across exports. | #62 review |
 | P3 | Compare pricing freshness across machines: each machine prices its own sessions with its own cache, and a remote's stale or older rate card is not flagged. | Machines review (no-cross-machine-consistency) |
 | P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
