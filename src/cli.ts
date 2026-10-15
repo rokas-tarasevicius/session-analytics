@@ -1,6 +1,6 @@
 import { historyReport } from "./report/history.ts";
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, OptionError, optionErrorMessage, pricingHelp, argument, remoteBooleanFlags, remoteHelp, remoteValueFlags, type RemoteOptions } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, OptionError, optionErrorMessage, pricingHelp, sourceHelp, argument, remoteBooleanFlags, remoteHelp, remoteValueFlags, type RemoteOptions } from "./options.ts";
 import { remoteFor } from "./machines/config.ts";
 import { stopOnSignals, stopping } from "./processes.ts";
 import { analyzeMachines } from "./remote.ts";
@@ -63,19 +63,7 @@ Options:
   --repo-name NAME       Narrow to one uniquely named repository
   --repo-root PATH       Narrow by canonical repository root
   --repo-remote URL      Narrow by canonical Git remote
-  --database PATH        Override the optional Conductor metadata database
-  --codex-root PATH      Override the Codex transcript root
-  --codex-archive-root PATH Override the archived Codex transcript root
-  --claude-root PATH     Override the Claude transcript root
-  --cursor-database PATH Override the Cursor local history database
-  --cursor-sdk-root PATH Override the Conductor Cursor SDK store
-  --cursor-transcript-root PATH Override Cursor's projects directory
-  --copilot-root PATH    Override Copilot's session-state directory
-  --opencode-database PATH Override the OpenCode SQLite database
-  --gemini-root PATH     Override Gemini's tmp directory
-  --no-additional-providers Disable new-source discovery (explicit paths still apply)
-  --rate-card PATH       Override the reviewed rate card
-${pricingHelp}${machineHelp}${remoteHelp}  --no-index             Full scan without reading or writing the index
+${sourceHelp}${pricingHelp}${machineHelp}${remoteHelp}  --no-index             Full scan without reading or writing the index
   --version              Print the version
   --help                 Show this help
 `);

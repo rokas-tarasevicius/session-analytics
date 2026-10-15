@@ -11,6 +11,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { AnalysisHeapLimitError, analysisHeapLimitMegabytes } from "../src/analysis-process.ts";
+import { analysisBooleanFlags, analysisValueFlags } from "../src/options.ts";
 import { MAX_MESSAGE_BYTES, PROTOCOL_VERSION, serveMcp } from "../src/mcp/server.ts";
 import { loadSnapshot, SNAPSHOT_DEADLINE_MS } from "../src/mcp/snapshot.ts";
 import type { McpPayload, McpSnapshot } from "../src/types.ts";
@@ -276,6 +277,9 @@ test("MCP startup options and snapshot failures do not expose paths or exception
   }
   const help = spawnSync(process.execPath, [bin, "mcp", "--help"], { encoding: "utf8" });
   assert.equal(help.status, 0); assert.match(help.stdout, /stdio/);
+  // Every documented mcp option is in its help, as docs/cli.md lists them for mcp, with what the shared ones mean here.
+  for (const flag of [...analysisValueFlags, ...analysisBooleanFlags, "--mcp-ttl", "--mcp-cwd", "--exclude-hidden"]) assert.match(help.stdout, new RegExp(`^  ${flag} `, "m"), flag);
+  assert.match(help.stdout, /^mcp never fetches prices: .*\ntool windows stay UTC whatever --time-zone says\.$/m);
   const f = await fixture();
   const c = client([...f.args, "--rate-card", join(f.root, "SECRET_MISSING_RATE_CARD")], f.source.repositoryRoot);
   try {

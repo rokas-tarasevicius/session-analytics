@@ -18,8 +18,19 @@ export class AnalysisHeapLimitError extends Error {
   }
 }
 
+/** The worker's stderr line when its index parses every session again. */
+export const fullParseSignal = "session-analytics:full-parse";
+export const fullParseNotice = "Parsing all session history once (a first scan, or a new version or price list); on a large history this can take several minutes.";
+
+/** One line for a person at a terminal; a pipe, a file, a scheduled or a remote run hears nothing. */
+export function noticeFullParse(stream: { isTTY?: boolean; write(text: string): unknown } = process.stderr): void {
+  if (stream.isTTY) stream.write(`${fullParseNotice}\n`);
+}
+
+/** Analyze this machine in a worker process with its own heap; `onFullParse` hears once when its index parses everything. */
 export async function analyzeMachineSessionsIsolated(
   options: AnalyzeOptions,
+  { onFullParse = () => noticeFullParse() }: { onFullParse?: () => void } = {},
 ): Promise<MachineAnalytics> {
   return await new Promise<MachineAnalytics>((resolve, reject) => {
     const child = track(spawn(
@@ -32,7 +43,11 @@ export async function analyzeMachineSessionsIsolated(
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { output += chunk; });
-    child.stderr.on("data", (chunk: string) => { errorOutput += chunk; });
+    let noticed = false;
+    child.stderr.on("data", (chunk: string) => {
+      errorOutput += chunk;
+      if (!noticed && errorOutput.includes(fullParseSignal)) { noticed = true; onFullParse(); }
+    });
     child.once("error", reject);
     child.once("close", (code) => {
       if (code !== 0) {

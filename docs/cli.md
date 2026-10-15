@@ -22,14 +22,14 @@
 
 Requirements: **Node.js 24 or newer** and **macOS** or **Linux** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)). Windows is not supported; the package declares macOS and Linux, so npm refuses to install it there with `EBADPLATFORM`.
 
-Releases after 0.9.0 attach the compiled package to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases). npm installs the latest one directly from the release, without the npm registry:
+From the first packaged release (after 0.9.0), each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) attaches the compiled package, and npm installs the latest one directly from the release, without the npm registry. While 0.9.0 is the latest release, no packaged release exists yet and this command fails with a 404: run session-analytics [from source](#from-source) until the first one.
 
 ```bash
 npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
 session-analytics --version
 ```
 
-The release workflow installed and ran this `session-analytics-X.Y.Z.tgz` on Linux and macOS before publishing it; `session-analytics.tgz` is the same file under a name that always points to the latest release. The package has no dependencies and runs no install scripts. Until the first packaged release, and for 0.9.0 and earlier, run session-analytics [from source](#from-source).
+The release workflow installed and ran this `session-analytics-X.Y.Z.tgz` on Linux and macOS before publishing it; `session-analytics.tgz` is the same file under a name that always points to the latest release. The package has no dependencies and runs no install scripts. 0.9.0 and earlier run only [from source](#from-source).
 
 npm registry and Homebrew packages of the same tarball are planned: the release workflow can publish them, but neither is published yet. This page lists their commands once they are; until then, install from the release URL.
 
@@ -44,7 +44,7 @@ npm registry and Homebrew packages of the same tarball are planned: the release 
 | Release tarball | Run the install command again | Install the versioned asset URL | `npm uninstall -g session-analytics` |
 | Source checkout | `git pull`, or check out a newer release tag | Check out an older release tag | Delete the checkout, after `npm uninstall -g session-analytics` if you ran `npm link` |
 
-There is no automatic update check. After an upgrade, the first scan parses present sessions again once, and a dashboard still running the old version is named instead of reused: stop it and start the command again. An older version refuses an index that a newer version migrated ("created by a newer version"); run it with `--no-index` until you upgrade again.
+There is no automatic update check. After an upgrade, the first scan parses present sessions again once (on a terminal, one line on stderr says so, since it can take several minutes; the same happens on a first scan and after a price list change), and a dashboard still running the old version is named instead of reused: stop it and start the command again. An older version refuses an index that a newer version migrated ("created by a newer version"); run it with `--no-index` until you upgrade again.
 
 Uninstalling removes the command only. The [data directory](#local-index) keeps the private index, pricing cache and limits ledger: `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (or `~/.local/share/session-analytics/`) on Linux, unless `--data-dir` or `SESSION_ANALYTICS_DATA_DIR` chose another; `session-analytics index path` prints the index file inside it. The sharing key stays in `$XDG_STATE_HOME/session-analytics/` (or `~/.local/state/session-analytics/`). Delete both directories to remove everything session-analytics stored; provider history is never modified. Also remove any MCP registration or status line that runs the command.
 
@@ -80,7 +80,7 @@ The server binds to `127.0.0.1` only and answers read-only `GET` requests. Machi
 
 ### Window and URL state
 
-The dashboard starts with the last 30 days of observed history. `?window=7`, `?window=30`, `?window=90`, or `?window=all` overrides this for the visit, and `?window=custom&start=YYYY-MM-DD&end=YYYY-MM-DD` opens a custom range. `?view=` selects a view (`summary`, `velocity`, `costs`, `pricing`, `tools`, `activity`), `?repo=` focuses a repository, and `?theme=` / `?density=` apply a one-visit appearance. The window is not saved in browser storage, but the address bar follows the view, window and repository focus, so reload, bookmarks and Back/Forward return to the same place. Sessions with an unknown start time only count under **All**, and **Export view** downloads cover the selected window, so choose **All** for a whole-history export.
+The dashboard starts with the last 30 days of observed history. `?window=7`, `?window=30`, `?window=90`, or `?window=all` overrides this for the visit, and `?window=custom&start=YYYY-MM-DD&end=YYYY-MM-DD` opens a custom range. `?view=` selects a view (`summary`, `velocity`, `costs`, `pricing`, `subscription`, `tools`, `activity`), `?repo=` focuses a repository, and `?theme=` / `?density=` apply a one-visit appearance. The window is not saved in browser storage, but the address bar follows the view, window and repository focus, so reload, bookmarks and Back/Forward return to the same place. Sessions with an unknown start time only count under **All**, and **Export view** downloads cover the selected window, so choose **All** for a whole-history export.
 
 ### Dates and timezones
 
@@ -169,7 +169,7 @@ session-analytics limits --no-remote     # this machine only, without the saved 
 
 Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. Each reading is attributed to an account, so two Claude logins used on one machine are reported separately.
 
-`limits` prints one block per account, labelled with its plan and local profile names, for example `Claude Max 20x · work ($200/mo)` or `Claude Team · client`. A price is shown only for plans you pay for yourself; a Team seat instead lists its seat evidence. Each meter shows the share used and its reset, then what applies: the projected level at the reset or the run-out time when it comes first, "too early in the window to project", a cap, a restart in place, extra usage past the allowance, a stale last reading, or that the window is idle or no longer reported. Then come the account's extra-usage state, banked Codex resets and Codex credit balance, and the status of each of this machine's sources. `--json` prints the content-free snapshot (`schemaVersion` 2) with `accounts`, `meters` and an account key on every reading; its fields are listed in the [privacy manifest](privacy.md#limits-endpoint-limitssnapshot).
+`limits` prints one block per account, labelled with its plan and local profile names, for example `Claude Max 20x · work ($200/mo)` or `Claude Team · client`. A price is shown only for plans you pay for yourself; a Team seat instead lists its seat evidence. Each meter shows the share used and its reset, then what applies: the projected level at the reset or the run-out time when it comes first, "too early in the window to project", or, for a meter used up fast before a projection has evidence, the run-out at the pace so far ("12h 30m into the window: at this pace runs out Thu 18:07 (too early to project)"), a cap, a restart in place, extra usage past the allowance, a stale last reading, or that the window is idle or no longer reported. Extra limits that never moved off 0%, such as an unused model-specific limit, are left out. Then come the account's extra-usage state, banked Codex resets and Codex credit balance, and the status of each of this machine's sources. `--json` prints the content-free snapshot (`schemaVersion` 2) with `accounts`, `meters` and an account key on every reading; its fields are listed in the [privacy manifest](privacy.md#limits-endpoint-limitssnapshot).
 
 - `--quiet` harvests without printing, for cron. One entry covers every account on the machine.
 - `--claude-root PATH` reads only that profile: event-log and profile discovery are skipped unless `SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` is set.

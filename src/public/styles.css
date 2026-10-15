@@ -815,6 +815,9 @@ dialog::backdrop { background: var(--backdrop); }
 .coverage-body table { min-width: 720px; }
 .coverage-footnotes ul { margin: 0; padding-left: 18px; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.6; }
 .coverage-footnotes li + li { margin-top: 4px; }
+.coverage-footnotes code { font: 500 var(--fs-xs) var(--font-mono); overflow-wrap: anywhere; }
+.coverage-footnotes a { color: var(--text-2); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
+.coverage-footnotes a:hover { color: var(--text); border-color: var(--text); }
 
 /* Export menu as an icon button with a popover. */
 .export-menu { position: relative; }

@@ -75,6 +75,8 @@ export class IndexScan {
   private ambiguousCounters = false;
   private repositories = new Map<string, { root: string; remote: string }>();
   private committed = false;
+  /** The index was cold, or written by other code or prices: every present session is parsed again in this scan. */
+  readonly fullParse: boolean;
   private pruneBefore: string;
   private auditSessions: Set<string>;
   private auditLedgers: Set<string>;
@@ -92,7 +94,8 @@ export class IndexScan {
     this.connection = connection; this.scope = scope; this.revision = revision;
     connection.database.exec("BEGIN IMMEDIATE");
     const revisionKey = `parser:${scope}`;
-    if (connection.database.prepare("SELECT value FROM metadata WHERE key=?").get(revisionKey)?.["value"] !== revision) {
+    this.fullParse = connection.database.prepare("SELECT value FROM metadata WHERE key=?").get(revisionKey)?.["value"] !== revision;
+    if (this.fullParse) {
       for (const table of ["evidence", "claude_ownership", "conductor_records"]) connection.database.prepare(`DELETE FROM ${table} WHERE scope=?`).run(scope);
       connection.database.prepare("INSERT OR REPLACE INTO metadata(key,value) VALUES (?,?)").run(revisionKey, revision);
     }

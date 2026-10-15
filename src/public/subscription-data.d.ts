@@ -34,6 +34,8 @@ export interface LiveMeter {
   nextResetAt: number | null;
   rate?: number; remaining?: number; projected?: number | null; tooEarly?: boolean; stale?: boolean; capAt?: number | null;
   elapsed?: number; capsEarly?: boolean; mayBeUsedUp?: boolean; dailyBudget?: number | null; observedAt?: number;
+  /** Too early to project, but used up fast (half the allowance, or 15% at three times the even pace): the run-out at the pace so far. */
+  burnAt?: number | null;
   /** A meter whose meaning is not documented: levels only, never a projection, run-out or cap. */
   levelsOnly?: boolean;
   /** Without an open cycle: whether the provider confirmed the window has not started (else nothing is known since the reset). */
@@ -63,7 +65,7 @@ export interface BankedResets {
   upToUsd: number | null; fullValue(credit: BankedCredit): number | null; nowValue(credit: BankedCredit): number | null;
 }
 export interface ValueRange { from: number; to: number }
-/** `profiles`: sessions in the account's profiles; `provider`: the provider's only account takes this machine's sessions; `none`: nothing attributable. */
+/** `profiles`: sessions in the account's profiles; `provider`: the provider's only account on a machine whose limits were read takes that machine's sessions; `none`: nothing attributable. */
 export type ValueBasis = "profiles" | "provider" | "none";
 export interface AccountUtilization {
   account: LimitAccount; key: string; provider: LimitProvider; label: string; identified: boolean; planId: string | null;
@@ -88,9 +90,9 @@ export interface SubscriptionTotals {
 }
 export interface SubscriptionModel {
   meters: Meter[]; accounts: Array<AccountUtilization & { excluded: boolean }>; totals: SubscriptionTotals;
-  /** Value of this machine's sessions no account could claim. */
+  /** Value of sessions from the machines whose limits were read that no account could claim. */
   unattributed: { claude: number; codex: number };
-  /** Value of other machines' sessions: their meters are not read here, so no account counts it. */
+  /** Value of sessions from machines whose limits were not read: no account counts it. */
   elsewhere: { claude: number; codex: number };
 }
 export interface Recommendation {
@@ -128,10 +130,11 @@ export function bankedResets(input: {
 export function economics(input: { provider: LimitProvider; planId: string | null; payer?: PlanPayer | null; perPercent: number | null; extracted: number | null; days: number }): Economics;
 export function resetUtilization(history: ResetCycle[], live: LiveMeter | null, limit?: number): { mean: number; closed: number; includesProjection: boolean } | null;
 export function visibleMeters(item: AccountUtilization): { weekly: LiveMeter | null; session: LiveMeter | null; extra: LiveMeter[] };
+export function unusedExtraMeter(meter: Meter): boolean;
 export interface AccountStatus {
-  kind: "capped" | "overage" | "runs-out" | "may-be-used-up" | "stale" | "too-early" | "on-track" | "idle" | "levels-only";
+  kind: "capped" | "overage" | "runs-out" | "early-burn" | "may-be-used-up" | "stale" | "too-early" | "on-track" | "idle" | "levels-only";
   tone: "danger" | "warn" | "ok" | "muted"; rank: number; used: number; meter: "weekly" | "session";
-  /** Run-out instant; `until`: the reset that ends a cap or an idle week; `since`: the last reading; `early`: seconds before the reset. */
+  /** Run-out instant; `until`: the reset that ends a cap or an idle week; `since`: the last reading, or the start of a fast week or 5-hour window; `early`: seconds before the reset. */
   at: number | null; until: number | null; since: number | null; early: number | null;
   /** Idle only: the provider confirmed the week has not started, rather than no reading since the reset. */
   confirmed?: boolean;

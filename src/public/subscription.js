@@ -183,6 +183,7 @@ function meterSentence(live, fmt, now) {
   if (live.state === "overage") return { text: `Past the included allowance, on paid extra usage; ${reset}.${restarted}`, tone: "warn" };
   if (live.state === "capped") return { text: `Limit reached ${fmt.when(live.capAt)}; ${reset}.${restarted}`, tone: "danger" };
   if (live.capsEarly) return { text: `${used}. At this pace it runs out ${fmt.when(live.capAt)}, ${formatDuration(live.cycle.resetsAt - live.capAt)} before it ${reset}.${restarted}`, tone: "warn" };
+  if (live.burnAt) return { text: `${used} in ${formatDuration(now - live.segment.start)}: at this pace it runs out ${fmt.when(live.burnAt)}, ${formatDuration(live.cycle.resetsAt - live.burnAt)} before it ${reset}. Too early in the window for a projection.${restarted}`, tone: "warn" };
   if (live.mayBeUsedUp) return { text: `${used} at ${fmt.when(live.observedAt)}. The pace before that reaches 100% by now, so it may already be used up; ${reset}.`, tone: "warn" };
   if (live.stale) return { text: `${used} at the last reading, ${fmt.when(live.observedAt)} (${formatDuration(now - live.observedAt)} ago); ${reset}.${restarted}` };
   if (live.projected === null || live.projected === undefined) return { text: `${used}; ${live.tooEarly ? "too early in the window to project" : "levels only, no projection"}; ${reset}.${restarted}` };
@@ -211,6 +212,8 @@ function statusText(status, fmt, now) {
     capped: () => `${session ? "5-hour limit capped" : "Capped"} until ${fmt.when(status.until)}`,
     overage: () => "Using extra usage",
     "runs-out": () => `${session ? "5-hour limit runs" : "Runs"} out ${fmt.when(status.at)} · ${formatDuration(status.early)} early`,
+    "early-burn": () => session ? `5-hour limit runs out ${fmt.when(status.at)} at this pace`
+      : `${percentText(status.used)} used in ${formatDuration(now - status.since)} · runs out ${fmt.when(status.at)} at this pace`,
     "may-be-used-up": () => "May be used up",
     stale: () => `Last seen ${formatDuration(now - status.since)} ago`,
     "too-early": () => "Too early to tell",
@@ -497,9 +500,12 @@ function payerControl(item, onChange) {
   return cell;
 }
 
+/** Whether an account's counted period starts at its first meter reading rather than at the start of the selected dates. */
+const firstReadingStart = (item) => item.period.firstReading !== null && item.period.from <= item.period.firstReading + 60;
+
 /**
- * The dates value is counted over: from each account's first reading in the range (shared by provider when it can be)
- * to the end of the range, or now.
+ * The dates value is counted over: from each account's first reading or the start of the range, whichever is later (shared
+ * by provider when it can be), to the end of the range, or now.
  */
 function periodText(items, fmt, now) {
   if (!items.length) return "No account has readings in these dates";
@@ -508,10 +514,12 @@ function periodText(items, fmt, now) {
   const until = end >= now - HOUR ? "to now" : `to ${fmt.date(end - 1)}`;
   const starts = new Set(items.map((item) => fmt.date(item.period.from)));
   if (starts.size === 1) return `${[...starts][0]} ${until}`;
-  const byProvider = ["claude", "codex"].map((provider) => [provider, new Set(items.filter((item) => item.provider === provider).map((item) => fmt.date(item.period.from)))]);
-  return byProvider.every(([, dates]) => dates.size <= 1)
-    ? `${byProvider.filter(([, dates]) => dates.size).map(([provider, dates]) => `${providerNames[provider]} since ${[...dates][0]}`).join(", ")} (first readings), ${until}`
-    : `Since each account's first reading (see Since below), ${until}`;
+  const byProvider = ["claude", "codex"].map((provider) => [provider, items.filter((item) => item.provider === provider)]);
+  const dates = (list) => new Set(list.map((item) => fmt.date(item.period.from)));
+  // A provider's start is its first reading only when every account of it starts there, not at the start of the dates.
+  return byProvider.every(([, list]) => dates(list).size <= 1)
+    ? `${byProvider.filter(([, list]) => list.length).map(([provider, list]) => `${providerNames[provider]} since ${[...dates(list)][0]}${list.every(firstReadingStart) ? " (first reading)" : ""}`).join(", ")}, ${until}`
+    : `Since each account's first reading or the start of these dates (see Since below), ${until}`;
 }
 
 /** Value per account and totals that compare like with like; secondary, so it starts open only on wide screens. */
@@ -551,7 +559,7 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide, sco
     const { economics: value, calibration, period } = item;
     const empty = period.days <= 0;
     return [
-      { text: item.label, detail: empty ? `First reading ${period.firstReading !== null ? fmt.date(period.firstReading) : "not yet"} · no days in these dates` : `Since ${fmt.date(period.from)}${period.firstReading !== null && period.from <= period.firstReading + 60 ? " (first reading)" : ""} · ${Math.round(period.days * 10) / 10} days${item.excluded ? " · excluded" : ""}` },
+      { text: item.label, detail: empty ? `First reading ${period.firstReading !== null ? fmt.date(period.firstReading) : "not yet"} · no days in these dates` : `Since ${fmt.date(period.from)}${firstReadingStart(item) ? " (first reading)" : ""} · ${Math.round(period.days * 10) / 10} days${item.excluded ? " · excluded" : ""}` },
       payerControl(item, onPlanChange),
       calibration.perPercent !== null ? { text: money(calibration.perPercent), detail: `median of ${plural(calibration.cycles, "cycle")}` }
         : { text: DASH, detail: `needs ${calibrationMinimum} cycles (${calibration.cycles} so far)` },
@@ -595,7 +603,9 @@ function closesChart(container, rows, fmt, now) {
   const cycles = rows.map((item) => [
     ...item.history.slice(-12).map((cycle) => ({ ...cycle, at: cycle.endedEarly ? cycle.end : cycle.resetsAt, live: false, item })),
     ...(item.weekly?.cycle ? [{ at: item.weekly.cycle.resetsAt, resetsAt: item.weekly.cycle.resetsAt, peak: Math.min(100, item.weekly.used), projected: Math.min(100, item.weekly.projected ?? item.weekly.used), live: true,
-      capped: item.weekly.state === "capped" || item.weekly.capsEarly, cappedNow: item.weekly.state === "capped", capAt: item.weekly.capAt, endedEarly: false, lowerBound: false, inPlace: item.restarts, item }] : []),
+      capped: item.weekly.state === "capped" || item.weekly.capsEarly, cappedNow: item.weekly.state === "capped", capAt: item.weekly.capAt, endedEarly: false, lowerBound: false, inPlace: item.restarts, item,
+      // Past the allowance on paid extra usage, as the card says: since the first reading on it in this segment.
+      overageSince: item.weekly.state === "overage" ? item.weekly.segment.samples.find((sample) => sample.status === "overage")?.t ?? item.weekly.observedAt : null }] : []),
   ]);
   const all = cycles.flat();
   if (!all.length) { container.append(note("No weekly resets observed yet.")); return; }
@@ -634,7 +644,7 @@ function closesChart(container, rows, fmt, now) {
     root.append(marker);
     const readout = inspectable(root, `closes:${item.key}`, lane, (cycle) => `${cycle.live}|${cycle.resetsAt}`, (cycle) => cycle.live ? [
       `This week · resets ${fmt.when(cycle.resetsAt)}`,
-      cycle.cappedNow ? `Used up since ${fmt.when(cycle.capAt)}` : `${percentText(cycle.peak)} used so far${cycle.projected > cycle.peak ? `; on pace for ${percentText(cycle.projected)}` : ""}${cycle.capped ? "; runs out before the reset" : ""}`,
+      cycle.cappedNow ? `Used up since ${fmt.when(cycle.capAt)}` : cycle.overageSince !== null ? `Past the included allowance, on paid extra usage since ${fmt.when(cycle.overageSince)}` : `${percentText(cycle.peak)} used so far${cycle.projected > cycle.peak ? `; on pace for ${percentText(cycle.projected)}` : ""}${cycle.capped ? "; runs out before the reset" : ""}`,
     ] : [
       `${cycle.endedEarly ? `Reset early ${fmt.date(cycle.end)}` : `Reset ${fmt.date(cycle.resetsAt)}`} · closed at ${percentText(cycle.peak)}${cycle.lowerBound ? " or more" : ""}`,
       cycle.endedEarly

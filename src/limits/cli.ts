@@ -8,7 +8,7 @@ import { argument, optionErrorMessage, remoteBooleanFlags, remoteHelp, remoteVal
 import { stopOnSignals, stopping } from "../processes.ts";
 import { dataDirectory, secureDirectory, secureFile } from "../store/database.ts";
 import { machineAge, machineReasons, machineTally } from "../public/machines.js";
-import { buildMeters, formatDuration, identified, latestReading, liveMeter, providerNames, type LiveMeter } from "../public/subscription-data.js";
+import { buildMeters, formatDuration, identified, latestReading, liveMeter, providerNames, unusedExtraMeter, type LiveMeter } from "../public/subscription-data.js";
 import { planFor } from "../public/subscription-plans.js";
 import { collectLimits, statuslineAccount, type LimitsOptions } from "./index.ts";
 import { appendInbox } from "./ledger.ts";
@@ -84,6 +84,7 @@ function describe(live: LiveMeter, info: LimitMeterInfo | undefined, now: number
   else if (live.state === "overage") parts.push("past the included allowance, on extra usage");
   else if (live.state === "capped") parts.push(`capped since ${clock(live.capAt ?? live.cycle.last.t)}`);
   else if (live.capsEarly && live.capAt) parts.push(`at this pace runs out ${clock(live.capAt)}`);
+  else if (live.burnAt) parts.push(`${formatDuration(now - live.segment!.start)} into the window: at this pace runs out ${clock(live.burnAt)} (too early to project)`);
   else if (live.mayBeUsedUp) parts.push("may already be used up");
   else if (live.stale) { /* The last reading below says how old it is; no projection. */ }
   else if (live.tooEarly) parts.push("too early in the window to project");
@@ -184,11 +185,13 @@ async function report(args: string[]): Promise<number> {
         lines.push(account.machines?.length ? `  Reported by ${names(account.machines.map(({ key }) => label(key)))}` : "  No machine read now is logged into it; shown from the history kept here");
       }
       // Each account is its own series: cycles, pace and "no longer reported" never mix two accounts.
-      const own = buildMeters(snapshot.observations.filter((row) => row.provider === provider && row.account === account.key), now, snapshot.meters);
+      const all = buildMeters(snapshot.observations.filter((row) => row.provider === provider && row.account === account.key), now, snapshot.meters);
+      const reportedUntil = latestReading(all);
+      // Extra limits that never moved off 0% are left out, as in the dashboard.
+      const own = all.filter((meter) => !unusedExtraMeter(meter));
       if (!own.length) lines.push("  No meter readings yet.");
       const infos = own.map((meter) => snapshot.meters.find((item) => item.provider === provider && item.account === account.key && item.meter === meter.meter));
       const width = Math.max(28, ...own.map((meter) => meter.label.length + 1));
-      const reportedUntil = latestReading(own);
       for (const [index, meter] of own.entries()) lines.push(describe(liveMeter(meter, now, reportedUntil, { project: identified(account.key) }), infos[index], now, width));
       lines.push(...accountFacts(account, snapshot.codexAccount, now), "");
     }

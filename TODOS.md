@@ -50,14 +50,22 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | P3 | Add a Machines column (or filter chips) to the repository table. | Machines review (no-machine-dimension) |
 | P3 | Stop every saved Linux server from adding "Cursor local session history is missing." and an incomplete Cursor source: the default Cursor database is the macOS path on every platform. Use each platform's default (`~/.config/Cursor` on Linux, `%APPDATA%\Cursor` on Windows), and count an absent default store as not installed rather than missing for every provider's default roots alike, the Codex archive root included, so source health stays consistent. | Machines end-to-end review (cursor-missing-on-every-server) |
 
+## Subscription limits
+
+| Priority | Item | Plan reference |
+| --- | --- | --- |
+| P2 | Store Codex `plan_type` with each ledger reading, calibrate value per 1% per plan and prorate price per plan period; today every cycle uses the account's latest plan, so value per 1% spans plan changes. A plan type that changes within one stream could also set apart readings from a conflicting limit context, such as a cycle that looks like an early reset. | Subscription review (codex-conflicting-cycles) |
+
 ## Distribution and release metadata
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
+| P1 | Cut the first packaged release (0.10.0): move `[Unreleased]` into it, bump the version and tag it, so the tag workflow publishes `session-analytics.tgz` and `SHA256SUMS`. Until then the release-URL install fails with a 404, and the README and `docs/cli.md#install` send users to a source checkout. In the same release PR, remove the "While 0.9.0 is the latest release … 404" sentences from `README.md`, `docs/cli.md#install` and `docs/faq.md`, reword README's "Before the first packaged release" lead-in, and tick the GitHub Release item in `docs/roadmap.md`. A maintainer decision. | [Cut a release](docs/release.md#cut-a-release) |
 | P1 | Maintainer step: right after the first packaged tag, claim the unscoped npm name by publishing that release's tarball, so nobody else can register `session-analytics`; then configure trusted publishing and set `NPM_PUBLISH`. Create the Homebrew tap and its `TAP_TOKEN` and set `HOMEBREW_TAP`. | [One-time maintainer steps](docs/release.md#one-time-maintainer-steps) |
 | P2 | Once npm and the tap serve a release, add their install, upgrade and uninstall commands to the README, `docs/cli.md#install`, the FAQ and the agent skill. They are held back until then, so no guide names a package that does not exist or that someone else could register. | [One-time maintainer steps](docs/release.md#one-time-maintainer-steps) |
 | P3 | Decide whether the package should ship declaration files; it ships none today. The release check already installs and runs the compiled artifact and requires CHANGELOG and license assets. | §4 P3; §6, Not in scope for 0.8.0 |
 | P3 | Upload the social preview through repository settings at release time. | §4 P3; §6 Release 0.8.0, maintainer step |
+| P3 | Make `release:check` compare the CHANGELOG's versions with `git tag` (fetching tags in the check job), with a documented exception list: 0.8.1 was prepared at `67b0281` but never tagged. | Release review (changelog versions without a tag) |
 
 ## Security tooling and product validation
 

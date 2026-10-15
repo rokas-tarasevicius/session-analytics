@@ -48,7 +48,7 @@ const elements = {
   machinesRead: $("#machines-read"), machinesRows: $("#machines-rows"), machinesSummary: $("#machines-summary"),
   input: $("#metric-input"), main: $("#main"),
   modelSpend: $("#model-spend"), output: $("#metric-output"),
-  coverageUsageNote: $("#coverage-usage-note"), coverageSessionNote: $("#coverage-session-note"), coverageLiveNote: $("#coverage-live-note"), coverageCostNote: $("#coverage-cost-note"), retentionNote: $("#retention-note"),
+  coverageUsageNote: $("#coverage-usage-note"), coverageSessionNote: $("#coverage-session-note"), coverageLiveNote: $("#coverage-live-note"), coverageCostNote: $("#coverage-cost-note"), coverageMachinesNote: $("#coverage-machines-note"), coverageMachinesLink: $("#coverage-machines-link"), retentionNote: $("#retention-note"),
   pageTitle: $("#page-title"), palette: $("#command-palette"),
   providerCostModels: $("#provider-cost-models"), costModels: $("#cost-models"),
   providerDonut: $("#provider-donut"), providerLegend: $("#provider-legend"),
@@ -1064,6 +1064,9 @@ function renderStripMeta() {
     : read.length > 1 ? `Subscription counts ${read.join(" + ")}` : "Subscription counts this machine only";
 }
 
+/** Where Coverage sends a person whose agents also run on a server or VM. */
+const combineMachinesGuide = "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/interop.md#combine-machines";
+
 /**
  * The Machines strip and its dialog. A machine with sessions to show is a chip that filters every view;
  * one without is a button to its reason and fix. Shown only when the snapshot combines machines.
@@ -1071,6 +1074,9 @@ function renderStripMeta() {
 function renderMachines() {
   const machines = fullSnapshot?.machines ?? [], restoreFocus = rememberFocus();
   elements.machineStrip.hidden = machines.length < 2;
+  // With this machine alone, Coverage says once where other machines are added. The page itself names no outside address.
+  elements.coverageMachinesNote.hidden = !fullSnapshot || machines.length > 1;
+  elements.coverageMachinesLink.setAttribute("href", combineMachinesGuide);
   clear(elements.machineChips); clear(elements.machinesRows);
   if (machines.length < 2) return;
   const timeZone = snapshotTimeZone();

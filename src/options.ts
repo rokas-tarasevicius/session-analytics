@@ -26,6 +26,20 @@ const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
 ];
 
 export const analysisValueFlags = [...analysisSettings.map(([, flag]) => flag), "--pricing-policy", "--pricing-sources", "--pricing-max-age-days"];
+/** Source overrides, shared by every command that scans: report, the dashboard and mcp. */
+export const sourceHelp = `  --database PATH        Override the optional Conductor metadata database
+  --codex-root PATH      Override the Codex transcript root
+  --codex-archive-root PATH Override the archived Codex transcript root
+  --claude-root PATH     Override the Claude transcript root
+  --cursor-database PATH Override the Cursor local history database
+  --cursor-sdk-root PATH Override the Conductor Cursor SDK store
+  --cursor-transcript-root PATH Override Cursor's projects directory
+  --copilot-root PATH    Override Copilot's session-state directory
+  --opencode-database PATH Override the OpenCode SQLite database
+  --gemini-root PATH     Override Gemini's tmp directory
+  --no-additional-providers Disable new-source discovery (explicit paths still apply)
+  --rate-card PATH       Override the reviewed rate card
+`;
 export const pricingHelp = `  --offline              Disable public pricing requests (cached prices still work)
   --data-dir PATH        Override the per-user analytics data directory
   --pricing-policy MODE  reviewed-first (default), api-first, or reviewed-only

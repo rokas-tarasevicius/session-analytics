@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { analysisBooleanFlags, analysisValueFlags } from "../src/options.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bin = resolve(here, "../bin/session-analytics.ts");
@@ -38,6 +39,8 @@ test("the command dispatcher exposes help, version, and both subcommands", () =>
   const dashboardHelp = run(bin, ["dashboard", "--help"]);
   assert.equal(dashboardHelp.status, 0, dashboardHelp.stderr);
   assert.match(dashboardHelp.stdout, /always binds to 127\.0\.0\.1/);
+  // Every analysis option the dashboard accepts is in its help, as for report and mcp.
+  for (const flag of [...analysisValueFlags, ...analysisBooleanFlags, "--snapshot", "--exclude-hidden", "--no-codex-account"]) assert.match(dashboardHelp.stdout, new RegExp(`^  ${flag} `, "m"), flag);
 });
 
 test("report and dashboard entrypoints keep deterministic contracts", () => {
