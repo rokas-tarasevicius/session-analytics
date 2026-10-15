@@ -37,10 +37,13 @@ Model is the default grouping. Provider colours keep the series easy to distingu
 
 Requires **Node.js 24+** on macOS or Linux. macOS is the primary platform; Claude Code and Codex sources also work on Linux.
 
-Each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) from 0.10.0 attaches a compiled package, and npm installs the latest one straight from the release, without the npm registry:
+Each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) from 0.10.0 attaches a compiled package. Install it with Homebrew, or with npm straight from the release, without the npm registry:
 
 ```bash
+brew install rokas-tarasevicius/tap/session-analytics
+# or
 npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
+
 session-analytics             # opens http://127.0.0.1:4174
 session-analytics --offline   # disables public pricing refreshes
 ```
@@ -54,7 +57,7 @@ npm run demo                    # synthetic history only; never reads your sessi
 node bin/session-analytics.ts   # your own history at http://127.0.0.1:4174
 ```
 
-A checkout runs unreleased `master`; check out a release tag to run released code, and `npm link` to get a `session-analytics` command. npm registry and Homebrew packages of the same tarball are planned but not published yet. See [installation](docs/cli.md#install) for verifying a download, pinning a version, upgrades, uninstalling and platform limits; `npm ci` is needed only for the checks in [CONTRIBUTING.md](CONTRIBUTING.md).
+A checkout runs unreleased `master`; check out a release tag to run released code, and `npm link` to get a `session-analytics` command. An npm registry package of the same tarball is planned but not published yet. See [installation](docs/cli.md#install) for verifying a download, pinning a version, upgrades, uninstalling and platform limits; `npm ci` is needed only for the checks in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 To include a server or VM where agents run, save it once; every later launch reads it too, and it needs only Node.js 24 there:
 

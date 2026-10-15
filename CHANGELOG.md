@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Install with Homebrew on macOS or Linux: `brew install rokas-tarasevicius/tap/session-analytics`. The tap installs the release tarball and runs it with Homebrew's Node.js; `brew upgrade` and `brew uninstall` manage it. See [installation](docs/cli.md#install).
+
 ## [0.10.0] - 2026-10-15
 
 ### Added

@@ -31,7 +31,7 @@ session-analytics --version
 
 The release workflow installed and ran this `session-analytics-X.Y.Z.tgz` on Linux and macOS before publishing it; `session-analytics.tgz` is the same file under a name that always points to the latest release. The package has no dependencies and runs no install scripts. 0.9.0 and earlier run only [from source](#from-source).
 
-npm registry and Homebrew packages of the same tarball are planned: the release workflow can publish them, but neither is published yet. This page lists their commands once they are; until then, install from the release URL.
+With Homebrew on macOS or Linux, `brew install rokas-tarasevicius/tap/session-analytics` installs the same tarball and runs it with Homebrew's Node.js. The release workflow updates the [tap](https://github.com/rokas-tarasevicius/homebrew-tap) after Homebrew installs, tests and audits the formula. An npm registry package is planned: the release workflow can publish it, but it is not published yet, so install from the release URL or Homebrew.
 
 - **Pin a version:** install the versioned asset, `https://github.com/rokas-tarasevicius/session-analytics/releases/download/vX.Y.Z/session-analytics-X.Y.Z.tgz`.
 - **Try once without installing:** `npx --package <tarball URL> session-analytics`. npx resolves the package again on every start, so configure MCP clients and the Claude Code status line with an installed command.
@@ -42,6 +42,7 @@ npm registry and Homebrew packages of the same tarball are planned: the release 
 | Installed from | Upgrade | Roll back | Uninstall |
 | --- | --- | --- | --- |
 | Release tarball | Run the install command again | Install the versioned asset URL | `npm uninstall -g session-analytics` |
+| Homebrew | `brew upgrade session-analytics` | `brew uninstall session-analytics`, then install the versioned asset URL with npm | `brew uninstall session-analytics` |
 | Source checkout | `git pull`, or check out a newer release tag | Check out an older release tag | Delete the checkout, after `npm uninstall -g session-analytics` if you ran `npm link` |
 
 There is no automatic update check. After an upgrade, the first scan parses present sessions again once (on a terminal, one line on stderr says so, since it can take several minutes; the same happens on a first scan and after a price list change), and a dashboard still running the old version is named instead of reused: stop it and start the command again. An older version refuses an index that a newer version migrated ("created by a newer version"); run it with `--no-index` until you upgrade again.
