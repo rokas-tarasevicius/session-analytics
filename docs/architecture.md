@@ -23,8 +23,8 @@
 | `src/providers/` | Additional-source registry, bounded readers and projection, Cursor SDK/transcripts, Copilot, OpenCode, Gemini, and Conductor result fallback. |
 | `src/public/providers.js` | Provider labels, daily series, and source-specific evidence coverage. |
 | `src/pricing/` | Fixed public-feed fetchers, normalization, validation, content-addressed rate tables with immutable observations, indexed request-time history, token-class pricing/coverage, provenance and rates CLI. |
-| `src/limits/` | Limit-meter harvesters (Codex `rate_limits`, Claude Agent SDK `rate_limit_event` logs, status line), incremental byte cursors, the private `limits.json` ledger and the `limits` command. Served by `/api/limits`, outside the analysis worker. |
-| `src/public/subscription-data.js`, `subscription.js`, `subscription-plans.js` | Subscription view: meter cycles, pace and projection, value-per-percent calibration against the activity ledger, reset history, recommendations, and the reviewed plan price list. |
+| `src/limits/` | Limit-meter harvesters (Codex `rate_limits`, Claude Agent SDK `rate_limit_event` logs, status line), account attribution (`accounts.ts`: session → profile → hashed login), persisted fingerprinted byte cursors, the private `limits-v2.json` ledger with merge-on-write and the `limits` command. Served by `/api/limits`, outside the analysis worker. |
+| `src/public/subscription-data.js`, `subscription.js`, `subscription-plans.js` | Subscription view, one account at a time: each account's status and urgency for Limits now, meter cycles and in-place-reset segments, pace and projection, session-to-account value attribution and per-account calibration against the activity ledger, reset history, like-with-like totals, ranked recommendations, and the reviewed plan price list with who pays for each plan. |
 | `src/public/pricing.js` | Isolated Pricing tab renderer: source freshness, coverage, model cards and the model details dialog. |
 | `src/public/pricing-data.js` | Pricing model cards per provider and model from the rate card and the activity ledger for the selected dates (usage-value ordering, unused models, rate rows). |
 | `src/public/model-id.js` | Shared bounded model projection for provider parsing, catalogs and Pricing rendering. |
@@ -53,7 +53,7 @@
 | `src/public/` | Dashboard: `index.html`, `app.js` (a dependency-free ES module), `styles.css`, bundled fonts, provider marks, favicon. |
 | `data/rate-cards.json` | Versioned model rates with an effective date and a source URL per model. |
 | `skills/session-analytics/` | Agent skill that launches the dashboard or report. |
-| `scripts/demo.ts` | Synthetic dataset generator that runs the tool against that data only; `--bin` runs another build, such as an installed package. |
+| `scripts/demo.ts` | Synthetic dataset generator that runs the tool against that data only; `--bin` runs another build, such as an installed package; `demo-limits.ts` adds synthetic subscription limits for two Claude profiles and a Codex account. |
 | `scripts/build.ts`, `scripts/smoke-installed.ts` | Compile the installable package into `dist/`, and install a packed tarball into a temporary prefix to run every surface from it. |
 | `scripts/homebrew-formula.ts` | Render the Homebrew tap formula for a release tarball; the release workflow installs and tests it with Homebrew, then commits it to the tap once the tap is set up. |
 | `scripts/benchmark-index.ts` | Numeric-only cold/warm timing, plus full-scan parity for a retained demo dataset. |

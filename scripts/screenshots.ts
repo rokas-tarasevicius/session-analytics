@@ -20,8 +20,10 @@ import { join } from "node:path";
 
 type Capture = {
   name: string;
-  view: "summary" | "velocity" | "costs" | "pricing" | "tools" | "activity";
+  view: "summary" | "velocity" | "costs" | "pricing" | "subscription" | "tools" | "activity";
   query?: string;
+  /** Expression that turns true once the view's own data has arrived (Subscription loads its meters separately). */
+  waitJs?: string;
   /** Runs after the snapshot is live; `__p(title)` finds a panel by heading, `__rect(el)` returns [x, y, w, h]. */
   js?: string;
   /** Expression returning the bottom edge (CSS px) the viewport should end at. */
@@ -50,6 +52,10 @@ const CAPTURES: Capture[] = [
   { name: "velocity-movers", view: "velocity", clipJs: "__rect(__p('Top movers'))", pad: 14 },
   { name: "costs", view: "costs", fitJs: panelBottom("Cost by model") },
   { name: "pricing", view: "pricing", fitJs: panelBottom("Model prices") },
+  {
+    name: "subscription", view: "subscription", waitJs: "document.querySelectorAll('.limit-row').length > 0 && Boolean(document.querySelector('.worth-totals'))",
+    fitJs: "Math.max(...[...document.querySelectorAll('.subscription-card')].slice(0, 2).map((card) => card.getBoundingClientRect().bottom))",
+  },
   { name: "tools", view: "tools", fitJs: "Math.max(...['Top tools', 'Read'].map((t) => { const r = __rect(__p(t)); return r[1] + r[3]; }))" },
   { name: "activity", view: "activity", fitJs: "document.querySelector('#activity-repositories-panel').getBoundingClientRect().bottom" },
   { name: "coverage", view: "summary", js: "document.querySelector('#coverage-button').click()", clipJs: "__rect(document.querySelector('#coverage-dialog'))", pad: 28 },
@@ -162,6 +168,11 @@ async function capture(session: Session, base: string, item: Capture, theme: "li
     live = await session.evaluate<boolean>("document.readyState === 'complete' && document.querySelector('#sync-context')?.dataset.state === 'live' && !document.querySelector('.shimmer')");
   }
   if (!live) throw new Error(`${item.name} (${theme}): the dashboard did not reach a live snapshot within 30 seconds.`);
+  for (let attempt = 0; item.waitJs && attempt < 300; attempt += 1) {
+    if (await session.evaluate<boolean>(item.waitJs)) break;
+    if (attempt === 299) throw new Error(`${item.name} (${theme}): the view's data did not arrive within 30 seconds.`);
+    await sleep(100);
+  }
   await sleep(700);
   await session.evaluate(HELPERS);
   if (item.js) { await session.evaluate(item.js); await sleep(600); }
@@ -235,7 +246,7 @@ async function main(): Promise<void> {
   } finally {
     session?.close();
     chrome?.kill();
-    rmSync(profile, { recursive: true, force: true });
+    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 

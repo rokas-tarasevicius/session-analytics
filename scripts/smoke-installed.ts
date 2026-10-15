@@ -19,10 +19,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { staticRoutes } from "../src/static-routes.ts";
+import type { LimitsSnapshot } from "../src/limits/types.ts";
 import type { MachineAnalytics } from "../src/types.ts";
 import { version } from "../src/version.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+/** The limits snapshot version this checkout serves; a schema change fails the typecheck here instead of the smoke. */
+const limitsSchemaVersion: LimitsSnapshot["schemaVersion"] = 2;
 const commands = ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits"];
 const providers = ["claude", "codex", "cursor", "copilot", "opencode", "gemini"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
@@ -184,7 +187,9 @@ async function main(): Promise<void> {
       check(analytics.status === 200, `/api/analytics returned ${analytics.status}`);
       check(validateSnapshot(await analytics.json()).sessions.length === installed.sessions.length, "/api/analytics differs from the report");
       const limits = await fetch(`${origin}/api/limits`);
-      check(limits.status === 200 && (await limits.json() as { schemaVersion?: unknown }).schemaVersion === 1, `/api/limits returned ${limits.status}`);
+      check(limits.status === 200, `/api/limits returned ${limits.status}`);
+      const limitsVersion = (await limits.json() as { schemaVersion?: unknown }).schemaVersion;
+      check(limitsVersion === limitsSchemaVersion, `/api/limits served schema version ${String(limitsVersion)}, expected ${limitsSchemaVersion}`);
       const exited = once(dashboard, "exit");
       dashboard.kill("SIGTERM");
       check(await Promise.race([exited.then(() => true), delay(15_000, undefined, { ref: false }).then(() => false)]), "the dashboard did not stop on SIGTERM");

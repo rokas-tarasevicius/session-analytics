@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 
-import { codexPlans, type CodexAccountState, type CodexPlan, type LimitObservation } from "./types.ts";
+import { codexAccountKey, codexPlan, enumValue } from "./accounts.ts";
+import { codexLimitId, codexMeter, limitName } from "./sources.ts";
+import type { CodexAccountState, CodexPlan, LimitObservation } from "./types.ts";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -9,22 +11,18 @@ const finite = (value: unknown): number | null => {
   return typeof number === "number" && Number.isFinite(number) ? number : null;
 };
 
-function meterName(limitId: string, minutes: number | null): string {
-  const base = minutes === 300 ? "five_hour" : minutes === 10_080 ? "seven_day" : minutes ? `window_${minutes}m` : "window";
-  const id = limitId.toLowerCase();
-  return id !== "codex" && /^[a-z0-9_-]{1,40}$/.test(id) ? `${id}.${base}` : base;
-}
-
 /**
- * Project an `account/rateLimits/read` response into meters, credit balance and banked reset credits.
- * Opaque credit IDs, backend titles, the account ID and upsell banners are dropped here.
+ * Project an `account/rateLimits/read` response into meters, credit balance and banked reset credits. The account ID is
+ * hashed into the same key as rollouts' `creator_account_id`; it, opaque credit IDs, backend titles and upsell banners
+ * are dropped here.
  */
 export function codexAccountState(value: unknown, observedAt: number): CodexAccountState | null {
   const response = record(value);
   if (!response) return null;
   const buckets = record(response["rateLimitsByLimitId"]) ?? { codex: response["rateLimits"] };
   const observations: LimitObservation[] = [];
-  let plan: CodexPlan | null = null, balance: CodexAccountState["credits"] = null;
+  let plan: CodexPlan | null = null, planType: string | null = null, balance: CodexAccountState["credits"] = null;
+  const limitNames: Record<string, string> = {};
   for (const [limitId, snapshot] of Object.entries(buckets)) {
     const limits = record(snapshot);
     if (!limits) continue;
@@ -33,19 +31,23 @@ export function codexAccountState(value: unknown, observedAt: number): CodexAcco
       const used = finite(window?.["usedPercent"]), resetsAt = finite(window?.["resetsAt"]), minutes = finite(window?.["windowDurationMins"]);
       if (used === null || resetsAt === null) continue;
       observations.push({
-        provider: "codex", meter: meterName(limitId, minutes), windowMinutes: minutes !== null && minutes > 0 ? Math.round(minutes) : null,
+        provider: "codex", account: "", meter: codexMeter(limitId, minutes), windowMinutes: minutes !== null && minutes > 0 ? Math.round(minutes) : null,
         resetsAt, observedAt, usedPercent: used, status: used >= 100 ? "rejected" : "allowed", source: "codex-account",
       });
     }
-    if (typeof limits["planType"] === "string" && (codexPlans as readonly string[]).includes(limits["planType"])) plan = limits["planType"] as CodexPlan;
+    plan = codexPlan(limits["planType"]) ?? plan;
+    planType = enumValue(limits["planType"]) ?? planType;
+    const name = limitName(limits["limitName"]), id = codexLimitId(limitId);
+    if (name && id !== "codex") limitNames[id] = name;
     const credits = record(limits["credits"]);
     if (credits && limitId === "codex") balance = { hasCredits: credits["hasCredits"] === true, unlimited: credits["unlimited"] === true, balance: finite(credits["balance"]) };
   }
   const summary = record(response["rateLimitResetCredits"]);
   const available = finite(summary?.["availableCount"]);
   const details = Array.isArray(summary?.["credits"]) ? summary["credits"] as unknown[] : null;
+  const account = typeof response["accountId"] === "string" && response["accountId"].length > 0 && response["accountId"].length <= 128 ? codexAccountKey(response["accountId"]) : null;
   return {
-    observedAt, plan, observations, credits: balance,
+    observedAt, account, plan, planType, observations, credits: balance, limitNames,
     ordinaryUsageAllowed: typeof response["ordinaryUsageAllowed"] === "boolean" ? response["ordinaryUsageAllowed"] : null,
     resetCredits: available === null ? null : {
       available: Math.max(0, Math.min(1000, Math.floor(available))),

@@ -156,14 +156,24 @@ Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip se
 ## Subscription limits
 
 ```sh
-session-analytics limits                 # harvest meters and print each with its reset and projection
+session-analytics limits                 # harvest meters and print each account's meters with reset and projection
 session-analytics limits --json          # content-free limits snapshot
 session-analytics limits --quiet         # harvest only, for cron: */20 * * * * session-analytics limits --quiet
 session-analytics limits statusline      # Claude Code status line: records stdin rate_limits, prints them
 session-analytics limits --no-codex-account  # skip the banked-reset read through the local Codex app-server
 ```
 
-Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. They are kept in `limits.json` in the data directory; `--no-index` neither reads nor writes it. See [Subscription limits and value](subscription.md).
+Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. Each reading is attributed to an account, so two Claude logins used on one machine are reported separately.
+
+`limits` prints one block per account, labelled with its plan and local profile names, for example `Claude Max 20x · work ($200/mo)` or `Claude Team · client`. A price is shown only for plans you pay for yourself; a Team seat instead lists its seat evidence. Each meter shows the share used and its reset, then what applies: the projected level at the reset or the run-out time when it comes first, "too early in the window to project", a cap, a restart in place, extra usage past the allowance, a stale last reading, or that the window is idle or no longer reported. Then come the account's extra-usage state, banked Codex resets and Codex credit balance, and each source's status. `--json` prints the content-free snapshot (`schemaVersion` 2) with `accounts`, `meters` and an account key on every reading; its fields are listed in the [privacy manifest](privacy.md#limits-endpoint-limitssnapshot).
+
+- `--quiet` harvests without printing, for cron. One entry covers every account on the machine.
+- `--claude-root PATH` reads only that profile: event-log and profile discovery are skipped unless `SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` is set.
+- `--codex-root PATH` reads Codex rollouts from `PATH` and skips the Codex account read.
+- `--no-codex-account` (or `SESSION_ANALYTICS_CODEX_ACCOUNT=0`) and `--offline` skip the banked-reset read through the local Codex app-server.
+- `limits statusline` records the readings Claude Code passes on stdin for the account of the profile it runs in; add it to each profile's `settings.json`.
+
+Readings are kept in `limits-v2.json` in the data directory; `--no-index` neither reads nor writes it. The 0.9.0 ledger, `limits.json`, is imported and never written, so an older installation can share the data directory. See [Subscription limits and value](subscription.md#accounts).
 
 ## MCP server and agent skill
 
@@ -245,7 +255,7 @@ npm run demo -- report            # terminal report of the same data
 node scripts/demo.ts mcp          # MCP server over the synthetic data
 ```
 
-The demo generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory, and deletes it on exit. It never reads real history. Every screenshot in this repository is rendered from it. `--bin PATH` (or `SESSION_ANALYTICS_DEMO_BIN`) runs the same data through another build, such as the `bin/session-analytics.js` of an installed package, and `SESSION_ANALYTICS_DEMO_NOW=<ISO 8601 instant>` generates the data as of that instant, so two runs analyze the same sessions. `node scripts/smoke-installed.ts TARBALL` uses both to compare a packed release, installed into a temporary prefix, with the checkout.
+The demo generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory,, runs with `HOME` set to a synthetic home inside it, and deletes it on exit. It never reads real history. The synthetic home holds two Claude profiles (a Max plan and a Team seat) with synthetic `.claude.json` plan enums and T3-style limit event logs, and the Codex rollouts carry `rate_limits`, so the Subscription view shows two Claude accounts with different weekly reset days and their own 5-hour windows (a Team seat that runs past its weekly allowance onto extra usage, and a Max plan without extra usage with a capped 5-hour window and an in-place reset), and a ChatGPT Pro account with a banked reset. Every screenshot in this repository is rendered from it. `--bin PATH` (or `SESSION_ANALYTICS_DEMO_BIN`) runs the same data through another build, such as the `bin/session-analytics.js` of an installed package, and `SESSION_ANALYTICS_DEMO_NOW=<ISO 8601 instant>` generates the data as of that instant, so two runs analyze the same sessions. `node scripts/smoke-installed.ts TARBALL` uses both to compare a packed release, installed into a temporary prefix, with the checkout.
 
 Developers can run `node scripts/parity.ts --machine` to compare full, cold-index and warm-index accounting. It uses the 1024 MB analysis worker, offline pricing, a fresh private index under `.lane/`, and the shared real-scan lock. Output contains month/provider totals and differences by hashed session key, never repository names or transcript content. Live source changes are reported separately and do not suppress the unfiltered diff or a failing exit status. Use `--demo-root PATH` with a retained synthetic demo for repeatable local checks.
 

@@ -60,11 +60,11 @@ A checkout runs unreleased `master`; check out a release tag to run released cod
 
 - **Groups work by repository.** Combine agents, profiles, linked worktrees and clones of the same remote in one view. Conductor can enrich the mapping when installed.
 - **Makes accounting inspectable.** Dated price snapshots, deduplicated token records and visible coverage explain each total. Unknown prices stay unpriced; missing evidence stays unavailable.
-- **Shows seven views.** Summary for totals, Velocity for trends, Costs for the value breakdown, Pricing for rate provenance, Subscription for how much of your Claude and Codex limits you use, Tools for call patterns, and Activity for session starts. Views share a time window and support repository focus.
+- **Shows seven views.** Summary for totals, Velocity for trends, Costs for the value breakdown, Pricing for rate provenance, Subscription for which Claude and Codex accounts you can still use and what each allowance is worth, Tools for call patterns, and Activity for session starts. Views share a time window; all but Subscription, which is account-wide, support repository focus.
 - **Includes your other machines.** `--remote server` adds a server or VM where agents run, read over your own SSH. Each machine analyzes its own history and returns only its content-free snapshot. [Combine machines](docs/interop.md#combine-machines).
 - **Works beyond the browser.** Get terminal reports, JSON, CSV/NDJSON/OTLP exports, aggregate team snapshots, and six read-only [MCP tools](docs/mcp.md). A bundled [agent skill](skills/session-analytics/SKILL.md) exposes the same metrics.
 
-**Usage value is an API list-price equivalent, not your bill.** Provider-reported figures stay separately identified. Subscriptions and discounts are not modeled. Money follows request activity dates; session, token and tool counts use session-start dates. [Metric definitions and limits](docs/metrics.md).
+**Usage value is an API list-price equivalent, not your bill.** Provider-reported figures stay separately identified. Discounts are not modeled; subscription allowances are compared with this value only in the Subscription view. Money follows request activity dates; session, token and tool counts use session-start dates. [Metric definitions and limits](docs/metrics.md).
 
 ## Which agents it reads
 
