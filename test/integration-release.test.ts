@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, sep } from "node:path";
@@ -183,9 +183,11 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   assert.deepEqual(/^        node: \[([^\]]+)\]$/m.exec(smoke!)?.[1]!.split(", "), ["'24.0.0'", "'24'", "'26'"], "the engines floor, the newest 24.x and Homebrew's Node.js");
   assert.match(smoke!, /run: node scripts\/smoke-installed.ts "release\/session-analytics-\$\{RELEASE_TAG#v\}.tgz"/);
   assert.doesNotMatch(smoke!, /npm ci|npm run/, "the smoke runs the packed tarball, not a fresh build");
+  assert.deepEqual([...smoke!.matchAll(/^      - name: (.+)$/gm)].map((step) => step[1]),
+    ["Check out", "Set up Node.js", "Name the release", "Download release files", "Verify checksums", "Install and run the tarball", "Check the Homebrew formula's style"]);
 
   // Every consumer of the packed files checks them against SHA256SUMS before using them.
-  for (const [name, job, use] of [["smoke", smoke, "scripts/smoke-installed.ts"], ["release", release, "attest-build-provenance"], ["npm", npm, "npm publish"], ["homebrew", homebrew, "scripts/homebrew-formula.ts"]] as const) {
+  for (const [name, job, use] of [["smoke", smoke, "scripts/smoke-installed.ts"], ["smoke", smoke, "scripts/homebrew-formula.ts"], ["release", release, "attest-build-provenance"], ["npm", npm, "npm publish"], ["homebrew", homebrew, "scripts/homebrew-formula.ts"]] as const) {
     const download = job!.indexOf("uses: actions/download-artifact@"), verified = job!.indexOf("-c SHA256SUMS");
     assert.ok(download > 0 && verified > download && job!.indexOf(use) > verified, `${name} verifies checksums before ${use}`);
   }
@@ -496,7 +498,8 @@ test("release: the Homebrew formula installs the release tarball with Homebrew's
   assert.match(formula, /^  license "MIT"$/m);
   assert.match(formula, /^  depends_on "node"$/m);
   assert.match(formula, /^    system "npm", "install", \*std_npm_args$/m);
-  assert.match(formula, /^    env = \{ PATH: "#\{Formula\["node"\]\.opt_bin\}:\$PATH" \}\n    \(bin\/"session-analytics"\)\.write_env_script libexec\/"bin\/session-analytics", env$/m);
+  assert.match(formula, /^    env = \{ PATH: "#\{formula_opt_bin\("node"\)\}:\$PATH" \}\n    \(bin\/"session-analytics"\)\.write_env_script libexec\/"bin\/session-analytics", env$/m);
+  assert.doesNotMatch(formula, /Formula\[|Formulary\.|\.opt_(?:bin|lib|libexec|include|prefix)\b/, "Homebrew's FormulaPathMethods cop wants formula_opt_* helpers");
   for (const line of homebrewFormula("100.100.100", sha256).split("\n")) if (!line.startsWith("  url ")) assert.ok(line.length <= 118, `Homebrew's style check allows 118 columns: ${line}`);
   assert.match(formula, /^    ENV\["HOME"\] = testpath$/m);
   assert.match(formula, /shell_output\("#\{bin\}\/session-analytics --version"\)/);
@@ -506,6 +509,72 @@ test("release: the Homebrew formula installs the release tarball with Homebrew's
   const ruby = spawnSync("ruby", ["-c"], { input: formula, encoding: "utf8" });
   if (ruby.error) t.diagnostic("Ruby is unavailable; formula syntax not checked.");
   else assert.equal(ruby.status, 0, ruby.stderr);
+});
+
+test("release: while the tap is on, every run checks the style of the formula a tag would commit, on one macOS smoke leg", async (t) => {
+  const { smoke, homebrew } = workflowJobs(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as Record<string, string>;
+  const style = stepOf(smoke!, "Check the Homebrew formula's style");
+  // The macOS leg on the newest Node.js, Homebrew's own, on a pushed tag and on every dry run alike, while the tap is on; with the
+  // tap off, Homebrew never holds back the other channels. It needs no secret or permission.
+  const condition = /^        if: (.+)$/m.exec(style)?.[1] ?? "";
+  assert.doesNotMatch(condition, /needs\.|secrets\./, "the step depends on the matrix leg, the run and the tap switch alone");
+  const [oses, nodes] = ["os", "node"].map((key) => new RegExp(`^        ${key}: \\[([^\\]]+)\\]$`, "m").exec(smoke!)?.[1]!.split(", ").map((value) => value.replace(/^'|'$/g, "")) ?? []);
+  const legs = oses!.flatMap((os) => nodes!.map((node) => ({ os, node })));
+  for (const { event, ref } of [{ event: "push", ref: "refs/tags/v1.2.3" }, ...untagged.filter(({ event }) => event === "workflow_dispatch"), { event: "workflow_dispatch", ref: "refs/heads/fix/a-branch" }]) {
+    const github = { event_name: event, ref, ref_name: ref.replace(/^refs\/(?:heads|tags)\//, "") };
+    for (const vars of [{ HOMEBREW_TAP: "true" }, { HOMEBREW_TAP: "false" }, {}] as Array<Record<string, string>>) {
+      const checks = legs.filter((matrix) => new Function("matrix", "github", "vars", `return ${condition};`)(matrix, github, vars));
+      assert.deepEqual(checks, vars["HOMEBREW_TAP"] === "true" ? [{ os: "macos-latest", node: nodes!.at(-1) }] : [], `${event} ${ref} ${JSON.stringify(vars)}`);
+    }
+  }
+  assert.match(style, /\n        env:\n          HOMEBREW_NO_AUTO_UPDATE: '1'\n/);
+  assert.doesNotMatch(stepScript(smoke!, "Check the Homebrew formula's style"), /brew (?:install|test|audit|update|upgrade)\b/, "a style check installs nothing");
+  // The same render command as the homebrew job, for the version the run names and the tarball whose checksum it verified.
+  const render = (job: string) => /^ +(node scripts\/homebrew-formula\.ts .*)$/m.exec(job)?.[1];
+  assert.ok(render(style) && render(style) === render(homebrew!), "the formula the homebrew job would commit");
+
+  if (spawnSync("shasum", ["--version"]).error) return t.diagnostic("shasum is unavailable; the steps were not run.");
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "session-analytics-formula-style-")));
+  try {
+    const [bin, work, tap, log, styled] = ["bin", "work", "tap", "brew.log", "styled.rb"].map((name) => join(directory, name)) as [string, string, string, string, string];
+    await Promise.all([bin, join(work, "scripts"), join(work, "release")].map((path) => mkdir(path, { recursive: true })));
+    await copyFile(fileURLToPath(new URL("../scripts/homebrew-formula.ts", import.meta.url)), join(work, "scripts", "homebrew-formula.ts"));
+    const tarball = Buffer.from("synthetic release tarball\n");
+    await writeFile(join(work, "release", "session-analytics-1.2.3.tgz"), tarball);
+    // A stand-in brew: one local tap, and `brew style` keeps the file it was given and exits with BREW_STYLE_STATUS.
+    await writeFile(join(bin, "brew"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$BREW_LOG"
+case "$1" in
+  tap-new) mkdir -p "$BREW_TAP/Formula" ;;
+  --repository) printf '%s\\n' "$BREW_TAP" ;;
+  style) cp "$3" "$BREW_STYLED"; exit "$BREW_STYLE_STATUS" ;;
+esac
+`, { mode: 0o755 });
+    const run = (job: string, step: string, env: Record<string, string>) => spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", stepScript(job, step)], {
+      cwd: work, encoding: "utf8",
+      env: { PATH: [bin, dirname(process.execPath), process.env["PATH"]].join(delimiter), BREW_LOG: log, BREW_TAP: tap, BREW_STYLED: styled, BREW_STYLE_STATUS: "0", ...env },
+    });
+    const expected = homebrewFormula("1.2.3", createHash("sha256").update(tarball).digest("hex"));
+
+    const checked = run(smoke!, "Check the Homebrew formula's style", { RELEASE_TAG: "v1.2.3" });
+    assert.equal(checked.status, 0, checked.stderr);
+    assert.equal(await readFile(styled, "utf8"), expected);
+    assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"),
+      ["tap-new --no-git session-analytics/release-check", "--repository session-analytics/release-check", `style --formula ${join(tap, "Formula", "session-analytics.rb")}`]);
+    const rendered = run(homebrew!, "Render the formula", { GITHUB_REF_NAME: "v1.2.3" });
+    assert.equal(rendered.status, 0, rendered.stderr);
+    assert.equal(await readFile(join(work, "session-analytics.rb"), "utf8"), expected, "the homebrew job renders the same bytes from the tag");
+
+    assert.equal(run(smoke!, "Check the Homebrew formula's style", { RELEASE_TAG: "v1.2.3", BREW_STYLE_STATUS: "1" }).status, 1, "a style offence fails the leg");
+
+    // A prerelease leaves the tap alone, so its leg passes without rendering a formula or calling brew.
+    await Promise.all([log, styled, join(work, "session-analytics.rb")].map((path) => rm(path)));
+    const prerelease = run(smoke!, "Check the Homebrew formula's style", { RELEASE_TAG: "v1.2.3-rc.1", BREW_STYLE_STATUS: "1" });
+    assert.equal(prerelease.status, 0, prerelease.stderr);
+    assert.match(prerelease.stdout, /Prereleases leave the tap alone\./);
+    assert.deepEqual((await readdir(directory)).sort(), ["bin", "tap", "work"], "no brew call");
+    assert.deepEqual((await readdir(work)).sort(), ["release", "scripts"], "no formula rendered");
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("release: notes exclude unreleased and older changes; mismatched tags, metadata and compare links fail", () => {

@@ -8,7 +8,7 @@
 // polls for the state it needs instead of sleeping for a fixed time.
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -81,19 +81,25 @@ interface Browser {
   click(selector: string): Promise<void>;
 }
 
-async function connect(port: number): Promise<{ browser: Browser; close: () => void }> {
+/** The last few kilobytes Chrome wrote to its stderr log, for a failure message. */
+function readLogTail(path: string): string {
+  try { return readFileSync(path, "utf8").slice(-4096); } catch { return ""; }
+}
+
+/** Chrome's first start on a fresh CI image can take well over ten seconds; `log` returns its stderr for the failure message. */
+async function connect(port: number, log: () => string = () => ""): Promise<{ browser: Browser; close: () => void }> {
   let targets: Array<{ type: string; webSocketDebuggerUrl: string }> = [];
   // Chrome can answer /json/list before its first tab exists, so wait between every attempt, then open a tab ourselves.
   const hasPage = (): boolean => targets.some((target) => target.type === "page");
-  for (let attempt = 0; attempt < 100 && !hasPage(); attempt += 1) {
+  for (const deadline = Date.now() + 60_000; Date.now() < deadline && !hasPage();) {
     try { targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as typeof targets; } catch { /* Not listening yet. */ }
-    if (!hasPage()) await delay(100);
+    if (!hasPage()) await delay(250);
   }
   if (!hasPage()) {
     try { targets = [(await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" })).json()) as (typeof targets)[number]]; } catch { /* Reported below. */ }
   }
   const page = targets.find((target) => target.type === "page");
-  assert.ok(page, "Chrome exposed no page target");
+  assert.ok(page, `Chrome exposed no page target within 60 s.${log().trim() ? `\nChrome stderr:\n${log().trim()}` : ""}`);
   const socket = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise<void>((resolve) => socket.addEventListener("open", () => resolve(), { once: true }));
   let id = 0;
@@ -172,8 +178,10 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
     const started = await startServer(hermeticEnvironment(fixture, home), ["--snapshot", snapshotPath]);
     server = started.child;
     const debugPort = await availablePort();
-    chrome = spawn(chromePath, ["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${join(temporaryDirectory, "chrome-profile")}`, "--no-first-run", "--no-default-browser-check", "--disable-gpu", "about:blank"], { stdio: "ignore" });
-    const connection = await connect(debugPort).catch((error: unknown) => {
+    const chromeLogPath = join(temporaryDirectory, "chrome.log"), chromeLogFile = openSync(chromeLogPath, "w");
+    chrome = spawn(chromePath, ["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${join(temporaryDirectory, "chrome-profile")}`, "--no-first-run", "--no-default-browser-check", "--disable-gpu", "about:blank"], { stdio: ["ignore", "ignore", chromeLogFile] });
+    closeSync(chromeLogFile);
+    const connection = await connect(debugPort, () => readLogTail(chromeLogPath)).catch((error: unknown) => {
       if (chrome && (chrome.exitCode !== null || chrome.signalCode !== null)) return null;
       throw error;
     });
@@ -268,8 +276,10 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
 
     const debugPort = await availablePort();
     const profile = join(temporaryDirectory, "chrome-profile");
-    chrome = spawn(chromePath, ["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--window-size=1440,1100", "about:blank"], { stdio: "ignore" });
-    const connection = await connect(debugPort).catch((error: unknown) => {
+    const chromeLogPath = join(temporaryDirectory, "chrome.log"), chromeLogFile = openSync(chromeLogPath, "w");
+    chrome = spawn(chromePath, ["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--window-size=1440,1100", "about:blank"], { stdio: ["ignore", "ignore", chromeLogFile] });
+    closeSync(chromeLogFile);
+    const connection = await connect(debugPort, () => readLogTail(chromeLogPath)).catch((error: unknown) => {
       if (chrome && (chrome.exitCode !== null || chrome.signalCode !== null)) return null;
       throw error;
     });

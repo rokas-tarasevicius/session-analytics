@@ -144,7 +144,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out
-        # The smoke script and demo fixtures only; the code under test is the packed tarball.
+        # The smoke and formula scripts and demo fixtures only; the code under test is the packed tarball.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
@@ -171,6 +171,24 @@ jobs:
 
       - name: Install and run the tarball
         run: node scripts/smoke-installed.ts "release/session-analytics-${RELEASE_TAG#v}.tgz"
+
+      - name: Check the Homebrew formula's style
+        # One leg renders the formula the homebrew job would commit for this tarball and runs Homebrew's style cops on it, so dry
+        # runs and tags fail on style offences that `brew audit --strict` would otherwise find only after publication.
+        # Only while the tap is on, so that Homebrew alone never holds back the GitHub Release and npm; a prerelease leaves the
+        # tap alone, so it skips the check. The version, not the ref, decides: a dry run's ref is a branch.
+        # `brew style --formula` reads formulae only from a tap, so it gets a throwaway local one, as in the homebrew job.
+        if: matrix.os == 'macos-latest' && matrix.node == '26' && vars.HOMEBREW_TAP == 'true'
+        run: |
+          V="${RELEASE_TAG#v}"
+          case "$V" in *-*) echo 'Prereleases leave the tap alone.'; exit 0 ;; esac
+          node scripts/homebrew-formula.ts --version "$V" --sha256 "$(shasum -a 256 "release/session-analytics-$V.tgz" | cut -d ' ' -f 1)" > session-analytics.rb
+          brew tap-new --no-git session-analytics/release-check
+          FORMULA="$(brew --repository session-analytics/release-check)/Formula/session-analytics.rb"
+          cp session-analytics.rb "$FORMULA"
+          brew style --formula "$FORMULA"
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
 
   release:
     name: publish release
@@ -328,7 +346,7 @@ jobs:
     # Off until the tap and its deploy key exist (docs/release.md) and the HOMEBREW_TAP repository variable is set.
     # Waits for npm only when npm publishing ran; prereleases leave the tap alone.
     if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.release.result == 'success' && (needs.npm.result == 'success' || needs.npm.result == 'skipped') && vars.HOMEBREW_TAP == 'true' && !contains(github.ref_name, '-') }}
-    # macOS, so the formula is installed and tested with Homebrew before it is committed; the tap's CI checks only syntax on main.
+    # macOS, so the formula is installed, tested and audited with Homebrew before it is committed; the tap's CI runs after the push.
     runs-on: macos-latest
     environment: homebrew
     timeout-minutes: 30
