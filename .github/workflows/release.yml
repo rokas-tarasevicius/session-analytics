@@ -10,7 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  # Dry runs publish nothing, so they get their own group and never queue behind, or replace, a tag's run or re-run.
+  group: release-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -42,6 +43,17 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then TAG="$GITHUB_REF_NAME"; else TAG="v$(node -p 'require("./package.json").version')"; fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Check the tag is unused
+        # A dry run vets the next release. A version that is already tagged can never be released again, because tags never move.
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          FOUND=0; git ls-remote --exit-code --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG" > /dev/null || FOUND=$?
+          case "$FOUND" in
+            0) echo "$RELEASE_TAG is already tagged; bump the version before a dry run." >&2; exit 1 ;;
+            2) echo "$RELEASE_TAG is unused; once this run passes, tag $GITHUB_SHA." ;;
+            *) echo "Reading the repository's tags failed." >&2; exit 1 ;;
+          esac
 
       - name: Verify tag and release notes
         run: node scripts/release-check.ts --notes "$RELEASE_TAG"
@@ -361,7 +373,7 @@ jobs:
       - name: Commit the formula to the tap
         # Over SSH with a deploy key that can write only to the tap, trusting only github.com's published host keys (gh api meta).
         # One commit to main, or none when the formula is unchanged or the tap already has a newer version, so a backport or a
-        # late re-run never downgrades `brew upgrade`.
+        # late re-run never downgrades `brew upgrade`. `brew tap` reads only the default branch: main must be it, or the tap empty.
         run: |
           [ -n "$TAP_DEPLOY_KEY" ] || { echo "The homebrew environment has no TAP_DEPLOY_KEY secret; nothing was committed." >&2; exit 1; }
           WORK="$(mktemp -d "$RUNNER_TEMP/tap.XXXXXX")"
@@ -375,12 +387,14 @@ jobs:
           HOSTS
           export GIT_SSH_COMMAND="ssh -F /dev/null -i '$WORK/key' -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$WORK/known_hosts' -o GlobalKnownHostsFile=/dev/null"
           TAP=git@github.com:rokas-tarasevicius/homebrew-tap.git FORMULA="$WORK/tap/Formula/session-analytics.rb" V="${GITHUB_REF_NAME#v}"
-          FOUND=0; git ls-remote --exit-code "$TAP" refs/heads/main > /dev/null || FOUND=$?
-          case "$FOUND" in
-            0) git clone --quiet --depth 1 --branch main "$TAP" "$WORK/tap" ;;
-            2) git init --quiet --initial-branch main "$WORK/tap" ;;
-            *) echo "Reading the tap failed; nothing was committed." >&2; exit 1 ;;
-          esac
+          git ls-remote --symref "$TAP" > "$WORK/refs" || { echo "Reading the tap failed; nothing was committed." >&2; exit 1; }
+          if grep -q '^ref: refs/heads/main[[:space:]]HEAD$' "$WORK/refs"; then
+            git clone --quiet --depth 1 --branch main "$TAP" "$WORK/tap"
+          elif [ -s "$WORK/refs" ]; then
+            echo "The tap's default branch is not main; nothing was committed." >&2; exit 1
+          else
+            git init --quiet --initial-branch main "$WORK/tap"
+          fi
           if [ -f "$FORMULA" ]; then
             if cmp -s session-analytics.rb "$FORMULA"; then echo "The tap already has this formula."; exit 0; fi
             TAPPED="$(sed -n 's|.*/releases/download/v\([0-9]*\.[0-9]*\.[0-9]*\)/.*|\1|p' "$FORMULA" | head -n 1)"

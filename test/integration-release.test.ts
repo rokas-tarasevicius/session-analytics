@@ -116,7 +116,8 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   const triggers = /\non:\n((?: {2}.*\n)+)/.exec(workflow)?.[1]!.split("\n").filter((line) => line && !line.trimStart().startsWith("#"));
   assert.deepEqual(triggers, ["  push:", "    tags: ['v*']", "  workflow_dispatch:"]);
   assert.match(workflow, /\npermissions:\n  contents: read\n/);
-  assert.match(workflow, /concurrency:\n  group: release-.*\n  cancel-in-progress: false/);
+  // A tag's runs never overlap or cancel each other, and a dry run never shares their queue.
+  assert.match(workflow, /concurrency:\n(?: {2}#.*\n)*  group: release-\$\{\{ github\.event_name \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false/);
   const jobs = workflowJobs(workflow);
   assert.deepEqual(Object.keys(jobs), ["validate", "browser", "package", "smoke", "release", "npm", "homebrew"]);
   const { validate, browser, package: pack, smoke, release, npm, homebrew } = jobs as Record<string, string>;
@@ -249,6 +250,41 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   assert.deepEqual(hostKeyFingerprints(/<<'HOSTS'\n([\s\S]*?)\nHOSTS\n/.exec(stepScript(homebrew!, "Commit the formula to the tap"))?.[1] ?? ""), githubHostKeys);
 });
 
+test("release: a dry run fails for a version that is already tagged, before the long checks", async () => {
+  const { validate } = workflowJobs(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as Record<string, string>;
+  const check = stepOf(validate!, "Check the tag is unused");
+  assert.match(check, /^        if: github\.event_name == 'workflow_dispatch'$/m, "a pushed tag always exists, so only a dry run checks");
+  const [named, checked, verified] = [stepOf(validate!, "Name the release"), check, "run: npm run release:check"].map((step) => validate!.indexOf(step));
+  assert.ok(named! > 0 && checked! > named! && verified! > checked!, "the tag is checked once named, before release:check");
+
+  // The real step against a local repository standing in for GitHub; only an exact tag counts, and an unreadable repository fails.
+  const server = await mkdtemp(join(tmpdir(), "session-analytics-tags-"));
+  try {
+    const env = { PATH: process.env["PATH"], HOME: server, GIT_CONFIG_NOSYSTEM: "1" };
+    const git = (...args: string[]): string => {
+      const result = spawnSync("git", args, { encoding: "utf8", env });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    const bare = join(server, "o", "r.git");
+    git("init", "--quiet", "--bare", bare);
+    const commit = git("-C", bare, "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.com", "commit-tree", git("-C", bare, "mktree"), "-m", "Release");
+    for (const [tags, repository, status, output] of [
+      [["v1.2.2", "v1.2.30", "v1.2.3-rc.1"], "o/r", 0, new RegExp(`^v1\\.2\\.3 is unused; once this run passes, tag ${commit}\\.\\n$`)],
+      [["v1.2.2", "v1.2.3"], "o/r", 1, /^v1\.2\.3 is already tagged; bump the version before a dry run\.\n$/],
+      [[], "o/missing", 1, /Reading the repository's tags failed\.\n$/],
+    ] as const) {
+      for (const tag of git("-C", bare, "tag", "--list").split("\n").filter(Boolean)) git("-C", bare, "tag", "--delete", tag);
+      for (const tag of tags) git("-C", bare, "tag", tag, commit);
+      const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", stepScript(validate!, "Check the tag is unused")], {
+        encoding: "utf8", env: { ...env, GITHUB_SERVER_URL: pathToFileURL(server).href, GITHUB_REPOSITORY: repository, GITHUB_SHA: commit, RELEASE_TAG: "v1.2.3" },
+      });
+      assert.equal(result.status, status, `${repository} with ${tags.join(", ")}: ${result.stderr}`);
+      assert.match(status === 0 ? result.stdout : result.stderr, output, `${repository} with ${tags.join(", ")}`);
+    }
+  } finally { await rm(server, { recursive: true, force: true }); }
+});
+
 /** A job's step, from its `- name:` line to the next step. */
 function stepOf(job: string, name: string): string {
   const step = job.split(/^(?=      - name: )/m).find((candidate) => candidate.startsWith(`      - name: ${name}\n`));
@@ -355,8 +391,8 @@ process.exit(result.status ?? 1);
 const tapKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nc2Vzc2lvbi1hbmFseXRpY3MgdGVzdCBrZXk=\n-----END OPENSSH PRIVATE KEY-----";
 type SshCall = { destination: string, command: string, options: Record<string, string>, keyMode: number, key: string, knownHosts: string, secretInEnvironment: boolean };
 
-/** Run the tap step as the runner would, against a local bare tap whose main holds `seed`, or an empty tap when it is null. */
-async function runTapStep(script: string, directory: string, seed: Record<string, string> | null, env: Record<string, string> = {}) {
+/** Run the tap step as the runner would, against a local bare tap whose `branches` hold `seed`, the first being its default, or an empty tap when it is null. */
+async function runTapStep(script: string, directory: string, seed: Record<string, string> | null, env: Record<string, string> = {}, branches = ["main"]) {
   const root = await mkdtemp(join(directory, "tap-")), bin = join(root, "bin"), runnerTemp = join(root, "runner-temp"), home = join(root, "home"), log = join(root, "ssh.jsonl");
   const bare = join(root, "server", "rokas-tarasevicius", "homebrew-tap.git");
   await Promise.all([mkdir(bin), mkdir(runnerTemp), mkdir(home)]);
@@ -367,7 +403,7 @@ async function runTapStep(script: string, directory: string, seed: Record<string
     assert.equal(result.status, 0, result.stderr);
     return result.stdout.trim();
   };
-  git("init", "--quiet", "--bare", "--initial-branch", "main", bare);
+  git("init", "--quiet", "--bare", "--initial-branch", branches[0]!, bare);
   if (seed) {
     const work = join(root, "seed");
     git("init", "--quiet", "--initial-branch", "main", work);
@@ -377,7 +413,7 @@ async function runTapStep(script: string, directory: string, seed: Record<string
     }
     git("-C", work, "add", ".");
     git("-C", work, "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.com", "commit", "--quiet", "-m", "Seed the tap");
-    git("-C", work, "push", "--quiet", bare, "HEAD:refs/heads/main");
+    for (const branch of branches) git("-C", work, "push", "--quiet", bare, `HEAD:refs/heads/${branch}`);
   }
   const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", script], {
     cwd: directory, encoding: "utf8",
@@ -388,6 +424,7 @@ async function runTapStep(script: string, directory: string, seed: Record<string
   const formula = hasMain ? spawnSync("git", ["-C", bare, "show", "main:Formula/session-analytics.rb"], { encoding: "utf8", env: gitEnv }) : null;
   return {
     status: result.status, stdout: result.stdout, stderr: result.stderr, calls, leftovers: await readdir(runnerTemp),
+    heads: git("-C", bare, "for-each-ref", "--format=%(refname)", "refs/heads").split("\n").filter(Boolean),
     commits: hasMain ? git("-C", bare, "log", "--format=%an <%ae>|%cn <%ce>|%s", "main").split("\n") : [],
     files: hasMain ? git("-C", bare, "ls-tree", "-r", "--name-only", "main").split("\n") : [],
     formula: formula?.status === 0 ? formula.stdout : null,
@@ -401,7 +438,7 @@ test("release: the tap takes one bot commit over SSH to pinned host keys, and th
   try {
     const formula = homebrewFormula("1.9.0", "0123456789abcdef".repeat(4)), bot = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>";
     await writeFile(join(directory, "session-analytics.rb"), formula);
-    // An empty tap and a tap with only a README both get main with the formula, in one commit by the bot.
+    // An empty tap and a tap with only a README on main both get main with the formula, in one commit by the bot.
     for (const seed of [null, { "README.md": "# Tap\n" }]) {
       const tap = await runTapStep(script, directory, seed);
       assert.equal(tap.status, 0, tap.stderr);
@@ -434,6 +471,16 @@ test("release: the tap takes one bot commit over SSH to pinned host keys, and th
       assert.equal(tap.commits.length, 1, JSON.stringify(env));
       assert.deepEqual(tap.leftovers, [], JSON.stringify(env));
       if ("TAP_DEPLOY_KEY" in env) assert.deepEqual(tap.calls, [], "no secret, no connection");
+    }
+    // `brew tap` reads only the default branch, so a tap whose default is not main, with or without a main, is read and never pushed to.
+    for (const branches of [["master"], ["master", "main"]]) {
+      const tap = await runTapStep(script, directory, { "README.md": "# Tap\n" }, {}, branches);
+      assert.notEqual(tap.status, 0, branches.join(", "));
+      assert.match(tap.stderr, /The tap's default branch is not main; nothing was committed\./);
+      assert.deepEqual(tap.heads, branches.map((branch) => `refs/heads/${branch}`).sort(), "no orphan main appears");
+      assert.equal(tap.commits.length, branches.includes("main") ? 1 : 0, branches.join(", "));
+      assert.deepEqual(tap.calls.map((call) => call.command), ["git-upload-pack 'rokas-tarasevicius/homebrew-tap.git'"], branches.join(", "));
+      assert.deepEqual(tap.leftovers, [], branches.join(", "));
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
