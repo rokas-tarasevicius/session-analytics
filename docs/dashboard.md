@@ -86,11 +86,11 @@ Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the
 
 Subscription answers "which of my accounts can I still use, and until when?" first, and "what is each allowance worth?" second. Every account is shown on its own, so a personal Max plan and an employer's Team seat used on one machine are never mixed. Limits are account-wide, so the repository focus does not apply. The view reads from top to bottom:
 
-1. **Limits now**: one row per account, the most urgent first. Each row has the weekly bar, a thin 5-hour bar, the weekly share left in large type, when it resets (absolute and relative, in your browser's time zone) and one status: on track, runs out early, capped until the reset, using extra usage, or last seen a while ago. These rows appear as soon as the meters are read, before the session scan finishes.
+1. **Limits now**: one row per account, the most urgent first. Each row has the weekly bar, a thin 5-hour bar, the weekly share left in large type, when it resets (absolute and relative, in your browser's time zone) and one status: on track, runs out early, capped until the reset, using extra usage, last seen a while ago, or no reading this week. While the weekly allowance is capped, the 5-hour line says the account is blocked until the weekly reset. These rows appear as soon as the meters are read, before the session scan finishes.
 2. **Next**: at most three suggestions, one line each; "Why?" opens the reasoning, and the rest sit under a "more suggestions" toggle.
 3. **Account cards**: the plan chip ("Max 20x · detected") opens a menu to choose another plan or to exclude the account from value totals; an excluded card stays visible with the same control to undo it. Weekly and 5-hour meters come first, with a tick for even pace and a hatched projection; model-specific limits are collapsed, stale meters are muted and retired ones hidden. The chart of this week marks an in-place reset where it happened and projects from the current segment. Banked resets, credits and extra usage belong to the account.
-4. **What it's worth**: value used, the value multiple over plans you pay for, a month of full use and the typical weekly close, then each account's value per 1% of the week, weekly capacity, value used and multiple, with the date range stated. A listed price can be marked as paid by you or by an employer. It starts collapsed on narrow screens.
-5. **History**: each account's weekly closes on one time axis (hatched when a reset came early, outlined when the close was not observed) and the last week's 5-hour windows, one lane per account.
+4. **What it's worth**: value used (with the dates each account is counted from, the value before the first readings that is not counted, and the share of a full week every week), the value multiple over plans you pay for, a month of full use of those same plans against their price (employer-paid and unpriced seats beside it) and the typical weekly close, then each account's value per 1% of the week, weekly capacity, value used with the sessions active in those dates, and multiple. A listed price can be marked as paid by you or by an employer. It starts collapsed on narrow screens.
+5. **History**: each account's weekly closes on one time axis (hatched when a reset came early, outlined when the close was not observed) and the last week's 5-hour windows, one lane per account with a 5-hour limit.
 6. **Sources and method**: the accounts found, each source's last reading, and what the readings cover.
 
 Charts take Left, Right, Home and End to inspect readings. The two-minute refresh keeps keyboard focus, the inspected reading and open sections. See [Subscription limits and value](subscription.md).
@@ -98,7 +98,7 @@ Charts take Left, Right, Home and End to inspect readings. The two-minute refres
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-subscription-dark.webp" />
-    <img alt="Subscription view: Limits now with a capped Team seat, a ChatGPT Pro account and a Max plan on track, three next steps with Why? toggles, and account cards with meters, this week's chart, banked resets and credits" src="../assets/screenshot-subscription.webp" width="100%" />
+    <img alt="Subscription view: Limits now with a Team seat that runs out before its reset, and a ChatGPT Pro account and a Max plan on track, three next steps with Why? toggles, and account cards with meters, this week's chart, banked resets and credits" src="../assets/screenshot-subscription.webp" width="100%" />
   </picture>
 </p>
 

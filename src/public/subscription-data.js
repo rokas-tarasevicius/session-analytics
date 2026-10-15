@@ -57,6 +57,12 @@ export const meterBase = (meter) => meter.slice(meter.lastIndexOf(".") + 1);
 const isCapped = (sample) => sample.status === "rejected" || (sample.used >= 100 && sample.status !== "overage");
 
 /**
+ * Meters shown as levels only: what Claude's weekly "including extra usage" meter limits is not documented (on a plan
+ * without extra usage it reported 100% while work went on), so it gets no projection, run-out or cap.
+ */
+const levelsOnlyMeters = new Set(["seven_day_overage_included"]);
+
+/**
  * Group observations into meters per account and into reset cycles. A cycle ends at its reset, or earlier when the next
  * cycle begins first. `infos` (`LimitsSnapshot.meters`) supplies display labels and retired flags. Idle markers
  * never form a cycle.
@@ -78,8 +84,9 @@ export function buildMeters(observations, now, infos = []) {
     }
     meter.windowMinutes ??= observation.windowMinutes;
     if (observation.status !== "idle") meter.readings.push(observation);
+    else meter.idleAt = Math.max(meter.idleAt ?? 0, observation.observedAt);
   }
-  return [...meters.values()].map(({ readings, ...meter }) => ({ ...meter, cycles: cyclesOf(readings, meter.windowMinutes ? meter.windowMinutes * 60 : 0, now) }))
+  return [...meters.values()].map(({ readings, ...meter }) => ({ ...meter, idleAt: meter.idleAt ?? null, cycles: cyclesOf(readings, meter.windowMinutes ? meter.windowMinutes * 60 : 0, now) }))
     .sort((left, right) => left.provider.localeCompare(right.provider) || left.account.localeCompare(right.account) ||
       meterOrder(left.meter) - meterOrder(right.meter) || left.meter.localeCompare(right.meter));
 }
@@ -140,16 +147,31 @@ function segmentsOf(samples, start, end) {
     groups.at(-1).samples.push(sample);
     top = Math.max(top, sample.used);
   });
-  return groups.map((group, index) => ({
-    start: group.start, end: groups[index + 1]?.start ?? end, before: group.before, samples: group.samples,
-    peak: Math.max(...group.samples.map((sample) => sample.used)), last: group.samples.at(-1),
-    cappedAt: group.samples.find(isCapped)?.t ?? null,
-  }));
+  return groups.map((group, index) => {
+    const close = groups[index + 1]?.start ?? end;
+    return {
+      start: group.start, end: close, before: group.before, samples: group.samples,
+      peak: Math.max(...group.samples.map((sample) => sample.used)), last: group.samples.at(-1),
+      cappedAt: group.samples.find(isCapped)?.t ?? null, lockouts: lockoutsOf(group.samples, close),
+    };
+  });
 }
 
-/** Seconds locked out in a cycle: from each segment's first capped reading to that segment's end. */
+/** Lockouts of a segment: from a capped reading to the next reading on extra usage (work went on), else to its end. */
+function lockoutsOf(samples, end) {
+  const spans = [];
+  let from = null;
+  for (const sample of samples) {
+    if (from === null && isCapped(sample)) from = sample.t;
+    else if (from !== null && sample.status === "overage") { spans.push([from, sample.t]); from = null; }
+  }
+  if (from !== null) spans.push([from, end]);
+  return spans;
+}
+
+/** Seconds locked out in a cycle, up to `until`. */
 const lockedSeconds = (cycle, until = Infinity) => cycle.segments.reduce((total, segment) =>
-  total + (segment.cappedAt === null ? 0 : Math.max(0, Math.min(segment.end, until) - segment.cappedAt)), 0);
+  total + segment.lockouts.reduce((sum, [from, to]) => sum + Math.max(0, Math.min(to, until) - from), 0), 0);
 
 /** A closing reading taken this long before the reset is a lower bound: later use was not observed. */
 const unobservedLimit = (meter) => Math.max(HOUR, (meter?.windowMinutes ?? 0) * 60 * 0.1);
@@ -166,12 +188,23 @@ function scheduledReset(meter, now) {
  * `reportedUntil` is the account's latest reading on any meter: a meter the provider stopped reporting while the account's
  * others continue is `unreported`, not still capped (Claude only includes some scoped meters while they matter).
  * Pace runs from the current segment's start through now, so hours without readings (no use) slow it and a run-out is
- * never in the past. `project: false` (readings without an account) reports levels only.
+ * never in the past. `project: false` (readings without an account) and `levelsOnly` meters report levels only. A meter with
+ * no open cycle is `confirmedIdle` only when the provider reported the window as not started after the last cycle; else
+ * nothing is known since the reset (another machine or the web may have used it).
  */
 export function liveMeter(meter, now, reportedUntil = null, { project = true } = {}) {
   const window = (meter.windowMinutes ?? 0) * 60;
   const cycle = meter.cycles.findLast((item) => !item.closed) ?? null;
-  if (!cycle) return { meter, cycle: null, segment: null, state: meter.retired ? "retired" : "idle", used: 0, nextResetAt: scheduledReset(meter, now) };
+  const levelsOnly = levelsOnlyMeters.has(meterBase(meter.meter));
+  if (levelsOnly) project = false;
+  if (!cycle) {
+    const nextResetAt = scheduledReset(meter, now), previous = meter.cycles.at(-1) ?? null;
+    return {
+      meter, cycle: null, segment: null, state: meter.retired ? "retired" : "idle", used: 0, nextResetAt, levelsOnly,
+      confirmedIdle: (meter.idleAt ?? null) !== null && meter.idleAt >= (previous?.end ?? -Infinity),
+      lastResetAt: nextResetAt !== null && window ? nextResetAt - window : previous?.end ?? null,
+    };
+  }
   const segment = cycle.segments.at(-1), { last } = segment, { resetsAt } = cycle;
   const used = last.used;
   const unreported = reportedUntil !== null && last.t < reportedUntil - 2 * HOUR;
@@ -183,15 +216,17 @@ export function liveMeter(meter, now, reportedUntil = null, { project = true } =
   const tooEarly = segment.samples.length < 2 || (window > 0 && now - segment.start < window * 0.1);
   const remaining = Math.max(0, resetsAt - now);
   const projected = project && !tooEarly && !stale ? used + rate * remaining : null;
-  const capAt = state === "capped" ? segment.cappedAt ?? last.t
+  const capAt = levelsOnly ? null : state === "capped" ? segment.cappedAt ?? last.t
     : state === "active" && projected !== null && projected > 100 && rate > 0 ? now + Math.max(0, 100 - used) / rate : null;
   const lastRate = used / Math.max(minimum, last.t - segment.start);
+  // The same evidence a projection needs, measured up to the last reading: a burst right after a reset says nothing.
+  const evidenced = segment.samples.length >= 2 && last.t - segment.start >= Math.max(HOUR, window * 0.1);
   return {
-    meter, cycle, segment, state, used, rate, remaining, projected, tooEarly, stale, capAt,
+    meter, cycle, segment, state, used, rate, remaining, projected, tooEarly, stale, capAt, levelsOnly, confirmedIdle: false, lastResetAt: null,
     elapsed: Math.min(1, Math.max(0, (now - segment.start) / Math.max(1, resetsAt - segment.start))),
     capsEarly: state === "active" && capAt !== null && capAt < resetsAt - 15 * 60,
     // No recent reading, but the pace before the last one would have used the allowance up by now.
-    mayBeUsedUp: project && state === "active" && stale && used + lastRate * (Math.min(now, resetsAt) - last.t) >= 100,
+    mayBeUsedUp: project && state === "active" && stale && evidenced && used + lastRate * (Math.min(now, resetsAt) - last.t) >= 100,
     dailyBudget: remaining > 0 ? Math.max(0, 100 - used) / Math.max(remaining / DAY, 1 / 24) : null,
     observedAt: last.t, nextResetAt: resetsAt,
   };
@@ -258,6 +293,19 @@ export function hourlyValue(sessions, timeZone = "UTC") {
   return { between, empty: cells.size === 0 };
 }
 
+/** Sessions with activity between two instants, from the local hours of their activity ledger. */
+function activeSessions(sessions, from, to, timeZone) {
+  if (!(to > from)) return 0;
+  const hourStart = (day, hour) => {
+    const key = `${timeZone}|${day}`;
+    let start = dayStarts.get(key);
+    if (start === undefined) { start = zonedDayStart(day, timeZone); dayStarts.set(key, start); }
+    return start + hour * HOUR;
+  };
+  return sessions.filter((session) => ledgerCells(session.velocity).some(([day, hour]) => { const t = hourStart(day, hour); return t + HOUR > from && t < to; })).length;
+}
+const dayStarts = new Map();
+
 /** Unix seconds when the local calendar day `day` (`YYYY-MM-DD`) begins in `timeZone`. */
 export function zonedDayStart(day, timeZone = "UTC") {
   const midnight = Date.parse(`${day}T00:00:00Z`) / 1000;
@@ -296,10 +344,13 @@ const median = (values) => {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
-/** The reading a segment calibrates on: at the cap for a meter that stops at 100 (value after it did not move the meter), else the last. */
+/**
+ * The reading a segment calibrates on: the first one at or past 100% (a cap, or the start of extra usage), else the last.
+ * Value after the first full reading may not move the meter (a refused request, or extra usage the meter stops counting
+ * at about 102%), so it never counts.
+ */
 function calibrationSample({ samples }) {
-  const capped = samples.some((sample) => sample.used > 100) ? null : samples.find(isCapped);
-  return capped ?? samples.findLast((sample) => sample.used >= calibrationFloor) ?? null;
+  return samples.find((sample) => sample.used >= 100 || sample.status === "rejected") ?? samples.findLast((sample) => sample.used >= calibrationFloor) ?? null;
 }
 
 /**
@@ -379,6 +430,7 @@ export function sessionWindows(meter, now, span = 7 * DAY) {
     start: cycle.start, end: cycle.end, resetsAt: cycle.resetsAt, active: !cycle.closed,
     peak: Math.min(100, Math.max(...cycle.segments.map((segment) => segment.peak))),
     cappedAt: cycle.cappedAt, lockedSeconds: lockedSeconds(cycle, now),
+    lockouts: cycle.segments.flatMap((segment) => segment.lockouts).map(([start, end]) => [start, Math.min(end, now)]).filter(([start, end]) => end > start),
   }));
   const closed = windows.filter((window) => !window.active);
   return {
@@ -437,7 +489,7 @@ export function economics({ provider, planId, payer = null, perPercent, extracte
   return {
     plan, payer: paidBy, monthlyPrice, weeklyCapacity, monthlyPotential: weeklyCapacity !== null ? weeklyCapacity * MONTH_DAYS / 7 : null,
     days, price, potential, extracted,
-    multiple: price && extracted !== null ? extracted / price : null,
+    multiple: price !== null && price > 0 && extracted !== null ? extracted / price : null,
     utilization: potential && extracted !== null ? extracted / potential : null,
   };
 }
@@ -475,7 +527,7 @@ export function limitStatus(item, now) {
   if (session?.capsEarly && !session.stale) return status("runs-out", "warn", 5, { at: session.capAt, early: session.cycle.resetsAt - session.capAt, meter: "session" });
   if (weekly && (weekly.stale || weekly.state === "unreported")) return status("stale", "muted", 7, { since: weekly.observedAt });
   if (weekly) return status(weekly.tooEarly ? "too-early" : "on-track", weekly.tooEarly ? "muted" : "ok", 6);
-  return status("idle", "muted", 8, { until: item.weekly?.nextResetAt ?? null });
+  return status("idle", "muted", 8, { until: item.weekly?.nextResetAt ?? null, confirmed: item.weekly?.confirmedIdle ?? false });
 }
 
 /** Most urgent first: by rank, then the sooner run-out, then the fuller weekly meter. */
@@ -517,7 +569,9 @@ export { duration as formatDuration };
 /**
  * Everything the Subscription view and `limits` report show for one account. `sessions` are the account's own sessions
  * (`attributeSessions`); `range` is the selected period in Unix seconds, clamped here to the account's first reading and to
- * now, so price and capacity are never prorated over days before the meters or the rest of today.
+ * now, so price and capacity are never prorated over days before the meters or the rest of today. `value.before` is the
+ * account's value in the range before its first reading, which is therefore not counted; `value.sessions` counts the
+ * sessions active in the counted period.
  */
 export function accountUtilization({ account, meters, sessions = [], timeZone = "UTC", now, range, planId = account.plan, payer = null, creditHistory = [], basis = "none" }) {
   const own = meters.filter((meter) => meter.provider === account.provider && meter.account === account.key);
@@ -534,6 +588,7 @@ export function accountUtilization({ account, meters, sessions = [], timeZone = 
   const first = firstReading(own);
   const from = Math.max(range.from, first ?? range.to), to = Math.max(from, Math.min(range.to, now));
   const days = (to - from) / DAY;
+  const measured = real && basis !== "none";
   return {
     account, key: account.key, provider: account.provider, label: account.label, identified: real, planId,
     meters: own, weeklyMeter: weekly_, sessionMeter: session_, weekly, session, live, history,
@@ -541,38 +596,47 @@ export function accountUtilization({ account, meters, sessions = [], timeZone = 
     windows: session_ ? sessionWindows(session_, now) : null,
     calibration, sessionCalibration,
     resets: bankedResets({ provider: account.provider, summary: account.codex, weekly, session, perPercent: calibration.perPercent, sessionPerPercent: sessionCalibration?.perPercent ?? null, now }),
-    economics: economics({ provider: account.provider, planId, payer, perPercent: calibration.perPercent, extracted: real && basis !== "none" ? value.between(from, to) : null, days }),
+    economics: economics({ provider: account.provider, planId, payer, perPercent: calibration.perPercent, extracted: measured ? value.between(from, to) : null, days }),
     period: { from, to, days, firstReading: first },
-    value: { basis: real ? basis : "none", sessions: real ? sessions.length : 0 },
+    value: {
+      basis: real ? basis : "none", sessions: measured ? activeSessions(sessions, from, to, timeZone) : 0,
+      before: measured ? value.between(range.from, Math.min(from, range.to, now)) : 0,
+    },
     utilization: resetUtilization(history, weekly),
   };
 }
 
 /**
- * Totals across accounts that compare like with like. The value multiple and the potential-to-price ratio use only accounts
- * with a known personal price, so an unpriced or employer-paid account never inflates them; their value is reported
- * beside. Accounts excluded from value totals, accounts whose value cannot be measured and readings without an account
- * are left out.
+ * Totals across accounts that compare like with like. The value multiple and the month of full use use only accounts with
+ * a personal price, so an unpriced, free or employer-paid account never inflates them; the rest is reported beside
+ * (`otherMonthlyPotential`, `organization`, `unpriced`). Accounts excluded from value totals, accounts whose value cannot
+ * be measured, accounts with no reading in the selected dates and readings without an account are left out;
+ * `beforeReadings` is the measured accounts' value before their first readings, which no total counts.
  */
 export function subscriptionTotals(items, unattributed = { claude: 0, codex: 0 }) {
-  const included = items.filter((item) => item.identified && !item.excluded && item.economics.extracted !== null);
+  const measured = items.filter((item) => item.identified && !item.excluded && item.economics.extracted !== null);
+  const included = measured.filter((item) => item.period.days > 0);
   const sum = (list, pick) => list.reduce((total, item) => total + (pick(item) ?? 0), 0);
-  const priced = included.filter((item) => item.economics.price !== null);
-  const pricedPotential = priced.filter((item) => item.economics.monthlyPotential !== null && item.economics.monthlyPrice > 0);
+  const priced = included.filter((item) => item.economics.price !== null && item.economics.monthlyPrice > 0);
   const calibrated = included.filter((item) => item.economics.potential !== null);
+  const pricedPotential = priced.filter((item) => item.economics.monthlyPotential !== null);
+  const otherPotential = calibrated.filter((item) => !pricedPotential.includes(item));
   const organization = included.filter((item) => item.economics.payer === "organization");
-  const unpriced = included.filter((item) => item.economics.price === null && item.economics.payer !== "organization");
+  const unpriced = included.filter((item) => !priced.includes(item) && item.economics.payer !== "organization");
   const price = sum(priced, (item) => item.economics.price), pricedValue = sum(priced, (item) => item.economics.extracted);
   const potential = sum(calibrated, (item) => item.economics.potential);
+  const monthlyPrice = sum(pricedPotential, (item) => item.economics.monthlyPrice);
   const reset = included.filter((item) => item.utilization);
   return {
     extracted: sum(included, (item) => item.economics.extracted),
     unattributed: (unattributed.claude ?? 0) + (unattributed.codex ?? 0),
+    beforeReadings: sum(measured, (item) => item.value.before),
     priced: { accounts: priced.length, extracted: pricedValue, price, multiple: price > 0 ? pricedValue / price : null },
     organization: { accounts: organization.length, extracted: sum(organization, (item) => item.economics.extracted) },
     unpriced: { accounts: unpriced.length, extracted: sum(unpriced, (item) => item.economics.extracted) },
-    monthlyPotential: calibrated.length ? sum(calibrated, (item) => item.economics.monthlyPotential) : null,
-    potentialMultiple: pricedPotential.length ? sum(pricedPotential, (item) => item.economics.monthlyPotential) / sum(pricedPotential, (item) => item.economics.monthlyPrice) : null,
+    monthlyPotential: pricedPotential.length ? sum(pricedPotential, (item) => item.economics.monthlyPotential) : null, monthlyPrice,
+    potentialMultiple: monthlyPrice > 0 ? sum(pricedPotential, (item) => item.economics.monthlyPotential) / monthlyPrice : null,
+    otherMonthlyPotential: otherPotential.length ? sum(otherPotential, (item) => item.economics.monthlyPotential) : null,
     capacityUsed: potential > 0 ? sum(calibrated, (item) => item.economics.extracted) / potential : null, potential: calibrated.length ? potential : null,
     resetsUsed: reset.length ? sum(reset, (item) => item.utilization.mean) / reset.length : null,
     banked: sum(included, (item) => item.resets.upToUsd),
@@ -592,7 +656,7 @@ export function subscriptionModel({ limits, sessions, timeZone = "UTC", now, ran
   const items = accounts.map((account) => {
     const own = byAccount.get(account.key) ?? [], override = plans[account.key];
     // Whether this account's value can be measured at all: an account with no attributable sessions has unknown value, not zero.
-    const basis = !identified(account.key) ? "none"
+    const basis = !identified(account.key) || !own.length ? "none"
       : own.some((session) => session.historyProfile) || (account.provider === "claude" && account.profileKeys?.length) ? "profiles"
       : only(account.provider) && local === null ? "provider" : "none";
     return {
@@ -613,8 +677,23 @@ const rate = (value) => `${value < 10 ? (Math.round(value * 10) / 10).toString()
 
 const usd = (value) => value >= 1000 ? `$${(value / 1000).toFixed(1)}k` : `$${Math.round(value)}`;
 
+/** Why limit history is not being kept, by `LimitsSnapshot.ledger`; the `limits` command says the same. */
+export const historyNotes = {
+  off: { title: "Limit history is not being kept", detail: "With --no-index, only readings still in provider logs are shown. Claude event logs rotate within a few days, so reset history needs the private ledger." },
+  unreadable: { title: "Limit history is not being kept", detail: "The limits ledger was written by another version of session-analytics, or this user may not replace it, so it was left untouched. Only readings still in provider logs are shown until that is resolved." },
+  unwritable: { title: "Limit history could not be saved this time", detail: "The private ledger could not be written; the next harvest reads the same records again." },
+};
+
 /** Urgency decides the order; dollars only break ties within a tier. */
 const tiers = { act: 0, watch: 1, setup: 2, good: 3 };
+
+/**
+ * Who turned Claude extra usage off. Anthropic reports a personal plan's switch as the organization's too
+ * (`org_level_disabled`), so only an employer-paid seat is told it is the organization's.
+ */
+export const extraUsageOff = (item) => item.economics?.payer === "organization"
+  ? `Extra usage is off${item.account.extraUsage?.disabledReason === "org_level_disabled" ? " for this organization" : ""}`
+  : "Extra usage is turned off for this account (claude.ai settings)";
 
 /** What happens after a cap on this account: Codex credits, Claude extra usage, and paid resets. */
 function afterCap(item) {
@@ -624,7 +703,7 @@ function afterCap(item) {
     return `${balance} A paid instant reset (chatgpt.com/codex/purchase/reset) also restarts both windows; it is worth it only if the blocked days are worth more than its price.`;
   }
   const extra = item.account.extraUsage;
-  if (extra?.extraUsage === "disabled") return ` Extra usage is off${extra.disabledReason === "org_level_disabled" ? " for this organization" : ""}, so a cap means waiting for the reset.`;
+  if (extra?.extraUsage === "disabled") return ` ${extraUsageOff(item)}, so a cap means waiting for the reset.`;
   if (extra?.extraUsage === "enabled" || extra?.extraUsage === "in-use") return " Extra usage is on for this account: past the cap you pay API rates.";
   return "";
 }
@@ -634,10 +713,11 @@ function afterCap(item) {
  * account it concerns (or null), and, where calibration allows, the API-equivalent value at stake. Items sort by tone,
  * then urgency, then value.
  */
-export function recommendations(items, { now, sources = [], persisted = true, codexAccount = "ok", formatTime = (seconds) => new Date(seconds * 1000).toISOString() }) {
+export function recommendations(items, { now, sources = [], persisted = true, ledger = persisted ? "ok" : "off", codexAccount = "ok", formatTime = (seconds) => new Date(seconds * 1000).toISOString() }) {
   const advice = [];
   const accounts = items.filter((item) => item.identified);
-  const push = (item, entry) => advice.push({ provider: item?.provider ?? null, account: item?.key ?? null, impactUsd: null, ...entry });
+  // `kind` names the rule: with the provider and account it identifies a suggestion across refreshes.
+  const push = (item, kind, entry) => advice.push({ kind, provider: item?.provider ?? null, account: item?.key ?? null, impactUsd: null, ...entry });
   // "Claude Max 20x" or "Claude Team seat"; the full label when two accounts would share the plan name.
   const shortName = (item) => {
     const plan = planFor(item.provider, item.planId);
@@ -664,7 +744,7 @@ export function recommendations(items, { now, sources = [], persisted = true, co
       const other = alternative(item);
       if (weekly.state === "capped" || weekly.state === "overage") {
         const overage = weekly.state === "overage";
-        push(item, {
+        push(item, "weekly-used-up", {
           tone: "act", score: 1100,
           title: overage ? `${name} is past its weekly allowance and on paid extra usage until ${formatTime(weekly.cycle.resetsAt)}` : `${name} weekly allowance is used up until ${formatTime(weekly.cycle.resetsAt)}`,
           detail: other ? `${elsewhere(other)}. Point background agents at ${target(other, item)} until the reset.${afterCap(item)}`
@@ -673,7 +753,7 @@ export function recommendations(items, { now, sources = [], persisted = true, co
         });
       } else if (weekly.capsEarly) {
         const early = weekly.cycle.resetsAt - weekly.capAt;
-        push(item, {
+        push(item, "runs-out", {
           tone: "act", score: 1000 + early / HOUR,
           title: other ? `${name} runs out before its ${formatTime(weekly.cycle.resetsAt)} reset; ${elsewhere(other)}`
             : `${name} weekly allowance runs out in ${duration(weekly.capAt - now)}, ${duration(early)} before it resets`,
@@ -681,14 +761,14 @@ export function recommendations(items, { now, sources = [], persisted = true, co
             (other ? `Point background agents and long-running work at ${target(other, item)}, and keep this account for interactive work. ` : "Keep the remaining allowance for interactive work, and run subagents and bulk jobs on cheaper models.") + afterCap(item),
         });
       } else if (weekly.mayBeUsedUp) {
-        push(item, {
+        push(item, "may-be-used-up", {
           tone: "watch", score: 700,
           title: `${name} weekly allowance may already be used up`,
           detail: `The last reading, ${Math.round(weekly.used)}% at ${formatTime(weekly.observedAt)}, is ${duration(now - weekly.observedAt)} old, and the pace before it reaches 100% by now. The next reading from this account will tell; usage on other machines also moves this meter.`,
         });
       } else if (weekly.projected !== null && weekly.projected < 85 && weekly.remaining > 12 * HOUR) {
         const expiring = 100 - weekly.projected;
-        push(item, {
+        push(item, "expiring-week", {
           tone: "watch", score: 500,
           title: `About ${expiring.toFixed(0)}% of this week's ${name} allowance will expire unused${k ? ` (≈ ${usd(expiring * k)} of API value)` : ""}`,
           detail: `At your current pace the meter closes near ${weekly.projected.toFixed(0)}% at ${formatTime(weekly.cycle.resetsAt)}. Using all of it takes about ${rate(weekly.dailyBudget)} a day. Queue overnight agent work on this account before the reset, such as test backfills, refactors, dependency upgrades and review passes.`,
@@ -699,20 +779,20 @@ export function recommendations(items, { now, sources = [], persisted = true, co
     const exact = item.history.filter(exactClose);
     if (exact.length >= 2) {
       const unused = exact.reduce((total, cycle) => total + cycle.expired, 0) / exact.length;
-      if (unused >= 15) push(item, {
+      if (unused >= 15) push(item, "unused-resets", {
         tone: "watch", score: 400,
         title: `${name}'s last ${exact.length} observed weekly resets left an average of ${unused.toFixed(0)}% unused`,
         detail: `${k ? `That is about ${usd(unused * k)} of API-equivalent value a week (${usd(unused * k * MONTH_DAYS / 7)} a month). ` : ""}A steady daily target of about ${(100 / 7).toFixed(0)}% keeps each week fully used without running out early.`,
         impactUsd: k ? unused * k * MONTH_DAYS / 7 : null,
       });
-      else if (exact.every((cycle) => cycle.peak >= 90)) push(item, {
+      else if (exact.every((cycle) => cycle.peak >= 90)) push(item, "full-resets", {
         tone: "good", score: 50,
         title: `You use ${name}'s weekly resets almost fully`,
         detail: `Each of the last ${exact.length} observed weekly resets closed at 90% or more.`,
       });
     }
     const unobserved = item.history.filter((cycle) => cycle.lowerBound).length;
-    if (unobserved >= 2 && exact.length < 2) push(item, {
+    if (unobserved >= 2 && exact.length < 2) push(item, "unobserved-closes", {
       tone: "setup", score: 160,
       title: `${name}: the closing level of ${unobserved} weekly resets was not observed`,
       detail: "Their last readings came long before the reset, so how much was left unused is unknown; they are left out of the averages and plan advice. A scheduled `session-analytics limits --quiet` every 20 minutes records each close this machine can see, including the Codex account read.",
@@ -720,7 +800,7 @@ export function recommendations(items, { now, sources = [], persisted = true, co
     if (item.windows && item.windows.capped > 0) {
       const weeklyBinding = weekly?.capsEarly || weekly?.state === "capped";
       const other = alternative(item);
-      push(item, {
+      push(item, "lockouts", {
         tone: weeklyBinding ? "watch" : "act", score: 600 + item.windows.lockedSeconds / 60,
         title: `Hit the ${name} 5-hour limit ${item.windows.capped} time${item.windows.capped === 1 ? "" : "s"} in 7 days (${duration(item.windows.lockedSeconds)} locked out)`,
         detail: weeklyBinding
@@ -734,12 +814,12 @@ export function recommendations(items, { now, sources = [], persisted = true, co
       const recent = exact.slice(-4);
       const mean = recent.reduce((total, cycle) => total + cycle.peak, 0) / recent.length;
       const cappedWeeks = recent.filter((cycle) => cycle.capped).length;
-      if (cappedWeeks >= 2 && plan.rank < topRank(item.provider)) push(item, {
+      if (cappedWeeks >= 2 && plan.rank < topRank(item.provider)) push(item, "plan-up", {
         tone: "watch", score: 300,
         title: `${name} capped out in ${cappedWeeks} of the last ${recent.length} observed weeks`,
         detail: "If those lockouts cost you working time, the next tier up may be worth it. Compare the price difference with the value you produce in the blocked hours.",
       });
-      if (mean < 30 && plan.rank >= 2) push(item, {
+      if (mean < 30 && plan.rank >= 2) push(item, "plan-down", {
         tone: "watch", score: 350,
         title: `${name} weekly resets averaged ${mean.toFixed(0)}% over the last ${recent.length} observed weeks`,
         detail: "A lower tier would cover this level of use. Either move more work onto this subscription or downgrade to save the difference.",
@@ -756,7 +836,7 @@ export function recommendations(items, { now, sources = [], persisted = true, co
       if (weeklyCredit && weekly?.cycle && !weekly.stale && (weekly.state === "capped" || weekly.used >= 90) && weekly.remaining > DAY) {
         timed = true;
         const restore = banked.nowValue(weeklyCredit);
-        push(item, {
+        push(item, "redeem-now", {
           tone: "act", score: 1300,
           title: `Redeem a banked ${name} reset now: it restores ${Math.round(Math.min(100, weekly.used))}% of the week${restore !== null ? ` (≈ ${usd(restore)})` : ""}`,
           detail: `The weekly meter is at ${Math.round(weekly.used)}% with ${duration(weekly.remaining)} until the scheduled reset, so this is when a reset is worth the most: it restarts the week at 0%. ${left} ${where}`,
@@ -764,7 +844,7 @@ export function recommendations(items, { now, sources = [], persisted = true, co
         });
       } else if (weeklyCredit && weekly?.capsEarly) {
         timed = true;
-        push(item, {
+        push(item, "hold-reset", {
           tone: "watch", score: 720,
           title: `Hold your banked ${name} reset until the weekly meter nears 100% (about ${formatTime(weekly.capAt)})`,
           detail: `A reset is worth what has been used when you redeem it: ${Math.round(weekly.used)}% now${k ? ` (≈ ${usd(weekly.used * k)})` : ""}, a full week near 100%${k ? ` (≈ ${usd(100 * k)})` : ""}. ${left} ${where}`,
@@ -772,7 +852,7 @@ export function recommendations(items, { now, sources = [], persisted = true, co
         });
       }
       if (sessionCredit && item.session?.state === "capped" && item.session.cycle && item.session.cycle.resetsAt - now > HOUR && !(weekly?.capsEarly || weekly?.state === "capped")) {
-        push(item, {
+        push(item, "redeem-session", {
           tone: "act", score: 1150,
           title: `A banked 5-hour reset would end this ${name} lockout ${duration(item.session.cycle.resetsAt - now)} early`,
           detail: `The weekly allowance still has room, so the 5-hour window is what is blocking you. ${left} ${where}`,
@@ -781,13 +861,13 @@ export function recommendations(items, { now, sources = [], persisted = true, co
       const credit = banked.credits.find((entry) => entry.expiresAt !== null); // The soonest expiry is the one to act on.
       if (credit) {
         const remaining = credit.expiresAt - now, restore = banked.nowValue(credit);
-        if (remaining <= 3 * DAY) push(item, {
+        if (remaining <= 3 * DAY) push(item, "credit-expiring", {
           tone: "act", score: 1250 - remaining / HOUR,
           title: `A banked ${name} reset expires ${formatTime(credit.expiresAt)}, in ${duration(remaining)}`,
           detail: `Unused, it is worth nothing. Redeem it before then at the highest meter reading you reach${restore !== null ? `; right now it would restore ≈ ${usd(restore)}` : ""}. ${where}`,
           impactUsd: restore,
         });
-        else if (!timed && credit.scope !== "five_hour" && weekly?.cycle && weekly.projected !== null && weekly.projected < 90 && credit.expiresAt < weekly.cycle.resetsAt + WEEK) push(item, {
+        else if (!timed && credit.scope !== "five_hour" && weekly?.cycle && weekly.projected !== null && weekly.projected < 90 && credit.expiresAt < weekly.cycle.resetsAt + WEEK) push(item, "credit-unneeded", {
           tone: "watch", score: 650,
           title: `Your banked ${name} reset expires ${formatTime(credit.expiresAt)}, and at this pace you will not need it first`,
           detail: `Plan a heavy run on this account before then (a large refactor, test backfill or review sweep), let the weekly meter climb close to 100%, then redeem it to restore a full week${k ? ` (≈ ${usd(100 * k)})` : ""}. ${where}`,
@@ -799,7 +879,7 @@ export function recommendations(items, { now, sources = [], persisted = true, co
     const early = item.history.filter((cycle) => cycle.endedEarly && cycle.restored !== null && cycle.restored < 60 && cycle.end >= now - 30 * DAY);
     if (early.length) {
       const last = early.at(-1);
-      push(item, {
+      push(item, "early-reset", {
         tone: "watch", score: 450,
         title: `${name} ${last.cause === "credit" ? "banked reset was redeemed" : "reset early"} at ${Math.round(last.restored)}% used${k ? `, restoring only ≈ ${usd(last.restored * k)}` : ""}`,
         detail: `A reset restarts the window at 0%, so it is worth what had been used when it happened. ${k ? `Taken near 100% it restores a full week, about ${usd(100 * k)}. ` : ""}If this was a reset credit you redeemed, save credits for when the meter is close to 100% with days left before the scheduled reset. Provider-wide resets are not in your control.`,
@@ -813,25 +893,22 @@ export function recommendations(items, { now, sources = [], persisted = true, co
   if (fresh.length >= 2 && exhausting.length === fresh.length) {
     const lost = exhausting.map((item) => item.weekly.cycle.resetsAt - Math.max(now, item.weekly.capAt ?? now));
     const banked = exhausting.reduce((total, item) => total + (item.resets?.available ?? 0), 0);
-    push(null, {
+    push(null, "capacity-bound", {
       tone: "act", score: 1200,
       title: "Every subscription runs out before its reset: you are capacity-bound, not under-using",
       detail: `At this pace you would have no allowance for ${duration(Math.min(...lost))} to ${duration(Math.max(...lost))} before the resets. You already extract more than the limits refill. Ration by priority: keep allowance for interactive work, batch background agents into the days after each reset, and use cheaper models for subagents.${banked ? ` Spend your ${banked} banked reset${banked === 1 ? "" : "s"} at the caps, not before.` : ""} Extra usage, credits, paid resets or another seat only pay off if the blocked hours are worth more than their price.`,
     });
   }
   const claudeSources = sources.filter((source) => source.source.startsWith("claude"));
-  if (!items.some((item) => item.provider === "claude" && item.meters.length) && claudeSources.every((source) => source.status !== "ok")) push(null, {
+  if (!items.some((item) => item.provider === "claude" && item.meters.length) && claudeSources.every((source) => source.status !== "ok")) push(null, "record-claude", {
     provider: "claude", tone: "setup", score: 200,
     title: "Record Claude limit meters",
     detail: "No Claude meter readings were found. Add `session-analytics limits statusline` as your Claude Code status line, or run Claude through a host that logs Agent SDK events, such as T3 Code.",
   });
-  if (codexAccount === "unavailable" && accounts.some((item) => item.provider === "codex" && !item.resets.known)) push(null, {
+  if (codexAccount === "unavailable" && accounts.some((item) => item.provider === "codex" && !item.resets.known)) push(null, "codex-account", {
     provider: "codex", tone: "setup", score: 180, title: "Banked Codex resets could not be read",
     detail: "The local Codex app-server did not answer, so banked resets and their expiry are unknown. Check that `codex` is installed and logged in; the next refresh retries.",
   });
-  if (!persisted) push(null, {
-    tone: "setup", score: 150, title: "Limit history is not being kept",
-    detail: "With --no-index, only readings still in provider logs are shown. Claude event logs rotate within about a day, so reset history needs the private ledger.",
-  });
+  if (ledger !== "ok" && historyNotes[ledger]) push(null, "history", { tone: "setup", score: 150, ...historyNotes[ledger] });
   return advice.sort((left, right) => tiers[left.tone] - tiers[right.tone] || right.score - left.score || (right.impactUsd ?? 0) - (left.impactUsd ?? 0));
 }

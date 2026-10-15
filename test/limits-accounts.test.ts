@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { claudeAccountKey, codexAccountKey, readClaudeProfile, weeklyPhaseKey } from "../src/limits/accounts.ts";
-import { collectLimits, statuslineAccount } from "../src/limits/index.ts";
-import { compactObservations, emptyLedger, readLedger, toRow, writeLedger, type Ledger } from "../src/limits/ledger.ts";
+import { collectLimits, resolveCaps, statuslineAccount } from "../src/limits/index.ts";
+import { appendInbox, compactObservations, emptyLedger, mergeAccount, mergeLedgers, readLedger, toRow, writeLedger, type Ledger, type LedgerAccount } from "../src/limits/ledger.ts";
 import { claudeSdkEvent, statuslineObservations } from "../src/limits/sources.ts";
 import type { LimitObservation, LimitsSnapshot } from "../src/limits/types.ts";
 import { profileKeyFor } from "../src/metrics/history-coverage.ts";
-import { buildMeters } from "../src/public/subscription-data.js";
+import { buildMeters, liveMeter } from "../src/public/subscription-data.js";
 
 const at = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 // Before the files these tests write, so every file counts as modified since the previous harvest unless dated otherwise.
@@ -133,15 +135,38 @@ test("status-line readings belong to the account of their CLAUDE_CONFIG_DIR, tra
   assert.equal(await statuslineAccount({ session_id: session(9), rate_limits: { seven_day: { used_percentage: 3, resets_at: weekB } } }, base), weeklyPhaseKey(weekB));
   assert.equal(await statuslineAccount({}, base), "");
   const observations = statuslineObservations({ rate_limits: { five_hour: { used_percentage: 104, resets_at: now + 600 } } }, now, keyB);
-  assert.deepEqual(observations.map((row) => [row.account, row.status]), [[keyB, "overage"]], "only a reading past 100% proves extra usage");
+  assert.deepEqual(observations.map((row) => [row.account, row.status]), [[keyB, "unknown"]], "the status line does not say whether a full window refused requests");
+});
+
+test("a full window the status line reports is a cap when the account's extra usage is off, and extra usage when it is on", async () => {
+  const { home, dataDir } = twoAccounts();
+  const keyA = claudeAccountKey(loginA.org, loginA.account), keyB = claudeAccountKey(loginB.org, loginB.account);
+  // Hard caps read 101-102% too, so the reading alone proves nothing.
+  appendInbox(dataDir, [
+    ...statuslineObservations({ rate_limits: { seven_day: { used_percentage: 101, resets_at: weekA } } }, now - 60, keyA),
+    ...statuslineObservations({ rate_limits: { seven_day: { used_percentage: 101, resets_at: weekB } } }, now - 60, keyB),
+  ]);
+  const snapshot = await collectLimits({ dataDir, codexRoot: join(home, "none") }, environmentFor(home), now);
+  const latest = (key: string) => own(snapshot, key, "seven_day").at(-1)!;
+  assert.deepEqual([latest(keyA).usedPercent, latest(keyA).status], [101, "rejected"], "extra usage is off for A");
+  assert.deepEqual([latest(keyB).usedPercent, latest(keyB).status], [101, "overage"], "B is on extra usage");
+  assert.equal(snapshot.sources.find((source) => source.source === "claude-statusline")?.read, 2);
+  assert.equal(readLedger(dataDir, now).ledger!.rows.filter((row) => row[8] === "claude-statusline").every((row) => row[7] === "unknown"), true, "the ledger keeps them unresolved");
+  const unknown = (used: number) => resolveCaps([{ ...latest(keyA), status: "unknown", usedPercent: used }], [{ key: keyA, provider: "claude", extraUsage: null }])[0]!.status;
+  assert.deepEqual([unknown(99), unknown(100), unknown(102)], ["unknown", "rejected", "overage"], "with the state unknown, only a reading past 100% is extra usage");
 });
 
 test("Claude rejected-while-on-extra-usage is overage; rejected without it is a cap", () => {
-  const event = (info: Record<string, unknown>) => claudeSdkEvent(JSON.parse(sdkEvent(now, session(1), { five_hour: [1.25, now + 600] }, info).replace(/^[^{]*/, "")))!;
+  const event = (info: Record<string, unknown>, windows: Record<string, [number, number]> = { five_hour: [1.25, now + 600] }) =>
+    claudeSdkEvent(JSON.parse(sdkEvent(now, session(1), windows, info).replace(/^[^{]*/, "")))!;
   assert.deepEqual(event({ status: "rejected", isUsingOverage: true }).observations.map((row) => [row.usedPercent, row.status]), [[125, "overage"]]);
   assert.deepEqual(event({ status: "rejected", overageInUse: true }).observations.map((row) => row.status), ["overage"]);
   assert.deepEqual(event({ status: "rejected", overageStatus: "rejected" }).observations.map((row) => row.status), ["rejected"]);
   assert.equal(event({}).sessionId, session(1));
+  // A full window other than the one the event reports on: extra usage pays past it too, and with extra usage off it is a cap.
+  const windows: Record<string, [number, number]> = { five_hour: [0.4, now + 600], seven_day: [1.02, weekA] };
+  const weekly = (info: Record<string, unknown>) => event({ status: "allowed", ...info }, windows).observations.find((row) => row.meter === "seven_day")!.status;
+  assert.deepEqual([weekly({ isUsingOverage: true }), weekly({ overageStatus: "rejected" }), weekly({})], ["overage", "rejected", "unknown"]);
 });
 
 const codexReading = (observedAt: number, resetsAt: number, usedPercent: number, meter = "seven_day", account = "codex-0123456789abcdef"): LimitObservation =>
@@ -214,7 +239,7 @@ test("every write merges with the ledger on disk, so a concurrent writer's rows,
   const cron: Ledger = { ...emptyLedger(), harvestedThrough: now - 60, rows: [row(40, now - 3600)], cursors: { "1:2": { offset: 900, fingerprint: "0123456789abcdef", seen: now } } };
   const dashboard: Ledger = { ...emptyLedger(), harvestedThrough: now - 120, rows: [row(45, now - 1200)], cursors: { "1:2": { offset: 400, fingerprint: "fedcba9876543210", seen: now } } };
   writeLedger(dataDir, cron, now);
-  const merged = writeLedger(dataDir, dashboard, now);
+  const merged = writeLedger(dataDir, dashboard, now).ledger;
   assert.deepEqual(merged.rows.map((item) => item[6]), [40, 45]);
   assert.deepEqual([merged.harvestedThrough, merged.cursors["1:2"]?.offset], [now - 60, 900]);
   assert.deepEqual(readLedger(dataDir, now).ledger?.rows, merged.rows);
@@ -349,7 +374,154 @@ test("readings kept under a profile's fallback key join its account once the log
   const key = claudeAccountKey(loginA.org, loginA.account);
   assert.deepEqual([...new Set(after.observations.map((row) => row.account))], [key]);
   // A process still holding the old ledger writes it back: its rows are re-keyed, not resurrected.
-  const merged = writeLedger(options.dataDir, stale, now + 120);
+  const merged = writeLedger(options.dataDir, stale, now + 120).ledger;
   assert.deepEqual([...new Set(merged.rows.map((row) => row[1]))], [key]);
   assert.deepEqual(Object.keys(merged.accounts), [key]);
+});
+
+test("an in-place reset inside one 15-minute bucket is kept apart, and each meter's latest reading keeps its own row", () => {
+  const reset = now + 3 * 86_400, bucket = Math.floor((now - 3600) / 900) * 900;
+  const claude = (offset: number, usedPercent: number): LimitObservation =>
+    ({ provider: "claude", account: "claude-0123456789abcdef", meter: "seven_day", windowMinutes: 10_080, resetsAt: reset, observedAt: bucket + offset, usedPercent, status: "allowed", source: "claude-sdk-log" });
+  const rows = compactObservations([claude(60, 90), claude(300, 0), claude(600, 2)], now);
+  assert.deepEqual(rows.map((row) => row.usedPercent), [90, 0, 2]);
+  const live = liveMeter(buildMeters(rows, now)[0]!, now);
+  assert.deepEqual([live.used, live.cycle!.segments.length], [2, 2], "the meter shows the level after the reset, not the bucket's maximum before it");
+  const ledger = { ...emptyLedger(), rows: rows.map(toRow) };
+  const twice = mergeLedgers(mergeLedgers(ledger, ledger, now), ledger, now);
+  assert.deepEqual(twice.rows, ledger.rows, "compaction is idempotent across merges");
+  assert.deepEqual(compactObservations([claude(60, 30), claude(300, 32), claude(600, 31)], now).map((row) => row.usedPercent), [32, 31], "the latest reading is never an earlier, higher one");
+});
+
+test("the newest plan evidence wins, including a tier this version does not recognise; Codex's 'unknown' plan type is no evidence", async () => {
+  const record = (plan: LedgerAccount["plan"], planType: string | null, planObservedAt: number | null): LedgerAccount => ({
+    provider: "codex", plan, planSource: plan ? "codex-session" : null, planObservedAt, extraUsage: null, codex: null, profileKeys: [],
+    planEvidence: { organizationType: null, organizationRateLimitTier: null, userRateLimitTier: null, seatTier: null, billingType: null, planType },
+  });
+  const pick = (account: LedgerAccount) => [account.plan, account.planEvidence?.planType];
+  assert.deepEqual(pick(mergeAccount(record("plus", "plus", now - 100), record(null, "promax", now))), [null, "promax"]);
+  assert.deepEqual(pick(mergeAccount(record(null, "promax", now), record("plus", "plus", now - 100))), [null, "promax"], "in either order");
+  assert.deepEqual(pick(mergeAccount(record("plus", "plus", now), record(null, null, null))), ["plus", "plus"], "a record without plan evidence changes nothing");
+
+  const home = mkdtempSync(join(tmpdir(), "limits-plan-"));
+  const sessions = join(home, ".codex", "sessions", "2026", "10");
+  mkdirSync(sessions, { recursive: true });
+  const line = (observedAt: number, plan: string) => JSON.stringify({ timestamp: iso(observedAt), type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", plan_type: plan, primary: { used_percent: 30, window_minutes: 10_080, resets_at: now + 3 * 86_400 } } } });
+  const rollout = join(sessions, "rollout-a.jsonl");
+  writeFileSync(rollout, [JSON.stringify({ type: "session_meta", payload: { creator_account_id: "SECRET-ACCOUNT" } }), line(now - 7200, "pro"), line(now - 600, "unknown")].join("\n") + "\n");
+  const options = { dataDir: join(home, "data") };
+  const codex = (snapshot: LimitsSnapshot) => snapshot.accounts.find((account) => account.provider === "codex")!;
+  assert.equal(codex(await collectLimits(options, environmentFor(home), now)).plan, "pro", "a later 'unknown' record keeps the plan");
+  appendFileSync(rollout, `${line(now - 60, "promax")}\n`);
+  const upgraded = codex(await collectLimits(options, environmentFor(home), now + 60));
+  assert.deepEqual([upgraded.plan, upgraded.planEvidence?.planType], [null, "promax"], "a newer unrecognised tier replaces the old plan");
+});
+
+test("Codex readings that name no account join their home's account only while it has one; a second login revokes that", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-creators-"));
+  const sessions = join(home, ".codex", "sessions", "2026", "10");
+  mkdirSync(sessions, { recursive: true });
+  const line = (observedAt: number, used: number, resetsAt = now + 3 * 86_400) => JSON.stringify({ timestamp: iso(observedAt), type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", plan_type: "pro", primary: { used_percent: used, window_minutes: 10_080, resets_at: resetsAt } } } });
+  const meta = (creator: string) => JSON.stringify({ type: "session_meta", payload: { creator_account_id: creator } });
+  const options = { dataDir: join(home, "data") };
+  const owner = (snapshot: LimitsSnapshot, used: number) => snapshot.observations.filter((row) => row.provider === "codex" && row.usedPercent === used).map((row) => row.account);
+  const [keyA, keyB] = [codexAccountKey("SECRET-A"), codexAccountKey("SECRET-B")];
+
+  writeFileSync(join(sessions, "rollout-a.jsonl"), `${meta("SECRET-A")}\n${line(now - 7200, 11)}\n`);
+  writeFileSync(join(sessions, "rollout-b.jsonl"), `${meta("SECRET-B")}\n${line(now - 7000, 21, now + 4 * 86_400)}\n`);
+  writeFileSync(join(sessions, "rollout-old.jsonl"), `${line(now - 6000, 31, now + 5 * 86_400)}\n`);
+  const first = await collectLimits(options, environmentFor(home), now);
+  assert.deepEqual([owner(first, 11), owner(first, 21)], [[keyA], [keyB]]);
+  assert.match(owner(first, 31)[0]!, /^codex-p-/, "two logins in one home: an unattributed rollout stays with the home");
+  appendFileSync(join(sessions, "rollout-a.jsonl"), `${line(now - 60, 12)}\n`);
+  appendFileSync(join(sessions, "rollout-old.jsonl"), `${line(now - 50, 32, now + 5 * 86_400)}\n`);
+  const second = await collectLimits(options, environmentFor(home), now + 60);
+  assert.deepEqual([owner(second, 12), owner(second, 31), owner(second, 32)].map((keys) => keys.map((key) => key.startsWith("codex-p-") ? "home" : key)), [[keyA], ["home"], ["home"]],
+    "a later harvest that only sees A's rollout does not hand A the home's history");
+});
+
+test("the account the Codex app-server answers for claims its home's unattributed readings", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-app-server-"));
+  const sessions = join(home, ".codex", "sessions", "2026", "10");
+  mkdirSync(sessions, { recursive: true });
+  writeFileSync(join(sessions, "rollout-old.jsonl"), `${JSON.stringify({ timestamp: iso(now - 7200), type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", plan_type: "pro", primary: { used_percent: 11, window_minutes: 10_080, resets_at: now + 3 * 86_400 } } } })}\n`);
+  const fake = join(home, "codex");
+  writeFileSync(fake, `#!${process.execPath}
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let end;
+  while ((end = buffer.indexOf("\\n")) >= 0) {
+    const message = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+    if (message.id === 1) process.stdout.write(JSON.stringify({ id: 1, result: {} }) + "\\n");
+    if (message.id === 2) process.stdout.write(JSON.stringify({ id: 2, result: { accountId: "SECRET-APP", rateLimits: { primary: { usedPercent: 12, windowDurationMins: 10080, resetsAt: ${now + 3 * 86_400} }, planType: "pro" } } }) + "\\n");
+  }
+});
+`, { mode: 0o755 });
+  const environment = { HOME: home, SESSION_ANALYTICS_CODEX_BIN: fake, SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: join(home, "none"), CLAUDE_CONFIG_DIR: join(home, "none") };
+  const snapshot = await collectLimits({ dataDir: join(home, "data") }, environment, now);
+  assert.deepEqual(snapshot.accounts.filter((account) => account.provider === "codex").map((account) => account.key), [codexAccountKey("SECRET-APP")], "one login, one account");
+  assert.deepEqual([...new Set(snapshot.observations.map((row) => row.account))], [codexAccountKey("SECRET-APP")]);
+});
+
+test("version 1 banked resets survive a newer session summary that carries none", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-legacy-credits-"));
+  const dataDir = join(home, "data");
+  mkdirSync(dataDir, { mode: 0o700 });
+  const sessions = join(home, ".codex", "sessions", "2026", "10");
+  mkdirSync(sessions, { recursive: true });
+  writeFileSync(join(sessions, "rollout-a.jsonl"), [
+    JSON.stringify({ type: "session_meta", payload: { creator_account_id: "SECRET-ACCOUNT" } }),
+    JSON.stringify({ timestamp: iso(now - 600), type: "event_msg", payload: { type: "token_count", rate_limits: { limit_id: "codex", plan_type: "pro", credits: { has_credits: true, unlimited: false, balance: "10" }, primary: { used_percent: 20, window_minutes: 10_080, resets_at: now + 4 * 86_400 } } } }),
+  ].join("\n") + "\n");
+  const credit = { status: "available", scope: "all", grantedAt: now - 5 * 86_400, expiresAt: now + 20 * 86_400 };
+  writeFileSync(join(dataDir, "limits.json"), JSON.stringify({ version: 1, rows: [], accounts: { codex: { observedAt: now - 3600, credits: null, ordinaryUsageAllowed: true, resetCredits: { available: 1, credits: [credit] } } } }), { mode: 0o600 });
+  const snapshot = await collectLimits({ dataDir, offline: true }, environmentFor(home), now);
+  const codex = snapshot.accounts.find((account) => account.provider === "codex")!.codex!;
+  assert.deepEqual([codex.resetCredits?.available, codex.credits?.balance, codex.ordinaryUsageAllowed], [1, 10, true]);
+});
+
+test("harvests in two processes take turns: no row and no status-line sample is lost", { timeout: 60_000 }, async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "limits-processes-"));
+  const ledgerModule = new URL("../src/limits/ledger.ts", import.meta.url).href;
+  const sample = (meter: string, usedPercent: number): LimitObservation =>
+    ({ provider: "codex", account: "codex-0123456789abcdef", meter, windowMinutes: 10_080, resetsAt: now + 86_400 * 3, observedAt: now - 600, usedPercent, status: "allowed", source: "codex-session" });
+  appendInbox(dataDir, Array.from({ length: 20 }, (_, index) => sample(`inbox_${index}`, 10)));
+  const source = `import { appendInbox, emptyLedger, toRow, writeLedger } from ${JSON.stringify(ledgerModule)};
+    const [dataDir, name, now] = [process.argv[1], process.argv[2], Number(process.argv[3])];
+    const row = (meter) => ({ provider: "codex", account: "codex-0123456789abcdef", meter, windowMinutes: 10080, resetsAt: now + 86400 * 3, observedAt: now - 600, usedPercent: 20, status: "allowed", source: "codex-session" });
+    for (let index = 0; index < 25; index += 1) {
+      appendInbox(dataDir, [row(name + "_inbox_" + index)]);
+      writeLedger(dataDir, { ...emptyLedger(), rows: [toRow(row(name + "_" + index))] }, now, { inbox: true });
+    }`;
+  const children = ["a", "b"].map((name) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", source, dataDir, name, String(now)], { stdio: ["ignore", "ignore", "pipe"] });
+    let errors = "";
+    child.stderr.on("data", (chunk) => { errors += chunk; });
+    return once(child, "exit").then(([code]) => assert.equal(code, 0, errors));
+  });
+  await Promise.all(children);
+  writeLedger(dataDir, emptyLedger(), now, { inbox: true });
+  const meters = new Set(readLedger(dataDir, now).ledger!.rows.map((row) => row[2]));
+  const expected = [...Array.from({ length: 20 }, (_, index) => `inbox_${index}`),
+    ...["a", "b"].flatMap((name) => Array.from({ length: 25 }, (_, index) => [`${name}_${index}`, `${name}_inbox_${index}`]).flat())];
+  assert.deepEqual(expected.filter((meter) => !meters.has(meter)), []);
+  assert.deepEqual(readdirSync(dataDir).filter((name) => name.includes("merging")), [], "every claim was settled");
+  assert.deepEqual(readdirSync(join(dataDir, "limits-gate")), [], "every gate ticket was released");
+});
+
+test("a status-line claim a stopped harvest left behind is merged by the next one, and a ledger that cannot be written keeps the inbox", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "limits-claims-"));
+  const sample = (meter: string): LimitObservation =>
+    ({ provider: "claude", account: "", meter, windowMinutes: 10_080, resetsAt: now + 86_400, observedAt: now - 60, usedPercent: 30, status: "unknown", source: "claude-statusline" });
+  writeFileSync(join(dataDir, "limits-inbox-v2.jsonl.0123456789abcdef.merging"), `${JSON.stringify(toRow(sample("seven_day_left_behind")))}\n`, { mode: 0o600 });
+  appendInbox(dataDir, [sample("seven_day")]);
+  const written = writeLedger(dataDir, emptyLedger(), now, { inbox: true });
+  assert.deepEqual(written.inbox.map((row) => row.meter).sort(), ["seven_day", "seven_day_left_behind"]);
+  assert.deepEqual(readdirSync(dataDir).filter((name) => name.startsWith("limits-inbox")), []);
+
+  appendInbox(dataDir, [sample("seven_day_opus")]);
+  writeFileSync(join(dataDir, "limits-v2.json"), JSON.stringify({ version: 3, rows: [] }), { mode: 0o600 });
+  assert.throws(() => writeLedger(dataDir, emptyLedger(), now, { inbox: true }), /left untouched/);
+  assert.match(readFileSync(join(dataDir, "limits-inbox-v2.jsonl"), "utf8"), /seven_day_opus/, "the samples wait for a ledger that can be written");
 });

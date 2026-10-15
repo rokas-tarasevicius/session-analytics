@@ -8,8 +8,8 @@ import type { AnalyzeOptions } from "../types.ts";
 import { accountAttribution, accountLabel, claudeIdentities, identified, profileFor, profilesFromRoots, rolloutAccount, weeklyPhaseKey, type Profile } from "./accounts.ts";
 import { readCodexAccount } from "./codex-account.ts";
 import {
-  LEDGER_UNREADABLE, applyAliases, attributeLegacy, claudeSummary, codexSummary, compactObservations, drainInbox, emptyLedger, fromRow, readLedger,
-  readLegacyLedger, resetCreditHistory, restoreInbox, retentionSeconds, setAsideLedger, toRow, writeLedger, type Ledger, type LedgerAccount,
+  LEDGER_UNREADABLE, applyAliases, attributeLegacy, claudeSummary, codexSummary, compactObservations, emptyLedger, fromRow, readLedger,
+  readLegacyLedger, resetCreditHistory, retentionSeconds, setAsideLedger, toRow, writeLedger, type Ledger, type LedgerAccount,
 } from "./ledger.ts";
 import { harvestClaudeEventLogs, harvestCodex, type Cursors } from "./sources.ts";
 import type {
@@ -46,7 +46,7 @@ const later = <T extends { observedAt: number }>(left: T | null | undefined, rig
 /**
  * Harvest provider-reported limit meters and fold them into the private ledger, attributed to accounts. Sources are
  * read-only; the only write is the ledger in the private data directory, skipped entirely with `--no-index`. Harvests in
- * one process run one at a time.
+ * one process run one at a time; writes from every process take turns through the ledger's gate.
  */
 export function collectLimits(options: LimitsOptions = {}, environment: NodeJS.ProcessEnv = process.env, now?: number): Promise<LimitsSnapshot> {
   const run = queue.then(() => harvest(options, environment, now ?? Date.now() / 1000));
@@ -83,7 +83,6 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     harvestCodex(codexRoots, since, cursors, now, rolloutAccount),
     harvestClaudeEventLogs(eventLogs, since, cursors, now),
   ]);
-  const inbox = writable ? (() => { try { return drainInbox(directory); } catch { return []; } })() : [];
   const fresh: LimitObservation[] = [];
 
   // Claude: a session's transcript names its profile, a profile's `.claude.json` names its account.
@@ -105,22 +104,28 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     const profile = codexHomes.find((item) => item.canonical === canonical);
     if (profile) homeOfRoot.set(root, profile);
   }
+  // Every account seen in a home, across harvests: one incremental batch can hold only one of a home's two logins.
   const creators = new Map<string, Set<string>>();
+  const creatorsOf = (profile: Profile): Set<string> => {
+    let seen = creators.get(profile.fallbackKey);
+    if (!seen) { seen = new Set(base.creators[profile.fallbackKey] ?? []); creators.set(profile.fallbackKey, seen); }
+    return seen;
+  };
   for (const file of codex.files) {
     const profile = homeOfRoot.get(file.root);
-    if (profile && file.account) creators.set(profile.profileKey, (creators.get(profile.profileKey) ?? new Set()).add(file.account));
+    if (profile && file.account) creatorsOf(profile).add(file.account);
   }
   const homeAccount = (profile: Profile): string => {
-    const seen = creators.get(profile.profileKey);
-    if (seen?.size === 1) return [...seen][0]!;
-    return (!seen && base.profiles[profile.profileKey]) || profile.fallbackKey;
+    const seen = creatorsOf(profile);
+    return seen.size === 1 ? [...seen][0]! : profile.fallbackKey;
   };
   type CodexPlanReading = { plan: CodexAccountState["plan"]; planType: string | null; at: number; source: PlanSource };
   const codexPlans = new Map<string, CodexPlanReading>();
   const codexAccounts = new Map<string, CodexAccountSummary>();
   const limitNames = { ...base.limitNames };
+  // `unknown` (and a missing plan type) is no evidence: Codex writes it in some records of a known plan.
   const notePlan = (account: string, reading: CodexPlanReading) => {
-    if ((reading.plan || reading.planType) && reading.at >= (codexPlans.get(account)?.at ?? 0)) codexPlans.set(account, reading);
+    if ((reading.plan || (reading.planType && reading.planType !== "unknown")) && reading.at >= (codexPlans.get(account)?.at ?? 0)) codexPlans.set(account, reading);
   };
   let sessionReads = 0;
   for (const file of codex.files) {
@@ -154,6 +159,8 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     for (const { profile, state } of reads) {
       if (!state) continue;
       answered = true;
+      // The login the app-server answers for is one of the home's accounts, like a rollout's creator.
+      if (state.account) creatorsOf(profile).add(state.account);
       const account = state.account ?? homeAccount(profile);
       accountReads += state.observations.length;
       for (const observation of state.observations) fresh.push({ ...observation, account });
@@ -172,10 +179,14 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   // every later merge with a ledger another process wrote meanwhile.
   const aliases = { ...base.aliases };
   for (const [profile, account] of claudeAccounts) if (accountAttribution(account) === "account") aliases[profile.fallbackKey] = account;
-  for (const profile of codexHomes) { const account = homeAccount(profile); if (accountAttribution(account) === "account") aliases[profile.fallbackKey] = account; }
+  for (const profile of codexHomes) {
+    const account = homeAccount(profile);
+    if (accountAttribution(account) === "account") aliases[profile.fallbackKey] = account;
+    else delete aliases[profile.fallbackKey];
+  }
   const rekey = (account: string) => aliases[account] ?? account;
   const healed = applyAliases({ ...base, aliases });
-  let observations = [...healed.rows.map(fromRow).filter((row): row is LimitObservation => row !== null), ...fresh, ...inbox]
+  let observations = [...healed.rows.map(fromRow).filter((row): row is LimitObservation => row !== null), ...fresh]
     .map((row) => aliases[row.account] ? { ...row, account: rekey(row.account) } : row);
 
   const accounts: Record<string, LedgerAccount> = { ...healed.accounts };
@@ -228,7 +239,12 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
       if (codexKeys.length === 1) {
         const account = touch(codexKeys[0]!, "codex");
         if (!account.plan && legacy.codexPlan) Object.assign(account, { plan: legacy.codexPlan, planSource: "codex-session" });
-        account.codex = later(account.codex, legacy.codex);
+        // A newer session-derived summary carries no banked resets; the count version 1 read is kept field by field.
+        const [current, merged] = [account.codex, later(account.codex, legacy.codex)];
+        if (merged) account.codex = {
+          ...merged, resetCredits: merged.resetCredits ?? current?.resetCredits ?? legacy.codex?.resetCredits ?? null,
+          ordinaryUsageAllowed: merged.ordinaryUsageAllowed ?? current?.ordinaryUsageAllowed ?? legacy.codex?.ordinaryUsageAllowed ?? null,
+        };
         history.push(...legacy.resetCreditHistory.map(([at, available]): [LimitProvider, string, number, number] => ["codex", codexKeys[0]!, at, available]));
       }
     }
@@ -237,14 +253,16 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   const rows = compactObservations(observations, now);
   const live = new Set(rows.map((row) => row.account));
   for (const key of Object.keys(accounts)) if (!live.has(key) && !Object.values(profiles).includes(key) && ![...claudeAccounts.values()].includes(key)) delete accounts[key];
+  const homes = Object.fromEntries([...creators].filter(([, seen]) => seen.size).map(([key, seen]) => [key, [...seen].sort()]));
   const next: Ledger = {
-    version: 2, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases, limitNames,
+    version: 2, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases,
+    creators: { ...base.creators, ...homes }, limitNames,
     rows: rows.map(toRow), resetCreditHistory: resetCreditHistory(history.map((row) => [row[0], rekey(row[1]), row[2], row[3]])), codexAccountReadAt,
   };
-  let ledger = next, persisted = false;
+  let ledger = next, persisted = false, inbox = 0;
   if (writable) {
-    try { ledger = writeLedger(directory, next, now); persisted = true; }
-    catch (error) { restoreInbox(directory, inbox); ledgerStatus = (error as Error).message === LEDGER_UNREADABLE ? "unreadable" : "unwritable"; }
+    try { const written = writeLedger(directory, next, now, { inbox: true }); ledger = written.ledger; inbox = written.inbox.length; persisted = true; }
+    catch (error) { ledgerStatus = (error as Error).message === LEDGER_UNREADABLE ? "unreadable" : "unwritable"; }
   } else processLedgers.set(directory, next);
 
   const kept = ledger.rows.map(fromRow).filter((row): row is LimitObservation => row !== null && row.observedAt >= now - retentionSeconds);
@@ -256,14 +274,31 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   for (const profile of codexHomes) { const key = homeAccount(profile); if (live.has(key) || ledger.accounts[key]) names.set(key, [...(names.get(key) ?? []), profile.name]); }
   const read: Record<LimitSource, number> = {
     "codex-session": sessionReads, "codex-account": accountReads,
-    "claude-sdk-log": claude.events.reduce((total, event) => total + event.observations.length, 0), "claude-statusline": inbox.length,
+    "claude-sdk-log": claude.events.reduce((total, event) => total + event.observations.length, 0), "claude-statusline": inbox,
   };
   const available: Record<LimitSource, boolean> = { "codex-session": codex.available, "codex-account": accountOptIn, "claude-sdk-log": claude.available, "claude-statusline": persist };
+  const summary = snapshotAccounts(kept, ledger, names, seeds, now);
   return {
     schemaVersion: 2, generatedAt: new Date(now * 1000).toISOString(), dataSource: "live", persisted, ledger: ledgerStatus,
-    ...snapshotAccounts(kept, ledger, names, seeds, now), sources: sourceHealth(kept, read, available), observations: kept,
+    ...summary, sources: sourceHealth(kept, read, available), observations: resolveCaps(kept, summary.accounts),
     resetCreditHistory: ledger.resetCreditHistory, codexAccount,
   };
+}
+
+/**
+ * Claude readings at or past 100% that do not say whether work continued (status-line readings, an event's windows other
+ * than the one it reports on) are settled here from the account's extra-usage state: off means the cap was hit, on means
+ * work continued on extra usage. With the state unknown, only a reading past 100% counts as extra usage. The ledger keeps
+ * them unresolved, so a later, better known state settles them again.
+ */
+export function resolveCaps(rows: LimitObservation[], accounts: Pick<LimitAccount, "key" | "provider" | "extraUsage">[]): LimitObservation[] {
+  const extra = new Map(accounts.filter((account) => account.provider === "claude").map((account) => [account.key, account.extraUsage?.extraUsage ?? "unknown"]));
+  return rows.map((row) => {
+    if (row.provider !== "claude" || row.usedPercent < 100 || row.status === "rejected" || row.status === "overage" || row.status === "idle") return row;
+    const state = extra.get(row.account) ?? "unknown";
+    const continued = state === "enabled" || state === "in-use" || (state !== "disabled" && row.usedPercent > 100);
+    return { ...row, status: continued ? "overage" : "rejected" };
+  });
 }
 
 function sourceHealth(rows: LimitObservation[], read: Record<LimitSource, number>, available: Record<LimitSource, boolean>): LimitSourceHealth[] {

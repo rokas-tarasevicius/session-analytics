@@ -11,7 +11,8 @@ export function identified(key: string): boolean;
 
 export interface Sample { t: number; used: number; status: LimitStatus }
 /** Part of a cycle between in-place resets. `before` is the last reading before the reset that started it. */
-export interface Segment { start: number; end: number; before: Sample | null; samples: Sample[]; peak: number; last: Sample; cappedAt: number | null }
+/** `lockouts`: [from, to] spans from a capped reading to the next reading on extra usage, else to the segment's end. */
+export interface Segment { start: number; end: number; before: Sample | null; samples: Sample[]; peak: number; last: Sample; cappedAt: number | null; lockouts: Array<[number, number]> }
 export interface Cycle {
   resetsAt: number; start: number; end: number; samples: Sample[]; segments: Segment[];
   /** The closing segment's last reading and highest reading. */
@@ -23,6 +24,8 @@ export interface Meter {
   retired: boolean;
   /** Idle markers (an unstarted Codex window) never form a cycle, so a meter with only those has none. */
   cycles: Cycle[];
+  /** The latest idle marker: the provider reported the window as not started. */
+  idleAt: number | null;
 }
 export interface LiveMeter {
   meter: Meter; cycle: Cycle | null; segment: Segment | null;
@@ -31,6 +34,10 @@ export interface LiveMeter {
   nextResetAt: number | null;
   rate?: number; remaining?: number; projected?: number | null; tooEarly?: boolean; stale?: boolean; capAt?: number | null;
   elapsed?: number; capsEarly?: boolean; mayBeUsedUp?: boolean; dailyBudget?: number | null; observedAt?: number;
+  /** A meter whose meaning is not documented: levels only, never a projection, run-out or cap. */
+  levelsOnly?: boolean;
+  /** Without an open cycle: whether the provider confirmed the window has not started (else nothing is known since the reset). */
+  confirmedIdle?: boolean; lastResetAt?: number | null;
 }
 export interface CalibrationPoint { resetsAt: number; start: number; at: number; used: number; spent: number; perPercent: number }
 export interface Calibration { perPercent: number | null; cycles: number; excluded: number; low: number | null; high: number | null; points: CalibrationPoint[] }
@@ -41,7 +48,7 @@ export interface ResetCycle {
   restored: number | null; restoredUsd: number | null; cause: "credit" | "unknown" | null; inPlace: InPlaceReset[];
 }
 export interface SessionWindows {
-  windows: Array<{ start: number; end: number; resetsAt: number; peak: number; active: boolean; cappedAt: number | null; lockedSeconds: number }>;
+  windows: Array<{ start: number; end: number; resetsAt: number; peak: number; active: boolean; cappedAt: number | null; lockedSeconds: number; lockouts: Array<[number, number]> }>;
   from: number; to: number; capped: number; lockedSeconds: number; averagePeak: number | null;
 }
 export interface Economics {
@@ -64,15 +71,19 @@ export interface AccountUtilization {
   /** In-place resets of the live weekly cycle. */
   history: ResetCycle[]; restarts: InPlaceReset[]; windows: SessionWindows | null; calibration: Calibration; sessionCalibration: Calibration | null;
   resets: BankedResets; economics: Economics; period: { from: number; to: number; days: number; firstReading: number | null };
-  value: { basis: ValueBasis; sessions: number };
+  /** `sessions`: sessions active in the counted period; `before`: value in the selected range before the first reading, not counted. */
+  value: { basis: ValueBasis; sessions: number; before: number };
   utilization: { mean: number; closed: number; includesProjection: boolean } | null;
   excluded?: boolean;
 }
 export interface SubscriptionTotals {
-  extracted: number; unattributed: number;
+  extracted: number; unattributed: number; beforeReadings: number;
   priced: { accounts: number; extracted: number; price: number; multiple: number | null };
   organization: { accounts: number; extracted: number }; unpriced: { accounts: number; extracted: number };
-  monthlyPotential: number | null; potentialMultiple: number | null; capacityUsed: number | null; potential: number | null;
+  /** A month of full use of the calibrated plans you pay for, their monthly price and the ratio; other calibrated accounts beside. */
+  monthlyPotential: number | null; monthlyPrice: number; potentialMultiple: number | null; otherMonthlyPotential: number | null;
+  /** Value used ÷ one full week per week of the calibrated accounts; early resets and extra usage can take it past 1. */
+  capacityUsed: number | null; potential: number | null;
   resetsUsed: number | null; banked: number;
 }
 export interface SubscriptionModel {
@@ -81,6 +92,8 @@ export interface SubscriptionModel {
   unattributed: { claude: number; codex: number; remote: boolean };
 }
 export interface Recommendation {
+  /** The rule that made it; with `provider` and `account` it identifies the suggestion across refreshes. */
+  kind: string;
   tone: "act" | "watch" | "good" | "setup"; provider: LimitProvider | null; account: string | null; score: number;
   title: string; detail: string; impactUsd: number | null;
 }
@@ -115,6 +128,8 @@ export interface AccountStatus {
   tone: "danger" | "warn" | "ok" | "muted"; rank: number; used: number; meter: "weekly" | "session";
   /** Run-out instant; `until`: the reset that ends a cap or an idle week; `since`: the last reading; `early`: seconds before the reset. */
   at: number | null; until: number | null; since: number | null; early: number | null;
+  /** Idle only: the provider confirmed the week has not started, rather than no reading since the reset. */
+  confirmed?: boolean;
 }
 export function limitStatus(item: AccountUtilization, now: number): AccountStatus;
 export function compareUrgency(left: AccountStatus, right: AccountStatus): number;
@@ -131,5 +146,7 @@ export function subscriptionModel(input: {
   local?: ((session: SessionLike) => boolean) | null;
 }): SubscriptionModel;
 export function recommendations(items: AccountUtilization[], options: {
-  now: number; sources?: LimitSourceHealth[]; persisted?: boolean; codexAccount?: "off" | "ok" | "unavailable"; formatTime?: (seconds: number) => string;
+  now: number; sources?: LimitSourceHealth[]; persisted?: boolean; ledger?: LimitsSnapshot["ledger"]; codexAccount?: "off" | "ok" | "unavailable"; formatTime?: (seconds: number) => string;
 }): Recommendation[];
+export const historyNotes: Record<"off" | "unreadable" | "unwritable", { title: string; detail: string }>;
+export function extraUsageOff(item: Pick<AccountUtilization, "account" | "economics">): string;

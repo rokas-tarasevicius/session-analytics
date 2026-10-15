@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, constants, fstatSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { INDEX_UNAVAILABLE, secureDirectory, secureFile } from "../store/database.ts";
+import { acquireWriterGate } from "../store/writer-gate.ts";
 import { accountAttribution, codexPlan, enumValue, identified, nextWeeklyReset, validAccount, weeklyPhase } from "./accounts.ts";
 import { limitName } from "./sources.ts";
 import {
@@ -19,6 +20,8 @@ import {
 export const ledgerName = "limits-v2.json";
 export const inboxName = "limits-inbox-v2.jsonl";
 export const legacyLedgerName = "limits.json";
+/** Ledger writers in every process take turns through their own gate, so a long index ingest never holds one up. */
+export const gateName = "limits-gate";
 const maximumLedgerBytes = 16 * 1024 * 1024;
 const maximumInboxBytes = 4 * 1024 * 1024;
 
@@ -31,6 +34,7 @@ const archiveAfterSeconds = 14 * 86_400;
 const resetToleranceSeconds = 120;
 const cursorRetentionSeconds = 7 * 86_400;
 const maximumCursors = 4096;
+const maximumCreators = 16;
 
 /** [provider, account, meter, windowMinutes, resetsAt, observedAt, usedPercent, status, source] */
 export type LedgerRow = [LimitProvider, string, string, number | null, number, number, number, LimitStatus, LimitSource];
@@ -63,6 +67,11 @@ export interface Ledger {
   profiles: Record<string, string>;
   /** A profile's fallback key → the account it turned out to be logged into; applied on every merge. */
   aliases: Record<string, string>;
+  /**
+   * A Codex home's fallback key → every account seen creating its rollouts or answering for it. Readings that name no
+   * account join the home's account only while exactly one is known; a second one revokes that alias.
+   */
+  creators: Record<string, string[]>;
   /** Codex scoped limit id → display name. */
   limitNames: Record<string, string>;
   rows: LedgerRow[];
@@ -73,7 +82,7 @@ export interface Ledger {
 }
 
 export const emptyLedger = (): Ledger => ({
-  version: 2, harvestedThrough: null, importedV1Through: null, cursors: {}, accounts: {}, profiles: {}, aliases: {}, limitNames: {}, rows: [],
+  version: 2, harvestedThrough: null, importedV1Through: null, cursors: {}, accounts: {}, profiles: {}, aliases: {}, creators: {}, limitNames: {}, rows: [],
   resetCreditHistory: [], codexAccountReadAt: null,
 });
 
@@ -299,11 +308,37 @@ function quarantineInterleaved(series: LimitObservation[]): void {
   }
 }
 
+/** A fall of this many points inside one cycle, confirmed by the next reading, is an in-place reset (as in the view). */
+const resetDrop = 5;
+
 /**
- * Normalize readings into one row per account, meter, reset cycle and time bucket. Each bucket keeps its highest reading
- * (earliest on ties) with the most severe status among them; a rejected reading keeps its own row and time, so the moment
- * a cap was hit is never moved earlier. Unattributed Claude readings join their account first, readings of windows that
- * have not started are reduced to one marker, and reset instants within two minutes are one cycle.
+ * Number the segments of each cycle: a provider can restart a meter at 0% without moving its reset, and readings after
+ * that must never share a bucket with the higher readings before it. Same rule as the view's `segmentsOf`.
+ */
+function segmentOrdinals(series: LimitObservation[], ordinals: Map<LimitObservation, number>): void {
+  for (const cycle of groupBy(series.filter((item) => item.status !== "idle"), (item) => String(item.resetsAt)).values()) {
+    const sorted = [...cycle].sort((left, right) => left.observedAt - right.observedAt);
+    let ordinal = 0, top = -Infinity;
+    sorted.forEach((item, index) => {
+      const next = sorted[index + 1], floor = top - resetDrop;
+      if (index > 0 && item.usedPercent <= floor && (next ? next.usedPercent <= floor : item.usedPercent <= top / 2)) { ordinal += 1; top = -Infinity; }
+      ordinals.set(item, ordinal);
+      top = Math.max(top, item.usedPercent);
+    });
+  }
+}
+
+/** A total order, so the latest reading of a series is the same whatever order ledgers are merged in. */
+const laterReading = (left: LimitObservation, right: LimitObservation): boolean =>
+  (left.observedAt - right.observedAt || left.usedPercent - right.usedPercent || statusRank[left.status] - statusRank[right.status] ||
+    (left.source > right.source ? 1 : left.source < right.source ? -1 : 0)) > 0;
+
+/**
+ * Normalize readings into one row per account, meter, reset cycle, segment and time bucket. Each bucket keeps its highest
+ * reading (earliest on ties) with the most severe status among them; a rejected reading keeps its own row and time, so
+ * the moment a cap was hit is never moved earlier, and each meter's latest reading keeps its own row, so the level shown
+ * now is never an earlier, higher reading. Unattributed Claude readings join their account first, readings of windows
+ * that have not started are reduced to one marker, and reset instants within two minutes are one cycle.
  */
 export function compactObservations(observations: Iterable<LimitObservation>, now: number): LimitObservation[] {
   const valid: LimitObservation[] = [];
@@ -313,17 +348,27 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
   }
   mergeWeeklyPhases(valid);
   const normalized: LimitObservation[] = [];
+  const ordinals = new Map<LimitObservation, number>();
   for (const series of groupBy(valid, seriesKey).values()) {
     const kept = markIdle(series);
     clusterResets(kept);
     quarantineInterleaved(kept);
+    segmentOrdinals(kept, ordinals);
     normalized.push(...kept);
+  }
+  const latest = new Map<string, LimitObservation>();
+  for (const observation of normalized) {
+    const current = latest.get(seriesKey(observation));
+    if (observation.status !== "idle" && (!current || laterReading(observation, current))) latest.set(seriesKey(observation), observation);
   }
   const buckets = new Map<string, LimitObservation>();
   for (const observation of normalized) {
+    const last = latest.get(seriesKey(observation));
+    // An identical copy of the latest reading (the same ledger merged twice) is that reading.
+    if (last && last !== observation && last.observedAt === observation.observedAt && last.usedPercent === observation.usedPercent && last.resetsAt === observation.resetsAt && last.status === observation.status) continue;
     const size = observation.resetsAt < now - archiveAfterSeconds ? archiveBucketSeconds : recentBucketSeconds;
-    const kind = observation.status === "rejected" ? "rejected" : observation.status === "idle" ? "idle" : "";
-    const key = `${seriesKey(observation)}|${observation.resetsAt}|${Math.floor(observation.observedAt / size)}|${kind}`;
+    const kind = observation.status === "rejected" ? "rejected" : observation.status === "idle" ? "idle" : last === observation ? "latest" : "";
+    const key = `${seriesKey(observation)}|${observation.resetsAt}|${ordinals.get(observation) ?? 0}|${Math.floor(observation.observedAt / size)}|${kind}`;
     const current = buckets.get(key);
     if (!current) { buckets.set(key, observation); continue; }
     if (kind === "rejected") { if (observation.observedAt < current.observedAt) buckets.set(key, observation); continue; }
@@ -342,17 +387,23 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
 export const ledgerPath = (directory: string): string => join(directory, ledgerName);
 export const inboxPath = (directory: string): string => join(directory, inboxName);
 
-/** `null` when the file does not exist; `oversize` when it exceeds the cap. Links and foreign-owned files throw. */
+/**
+ * `null` when the file does not exist; `oversize` when it exceeds the cap. Links and foreign-owned files throw. A file
+ * another writer replaced between open and stat (no links left) is opened again; its old content is still whole.
+ */
 function readPrivate(path: string, limit: number): string | "oversize" | null {
-  let descriptor: number;
-  try { descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
-  try {
-    const info = fstatSync(descriptor);
-    if (!info.isFile() || info.nlink !== 1 || (process.getuid && info.uid !== process.getuid())) throw new Error(INDEX_UNAVAILABLE);
-    if (info.size > limit) return "oversize";
-    return readFileSync(descriptor, "utf8");
-  } finally { closeSync(descriptor); }
+  for (let attempt = 0; ; attempt += 1) {
+    let descriptor: number;
+    try { descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+    try {
+      const info = fstatSync(descriptor);
+      if (info.nlink === 0 && attempt < 3) continue;
+      if (!info.isFile() || info.nlink > 1 || (process.getuid && info.uid !== process.getuid())) throw new Error(INDEX_UNAVAILABLE);
+      if (info.size > limit) return "oversize";
+      return readFileSync(descriptor, "utf8");
+    } finally { closeSync(descriptor); }
+  }
 }
 
 /**
@@ -378,13 +429,18 @@ export function readLedger(directory: string, now = Date.now() / 1000): LedgerRe
   for (const [key, account] of Object.entries(record(value["profiles"]) ?? {})) if (profileKeyPattern.test(key) && typeof account === "string" && identified(account) && (validAccount("claude", account) || validAccount("codex", account))) profiles[key] = account;
   const aliases: Record<string, string> = {};
   for (const [key, account] of Object.entries(record(value["aliases"]) ?? {})) if (aliasValid(key, account)) aliases[key] = account;
+  const creators: Record<string, string[]> = {};
+  for (const [key, accounts] of Object.entries(record(value["creators"]) ?? {})) {
+    const valid = Array.isArray(accounts) ? accounts.filter((account) => aliasValid(key, account)) : [];
+    if (key.startsWith("codex-") && valid.length) creators[key] = [...new Set(valid)].slice(0, maximumCreators);
+  }
   const limitNames: Record<string, string> = {};
   for (const [key, name] of Object.entries(record(value["limitNames"]) ?? {})) if (/^[a-z0-9_-]{1,40}$/.test(key) && limitName(name)) limitNames[key] = name as string;
   return {
     status: "ok",
     ledger: {
       version: 2, harvestedThrough: time(value["harvestedThrough"]), importedV1Through: time(value["importedV1Through"]),
-      cursors: pruneCursors(cursors, now), accounts, profiles, aliases, limitNames,
+      cursors: pruneCursors(cursors, now), accounts, profiles, aliases, creators, limitNames,
       rows: (value["rows"] as LedgerRow[]).map(fromRow).filter((row): row is LimitObservation => row !== null).map(toRow),
       resetCreditHistory: resetCreditHistory(value["resetCreditHistory"]),
       codexAccountReadAt: time(value["codexAccountReadAt"]),
@@ -418,9 +474,14 @@ export function applyAliases(ledger: Ledger): Ledger {
 const later = <T extends { observedAt: number }>(left: T | null, right: T | null): T | null =>
   !left ? right : !right ? left : right.observedAt >= left.observedAt ? right : left;
 
+/**
+ * The newest plan evidence wins, including a newer reading of a plan this version does not recognise (a tier change);
+ * a record without plan evidence (no `planObservedAt`) never replaces one with it.
+ */
 export function mergeAccount(left: LedgerAccount | undefined, right: LedgerAccount): LedgerAccount {
   if (!left) return { ...right, profileKeys: [...right.profileKeys] };
-  const plan = (right.planObservedAt ?? 0) >= (left.planObservedAt ?? 0) && right.plan ? right : left.plan ? left : right;
+  const [older, newer] = [left.planObservedAt, right.planObservedAt];
+  const plan = newer !== null && (older === null || newer >= older) ? right : older !== null ? left : right.plan ? right : left;
   return {
     provider: right.provider, plan: plan.plan, planSource: plan.planSource, planEvidence: plan.planEvidence ?? left.planEvidence ?? right.planEvidence, planObservedAt: plan.planObservedAt,
     extraUsage: later(left.extraUsage, right.extraUsage), codex: later(left.codex, right.codex),
@@ -430,8 +491,8 @@ export function mergeAccount(left: LedgerAccount | undefined, right: LedgerAccou
 
 /**
  * Union two ledgers. Rows max-merge per bucket, so merging is commutative; cursors keep the furthest read; account
- * summaries keep the latest observation. Used on every write, so a concurrent harvest (cron and the dashboard) never
- * erases the other's readings.
+ * summaries keep the latest observation. Every write merges with the file on disk under the limits gate, so harvests in
+ * other processes (cron and the dashboard) never erase each other's readings.
  */
 export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
   const cursors = { ...left.cursors };
@@ -439,14 +500,17 @@ export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
     const current = cursors[identity];
     if (!current || cursor.offset > current.offset || (cursor.offset === current.offset && (!cursor.retry || cursor.seen >= current.seen))) cursors[identity] = cursor;
   }
-  const aliases = { ...left.aliases, ...right.aliases };
+  const creators: Record<string, string[]> = { ...left.creators };
+  for (const [key, accounts] of Object.entries(right.creators)) creators[key] = [...new Set([...creators[key] ?? [], ...accounts])].sort().slice(0, maximumCreators);
+  // A home that turned out to hold two logins no longer sends its unattributed readings to either.
+  const aliases = Object.fromEntries(Object.entries({ ...left.aliases, ...right.aliases }).filter(([key]) => (creators[key]?.length ?? 0) <= 1));
   const [first, second] = [applyAliases({ ...left, aliases }), applyAliases({ ...right, aliases })];
   const accounts = { ...first.accounts };
   for (const [key, account] of Object.entries(second.accounts)) accounts[key] = mergeAccount(accounts[key], account);
   const max = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
   return {
     version: 2, harvestedThrough: max(left.harvestedThrough, right.harvestedThrough), importedV1Through: max(left.importedV1Through, right.importedV1Through),
-    cursors: pruneCursors(cursors, now), accounts, profiles: { ...left.profiles, ...right.profiles }, aliases, limitNames: { ...left.limitNames, ...right.limitNames },
+    cursors: pruneCursors(cursors, now), accounts, profiles: { ...left.profiles, ...right.profiles }, aliases, creators, limitNames: { ...left.limitNames, ...right.limitNames },
     rows: compactObservations([...first.rows, ...second.rows].map(fromRow).filter((row): row is LimitObservation => row !== null), now).map(toRow),
     resetCreditHistory: resetCreditHistory([...first.resetCreditHistory, ...second.resetCreditHistory]),
     codexAccountReadAt: max(left.codexAccountReadAt, right.codexAccountReadAt),
@@ -456,21 +520,37 @@ export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
 export const LEDGER_UNREADABLE = "The limits ledger was written by another version or cannot be replaced; it was left untouched.";
 
 /**
- * Merge into the ledger on disk and replace it atomically. The current file is re-read just before the rename, so a write
- * never drops what another process wrote meanwhile, and a ledger this version cannot read is never overwritten.
+ * Merge into the ledger on disk and replace it atomically, holding the limits gate: the current file is re-read under it,
+ * so no writer in any process drops what another wrote. With `inbox`, the status-line inbox is claimed and merged in
+ * the same turn, and its claim is deleted only once the new ledger is in place. A ledger this version cannot read is
+ * never overwritten.
  */
-export function writeLedger(directory: string, ledger: Ledger, now = Date.now() / 1000): Ledger {
+export function writeLedger(directory: string, ledger: Ledger, now = Date.now() / 1000, { inbox = false } = {}): { ledger: Ledger; inbox: LimitObservation[] } {
   secureDirectory(directory);
-  const path = ledgerPath(directory);
-  secureFile(path);
-  const current = readLedger(directory, now);
-  if (!current.ledger) throw new Error(LEDGER_UNREADABLE);
-  const merged = current.status === "ok" ? mergeLedgers(current.ledger, ledger, now) : ledger;
-  const temporary = `${path}.${randomBytes(16).toString("hex")}.next`;
-  writeFileSync(temporary, `${JSON.stringify(merged)}\n`, { mode: 0o600, flag: "wx" });
-  try { renameSync(temporary, path); }
-  finally { try { unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
-  return merged;
+  const gate = join(directory, gateName);
+  secureDirectory(gate);
+  const release = acquireWriterGate(gate);
+  try {
+    const path = ledgerPath(directory);
+    secureFile(path);
+    const current = readLedger(directory, now);
+    if (!current.ledger) throw new Error(LEDGER_UNREADABLE);
+    const claims = inbox ? claimInbox(directory) : [];
+    const samples = claims.flatMap((claim) => claim.observations);
+    try {
+      const merged = mergeLedgers(current.ledger, samples.length ? { ...ledger, rows: [...ledger.rows, ...samples.map(toRow)] } : ledger, now);
+      const temporary = `${path}.${randomBytes(16).toString("hex")}.next`;
+      writeFileSync(temporary, `${JSON.stringify(merged)}\n`, { mode: 0o600, flag: "wx" });
+      try { renameSync(temporary, path); }
+      finally { try { unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
+      settleClaims(directory, claims);
+      return { ledger: merged, inbox: samples };
+    } catch (error) {
+      // Put the samples back for the next harvest; if even that fails, the claims stay on disk and are taken next time.
+      try { if (samples.length) appendInbox(directory, samples); for (const claim of claims) unlinkSync(claim.path); } catch { /* Kept as claims. */ }
+      throw error;
+    }
+  } finally { release(); }
 }
 
 /** Statusline samples arrive many times a minute; they are appended here and folded into the ledger on the next harvest. */
@@ -479,37 +559,58 @@ export function appendInbox(directory: string, observations: LimitObservation[])
   if (!rows.length) return;
   secureDirectory(directory);
   const path = inboxPath(directory);
-  secureFile(path, true);
-  const descriptor = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  secureFile(path);
+  // Created by the open itself: a harvest may claim (rename) the inbox at any moment.
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
   try {
-    if (fstatSync(descriptor).size > maximumInboxBytes) return;
+    const info = fstatSync(descriptor);
+    if (!info.isFile() || info.nlink > 1 || (process.getuid && info.uid !== process.getuid())) throw new Error(INDEX_UNAVAILABLE);
+    if (info.size > maximumInboxBytes) return;
     writeFileSync(descriptor, rows.map((row) => `${JSON.stringify(row)}\n`).join(""));
   } finally { closeSync(descriptor); }
 }
 
-/**
- * Claims the inbox by renaming it first, so samples appended during the merge land in a fresh inbox and two harvests
- * never drain the same samples. A failed write restores the claim; a successful one is merged on write.
- */
-export function drainInbox(directory: string): LimitObservation[] {
-  const path = inboxPath(directory);
-  const claimed = `${path}.${randomBytes(8).toString("hex")}.merging`;
-  try { renameSync(path, claimed); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
-  try {
-    const text = readPrivate(claimed, maximumInboxBytes * 2);
-    const observations: LimitObservation[] = [];
-    for (const line of typeof text === "string" && text !== "oversize" ? text.split("\n") : []) {
-      if (!line) continue;
-      try { const row = fromRow(JSON.parse(line) as LedgerRow); if (row) observations.push(row); } catch { /* A torn final line is skipped. */ }
-    }
-    return observations;
-  } finally { try { unlinkSync(claimed); } catch { /* Already removed. */ } }
+interface Claim { path: string; bytes: number; observations: LimitObservation[] }
+
+const claimPattern = /^limits-inbox-v2\.jsonl\.[0-9a-f]{16}\.merging$/;
+
+function inboxRows(text: string): LimitObservation[] {
+  const observations: LimitObservation[] = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try { const row = fromRow(JSON.parse(line) as LedgerRow); if (row) observations.push(row); } catch { /* A torn final line is skipped. */ }
+  }
+  return observations;
 }
 
-/** Puts back an inbox claim that could not be merged, so a failed write never drops statusline samples. */
-export function restoreInbox(directory: string, observations: LimitObservation[]): void {
-  try { appendInbox(directory, observations); } catch { /* The ledger is best-effort history. */ }
+function readClaim(path: string): Claim | null {
+  try {
+    const text = readPrivate(path, maximumInboxBytes * 2);
+    if (text === null) return null;
+    return text === "oversize" ? { path, bytes: Infinity, observations: [] } : { path, bytes: Buffer.byteLength(text), observations: inboxRows(text) };
+  } catch { return null; }
+}
+
+/**
+ * Claims the inbox by renaming it, so samples appended meanwhile land in a fresh inbox. Claims a stopped harvest left
+ * behind are taken too: the caller holds the gate, so no other harvest is merging them. Merging is idempotent, so a
+ * claim taken twice adds nothing twice.
+ */
+function claimInbox(directory: string): Claim[] {
+  try { renameSync(inboxPath(directory), `${inboxPath(directory)}.${randomBytes(8).toString("hex")}.merging`); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  return readdirSync(directory).filter((name) => claimPattern.test(name)).map((name) => readClaim(join(directory, name))).filter((claim): claim is Claim => claim !== null);
+}
+
+/** A status line that opened the inbox just before it was claimed may append after the claim was read; that tail goes back. */
+function settleClaims(directory: string, claims: Claim[]): void {
+  for (const claim of claims) {
+    try {
+      const text = readPrivate(claim.path, maximumInboxBytes * 2);
+      if (typeof text === "string" && text !== "oversize" && Buffer.byteLength(text) > claim.bytes) appendInbox(directory, inboxRows(Buffer.from(text).subarray(claim.bytes).toString("utf8")));
+      unlinkSync(claim.path);
+    } catch { /* Taken again by the next harvest. */ }
+  }
 }
 
 export interface LegacyLedger {

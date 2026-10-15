@@ -105,18 +105,23 @@ export function claudeSdkEvent(value: unknown): ClaudeSdkEvent | null {
   if (triggered && !windows.has(triggered)) windows.set(triggered, { utilization: info["utilization"], resetsAt: info["resetsAt"] });
   // Rejected while extra usage pays for the overflow: work continues, so this is not a lockout.
   const overage = info["isUsingOverage"] === true || info["overageInUse"] === true;
+  const account = extraUsageState(info, observedAt);
   const observations: LimitObservation[] = [];
   for (const [meter, window] of windows) {
     const utilization = finite(window["utilization"]), resetsAt = finite(window["resetsAt"]);
     if (utilization === null || resetsAt === null) continue;
     const status = meter === triggered ? claudeStatus(info["status"]) : "unknown";
+    // Extra usage pays past every window's cap, not only the one the event reports on. A full window that is not the
+    // event's own stays unresolved unless extra usage is off; the snapshot settles it from the account's state.
+    const full = utilization >= 1;
     observations.push({
-      provider: "claude", account: "", meter, windowMinutes: impliedWindowMinutes(meter), resetsAt, observedAt,
-      usedPercent: utilization * 100, status: status === "rejected" && overage ? "overage" : status, source: "claude-sdk-log",
+      provider: "claude", account: "", meter, windowMinutes: impliedWindowMinutes(meter), resetsAt, observedAt, usedPercent: utilization * 100,
+      status: overage && (full || status === "rejected") ? "overage" : full && status === "unknown" && account?.extraUsage === "disabled" ? "rejected" : status,
+      source: "claude-sdk-log",
     });
   }
   const sessionId = typeof message?.["session_id"] === "string" && /^[0-9a-f-]{36}$/.test(message["session_id"]) ? message["session_id"] : null;
-  return { observations, account: extraUsageState(info, observedAt), sessionId, weeklyResetsAt: finite(record(windows.get("seven_day"))?.["resetsAt"]) };
+  return { observations, account, sessionId, weeklyResetsAt: finite(record(windows.get("seven_day"))?.["resetsAt"]) };
 }
 
 export const claudeSdkLimitRecord = (value: unknown): LimitObservation[] => claudeSdkEvent(value)?.observations ?? [];
@@ -142,8 +147,9 @@ export function statuslineObservations(value: unknown, now: number, account = ""
     if (used === null || resetsAt === null || resetsAt <= now) continue;
     observations.push({
       provider: "claude", account, meter, windowMinutes: impliedWindowMinutes(meter), resetsAt, observedAt: Math.floor(now),
-      // The status line does not say whether extra usage is on; only a reading past 100% proves it.
-      usedPercent: used, status: used > 100 ? "overage" : used >= 100 ? "rejected" : "unknown", source: "claude-statusline",
+      // The status line does not say whether a full window refused requests or went on to extra usage (hard caps read
+      // 101-102% too); the snapshot settles readings at or past 100% from the account's extra-usage state.
+      usedPercent: used, status: "unknown", source: "claude-statusline",
     });
   }
   return observations;

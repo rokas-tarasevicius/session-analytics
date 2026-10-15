@@ -51,6 +51,7 @@
 .meter-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: var(--fs-sm); }
 .meter-name { color: var(--text-2); }
 .meter-value { font: 500 var(--fs-md) var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter-row[data-stale] .meter-value { color: var(--muted); font-weight: 400; }
 .meter-status { margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; font-variant-numeric: tabular-nums; }
 .meter-status[data-tone="danger"] { color: var(--danger); }
 .meter-status[data-tone="warn"] { color: var(--text); }
@@ -133,6 +134,7 @@
 .history-lane + .history-lane { margin-top: 2px; }
 .lane-label { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 6px 0 0; color: var(--text-2); font-size: var(--fs-sm); }
 .closes-chart, .windows-chart { min-height: 120px; }
+.chart-slot:has(> .subscription-note:only-child) { min-height: 0; }
 
 /* Secondary sections open as disclosures; the heading is the toggle. */
 .section-disclosure > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; list-style: none; cursor: pointer; }

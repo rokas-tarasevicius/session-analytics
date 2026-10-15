@@ -139,3 +139,47 @@ test("the dashboard shows the meters before the session snapshot arrives, and a 
     assert.equal(active.getAttribute("data-focus-key"), `chart:burn:${team}`, "focus moves to its replacement");
   } finally { Element.prototype.focus = focus; }
 });
+
+test("a capped week blocks the 5-hour line, a week without a reading is unknown, and a Codex-only setup has no 5-hour section", () => {
+  const base = limits();
+  const codexReset = at("2026-10-17T20:00:00Z");
+  const snapshot: LimitsSnapshot = {
+    ...base,
+    observations: [
+      ...base.observations.filter((row) => row.account !== codex),
+      reading("claude", team, "five_hour", now + 3 * HOUR, now - 30 * 60, 10),
+      // The Codex week closed yesterday and nothing was read since: another machine may be using it.
+      reading("codex", codex, "seven_day", codexReset - 7 * DAY - DAY, now - 9 * DAY, 30), reading("codex", codex, "seven_day", codexReset - 7 * DAY - DAY, now - 2 * DAY, 60),
+    ],
+  };
+  const container = new Element();
+  render(container, { limits: snapshot });
+  const row = (label: string) => container.querySelectorAll(".limit-row").find((item) => item.querySelector(".limit-account")!.textContent.includes(label))!;
+  assert.match(row("Team").querySelector(".limit-session")!.textContent, /^5-hour: blocked by the weekly cap until Fri 03:00/);
+  assert.equal(row("ChatGPT").querySelector(".limit-left")!.querySelector("strong")!.textContent, "—");
+  assert.equal(row("ChatGPT").querySelector(".status-chip")!.textContent, "No reading this week");
+  assert.match(cardOf(container, codex).textContent, /No reading on this machine since the reset/);
+
+  const codexOnly = new Element();
+  render(codexOnly, { limits: { ...base, accounts: base.accounts.filter((item) => item.key === codex), observations: base.observations.filter((item) => item.account === codex) } });
+  assert.ok(codexOnly.querySelectorAll("h4").every((heading) => !/5-hour/.test(heading.textContent)), "no 5-hour section without a 5-hour limit");
+});
+
+test("an open 'Why?' follows its suggestion when a refresh re-ranks the list", () => {
+  const container = new Element();
+  render(container);
+  const why = () => container.querySelector(".subscription-next")!.querySelectorAll("details");
+  const target = why().find((details) => details.querySelector("summary")!.dataset["focusKey"]!.includes(`:${max}`))!;
+  const key = target.querySelector("summary")!.dataset["focusKey"]!;
+  assert.equal(key, `details:why:expiring-week:claude:${max}`);
+  assert.equal(why().indexOf(target), 1);
+  target.open = true;
+  target.listeners.get("toggle")!();
+  // A used-up Codex week adds a more urgent suggestion in front of it.
+  const base = limits();
+  render(container, { limits: { ...base, observations: [...base.observations, reading("codex", codex, "seven_day", at("2026-10-17T20:00:00Z"), now - 30 * 60, 100, "rejected")] } });
+  assert.notEqual(why().findIndex((details) => details.querySelector("summary")!.dataset["focusKey"] === key), 1, "the list was re-ranked");
+  const reopened = why().find((details) => details.querySelector("summary")!.dataset["focusKey"] === key)!;
+  assert.equal(reopened.open, true);
+  assert.equal(why().filter((details) => details.open).length, 1, "no other suggestion opened in its place");
+});

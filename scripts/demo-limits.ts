@@ -6,9 +6,10 @@ import { emptyLedger, writeLedger } from "../src/limits/ledger.ts";
 
 /**
  * Synthetic subscription limits for the demo, for the setup the Subscription view is built around: two Claude logins in
- * two profiles (a Team seat that resets on Fridays and runs short, a Max 20x plan that resets on Mondays with one
- * in-place reset) and one ChatGPT Pro account with a banked reset. Meter levels follow the demo's own synthetic activity,
- * so value per 1% calibrates. Every identifier and value here is synthetic.
+ * two profiles (a Team seat that resets on Fridays and runs past its weekly allowance onto extra usage, a Max 20x plan
+ * without extra usage that resets on Mondays, with one in-place reset and one 5-hour lockout) and one ChatGPT Pro account
+ * with a banked reset. Meter levels follow the demo's own synthetic activity, so value per 1% calibrates, and an account
+ * is never shown working while it refuses requests. Every identifier and value here is synthetic.
  */
 
 const HOUR = 3600, DAY = 86_400, WEEK = 7 * DAY;
@@ -46,12 +47,19 @@ function typicalWeek(events: Array<Activity & { reset: number }>, from: number, 
 
 interface Reading { t: number; sessionId: string; weekly: number; weeklyReset: number; session: number; sessionReset: number }
 
-/** One Claude account's readings: weekly levels per cycle (restarting at an in-place reset), 5-hour windows, one capped window. */
-function claudeReadings(sessions: ClaudeDemoSession[], anchor: number, close: number, now: number, options: { inPlace?: boolean; capWindow?: boolean }): Reading[] {
+/**
+ * One Claude account's readings: weekly levels per cycle (restarting at an in-place reset), 5-hour windows, one capped
+ * window. With extra usage on, the weekly meter goes past 100% and stops near 102%, as Claude's does; `fresh` is how long
+ * before now the latest request was, so two accounts never share a 5-hour window.
+ */
+function claudeReadings(sessions: ClaudeDemoSession[], anchor: number, close: number, now: number, options: { inPlace?: boolean; capWindow?: boolean; extraUsage: boolean; fresh: number }): Reading[] {
   const events = sessions.flatMap((session) => session.activity.map((item) => ({ ...item, sessionId: session.sessionId, reset: nextReset(anchor, item.t) })))
     .filter((event) => event.t <= now).sort((left, right) => left.t - right.t);
   if (!events.length) return [];
-  const full = typicalWeek(events, events[0]!.t, now) / close;
+  // Without extra usage, a week that reached 100% would refuse the work that follows, so no week is allowed to get there.
+  const weeks = new Map<number, number>();
+  for (const event of events) weeks.set(event.reset, (weeks.get(event.reset) ?? 0) + event.work);
+  const full = Math.max(typicalWeek(events, events[0]!.t, now) / close, options.extraUsage ? 0 : Math.max(...weeks.values()) / 0.97);
   // In-place reset: in the gap after the meter passes 10%, early enough that readings follow; this week if possible.
   let restart: number | null = null;
   if (options.inPlace) {
@@ -75,7 +83,7 @@ function claudeReadings(sessions: ClaudeDemoSession[], anchor: number, close: nu
     return window;
   });
   const sessionFull = Math.max(1.6 * median(windows.map((window) => window.work)), 1e-9);
-  // One recent, complete window runs into the 5-hour limit (at 70% of its work) and stays locked out to its end.
+  // One recent, complete window runs into the 5-hour limit with its last request and stays locked out to its end.
   const capped = options.capWindow ? windows.filter((window) => window.start >= now - 3 * DAY && window.end <= now - HOUR).sort((left, right) => right.work - left.work)[0] ?? null : null;
   const readings: Reading[] = [];
   let weekly = 0, cycle = 0, lastEmitted = -Infinity;
@@ -86,28 +94,33 @@ function claudeReadings(sessions: ClaudeDemoSession[], anchor: number, close: nu
     weekly += event.work / full * 100;
     const window = windowOf[index]!;
     const used = (spent.get(window) ?? 0) + event.work; spent.set(window, used);
-    const level = window === capped ? Math.min(100, used / (0.7 * window.work) * 100) : Math.min(97, used / sessionFull * 100);
+    const level = window === capped ? Math.min(100, used / window.work * 100) : Math.min(97, used / sessionFull * 100);
     const next = events[index + 1];
-    // Hosts log an event per request; one every 10 minutes and the last of each session are plenty.
-    if (event.t - lastEmitted < 600 && next && next.sessionId === event.sessionId) return;
+    // Hosts log an event per request; one every 10 minutes, the last of each session and the one that hits the cap are plenty.
+    const hitsCap = window === capped && windowOf[index + 1] !== window;
+    if (!hitsCap && event.t - lastEmitted < 600 && next && next.sessionId === event.sessionId) return;
     lastEmitted = event.t;
-    readings.push({ t: event.t, sessionId: event.sessionId, weekly: Math.min(100, weekly), weeklyReset: event.reset, session: level, sessionReset: window.end });
+    readings.push({ t: event.t, sessionId: event.sessionId, weekly: Math.min(options.extraUsage ? 102 : 100, weekly), weeklyReset: event.reset, session: level, sessionReset: window.end });
   });
-  // A request a few minutes ago, so the meters are fresh whenever the demo starts; it opens a 5-hour window if none is open.
-  const last = readings.at(-1)!, fresh = now - 8 * 60, open = windows.at(-1)!.end > fresh;
-  readings.push({ ...last, t: fresh, weeklyReset: nextReset(anchor, fresh), weekly: nextReset(anchor, fresh) === last.weeklyReset ? last.weekly : 0,
+  // A recent request, so the meters are fresh whenever the demo starts; it opens a 5-hour window if none is open. An
+  // account whose weekly allowance is used up without extra usage refuses requests, so it makes none.
+  const last = readings.at(-1)!, fresh = now - options.fresh, open = windows.at(-1)!.end > fresh;
+  const weeklyNow = nextReset(anchor, fresh) === last.weeklyReset ? last.weekly : 0;
+  if (!options.extraUsage && weeklyNow >= 100) return readings;
+  readings.push({ ...last, t: fresh, weeklyReset: nextReset(anchor, fresh), weekly: weeklyNow,
     session: open ? last.session : 1, sessionReset: open ? last.sessionReset : fresh + 5 * HOUR });
   return readings;
 }
 
 /** A T3 Code provider log line: a Claude Agent SDK `rate_limit_event` in T3's envelope. */
-function sdkEventLine(reading: Reading, overage: Record<string, unknown>): string {
+function sdkEventLine(reading: Reading, extraUsage: boolean): string {
   const unifiedWindows = { five_hour: { utilization: reading.session / 100, resetsAt: reading.sessionReset }, seven_day: { utilization: reading.weekly / 100, resetsAt: reading.weeklyReset } };
   const binding = reading.session > reading.weekly ? "five_hour" : "seven_day";
   const level = Math.max(reading.session, reading.weekly);
+  const overage = extraUsage ? { overageStatus: "allowed", isUsingOverage: level >= 100 } : { overageStatus: "rejected", overageDisabledReason: "org_level_disabled", isUsingOverage: false };
   const payload = {
     type: "rate_limit_event", session_id: reading.sessionId,
-    rate_limit_info: { status: level >= 100 ? "rejected" : level >= 80 ? "allowed_warning" : "allowed", rateLimitType: binding, unifiedWindows, isUsingOverage: false, ...overage },
+    rate_limit_info: { status: level >= 100 ? "rejected" : level >= 80 ? "allowed_warning" : "allowed", rateLimitType: binding, unifiedWindows, ...overage },
   };
   return `[${iso(reading.t)}] NATIVE: ${JSON.stringify({ observedAt: iso(reading.t), event: { method: "claude/rate_limit_event", payload } })}\n`;
 }
@@ -166,20 +179,20 @@ export function seedLimitsDemo({ home, profiles, dataDir, claude, codex, now }: 
   const login = (organization: string, account: string, type: string, extra: Record<string, unknown>) => ({
     oauthAccount: { accountUuid: `synthetic-demo-${account}`, organizationUuid: `synthetic-demo-${organization}`, organizationType: type, billingType: "stripe_subscription", ...extra },
   });
-  writeFileSync(join(home, ".claude.json"), JSON.stringify(login("personal", "personal", "claude_max", { organizationRateLimitTier: "default_claude_max_20x", hasExtraUsageEnabled: true })));
+  writeFileSync(join(home, ".claude.json"), JSON.stringify(login("personal", "personal", "claude_max", { organizationRateLimitTier: "default_claude_max_20x", hasExtraUsageEnabled: false })));
   writeFileSync(join(profiles.work, ".claude.json"), JSON.stringify(login("acme", "work", "claude_team", {
-    organizationRateLimitTier: "default_raven", userRateLimitTier: "default_claude_max_5x", seatTier: "team_tier_1", hasExtraUsageEnabled: false,
+    organizationRateLimitTier: "default_raven", userRateLimitTier: "default_claude_max_5x", seatTier: "team_tier_1", hasExtraUsageEnabled: true,
   })));
   const logs = join(home, ".t3", "userdata", "logs", "provider");
   mkdirSync(logs, { recursive: true });
   const accounts = [
-    { profile: "work" as const, anchor: teamAnchor, close: 1.0, options: { capWindow: true }, overage: { overageStatus: "rejected", overageDisabledReason: "org_level_disabled" } },
-    { profile: "default" as const, anchor: maxAnchor, close: 0.45, options: { inPlace: true }, overage: { overageStatus: "allowed" } },
+    { profile: "work" as const, anchor: teamAnchor, close: 1.0, options: { extraUsage: true, fresh: 8 * 60 } },
+    { profile: "default" as const, anchor: maxAnchor, close: 0.45, options: { inPlace: true, capWindow: true, extraUsage: false, fresh: 50 * 60 } },
   ];
   for (const account of accounts) {
     const readings = claudeReadings(claude.filter((session) => session.profile === account.profile), account.anchor, account.close, now, account.options);
     const threads = new Map<string, string>();
-    for (const reading of readings) threads.set(reading.sessionId, (threads.get(reading.sessionId) ?? "") + sdkEventLine(reading, account.overage));
+    for (const reading of readings) threads.set(reading.sessionId, (threads.get(reading.sessionId) ?? "") + sdkEventLine(reading, account.options.extraUsage));
     for (const [sessionId, lines] of threads) writeFileSync(join(logs, `events.thread-${sessionId.slice(0, 8)}.log`), lines, { flag: "a" });
   }
   const redeemed = codexLimits(codex, now);

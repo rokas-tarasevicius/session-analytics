@@ -246,10 +246,17 @@ test("calibration drops cycles whose local value explains almost none of the met
   ], start + WEEK)[0]!;
   const spend = hourlyValue([spending("codex", start, start + WEEK, 10)], "UTC");
   assert.deepEqual(calibrate(capped, spend).points.map((point) => [point.at, point.perPercent]), [[start + 4 * DAY, 9.6]], "credits spent after the cap did not move the meter");
-  const overage = buildMeters([
-    reading("claude", "seven_day", resetsAt, start + 4 * DAY, 100, "rejected"), reading("claude", "seven_day", resetsAt, start + 6 * DAY, 130, "overage"),
+  // On extra usage the meter stops near 102% while value keeps accruing: only value up to the first full reading counts.
+  const plateau = buildMeters([
+    reading("claude", "seven_day", resetsAt, start + 2 * DAY, 50), reading("claude", "seven_day", resetsAt, start + 4 * DAY, 102, "overage"),
+    ...[5, 6].map((day) => reading("claude", "seven_day", resetsAt, start + day * DAY, 102, "overage")),
   ], start + WEEK)[0]!;
-  assert.deepEqual(calibrate(overage, spend).points.map((point) => point.at), [start + 6 * DAY], "a meter that keeps counting past 100% keeps its last reading");
+  assert.deepEqual(calibrate(plateau, spend).points.map((point) => [point.at, point.perPercent]), [[start + 4 * DAY, 960 / 102]], "hours on extra usage never inflate value per 1%");
+  const fiveHour = buildMeters([
+    reading("claude", "five_hour", start + 5 * HOUR, start + HOUR, 40), reading("claude", "five_hour", start + 5 * HOUR, start + 2 * HOUR, 100, "overage"),
+    reading("claude", "five_hour", start + 5 * HOUR, start + 4 * HOUR, 100, "overage"),
+  ], start + DAY)[0]!;
+  assert.deepEqual(calibrate(fiveHour, spend).points.map((point) => point.at), [start + 2 * HOUR], "a 5-hour plateau at exactly 100% on extra usage stops at its first reading");
 });
 
 test("hero ratios compare like with like and prorate only the time since the first reading", () => {
@@ -385,8 +392,11 @@ test("a used-up weekly allowance names what keeps each provider working; extra u
   const detail = (item: ReturnType<typeof used>) => recommendations([item], { now }).find((advice) => advice.tone === "act")!.detail;
   const team = account("claude", "claude-aaaaaaaaaaaaaaaa", { extraUsage: { observedAt: now, extraUsage: "in-use", disabledReason: null } });
   assert.equal(detail(used(team, 104, "overage")), "Work continues at API rates until the reset, so move work that can wait until after it.");
-  const max = account("claude", "claude-bbbbbbbbbbbbbbbb", { extraUsage: { observedAt: now, extraUsage: "disabled", disabledReason: "org_level_disabled" } });
-  assert.match(detail(used(max, 100, "rejected")), /^Until the reset, only extra usage keeps this account working\. Extra usage is off for this organization/);
+  const max = account("claude", "claude-bbbbbbbbbbbbbbbb", { plan: "max-20x", extraUsage: { observedAt: now, extraUsage: "disabled", disabledReason: "org_level_disabled" } });
+  assert.match(detail(used(max, 100, "rejected")), /^Until the reset, only extra usage keeps this account working\. Extra usage is turned off for this account \(claude\.ai settings\)/,
+    "a personal plan is never told its organization turned extra usage off");
+  const seat = account("claude", "claude-cccccccccccccccc", { plan: "team", extraUsage: { observedAt: now, extraUsage: "disabled", disabledReason: "org_level_disabled" } });
+  assert.match(detail(used(seat, 100, "rejected")), /Extra usage is off for this organization/);
   assert.match(detail(used(account("codex", "codex-aaaaaaaaaaaaaaaa"), 100, "rejected")), /^Until the reset, only a banked or paid reset, or credits, keep this account working\./);
 });
 
@@ -501,4 +511,113 @@ test("pace counts the level given back by an in-place reset in the whole week, a
   assert.ok(pace.segment > pace.cycle, "the current segment is faster than the week's average");
   assert.ok(Math.abs(pace.budget! - 60 / 96) < 1e-9, "60% left over the 96 hours to the reset");
   assert.equal(meterPace(null, now), null);
+});
+
+test("a burst right after a reset is never 'may already be used up', however long the meter then stays quiet", () => {
+  const resetsAt = start + WEEK;
+  const burst = [5, 10, 15].map((level, index) => reading("claude", "seven_day", resetsAt, start + (index + 1) * HOUR, level));
+  for (const hours of [21, 40, 100, 160]) {
+    const now = start + hours * HOUR;
+    const live = liveMeter(buildMeters(burst, now)[0]!, now);
+    assert.deepEqual([live.stale, live.projected, live.mayBeUsedUp], [true, null, false], `${hours}h`);
+    const owner = account("claude", "claude-aaaaaaaaaaaaaaaa");
+    const item = utilization(owner, burst.map((row) => ({ ...row, account: owner.key })), now);
+    assert.equal(limitStatus(item, now).kind, "stale");
+    assert.ok(!recommendations([item], { now }).some((entry) => /may already be used up/.test(entry.title)));
+  }
+});
+
+test("a month of full use is the plans you pay for against their price; employer seats and free plans are beside it", () => {
+  const max = account("claude", "claude-aaaaaaaaaaaaaaaa", { plan: "max-20x", profileKeys: ["profile-a"] });
+  const team = account("claude", "claude-bbbbbbbbbbbbbbbb", { plan: "team", profileKeys: ["profile-b"] });
+  const codex = account("codex", "codex-aaaaaaaaaaaaaaaa", { plan: "pro" });
+  const now = start + 2 * WEEK + DAY;
+  const observations = [max, team, codex].flatMap((owner) => [1, 2, 3].flatMap((week) => [
+    reading(owner.provider, "seven_day", start + week * WEEK, start + (week - 1) * WEEK + HOUR, 1, "allowed", owner.key),
+    reading(owner.provider, "seven_day", start + week * WEEK, Math.min(now - HOUR, start + week * WEEK - HOUR / 2), 50, "allowed", owner.key),
+  ]));
+  const sessions = [spending("claude", start, now, 10, "profile-a"), spending("claude", start, now, 30, "profile-b"), spending("codex", start, now, 5)];
+  const model = subscriptionModel({ limits: { accounts: [max, team, codex], observations, meters: [], resetCreditHistory: [] }, sessions, timeZone: "UTC", now, range: { from: start, to: now } });
+  const [maxItem, teamItem, codexItem] = model.accounts;
+  const { totals } = model;
+  const priced = maxItem!.economics.monthlyPotential! + codexItem!.economics.monthlyPotential!;
+  assert.ok(Math.abs(totals.monthlyPotential! - priced) < 1e-6, "the headline is the plans you pay for");
+  assert.equal(totals.monthlyPrice, 400);
+  assert.ok(Math.abs(totals.potentialMultiple! - priced / 400) < 1e-9, "the multiple divides the same accounts' potential by their price");
+  assert.ok(Math.abs(totals.otherMonthlyPotential! - teamItem!.economics.monthlyPotential!) < 1e-6, "the employer seat is reported beside");
+
+  const free = economics({ provider: "codex", planId: "free", perPercent: 10, extracted: 50, days: 7 });
+  assert.deepEqual([free.price, free.multiple], [0, null]);
+  const freeTotals = subscriptionTotals(model.accounts.map((item) => item === codexItem ? { ...item, economics: { ...item.economics, ...free, days: item.economics.days } } : item));
+  assert.equal(freeTotals.priced.accounts, 1, "a free plan is not a plan you pay for");
+  assert.equal(freeTotals.monthlyPrice, 200);
+});
+
+test("value before the first reading is reported, not counted; accounts without readings in the dates leave the totals", () => {
+  const owner = account("codex", "codex-aaaaaaaaaaaaaaaa", { plan: "pro" });
+  const now = start + 10 * DAY, first = start + 5 * DAY;
+  const observations = [reading("codex", "seven_day", first + WEEK, first, 5, "allowed", owner.key), reading("codex", "seven_day", first + WEEK, now - HOUR, 40, "allowed", owner.key)];
+  const sessions = [spending("codex", start, start + 2 * DAY, 2), spending("codex", start + 6 * DAY, now, 2)];
+  const model = (range: { from: number; to: number }, list: unknown[] = sessions) =>
+    subscriptionModel({ limits: { accounts: [owner], observations, meters: [], resetCreditHistory: [] }, sessions: list as never, timeZone: "UTC", now, range });
+  const current = model({ from: start, to: now });
+  const item = current.accounts[0]!;
+  assert.ok(Math.abs(item.value.before - 2 * 48) < 1e-6, "two days at $2 an hour before the first reading");
+  assert.ok(Math.abs(current.totals.beforeReadings - 96) < 1e-6);
+  assert.equal(item.value.sessions, 1, "only the session active since the first reading is counted");
+
+  const past = model({ from: start, to: start + 4 * DAY });
+  assert.deepEqual([past.accounts[0]!.period.days, past.totals.priced.accounts, past.totals.extracted], [0, 0, 0], "no days in the dates: no price and no value");
+  assert.ok(Math.abs(past.totals.beforeReadings - 96) < 1e-6);
+
+  // An account no session matched has unknown value, never $0 that drags the value multiple down.
+  const unmatched = model({ from: start, to: now }, []);
+  assert.deepEqual([unmatched.accounts[0]!.value.basis, unmatched.accounts[0]!.economics.extracted, unmatched.totals.priced.accounts], ["none", null, 0]);
+  const claude = account("claude", "claude-aaaaaaaaaaaaaaaa", { plan: "pro", profileKeys: ["profile-a"] });
+  const lone = subscriptionModel({ limits: { accounts: [claude], observations: observations.map((row) => ({ ...row, provider: "claude" as const, account: claude.key })), meters: [], resetCreditHistory: [] }, sessions: [], timeZone: "UTC", now, range: { from: start, to: now } });
+  assert.deepEqual([lone.accounts[0]!.value.basis, lone.accounts[0]!.economics.extracted], ["none", null]);
+});
+
+test("a meter with no reading since its reset is unknown, not unused, unless the provider said the window has not started", () => {
+  const later = start + 2 * WEEK + DAY;
+  const claude = liveMeter(buildMeters([reading("claude", "seven_day", start + WEEK, start + DAY, 60)], later)[0]!, later);
+  assert.deepEqual([claude.state, claude.confirmedIdle, claude.lastResetAt, claude.nextResetAt], ["idle", false, start + 2 * WEEK, start + 3 * WEEK]);
+  const codex = liveMeter(buildMeters([reading("codex", "seven_day", start + WEEK, start + DAY, 60), reading("codex", "seven_day", later + WEEK, later - 60, 0, "idle")], later)[0]!, later);
+  assert.equal(codex.confirmedIdle, true);
+  const owner = account("claude", "claude-aaaaaaaaaaaaaaaa");
+  const item = utilization(owner, [reading("claude", "seven_day", start + WEEK, start + DAY, 60, "allowed", owner.key)], later);
+  assert.deepEqual([limitStatus(item, later).kind, limitStatus(item, later).confirmed], ["idle", false]);
+});
+
+test("a lockout ends when work resumes on extra usage", () => {
+  const windowEnd = start + 5 * HOUR;
+  const meter = buildMeters([
+    reading("claude", "five_hour", windowEnd, start + HOUR, 60), reading("claude", "five_hour", windowEnd, start + 2 * HOUR, 100, "rejected"),
+    reading("claude", "five_hour", windowEnd, start + 3 * HOUR, 104, "overage"),
+  ], start + DAY)[0]!;
+  const windows = sessionWindows(meter, start + DAY);
+  assert.deepEqual([windows.capped, windows.lockedSeconds, windows.windows[0]!.lockouts], [1, HOUR, [[start + 2 * HOUR, start + 3 * HOUR]]]);
+  const weekly = buildMeters([
+    reading("claude", "seven_day", start + WEEK, start + 2 * DAY, 100, "rejected"), reading("claude", "seven_day", start + WEEK, start + 3 * DAY, 110, "overage"),
+  ], start + WEEK + HOUR)[0]!;
+  assert.equal(resetHistory(weekly)[0]!.lockedSeconds, DAY);
+});
+
+test("the weekly meter including extra usage is a level only: no projection, run-out or cap", () => {
+  const resetsAt = start + WEEK, now = start + 3 * DAY;
+  const rising = buildMeters([reading("claude", "seven_day_overage_included", resetsAt, start + DAY, 40), reading("claude", "seven_day_overage_included", resetsAt, now - HOUR, 99)], now)[0]!;
+  const live = liveMeter(rising, now);
+  assert.deepEqual([live.levelsOnly, live.projected, live.capAt, live.capsEarly, live.mayBeUsedUp], [true, null, null, false, false]);
+  const full = liveMeter(buildMeters([reading("claude", "seven_day_overage_included", resetsAt, now - HOUR, 100, "rejected")], now)[0]!, now);
+  assert.equal(full.capAt, null);
+});
+
+test("each suggestion names its rule, and history that is not kept says why", () => {
+  const sources = [{ source: "claude-sdk-log" as const, status: "ok" as const, read: 1, latest: start }];
+  const notes = (options: Partial<Parameters<typeof recommendations>[1]>) => recommendations([], { now: start, sources, ...options }).filter((entry) => entry.kind === "history");
+  assert.deepEqual(notes({}), []);
+  assert.match(notes({ persisted: false })[0]!.detail, /--no-index.*a few days/);
+  assert.match(notes({ persisted: false, ledger: "unreadable" })[0]!.detail, /another version/);
+  assert.doesNotMatch(notes({ persisted: false, ledger: "unreadable" })[0]!.detail, /--no-index/);
+  assert.match(notes({ persisted: false, ledger: "unwritable" })[0]!.title, /could not be saved/);
 });

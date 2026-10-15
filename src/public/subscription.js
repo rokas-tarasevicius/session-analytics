@@ -1,12 +1,13 @@
 // Subscription view: which accounts can still be used and until when, what to do next, and what the allowances are worth.
 // Rendering only; every number comes from subscription-data.js.
 
-import { dayMonth, integer, money, weekdayDate, weekdayTime, wholeMoney } from "./format.js";
+import { dayMonth, integer, money, weekdayDate, weekdayTime, wholeMoney, zonedHourKey } from "./format.js";
 import { providerColor } from "./chart-colors.js";
 import { providerMark } from "./providers.js";
 import { chartWidth, dataTable, el, redrawOnResize, DASH } from "./ui.js";
 import {
-  DAY, HOUR, calibrationMinimum, compareUrgency, formatDuration, limitStatus, meterPace, providerNames, recommendations, subscriptionModel, visibleMeters,
+  DAY, HOUR, calibrationMinimum, compareUrgency, extraUsageOff, formatDuration, limitStatus, meterPace, providerNames, recommendations,
+  subscriptionModel, visibleMeters, zonedDayStart,
 } from "./subscription-data.js";
 import { planFor, plansReviewedAt, subscriptionPlans } from "./subscription-plans.js";
 
@@ -53,6 +54,8 @@ function formatters(timeZone, now) {
 }
 
 const usd = (value) => value === null || value === undefined ? DASH : value >= 10_000 ? `$${Math.round(value / 100) / 10}k` : wholeMoney(value);
+/** Multiples keep one decimal below 10×, so 2.5× never reads as 3×. */
+const times = (value) => `${value < 10 ? value.toFixed(1) : Math.round(value)}×`;
 const percentText = (value) => `${Math.round(value)}%`;
 const leftOf = (live) => Math.max(0, 100 - Math.min(100, live.used));
 const rate = (value) => `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}%/h`;
@@ -137,17 +140,27 @@ function resetText(live, fmt) {
   if (!live) return "No reading yet";
   if (live.cycle) return `Resets ${fmt.when(live.cycle.resetsAt)} · ${fmt.relative(live.cycle.resetsAt)}`;
   if (live.nextResetAt) return `Resets ${fmt.when(live.nextResetAt)} · ${fmt.relative(live.nextResetAt)}`;
+  if (!live.confirmedIdle) return "No reading since the last reset";
   return isSession(live) ? "No window open · your next message starts one" : "Starts with your next request";
+}
+
+/** No open cycle: either the provider said the window has not started, or nothing was read here since the last reset. */
+function idleSentence(live, fmt) {
+  if (live.confirmedIdle) return live.nextResetAt ? `Not used since the last reset. Next reset ${fmt.when(live.nextResetAt)}.` : resetText(live, fmt);
+  const since = live.lastResetAt ? ` since the reset ${fmt.when(live.lastResetAt)}` : " since the last reset";
+  const next = live.nextResetAt ? ` Next reset ${fmt.when(live.nextResetAt)}, on its fixed weekly schedule.` : "";
+  return `No reading on this machine${since}; other machines and the web still move this meter.${next}`;
 }
 
 /** One sentence per meter, in plain words. */
 function meterSentence(live, fmt, now) {
   if (live.state === "retired") return { text: "The provider no longer reports this meter." };
-  if (!live.cycle) return { text: live.nextResetAt ? `No use since the last reset. Next reset ${fmt.when(live.nextResetAt)}, on its fixed weekly schedule.` : resetText(live, fmt) };
+  if (!live.cycle) return { text: idleSentence(live, fmt) };
   const reset = `resets ${fmt.when(live.cycle.resetsAt)} (${fmt.relative(live.cycle.resetsAt)})`;
   const restarted = live.segment?.before ? ` Restarted in place ${fmt.when(live.segment.start)}.` : "";
   const used = `${percentText(live.used)} used`;
   if (live.state === "unreported") return { text: `${used} at the last report, ${fmt.when(live.observedAt)}. The provider no longer reports this meter.` };
+  if (live.levelsOnly) return { text: `${used}; ${reset}. What this meter limits is not documented, so it is shown as a level only, without a projection.` };
   if (live.state === "overage") return { text: `Past the included allowance, on paid extra usage; ${reset}.${restarted}`, tone: "warn" };
   if (live.state === "capped") return { text: `Limit reached ${fmt.when(live.capAt)}; ${reset}.${restarted}`, tone: "danger" };
   if (live.capsEarly) return { text: `${used}. At this pace it runs out ${fmt.when(live.capAt)}, ${formatDuration(live.cycle.resetsAt - live.capAt)} before it ${reset}.${restarted}`, tone: "warn" };
@@ -160,8 +173,10 @@ function meterSentence(live, fmt, now) {
 function meterRow(live, fmt, now) {
   const row = el("div", null, "meter-row");
   const head = el("div", null, "meter-head");
-  head.append(el("span", live.meter.label.replace(" · all models", ""), "meter-name"),
-    el("span", live.cycle ? `${percentText(leftOf(live))} left` : live.state === "idle" ? "100% left" : DASH, "meter-value"));
+  // A level the provider stopped reporting, or that is old, is not live capacity: it is muted, and an unreported one says when it was seen.
+  const value = live.state === "unreported" ? `last seen ${fmt.when(live.observedAt)}` : live.cycle ? `${percentText(leftOf(live))} left` : live.confirmedIdle ? "100% left" : DASH;
+  if (live.state === "unreported" || live.stale || (!live.cycle && !live.confirmedIdle)) row.dataset.stale = "true";
+  head.append(el("span", live.meter.label.replace(" · all models", ""), "meter-name"), el("span", value, "meter-value"));
   const bar = track(live);
   const { text, tone } = meterSentence(live, fmt, now);
   const status = el("p", text, "meter-status");
@@ -181,7 +196,7 @@ function statusText(status, fmt, now) {
     stale: () => `Last seen ${formatDuration(now - status.since)} ago`,
     "too-early": () => "Too early to tell",
     "on-track": () => "On track",
-    idle: () => "Not used this week",
+    idle: () => status.confirmed ? "Not used this week" : "No reading this week",
     "levels-only": () => "Levels only",
   }[status.kind]();
 }
@@ -195,21 +210,28 @@ function limitRow(item, status, fmt, now) {
   const name = el("div", null, "limit-account");
   name.append(providerMark(item.provider), el("strong", item.label));
   const bars = el("div", null, "limit-bars");
+  // A weekly cap blocks the account whatever its 5-hour window says; extra usage does not.
+  const blocked = weekly?.cycle && weekly.state === "capped" ? weekly.cycle.resetsAt : null;
   const line = (live, label, thin) => {
     const meter = el("div", null, `limit-meter${thin ? " thin" : ""}`);
     const bar = track(live, `meter-track${thin ? " thin" : ""}`);
-    bar.setAttribute("aria-label", `${label}: ${live?.cycle ? `${percentText(live.used)} used, ${percentText(leftOf(live))} left` : "no use in this window"}. ${resetText(live, fmt)}.`);
+    if (thin && blocked !== null) bar.dataset.stale = "true";
+    bar.setAttribute("aria-label", `${label}: ${live?.cycle ? `${percentText(live.used)} used, ${percentText(leftOf(live))} left` : live?.confirmedIdle ? "not started" : "no reading since the last reset"}. ${resetText(live, fmt)}.`);
     meter.append(el("span", label, "limit-meter-name"), bar);
     return meter;
   };
   bars.append(line(weekly, "Weekly", false));
   if (session) {
     bars.append(line(session, "5-hour", true));
-    bars.append(el("p", session.cycle ? `5-hour: ${percentText(leftOf(session))} left · resets ${fmt.when(session.cycle.resetsAt)}` : "5-hour: no window open", "limit-session"));
+    bars.append(el("p", blocked !== null ? `5-hour: blocked by the weekly cap until ${fmt.when(blocked)}`
+      : session.cycle ? `5-hour: ${percentText(leftOf(session))} left · resets ${fmt.when(session.cycle.resetsAt)}` : session.confirmedIdle ? "5-hour: no window open" : "5-hour: no reading since the last window", "limit-session"));
   }
+  // Nothing local says what Claude's weekly meter including extra usage limits; near full on extra usage, it is worth a look.
+  const overageMeter = weekly?.state === "overage" ? item.live.find((live) => live.levelsOnly && live.cycle && live.state !== "unreported" && live.used >= 90) : null;
+  if (overageMeter) bars.append(el("p", `${overageMeter.meter.label}: ${percentText(overageMeter.used)} used; what happens at 100% is not documented`, "limit-session"));
   const left = el("div", null, "limit-left");
-  left.append(el("strong", weekly?.cycle ? percentText(leftOf(weekly)) : weekly ? "100%" : DASH), el("span", "left this week"));
-  if (weekly?.stale || weekly?.state === "unreported") left.dataset.stale = "true";
+  left.append(el("strong", weekly?.cycle ? percentText(leftOf(weekly)) : weekly?.confirmedIdle ? "100%" : DASH), el("span", "left this week"));
+  if (weekly?.stale || weekly?.state === "unreported" || (weekly && !weekly.cycle && !weekly.confirmedIdle)) left.dataset.stale = "true";
   const chip = el("span", statusText(status, fmt, now), "status-chip");
   chip.dataset.tone = status.tone;
   // On wide screens the reset and the status are grid columns; narrower, they share one wrapping line.
@@ -238,22 +260,30 @@ function nextActions(advice) {
   section.setAttribute("aria-labelledby", "subscription-next-title");
   const title = el("h3", "Next"); title.id = "subscription-next-title";
   section.append(title);
-  const item = (entry, index) => {
+  // Open state and focus follow the suggestion, not its rank, which changes between refreshes.
+  const seen = new Map();
+  const keyOf = (entry) => {
+    const key = `why:${entry.kind}:${entry.provider ?? ""}:${entry.account ?? ""}`;
+    const count = (seen.get(key) ?? 0) + 1;
+    seen.set(key, count);
+    return count > 1 ? `${key}:${count}` : key;
+  };
+  const item = (entry) => {
     const row = el("li", null, "next-item");
     row.dataset.tone = entry.tone;
-    const details = disclosure(`why:${index}`, [el("span", toneLabels[entry.tone], "next-tone"), ...(entry.provider ? [providerMark(entry.provider)] : []), el("span", entry.title, "next-title"), el("span", "Why?", "next-why")]);
+    const details = disclosure(keyOf(entry), [el("span", toneLabels[entry.tone], "next-tone"), ...(entry.provider ? [providerMark(entry.provider)] : []), el("span", entry.title, "next-title"), el("span", "Why?", "next-why")]);
     details.append(el("p", entry.detail));
     row.append(details);
     return row;
   };
   if (!advice.length) { section.append(note("Nothing needs attention: no account is on course to run out early or to leave much of its week unused.")); return section; }
   const list = el("ol", null, "next-list");
-  advice.slice(0, 3).forEach((entry, index) => list.append(item(entry, index)));
+  for (const entry of advice.slice(0, 3)) list.append(item(entry));
   section.append(list);
   if (advice.length > 3) {
     const more = disclosure("next-more", `${advice.length - 3} more suggestion${advice.length === 4 ? "" : "s"}`, { className: "next-more" });
     const rest = el("ol", null, "next-list");
-    advice.slice(3).forEach((entry, index) => rest.append(item(entry, index + 3)));
+    for (const entry of advice.slice(3)) rest.append(item(entry));
     more.append(rest);
     section.append(more);
   }
@@ -266,7 +296,7 @@ const segmentOf = (cycle, sample) => cycle.segments.find((segment) => segment.sa
 function burnChart(container, item, fmt, now) {
   const live = item.weekly;
   container.replaceChildren();
-  if (!live?.cycle) { container.append(note(live?.nextResetAt ? `No use since the last weekly reset. The next one is ${fmt.when(live.nextResetAt)}.` : "No weekly cycle open: your next request starts one.")); return; }
+  if (!live?.cycle) { container.append(note(live ? idleSentence(live, fmt) : "No weekly cycle open: your next request starts one.")); return; }
   const cycle = live.cycle, width = chartWidth(container, 520, 260), height = 168, left = 36, right = 12, top = 12, bottom = 24;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const x = (t) => left + (t - cycle.start) / Math.max(1, cycle.resetsAt - cycle.start) * plotWidth;
@@ -277,12 +307,18 @@ function burnChart(container, item, fmt, now) {
     root.append(svg("line", { x1: left, x2: width - right, y1: y(tick), y2: y(tick), class: tick === 100 ? "limit-line" : "grid-line" }));
     root.append(svg("text", { x: left - 6, y: y(tick) + 4, "text-anchor": "end", class: "axis-label" }, `${tick}%`));
   }
+  // Day ticks at local midnights in the display zone, so a reading sits over the day it was taken.
   const step = plotWidth < 300 ? 3 : plotWidth < 420 ? 2 : 1;
-  for (let day = 0; day <= 7; day += step) {
-    const t = cycle.start + day * DAY;
-    if (t > cycle.resetsAt) break;
-    root.append(svg("text", { x: x(t), y: height - 6, "text-anchor": day === 0 ? "start" : day === 7 ? "end" : "middle", class: "axis-label" }, fmt.day(t)));
+  const midnights = [];
+  for (let t = cycle.start; t <= cycle.resetsAt + DAY; t += DAY / 2) {
+    const midnight = zonedDayStart(zonedHourKey(t, fmt.zone).split("|")[0], fmt.zone);
+    if (midnight >= cycle.start && midnight <= cycle.resetsAt && midnight !== midnights.at(-1)) midnights.push(midnight);
   }
+  midnights.forEach((t, index) => {
+    if (index % step) return;
+    root.append(svg("line", { x1: x(t), x2: x(t), y1: top + plotHeight, y2: top + plotHeight + 3, class: "grid-line" }));
+    root.append(svg("text", { x: Math.max(left, Math.min(width - right, x(t))), y: height - 6, "text-anchor": x(t) - left < 20 ? "start" : width - right - x(t) < 20 ? "end" : "middle", class: "axis-label" }, fmt.day(t)));
+  });
   const segment = live.segment;
   if (!live.stale) root.append(svg("line", { x1: x(segment.start), y1: y(0), x2: x(cycle.resetsAt), y2: y(100), class: "pace-line" }));
   for (const part of cycle.segments) {
@@ -355,7 +391,7 @@ function accountFacts(item, fmt, now, codexAccount) {
   const extra = item.account.extraUsage;
   if (extra) {
     const label = { enabled: "On", "in-use": "In use", disabled: "Off", unknown: "Unknown" }[extra.extraUsage];
-    fact("Extra usage", label, extra.extraUsage === "disabled" ? extra.disabledReason === "org_level_disabled" ? "Off for this organization: a cap means waiting for the reset" : "A cap means waiting for the reset" : "Billed at API rates past a limit");
+    fact("Extra usage", label, extra.extraUsage === "disabled" ? `${extraUsageOff(item)}: a cap means waiting for the reset` : "Billed at API rates past a limit");
   }
   const inPlace = (reset) => ({ term: reset.cause === "credit" ? "Banked reset redeemed" : "Restarted in place", at: reset.at, restored: reset.restored, restoredUsd: reset.restoredUsd });
   const resets = item.history.flatMap((cycle) => [
@@ -407,8 +443,8 @@ function accountCard(item, status, fmt, now, { onPlanChange, codexAccount, later
 }
 
 const valueScope = (item) => ({
-  profiles: `${plural(item.value.sessions, "session")} in this account's profiles`,
-  provider: `this machine's ${plural(item.value.sessions, `${providerNames[item.provider]} session`)}; the only ${providerNames[item.provider]} account`,
+  profiles: `${plural(item.value.sessions, "session")} in these dates, in this account's profiles`,
+  provider: `this machine's ${plural(item.value.sessions, `${providerNames[item.provider]} session`)} in these dates; the only ${providerNames[item.provider]} account`,
   none: "no sessions matched, so its value is unknown",
 })[item.value.basis];
 
@@ -428,8 +464,25 @@ function payerControl(item, onChange) {
   return cell;
 }
 
+/**
+ * The dates value is counted over: from each account's first reading in the range (shared by provider when it can be)
+ * to the end of the range, or now.
+ */
+function periodText(items, fmt, now) {
+  if (!items.length) return "No account has readings in these dates";
+  const end = Math.max(...items.map((item) => item.period.to));
+  // The range ends at the start of the day after it.
+  const until = end >= now - HOUR ? "to now" : `to ${fmt.date(end - 1)}`;
+  const starts = new Set(items.map((item) => fmt.date(item.period.from)));
+  if (starts.size === 1) return `${[...starts][0]} ${until}`;
+  const byProvider = ["claude", "codex"].map((provider) => [provider, new Set(items.filter((item) => item.provider === provider).map((item) => fmt.date(item.period.from)))]);
+  return byProvider.every(([, dates]) => dates.size <= 1)
+    ? `${byProvider.filter(([, dates]) => dates.size).map(([provider, dates]) => `${providerNames[provider]} since ${[...dates][0]}`).join(", ")} (first readings), ${until}`
+    : `Since each account's first reading (see Since below), ${until}`;
+}
+
 /** Value per account and totals that compare like with like; secondary, so it starts open only on wide screens. */
-function worthSection(model, items, fmt, { pending, onPlanChange, wide }) {
+function worthSection(model, items, fmt, now, { pending, onPlanChange, wide }) {
   const section = el("section", null, "panel subscription-worth");
   const details = disclosure("worth", [el("h3", "What it's worth"), el("span", "API-equivalent value of each allowance, from your own sessions", "panel-meta")], { open: wide, className: "section-disclosure" });
   section.append(details);
@@ -439,25 +492,38 @@ function worthSection(model, items, fmt, { pending, onPlanChange, wide }) {
   const { totals } = model;
   const totalsList = el("dl", null, "worth-totals");
   const total = (term, value, detail) => { const row = el("div"); row.append(el("dt", term), el("dd", value), el("small", detail)); totalsList.append(row); };
-  const pricedNames = accounts.filter((item) => !item.excluded && item.economics.extracted !== null && item.economics.price !== null).map((item) => item.label);
-  const earliest = Math.min(...accounts.map((item) => item.period.from));
-  total("Value used", usd(totals.extracted), `${fmt.date(earliest)} to now, matched to accounts${totals.capacityUsed !== null ? `; ${percentText(totals.capacityUsed * 100)} of what calibrated limits refilled` : ""}${totals.unattributed ? `; ${usd(totals.unattributed)} more matched none` : ""}`);
-  total("Value multiple", totals.priced.multiple !== null ? `${totals.priced.multiple.toFixed(1)}×` : DASH,
+  const counted = accounts.filter((item) => !item.excluded && item.economics.extracted !== null && item.period.days > 0);
+  const pricedNames = counted.filter((item) => item.economics.price !== null && item.economics.monthlyPrice > 0).map((item) => item.label);
+  total("Value used", usd(totals.extracted), [
+    `${periodText(counted, fmt, now)}, matched to accounts`,
+    totals.capacityUsed !== null ? `${percentText(totals.capacityUsed * 100)} of one full week every week${totals.capacityUsed > 1 ? " (early resets and extra usage add more)" : ""}` : "",
+    totals.beforeReadings >= 1 ? `${usd(totals.beforeReadings)} before the first meter readings is not counted` : "",
+    totals.unattributed ? `${usd(totals.unattributed)} more matched no account` : "",
+  ].filter(Boolean).join("; "));
+  total("Value multiple", totals.priced.multiple !== null ? times(totals.priced.multiple) : DASH,
     totals.priced.multiple !== null ? `${usd(totals.priced.extracted)} for ${usd(totals.priced.price)} of plan price: ${pricedNames.join(", ")}` : "Needs a plan you pay for with matched value");
-  total("A month of full use", usd(totals.monthlyPotential), totals.monthlyPotential === null ? "Needs two weekly cycles with matched sessions" : `${totals.potentialMultiple !== null ? `${Math.round(totals.potentialMultiple)}× the monthly price of priced plans` : "Every weekly reset used to 100%"}${totals.banked ? `; banked resets add up to ${usd(totals.banked)}` : ""}`);
+  // Like the value multiple: the headline is the plans you pay for, compared with their price; other seats are beside it.
+  const others = totals.otherMonthlyPotential !== null ? `${usd(totals.otherMonthlyPotential)} on employer-paid or unpriced seats` : "";
+  const banked = totals.banked ? `banked resets add up to ${usd(totals.banked)}` : "";
+  total("A month of full use", usd(totals.monthlyPotential ?? totals.otherMonthlyPotential),
+    totals.monthlyPotential !== null ? [`On plans you pay for: ${times(totals.potentialMultiple)} their ${usd(totals.monthlyPrice)} a month`, others && `plus ${others}`, banked].filter(Boolean).join("; ")
+      : totals.otherMonthlyPotential !== null ? [`On employer-paid or unpriced seats; no plan you pay for is calibrated`, banked].filter(Boolean).join("; ")
+      : "Needs two weekly cycles with matched sessions");
   total("Typical week closes at", totals.resetsUsed !== null ? percentText(totals.resetsUsed) : DASH, totals.resetsUsed !== null ? "Observed weekly closes, plus this week's projection" : "Needs a weekly reset whose close was observed");
   details.append(totalsList);
   const rows = accounts.map((item) => {
     const { economics: value, calibration, period } = item;
+    const empty = period.days <= 0;
     return [
-      { text: item.label, detail: `Since ${fmt.date(period.from)}${period.firstReading !== null && period.from <= period.firstReading + 60 ? " (first reading)" : ""} · ${Math.round(period.days * 10) / 10} days${item.excluded ? " · excluded" : ""}` },
+      { text: item.label, detail: empty ? `First reading ${period.firstReading !== null ? fmt.date(period.firstReading) : "not yet"} · no days in these dates` : `Since ${fmt.date(period.from)}${period.firstReading !== null && period.from <= period.firstReading + 60 ? " (first reading)" : ""} · ${Math.round(period.days * 10) / 10} days${item.excluded ? " · excluded" : ""}` },
       payerControl(item, onPlanChange),
       calibration.perPercent !== null ? { text: money(calibration.perPercent), detail: `median of ${plural(calibration.cycles, "cycle")}` }
         : { text: DASH, detail: `needs ${calibrationMinimum} cycles (${calibration.cycles} so far)` },
       { text: usd(value.weeklyCapacity), detail: value.weeklyCapacity !== null ? "a full week" : "" },
-      value.extracted !== null ? { text: usd(value.extracted), detail: valueScope(item) } : { text: "Unknown", detail: valueScope(item) },
-      value.multiple !== null ? { text: `${value.multiple.toFixed(1)}×`, detail: `for ${usd(value.price)} of plan price` }
-        : { text: DASH, detail: value.payer === "organization" ? "employer pays: value only" : value.plan ? "no list price" : "choose a plan" },
+      empty ? { text: DASH, detail: "no meter readings in these dates" }
+        : value.extracted !== null ? { text: usd(value.extracted), detail: valueScope(item) } : { text: "Unknown", detail: valueScope(item) },
+      value.multiple !== null ? { text: times(value.multiple), detail: `for ${usd(value.price)} of plan price` }
+        : { text: DASH, detail: empty ? "no meter readings in these dates" : value.payer === "organization" ? "employer pays: value only" : value.monthlyPrice === 0 ? "free plan" : value.plan?.monthlyUsd === null ? "no list price" : value.plan ? "no matched value" : "choose a plan" },
     ];
   });
   details.append(dataTable([
@@ -473,6 +539,7 @@ function worthSection(model, items, fmt, { pending, onPlanChange, wide }) {
     aside.length ? `Not in the multiple: ${aside.join(" and ")}.` : "",
     excluded.length ? `Excluded from totals: ${excluded.join(", ")}.` : "",
     model.unattributed.remote ? "Other machines are combined into this snapshot; their sessions cannot be matched to accounts yet, so Codex value is left out." : "",
+    "Value before an account's first meter reading is not counted, because no price or capacity can be prorated over it.",
   ].filter(Boolean).join(" ")));
   return section;
 }
@@ -534,12 +601,12 @@ function closesChart(container, rows, fmt, now) {
       `This week · resets ${fmt.when(cycle.resetsAt)}`,
       cycle.cappedNow ? `Used up since ${fmt.when(cycle.capAt)}` : `${percentText(cycle.peak)} used so far${cycle.projected > cycle.peak ? `; on pace for ${percentText(cycle.projected)}` : ""}${cycle.capped ? "; runs out before the reset" : ""}`,
     ] : [
-      `${cycle.endedEarly ? `Reset early ${fmt.date(cycle.end)}` : `Reset ${fmt.date(cycle.resetsAt)}`} · closed at ${cycle.lowerBound ? "at least " : ""}${percentText(cycle.peak)}`,
+      `${cycle.endedEarly ? `Reset early ${fmt.date(cycle.end)}` : `Reset ${fmt.date(cycle.resetsAt)}`} · closed at ${percentText(cycle.peak)}${cycle.lowerBound ? " or more" : ""}`,
       cycle.endedEarly
         ? cycle.restored !== null ? `${cycle.cause === "credit" ? "Banked reset redeemed" : "Reset before its schedule"}: gave back ${percentText(cycle.restored)} of a week${cycle.restoredUsd !== null ? ` (≈ ${usd(cycle.restoredUsd)})` : ""}` : "Reset before its schedule; the level at the reset was not observed"
         : cycle.expired !== null ? `${percentText(cycle.expired)} expired unused${cycle.expiredUsd !== null ? ` (≈ ${usd(cycle.expiredUsd)} of API value)` : ""}` : "The last reading came long before the reset, so how much went unused is unknown",
       ...cycle.inPlace.map((reset) => `${reset.cause === "credit" ? "Banked reset redeemed" : "Restarted in place"} ${fmt.when(reset.at)}${reset.restored !== null ? `, giving back ${percentText(reset.restored)}` : ""}`),
-      cycle.capped ? `Capped for ${formatDuration(cycle.lockedSeconds)} before the reset` : "",
+      cycle.capped ? `Hit the limit; locked out for ${formatDuration(cycle.lockedSeconds)}` : "",
     ].filter(Boolean), { x: (cycle) => x(cycle.at), marker });
     block.append(label, root, readout);
     container.append(block);
@@ -572,7 +639,7 @@ function windowsChart(container, rows, fmt, now) {
     const shown = windows.map((window) => ({ ...window, x0: x(window.start) + 0.5, x1: x(Math.min(window.end, now)) - 0.5 }));
     for (const window of shown) {
       root.append(svg("rect", { x: window.x0, y: y(window.peak), width: Math.max(2, window.x1 - window.x0), height: Math.max(1, y(0) - y(window.peak)), rx: 1.5, fill: color, "fill-opacity": window.active ? 0.5 : 0.85 }));
-      if (window.cappedAt !== null) root.append(svg("rect", { x: x(window.cappedAt), y: y(0) + 1.5, width: Math.max(2, x(Math.min(window.end, now)) - x(window.cappedAt)), height: 3, rx: 1.5, class: "locked-band" }));
+      for (const [from, until] of window.lockouts) root.append(svg("rect", { x: x(from), y: y(0) + 1.5, width: Math.max(2, x(until) - x(from)), height: 3, rx: 1.5, class: "locked-band" }));
     }
     if (lastLane) {
       // Day labels thin out on narrow screens so they never collide.
@@ -600,11 +667,14 @@ function historySection(items, fmt, now, later) {
   const title = el("h3", "History"); title.id = "subscription-history-title";
   header.append(title, el("span", "How full each weekly allowance was when it reset, and the 5-hour windows of the last week", "panel-meta"));
   const rows = items.filter((item) => item.identified && item.weeklyMeter);
+  // Accounts without a 5-hour limit (Codex plans that dropped it) get no 5-hour section; an idle week still gets its note.
+  const lanes = items.filter((item) => item.identified && item.sessionMeter);
   const closes = el("div", null, "chart-slot closes-chart"), windows = el("div", null, "chart-slot windows-chart");
-  section.append(header, el("h4", "Weekly closes"), closes, el("h4", "5-hour windows · last 7 days"), windows);
+  section.append(header, el("h4", "Weekly closes"), closes);
+  if (lanes.length) section.append(el("h4", "5-hour windows · last 7 days"), windows);
   later.push(() => {
     closesChart(closes, rows, fmt, now); redrawOnResize(closes, () => closesChart(closes, rows, fmt, now));
-    windowsChart(windows, items.filter((item) => item.identified), fmt, now); redrawOnResize(windows, () => windowsChart(windows, items.filter((item) => item.identified), fmt, now));
+    if (lanes.length) { windowsChart(windows, lanes, fmt, now); redrawOnResize(windows, () => windowsChart(windows, lanes, fmt, now)); }
   });
   return section;
 }
@@ -632,7 +702,7 @@ function sourcesSection(limits, items, fmt, { remote }) {
   const list = el("ul", null, "method-notes");
   for (const text of [
     "Meters are the provider's own usage percentages, copied from records already on this machine. Nothing is requested from Anthropic; the Codex account read asks the local Codex app-server.",
-    `Readings are kept in a private ledger${limits.persisted ? "" : " (off: --no-index)"} so reset history outlives provider log rotation. Run \`session-analytics limits --quiet\` every 20 minutes (cron or launchd) to keep it continuous.`,
+    `Readings are kept in a private ledger${limits.persisted ? "" : { off: " (off: --no-index)", unreadable: " (left untouched: written by another version or not replaceable)", unwritable: " (not saved this time)" }[limits.ledger] ?? ""} so reset history outlives provider log rotation. Run \`session-analytics limits --quiet\` every 20 minutes (cron or launchd) to keep it continuous.`,
     "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline` in each profile's settings.json. It records the documented rate_limits field for that profile's account and prints the meters.",
     "Value per 1% divides the API-equivalent value of an account's own sessions (matched through its Claude profiles, or every Codex session when there is one Codex account) by the meter's reading.",
     `Plan prices were reviewed on ${plansReviewedAt}. Team, Enterprise and Business seats are treated as paid by the employer: they show API value without a personal multiple unless you say you pay. Plan and payer choices stay in this browser.`,
@@ -681,7 +751,7 @@ export function renderSubscription(container, { limits, sessions = null, timeZon
   const items = entries.map(({ item }) => item);
   const generatedAt = Date.parse(limits.generatedAt) / 1000;
   const later = [];
-  const advice = recommendations(items, { now, sources: limits.sources, persisted: limits.persisted, codexAccount: limits.codexAccount ?? "off", formatTime: fmt.when });
+  const advice = recommendations(items, { now, sources: limits.sources, persisted: limits.persisted, ledger: limits.ledger, codexAccount: limits.codexAccount ?? "off", formatTime: fmt.when });
   const cards = el("section", null, "subscription-cards");
   cards.setAttribute("aria-label", "Accounts");
   for (const { item, status } of entries) cards.append(accountCard(item, status, fmt, now, { onPlanChange, codexAccount: limits.codexAccount ?? "off", later }));
@@ -690,7 +760,7 @@ export function renderSubscription(container, { limits, sessions = null, timeZon
     limitsNow(entries, fmt, now, Number.isFinite(generatedAt) ? generatedAt : null),
     nextActions(advice),
     cards,
-    worthSection(model, items, fmt, { pending, onPlanChange, wide: open }),
+    worthSection(model, items, fmt, now, { pending, onPlanChange, wide: open }),
     historySection(items, fmt, now, later),
     sourcesSection(limits, items, fmt, { remote: model.unattributed.remote }),
   );

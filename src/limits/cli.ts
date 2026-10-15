@@ -58,12 +58,14 @@ function describe(live: LiveMeter, info: LimitMeterInfo | undefined, now: number
   const label = live.meter.label.padEnd(width);
   if (info?.retired) return `  ${label} not reported since ${clock(info.lastObservedAt)}`;
   // Claude's weekly limits reset on a fixed weekly schedule; other windows start with the next request.
-  if (!live.cycle) return live.nextResetAt ? `  ${label} no reading since the last reset · resets ${clock(live.nextResetAt)} on its weekly schedule` : `  ${label} idle · the next request starts a new window`;
+  if (!live.cycle) return live.nextResetAt ? `  ${label} no reading since the last reset · resets ${clock(live.nextResetAt)} on its weekly schedule`
+    : live.confirmedIdle ? `  ${label} idle · the next request starts a new window` : `  ${label} no reading since the last reset`;
   const used = `${live.used.toFixed(0).padStart(3)}%`;
   if (live.state === "unreported") return `  ${label} ${used} at last report ${clock(live.observedAt ?? now)} · no longer reported by the provider`;
   const parts = [`${used} used`, `resets ${clock(live.cycle.resetsAt)} (in ${formatDuration(live.cycle.resetsAt - now)})`];
   if (live.segment?.before) parts.push(`restarted in place ${clock(live.segment.start)}`);
-  if (live.state === "overage") parts.push("past the included allowance, on extra usage");
+  if (live.levelsOnly) parts.push("level only: what this meter limits is not documented");
+  else if (live.state === "overage") parts.push("past the included allowance, on extra usage");
   else if (live.state === "capped") parts.push(`capped since ${clock(live.capAt ?? live.cycle.last.t)}`);
   else if (live.capsEarly && live.capAt) parts.push(`at this pace runs out ${clock(live.capAt)}`);
   else if (live.mayBeUsedUp) parts.push("may already be used up");
@@ -81,6 +83,7 @@ function accountFacts(account: LimitAccount, codexAccount: LimitsSnapshot["codex
   if (account.plan === "team" && (evidence?.seatTier || evidence?.userRateLimitTier)) {
     lines.push(`  Seat: ${[evidence.seatTier && `tier ${evidence.seatTier}`, evidence.userRateLimitTier && `user rate-limit tier ${evidence.userRateLimitTier}`].filter(Boolean).join(", ")} (seat type and price not recorded locally)`);
   }
+  if (!account.plan && evidence?.planType && evidence.planType !== "unknown") lines.push(`  Plan: reported as ${evidence.planType}, which this version does not recognise; choose the plan in the dashboard`);
   if (account.attribution === "unattributed") lines.push("  Readings that could not be tied to an account; left out of pace and value.");
   if (account.attribution === "weekly-phase") lines.push("  Readings whose session was not found in any profile; grouped by weekly reset time.");
   const extra = account.extraUsage;
