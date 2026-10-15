@@ -279,7 +279,7 @@ test("review: dashboard retains filtered history caveats and scan warnings witho
       ...await import("../src/public/timestamps.js"), ...await import(new URL("../src/public/view-model.js", import.meta.url).href),
       ...await import(new URL("../src/public/providers.js", import.meta.url).href),
       ...await import(new URL("../src/public/velocity-data.js", import.meta.url).href),
-      ...await import(new URL("../src/public/ui.js", import.meta.url).href) };
+      ...await import(new URL("../src/public/ui.js", import.meta.url).href), ...await import(new URL("../src/public/machines.js", import.meta.url).href) };
     const element = () => ({ value: "", textContent: "", dataset: {}, style: {}, classList: { add() {}, remove() {}, toggle() {} }, setAttribute() {}, addEventListener() {}, querySelectorAll: () => [], replaceChildren() {}, append() {} });
     const elements = new Map<string, ReturnType<typeof element>>();
     const document = { addEventListener() {}, documentElement: { dataset: {} }, querySelectorAll: () => [], createElement: element, createElementNS: element, querySelector: (selector: string) => {

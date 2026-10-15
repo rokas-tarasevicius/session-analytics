@@ -47,13 +47,19 @@ Yes. Sibling profile directories such as `~/.claude-work` or `~/.codex-personal`
 <details>
 <summary><strong>Can it include sessions from another computer?</strong></summary>
 
-Yes. Agents that run on a server or VM write their history there, so a laptop cannot see it directly. Install session-analytics on that machine too, then run `session-analytics --remote server` (any SSH destination, comma-separated for several). Each machine analyzes its own history; only its content-free snapshot comes back over your SSH connection. If agents run under a different account there, add `--remote-command "sudo -n -iu agents session-analytics"`. Snapshot files and `merge` work without SSH. See [combine machines](interop.md#combine-machines).
+Yes. Agents that run on a server or VM write their history there, so a laptop cannot see it directly. Run `session-analytics machines add server` once (any SSH destination); from then on a plain `session-analytics` reads it too. The machine needs only Node.js 24: it runs this install's own code, copied into that account's `~/.cache` over SSH. Each machine analyzes its own history; only its content-free snapshot comes back over your SSH connection. If agents run under a different account there, add `--user agents`, which reads that account through passwordless `sudo`; `machines check --find-users` lists the accounts that have agent history, and `machines check` prints the sudo rule when one is missing. The dashboard shows which machines were read, lets you switch each one's sessions in or out, and keeps a machine that is briefly unreachable on screen from its last good snapshot, marked stale. Snapshot files and `merge` work without SSH. See [combine machines](interop.md#combine-machines).
+</details>
+
+<details>
+<summary><strong>What does reading another computer leave on it?</strong></summary>
+
+Two things, both in the account that is read. Its `~/.cache/session-analytics/runtime` holds a copy of this install's code (about 2 MB per version, private to that account), and its own session-analytics data directory holds the private index that any `report` there writes. Nothing runs between reads, and nothing is installed system-wide. With `--runtime installed`, only the data directory is written. See [what a read leaves on that machine](interop.md#the-bundled-runtime).
 </details>
 
 <details>
 <summary><strong>Are T3 Code sessions included?</strong></summary>
 
-Yes, on the machine where T3 Code's server runs. T3 Code drives Claude Code and Codex, which write their usual transcripts there, so its threads appear as Claude (Agent SDK) and Codex sessions in the repository they worked on. Codex reports T3 Code's app-server sessions with the VS Code source label. T3 Code's own thread database is not read. If T3 Code runs on another computer, add it with `--remote`.
+Yes, on the machine where T3 Code's server runs. T3 Code drives Claude Code and Codex, which write their usual transcripts there, so its threads appear as Claude (Agent SDK) and Codex sessions in the repository they worked on. Codex reports T3 Code's app-server sessions with the VS Code source label. T3 Code's own thread database is not read. If T3 Code runs on another computer, add it with `session-analytics machines add HOST`.
 </details>
 
 <details>

@@ -37,7 +37,7 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
   const context = productionFunctions(["renderSummary", "renderCoverageSummary", "spendDelta", "renderRepositoryNav", "windowDays", "velocityContext", "snapshotTimeZone", "pricedBadge", "executionBreakdown", "subagentValue"], {
     ...ui, ...providers, ...viewModel, ...velocityData, elements, $: lookup, windowPreset: preset, Map, Set, Intl,
     snapshot: { generatedAt: "2026-09-15T09:00:00Z", velocity: { timeZone: "UTC" }, sessions, repositories },
-    wideLayout: { matches: true, addEventListener() {} }, navCache: { key: null }, navHoverListeners: new Set(), navDirty: false,
+    fullSnapshot: null, renderMachineSpend() {}, wideLayout: { matches: true, addEventListener() {} }, navCache: { key: null }, navHoverListeners: new Set(), navDirty: false,
     node: (tag: string, text?: string, className?: string) => { const e = new Element(tag); e.textContent = text ?? ""; e.className = className ?? ""; return e; },
     svgNode: (tag: string) => new Element(tag), icon: () => new Element("svg"), clear: (e: Element) => e.replaceChildren(),
     money: (v: number) => `$${v.toFixed(2)}`, shortMoney: (v: number) => `$${v.toFixed(2)}`, percent: String, integer, compact,

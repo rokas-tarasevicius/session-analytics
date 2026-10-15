@@ -314,10 +314,11 @@ export function zonedDayStart(day, timeZone = "UTC") {
 }
 
 /**
- * Which account each Claude or Codex session's value belongs to. A session joins the account whose `profileKeys` hold its
- * `historyProfile.profileKey`. A session without a profile key (every Codex session today, Claude sessions without a native
- * transcript) joins its provider's only account, and only when it is this machine's: `local` is null when every session is,
- * else a test for this machine's sessions. Everything else is unattributed and never calibrates a meter.
+ * Which account each Claude or Codex session's value belongs to. Meters are read on this machine only, so only its sessions
+ * can move them: `local` is null when every session is this machine's, else a test for this machine's sessions, and the
+ * others are `elsewhere`. A session joins the account whose `profileKeys` hold its `historyProfile.profileKey`; one without
+ * a profile key (every Codex session today, Claude sessions without a native transcript) joins its provider's only account.
+ * Everything else is unattributed. Neither unattributed nor elsewhere sessions calibrate a meter.
  */
 export function attributeSessions(sessions, accounts, { local = null } = {}) {
   const byProfile = new Map(), byAccount = new Map(), only = {};
@@ -327,15 +328,15 @@ export function attributeSessions(sessions, accounts, { local = null } = {}) {
     only[account.provider] = only[account.provider] === undefined ? account.key : null;
     for (const profile of account.profileKeys ?? []) if (!byProfile.has(`${account.provider}|${profile}`)) byProfile.set(`${account.provider}|${profile}`, account.key);
   }
-  const unattributed = { claude: [], codex: [] };
+  const unattributed = { claude: [], codex: [] }, elsewhere = { claude: [], codex: [] };
   for (const session of sessions ?? []) {
     if (!(session.provider in unattributed)) continue;
+    if (local !== null && !local(session)) { elsewhere[session.provider].push(session); continue; }
     const profile = session.historyProfile?.profileKey;
-    const key = profile ? byProfile.get(`${session.provider}|${profile}`)
-      : only[session.provider] && (local === null || local(session)) ? only[session.provider] : undefined;
+    const key = profile ? byProfile.get(`${session.provider}|${profile}`) : only[session.provider];
     (key ? byAccount.get(key) : unattributed[session.provider]).push(session);
   }
-  return { byAccount, unattributed };
+  return { byAccount, unattributed, elsewhere };
 }
 
 const median = (values) => {
@@ -644,21 +645,19 @@ export function subscriptionTotals(items, unattributed = { claude: 0, codex: 0 }
 }
 
 /**
- * The Subscription view's model: one entry per account, totals and the value nobody's account could claim. `plans` and
- * `payers` hold per-account overrides by account key (`"none"` excludes an account from value totals but keeps its
- * meters); `local` is as in `attributeSessions`.
+ * The Subscription view's model: one entry per account, totals, the value nobody's account could claim and the value of
+ * other machines, whose meters are not read here. `plans` and `payers` hold per-account overrides by account key
+ * (`"none"` excludes an account from value totals but keeps its meters); `local` is as in `attributeSessions`.
  */
 export function subscriptionModel({ limits, sessions, timeZone = "UTC", now, range, plans = {}, payers = {}, local = null }) {
   const accounts = limits?.accounts ?? [];
   const meters = buildMeters(limits?.observations ?? [], now, limits?.meters ?? []);
-  const { byAccount, unattributed } = attributeSessions(sessions, accounts, { local });
-  const only = (provider) => accounts.filter((account) => account.provider === provider && identified(account.key)).length === 1;
+  const { byAccount, unattributed, elsewhere } = attributeSessions(sessions, accounts, { local });
   const items = accounts.map((account) => {
     const own = byAccount.get(account.key) ?? [], override = plans[account.key];
     // Whether this account's value can be measured at all: an account with no attributable sessions has unknown value, not zero.
     const basis = !identified(account.key) || !own.length ? "none"
-      : own.some((session) => session.historyProfile) || (account.provider === "claude" && account.profileKeys?.length) ? "profiles"
-      : only(account.provider) && local === null ? "provider" : "none";
+      : own.some((session) => session.historyProfile) || (account.provider === "claude" && account.profileKeys?.length) ? "profiles" : "provider";
     return {
       ...accountUtilization({
         account, meters, sessions: own, timeZone, now, range, planId: override === "none" ? null : override || account.plan,
@@ -667,9 +666,9 @@ export function subscriptionModel({ limits, sessions, timeZone = "UTC", now, ran
       excluded: override === "none",
     };
   });
-  const until = Math.min(range.to, now);
-  const unclaimed = { claude: hourlyValue(unattributed.claude, timeZone).between(range.from, until), codex: hourlyValue(unattributed.codex, timeZone).between(range.from, until) };
-  return { meters, accounts: items, totals: subscriptionTotals(items, unclaimed), unattributed: { ...unclaimed, remote: local !== null } };
+  const until = Math.min(range.to, now), between = (list) => hourlyValue(list, timeZone).between(range.from, until);
+  const unclaimed = { claude: between(unattributed.claude), codex: between(unattributed.codex) };
+  return { meters, accounts: items, totals: subscriptionTotals(items, unclaimed), unattributed: unclaimed, elsewhere: { claude: between(elsewhere.claude), codex: between(elsewhere.codex) } };
 }
 
 /** Percent rates keep one decimal below 10 so a small daily budget never reads as 0%. */

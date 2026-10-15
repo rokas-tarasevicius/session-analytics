@@ -2,7 +2,7 @@ import { metricSchemas, model as publicModelSchema } from "./metric-schema.ts";
 /** Development-only schema generator. Exhaustive mapped types catch field drift in tsc. */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { CostBasis, CostBreakdown, ExecutionKind, LongContextRate, MachineAnalytics, PublicModelRate, ModelUsage, NamedMetric, RepositoryAnalytics, RepositoryRollup, SessionAnalytics, SessionMetrics, SessionProvider, SharedCounters, SharedRepository, SharedSnapshot, TokenUsage, TranscriptHealth } from "../src/types.ts";
+import type { CostBasis, CostBreakdown, ExecutionKind, LongContextRate, MachineAnalytics, MachineReason, MachineStatus, PublicModelRate, ModelUsage, NamedMetric, RepositoryAnalytics, RepositoryRollup, SessionAnalytics, SessionMetrics, SessionProvider, SharedCounters, SharedRepository, SharedSnapshot, TokenUsage, TranscriptHealth } from "../src/types.ts";
 import { fixedWarnings, warningPatterns, repositoryKeyPattern, modelPattern, metadataPattern, sessionStatuses } from "../src/public/evidence.js";
 
 type Schema = Record<string, unknown>;
@@ -19,6 +19,13 @@ const ref = (name: string) => ({ $ref: `#/$defs/${name}` });
 const array = (items: Schema) => ({ type: "array", items });
 const record = (values: Schema) => ({ type: "object", additionalProperties: values });
 const enumeration = <T extends string>(values: Record<T, true>) => ({ anyOf: Object.keys(values).map((value) => ({ const: value })) });
+const machineKey = { type: "string", pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" };
+const machineReasons: Record<MachineReason, true> = {
+  "no-ssh": true, "unknown-host": true, connection: true, "login-refused": true, dropped: true, sudo: true, "no-account": true, "login-shell": true, permission: true,
+  "missing-command": true, "no-node": true, "node-too-old": true, "local-runtime": true, runtime: true, "cache-unwritable": true, corrupted: true, "version-skew": true,
+  rejected: true, busy: true, "index-newer": true, analysis: true, invalid: true, "time-zone": true, timeout: true, "too-large": true, cancelled: true, "no-history": true,
+  "same-machine": true,
+};
 function object<T>(properties: { [K in keyof T]-?: Schema }, optional: Array<keyof T> = []): Schema {
   return { type: "object", properties, required: Object.keys(properties).filter((key) => !optional.includes(key as keyof T)), additionalProperties: false };
 }
@@ -78,11 +85,18 @@ export function snapshotSchemas(): Record<string, Schema> {
       pricedTokenCoverage: nullable(number), provider: enumeration<SessionProvider>({ claude: true, codex: true, cursor: true, copilot: true, opencode: true, gemini: true, unsupported: true }), repositoryId: repositoryKey,
       repositoryName: text, sessionKey: { type: "string", pattern: "^[a-f0-9]{12}$" },
       spendByDay: record(number), status: { anyOf: sessionStatuses.map((value) => ({ const: value })) }, tokens: ref("TokenUsage"), tools: { ...record(integer), propertyNames: metadata },
-      transcript: ref("TranscriptHealth"), transportTools: { ...record(integer), propertyNames: metadata }, updatedAt: text,
-    }, ["history", "historyStatistics", "historyProfile", "mcpEvidence", "evidence", "conductor", "agentIdentity", "velocity"]),
+      transcript: ref("TranscriptHealth"), transportTools: { ...record(integer), propertyNames: metadata }, updatedAt: text, machine: machineKey,
+    }, ["history", "historyStatistics", "historyProfile", "mcpEvidence", "evidence", "conductor", "agentIdentity", "velocity", "machine"]),
+    MachineStatus: object<MachineStatus>({
+      key: machineKey, label: { type: "string", minLength: 1, maxLength: 256 },
+      state: enumeration<MachineStatus["state"]>({ ok: true, stale: true, failed: true, reading: true }), reason: enumeration(machineReasons),
+      fix: { type: "string", minLength: 1, maxLength: 1024 }, sessions: integer, repositories: integer, readAt: nullable(text), durationMs: nullable(number),
+      version: nullable({ type: "string", pattern: "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$" }), identity: { type: "string", pattern: "^(?:host-)?[0-9a-f]{16}$" }, warnings: array(warning),
+    }, ["reason", "fix", "identity", "warnings"]),
     RepositoryRollup: object<RepositoryRollup>({ repository: ref("Repository"), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }),
     RepositoryAnalytics: object<RepositoryAnalytics>({ velocity: ref("VelocityMetadata"), schemaVersion: { const: 1 }, generatedAt: text, rateCard: ref("RateCard"), repository: ref("Repository"), sessions: array(ref("SessionAnalytics")), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")), summary: ref("Summary"), topTools: array(ref("NamedMetric")), warnings: array(warning) }, ["velocity"]),
     MachineAnalytics: object<MachineAnalytics>({
+      machines: { ...array(ref("MachineStatus")), maxItems: 256 },
       historyCoverage: ref("HistoryCoverage"),
       mcpSourceHealth: array(ref("McpSourceHealth")), mcpContext: ref("McpContext"),
       velocity: ref("VelocityMetadata"),
@@ -90,7 +104,7 @@ export function snapshotSchemas(): Record<string, Schema> {
       sessions: array(ref("SessionAnalytics")), spendByDay: array(ref("NamedMetric")), spendByModel: array(ref("ModelUsage")),
       summary: object<MachineAnalytics["summary"]>({ ...summaryFields, repositories: integer, repositoriesWithSessions: integer, workingSnapshots: integer }),
       topTools: array(ref("NamedMetric")), warnings: array(warning),
-    }, ["historyCoverage", "velocity", "mcpSourceHealth", "mcpContext"]),
+    }, ["machines", "historyCoverage", "velocity", "mcpSourceHealth", "mcpContext"]),
   };
   const sharedDefinitions = {
     SharedCounters: object<SharedCounters>(sharedFields),

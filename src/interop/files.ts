@@ -8,6 +8,11 @@ export const maximumSnapshotBytes = 256 * 1024 * 1024;
 
 /** Bounded read, including files that grow during the read. Never follow a symlink. */
 export async function readJsonFile(path: string, limit = maximumSnapshotBytes): Promise<unknown> {
+  return JSON.parse((await readBoundedFile(path, limit)).toString("utf8")) as unknown;
+}
+
+/** A regular file's bytes, never through a link, refused when larger than `limit` or changed while read. */
+export async function readBoundedFile(path: string, limit = maximumSnapshotBytes): Promise<Buffer> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stats = await file.stat();
@@ -21,7 +26,7 @@ export async function readJsonFile(path: string, limit = maximumSnapshotBytes): 
     }
     const after = await file.stat();
     if (offset > limit || offset !== stats.size || after.size !== stats.size || after.mtimeMs !== stats.mtimeMs) throw new InteropError("Snapshot changed during reading.");
-    return JSON.parse(buffer.subarray(0, offset).toString("utf8")) as unknown;
+    return buffer.subarray(0, offset);
   } finally { await file.close(); }
 }
 

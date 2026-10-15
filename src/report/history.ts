@@ -6,7 +6,8 @@ const count = (n: number) => new Intl.NumberFormat("en", { notation: "compact", 
 export function historyReport(snapshot: MachineAnalytics): string {
   const history = snapshot.historyCoverage;
   if (!history) return "";
-  const lines = ["", "History coverage · machine-wide, UTC months", "Session evidence and unattributed estimates are separate. API-equivalent value is not an invoice."];
+  const labels = new Map(snapshot.machines?.map(({ key, label }) => [key, label]));
+  const lines = ["", `History coverage · ${labels.size > 1 ? `all ${labels.size} machines` : "machine-wide"}, UTC months`, "Session evidence and unattributed estimates are separate. API-equivalent value is not an invoice."];
   for (const month of history.months) {
     const estimate = !month.statisticsCells || month.unattributedTokens && !month.pricedUnattributedTokens ? "N/A" : money(month.unattributedEstimateUsd);
     const evidence = month.sessionsWithDatedValue ? money(month.sessionEvidenceUsd) : "N/A";
@@ -15,7 +16,7 @@ export function historyReport(snapshot: MachineAnalytics): string {
   if (history.undatedSessionValueUsd > 0) lines.push(`Undated session value: ${money(history.undatedSessionValueUsd)}. This includes result-only summaries and is excluded from monthly evidence.`);
   lines.push("Statistics gaps use max(0, provider minus same-profile stream counters) per UTC day/model. Unknown-profile Conductor usage reserves overlap once across profiles. Estimates use lifetime model token proportions, ordinary rates and default cache-write TTL; request sizes and historical mix are unknown. Claude v5 statistics repeat input across streamed blocks; remaining counters can overstate missing billable tokens. Estimates are not added to repository or session totals.");
   for (const profile of history.profiles) {
-    lines.push(`Claude profile ${profile.ordinal}: statistics ${profile.status}${profile.statisticsThrough ? ` through ${profile.statisticsThrough}` : ""}; earliest present transcript ${profile.firstTranscriptDay ?? "unavailable"}; earliest statistics ${profile.firstStatisticsDay ?? "unavailable"}.`);
+    lines.push(`Claude profile ${profile.ordinal}${labels.size > 1 && profile.machine && labels.has(profile.machine) ? ` (${labels.get(profile.machine)})` : ""}: statistics ${profile.status}${profile.statisticsThrough ? ` through ${profile.statisticsThrough}` : ""}; earliest present transcript ${profile.firstTranscriptDay ?? "unavailable"}; earliest statistics ${profile.firstStatisticsDay ?? "unavailable"}.`);
     if (profile.sessionsWithoutStatisticsCounters) lines.push(`  ${profile.sessionsWithoutStatisticsCounters} indexed sessions lack stream counters; gaps may include known streamed blocks.`);
     for (const month of profile.months) for (const model of month.models) lines.push(`  ${month.month} ${model.model}: ${count(model.sessionStatisticsTokens)}/${count(model.providerTokens)} session/provider stream counters (${count(model.sessionTokens)} deduplicated session tokens) over ${model.statisticsDays} reported days; ${count(model.unattributedTokens)} unattributed after overlap reservation.`);
   }

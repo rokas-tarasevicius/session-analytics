@@ -17,13 +17,16 @@ function relation(running: unknown, expected: string): "An older" | "A newer" | 
  * Why a launch may not reuse the dashboard already on its port, or null to reuse it. Reuse needs the same version as
  * well as the same options and this data directory's token: after an upgrade the old process would keep serving old code.
  */
-export function reuseRefusal(health: Partial<DashboardHealth> | null, expected: { version: string; optionsHash: string; instanceToken: string | null }): string | null {
+export function reuseRefusal(health: Partial<DashboardHealth> | null, expected: { version: string; optionsHash: string; scanHash: string; instanceToken: string | null }): string | null {
   if (health?.service === serviceId && health.status === "ok" && health.version !== expected.version) {
     // Only a version matching the release grammar is ever printed from the port.
     const shown = typeof health.version === "string" && printableVersion.test(health.version) ? ` (${health.version})` : "";
     return `${relation(health.version, expected.version)} ${brand.name}${shown} is running on this port; this is ${expected.version}. Stop it (Ctrl+C where it runs) or choose --port.`;
   }
   if (health?.service === serviceId && health.status === "ok" && health.dataSource === "live" && expected.instanceToken !== null &&
-      health.optionsHash === expected.optionsHash && health.instanceToken === expected.instanceToken) return null;
+      health.instanceToken === expected.instanceToken) {
+    if (health.optionsHash === expected.optionsHash) return null;
+    if (health.scanHash === expected.scanHash) return `${brand.name} is already running on this port with other machines (--remote, --machines or --no-remote differ); stop it or choose --port.`;
+  }
   return `${brand.name} is already running on this port with different options; stop it or choose --port.`;
 }

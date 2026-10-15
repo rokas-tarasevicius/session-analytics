@@ -11,10 +11,10 @@ import { promisify } from "node:util";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { combineSnapshots } from "../src/interop/combine.ts";
 import { loadMachineSnapshot, validateSnapshot } from "../src/interop/snapshot.ts";
-import { duplicateMachineWarning, filteredWarning, indexParityWarning } from "../src/public/evidence.js";
+import { duplicateMachineWarning, filteredWarning, indexParityWarning, remoteUnavailableWarning, staleMachineWarning } from "../src/public/evidence.js";
 import { filterSnapshot } from "../src/public/export-data.js";
 import { indexStatus } from "../src/store/database.ts";
-import type { MachineAnalytics, SessionAnalytics } from "../src/types.ts";
+import type { MachineAnalytics, MachineStatus, SessionAnalytics } from "../src/types.ts";
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
 
 const run = promisify(execFile);
@@ -23,6 +23,8 @@ const sessionKey = (value: string): string => createHash("sha256").update(value)
 const remoteId = (identity: string): string => `discovered-${createHash("sha256").update(`remote:${identity}`).digest("hex").slice(0, 20)}`;
 const close = (actual: number, expected: number): void => assert.ok(Math.abs(actual - expected) <= 1e-9 * Math.max(1, expected), `${actual} != ${expected}`);
 const identity = ({ provider, sessionKey: key }: SessionAnalytics): string => `${provider}:${key}`;
+/** Sessions without the machine tag that combining adds. */
+const untagged = (sessions: SessionAnalytics[]): SessionAnalytics[] => sessions.map(({ machine: _, ...session }) => session);
 
 let directory: string;
 let fixture: SessionAnalyticsFixture;
@@ -77,7 +79,11 @@ test("combining machines unions sessions and repositories and rebuilds every rol
 test("a session seen on two machines counts once, from its most complete copy", () => {
   const same = combineSnapshots([local, local]);
   assert.ok(same.warnings.includes(duplicateMachineWarning));
-  for (const key of ["sessions", "repositories", "summary", "spendByDay", "spendByModel", "topTools"] as const) assert.deepEqual(same[key], local[key]);
+  for (const key of ["repositories", "summary", "spendByDay", "spendByModel", "topTools"] as const) assert.deepEqual(same[key], local[key]);
+  assert.deepEqual(untagged(same.sessions), local.sessions);
+  // Equal copies keep the first machine's.
+  assert.deepEqual(same.machines!.map(({ key, sessions }) => [key, sessions]), [["machine-1", local.summary.sessions], ["machine-2", local.summary.sessions]]);
+  assert.ok(same.sessions.every(({ machine }) => machine === "machine-1"));
   assert.equal(same.historyCoverage!.profiles.length, local.historyCoverage!.profiles.length * 2);
   const later = structuredClone(local);
   const target = later.sessions[0]!;
@@ -86,7 +92,10 @@ test("a session seen on two machines counts once, from its most complete copy", 
   for (const order of [[local, later], [later, local]]) {
     const combined = combineSnapshots(order);
     assert.equal(combined.sessions.length, local.sessions.length);
-    assert.equal(combined.sessions.find((session) => identity(session) === identity(target))!.lastEventAt, target.lastEventAt);
+    const kept = combined.sessions.find((session) => identity(session) === identity(target))!;
+    assert.equal(kept.lastEventAt, target.lastEventAt);
+    // The kept copy keeps its machine.
+    assert.equal(kept.machine, order[0] === later ? "machine-1" : "machine-2");
   }
 });
 
@@ -103,7 +112,8 @@ test("matching profile paths stay independent per input and winning sessions ref
   const original = structuredClone([local, other]);
   const combined = combineSnapshots([local, other]);
   const count = local.historyCoverage!.profiles.length, profiles = combined.historyCoverage!.profiles;
-  assert.deepEqual(profiles.slice(0, count), local.historyCoverage!.profiles);
+  assert.deepEqual(profiles.slice(0, count).map(({ machine: _, ...profile }) => profile), local.historyCoverage!.profiles);
+  assert.deepEqual(profiles.map(({ machine }) => machine), [...Array(count).fill("machine-1"), ...Array(count).fill("machine-2")]);
   assert.equal(profiles.length, count * 2);
   assert.equal(new Set(profiles.map(({ profileKey }) => profileKey)).size, count * 2);
   assert.deepEqual(profiles.map(({ ordinal }) => ordinal), profiles.map((_, index) => index + 1));
@@ -131,6 +141,81 @@ test("matching profile paths stay independent per input and winning sessions ref
     close(row.sessionEvidenceUsd, source.sessionEvidenceUsd);
   }
   validateSnapshot(JSON.parse(JSON.stringify(repeated)));
+});
+
+const status = (key: string, label: string, state: MachineStatus["state"], fields: Partial<MachineStatus> = {}): MachineStatus =>
+  ({ key, label, state, sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null, ...fields });
+
+test("machine statuses list every machine, a copy read now beats a stale one, and keys stay unique across combined files", () => {
+  const stale = structuredClone(local);
+  const target = stale.sessions[0]!;
+  target.lastEventAt = new Date(Date.parse(target.lastEventAt ?? target.updatedAt) + 3_600_000).toISOString();
+  validateSnapshot(stale);
+  const statuses = [
+    status("local", "laptop", "ok", { sessions: local.summary.sessions, readAt: local.generatedAt, identity: "0123456789abcdef" }),
+    status("agentbox", "agentbox", "stale", { reason: "timeout", fix: "allow more time", sessions: stale.summary.sessions, readAt: "2026-07-20T00:00:00Z" }),
+    status("boxa", "boxa", "failed", { reason: "connection" }),
+  ];
+  const combined = combineSnapshots([local, stale, null], { machines: statuses, warnings: [staleMachineWarning, remoteUnavailableWarning] });
+  assert.deepEqual(combined.machines!.map(({ key, state }) => [key, state]), [["local", "ok"], ["agentbox", "stale"], ["boxa", "failed"]]);
+  // Identity is for the duplicate check only; it never reaches a combined snapshot.
+  assert.equal(combined.machines![0]!.identity, undefined);
+  // The stale copy is more complete, but the copy read now is kept.
+  assert.equal(combined.sessions.find((session) => identity(session) === identity(target))!.lastEventAt, local.sessions[0]!.lastEventAt);
+  assert.ok(combined.sessions.every(({ machine }) => machine === "local"));
+  assert.ok(combined.warnings.includes(staleMachineWarning) && combined.warnings.includes(remoteUnavailableWarning));
+  assert.deepEqual(combined.historyCoverage!.profiles.map(({ machine }) => machine), [...local.historyCoverage!.profiles.map(() => "local"), ...stale.historyCoverage!.profiles.map(() => "agentbox")]);
+  validateSnapshot(JSON.parse(JSON.stringify(combined)));
+  // Machine-scoped warnings are kept per machine.
+  const other = otherMachine();
+  const scoped = combineSnapshots([local, validateSnapshot({ ...other, warnings: [...other.warnings, "Cursor local session history is missing."] })]);
+  assert.deepEqual(scoped.machines!.map(({ warnings }) => warnings?.includes("Cursor local session history is missing.") ?? false), [false, true]);
+  // Two combined files that both name "local" stay apart.
+  const twice = combineSnapshots([combined, combineSnapshots([local, other], { machines: [status("local", "laptop", "ok"), status("other", "other", "ok")] })]);
+  assert.deepEqual(twice.machines!.map(({ key }) => key), ["local", "agentbox", "boxa", "local-2", "other"]);
+  assert.deepEqual(twice.machines!.map(({ label }) => label), ["laptop", "agentbox", "boxa", "laptop (2)", "other"]);
+  assert.equal(twice.sessions.filter(({ machine }) => machine === "other").length, other.sessions.length);
+  // Unnamed inputs become machine-1, machine-2.
+  assert.deepEqual(combineSnapshots([local, other]).machines!.map(({ key }) => key), ["machine-1", "machine-2"]);
+  // One plain input is reproduced, without a machine list.
+  assert.equal(combineSnapshots([local]).machines, undefined);
+  assert.throws(() => combineSnapshots([local, null]), /status for a machine without a snapshot/);
+});
+
+test("merging combined files judges each session by its own machine's state, in either order", () => {
+  const stale = structuredClone(local);
+  const target = stale.sessions[0]!;
+  target.lastEventAt = new Date(Date.parse(target.lastEventAt ?? target.updatedAt) + 3_600_000).toISOString();
+  // A file read now for its own machine, carrying agentbox's last good snapshot with a more complete copy.
+  const file = combineSnapshots([otherMachine(), validateSnapshot(stale)], { machines: [
+    status("local", "laptop", "ok", { readAt: local.generatedAt }), status("agentbox", "agentbox", "stale", { reason: "timeout", readAt: "2026-07-20T00:00:00Z" }),
+  ] });
+  for (const inputs of [[file, local], [local, file]]) {
+    const merged = combineSnapshots(inputs);
+    assert.equal(merged.sessions.find((session) => identity(session) === identity(target))!.lastEventAt, local.sessions[0]!.lastEventAt);
+  }
+});
+
+test("snapshots without machines still validate, and machine fields are checked when present", () => {
+  assert.equal(validateSnapshot(structuredClone(local)).machines, undefined);
+  const combined = JSON.parse(JSON.stringify(combineSnapshots([local, otherMachine()]))) as MachineAnalytics;
+  validateSnapshot(combined);
+  const invalid = (change: (snapshot: MachineAnalytics) => void): void => {
+    const copy = structuredClone(combined);
+    change(copy);
+    assert.throws(() => validateSnapshot(copy), /invalid, inconsistent, or unsupported/);
+  };
+  invalid((snapshot) => { snapshot.sessions[0]!.machine = "elsewhere"; });
+  invalid((snapshot) => { snapshot.machines![1]!.key = snapshot.machines![0]!.key; });
+  invalid((snapshot) => { delete snapshot.machines; });
+  invalid((snapshot) => { (snapshot.machines![0] as { state: string }).state = "gone"; });
+  invalid((snapshot) => { (snapshot.machines![0] as { reason?: string }).reason = "a remote message"; });
+  invalid((snapshot) => { snapshot.machines![0]!.key = "Not A Key"; });
+  invalid((snapshot) => { snapshot.machines![0]!.readAt = "yesterday"; });
+  invalid((snapshot) => { snapshot.historyCoverage!.profiles[0]!.machine = "elsewhere"; });
+  invalid((snapshot) => { (snapshot.machines![0] as unknown as Record<string, unknown>)["hostname"] = "box"; });
+  // A machine's own report for another machine lists itself with its identity and tags nothing.
+  validateSnapshot({ ...structuredClone(local), machines: [status("local", "this machine", "ok", { sessions: local.summary.sessions, identity: "0123456789abcdef", version: "0.9.0" })] });
 });
 
 test("time-zone metadata compares fields independently of serialization order", () => {
@@ -317,4 +402,13 @@ test("merge combines full snapshots from several machines and refuses mixed or m
   assert.equal(refused.status, 1);
   assert.equal(refused.stdout, "");
   assert.match(refused.stderr, /same --time-zone/);
+  // Inputs without names become machine-1, machine-2; a share of several machines is refused, as one source ID would cover them all.
+  assert.deepEqual(merged.machines!.map(({ key, label, state }) => [key, label, state]), [["machine-1", "machine-1", "ok"], ["machine-2", "machine-2", "ok"]]);
+  const share = spawnSync(process.execPath, [bin, "report", "--share", "--snapshot", output, "--min-sessions", "2", "--share-key-file", join(directory, "share.key")], { encoding: "utf8" });
+  assert.equal(share.status, 1);
+  assert.equal(share.stdout, "");
+  assert.equal(share.stderr, "This snapshot combines several machines; share from each machine and merge the shared files.\n");
+  // The text report lists the machines behind a combined file.
+  const text = await run(process.execPath, [bin, "report", "--snapshot", output]);
+  assert.match(text.stdout, /^Session Analytics · machine-1 and machine-2\nGenerated: .*\nMachines: 2 of 2 read now\n {2}machine-1 {2}\d+ sessions, \d+ repositories\n {2}machine-2 {2}\d+ sessions/);
 });

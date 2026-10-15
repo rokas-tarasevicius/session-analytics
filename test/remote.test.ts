@@ -15,6 +15,7 @@ import { remoteArguments } from "../src/remote.ts";
 import { duplicateMachineWarning, filteredWarning, remoteUnavailableWarning } from "../src/public/evidence.js";
 import { filterSnapshot } from "../src/public/export-data.js";
 import type { MachineAnalytics } from "../src/types.ts";
+import { version } from "../src/version.ts";
 import { createSessionAnalyticsFixture, type SessionAnalyticsFixture } from "./fixtures.ts";
 
 const run = promisify(execFile);
@@ -108,13 +109,13 @@ test("--remote combines this machine with others read over the user's ssh", asyn
   assert.ok(!snapshot.warnings.includes(remoteUnavailableWarning));
   assert.equal(snapshot.velocity?.timeZone, "UTC");
   assert.deepEqual(snapshot.repositories.map(({ repository }) => repository.id), localSnapshot.repositories.map(({ repository }) => repository.id));
-  assert.match(stderr, /Read 5 sessions across 3 repositories from server\./);
-  assert.match(stderr, /from copied\./);
+  assert.match(stderr, /Read 5 sessions across 3 repositories from server in \d+\.\d s\./);
+  assert.match(stderr, /from copied in /);
   const recorded = await calls();
   // The server's configured remote must not trigger a second-level SSH call.
   assert.deepEqual(recorded.map(({ destination }) => destination).sort(), ["copied", "server"]);
   for (const call of recorded) {
-    assert.deepEqual(call.options, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-T"]);
+    assert.deepEqual(call.options, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-T", "-a", "-x", "-o", "ClearAllForwardings=yes", "-o", "PermitLocalCommand=no", "-o", "RemoteCommand=none"]);
     assert.deepEqual(call.command, ["session-analytics", ...remoteArguments({ timeZone: "UTC", offline: true, noIndex: true, additionalProviders: false })]);
     // This machine's paths and switches that describe it stay here.
     assert.doesNotMatch(JSON.stringify(call), new RegExp(directory.replaceAll("/", "\\/")));
@@ -123,11 +124,11 @@ test("--remote combines this machine with others read over the user's ssh", asyn
 });
 
 test("--no-remote ignores remote environment settings and conflicts with explicit --remote", () => {
-  assert.deepEqual(remoteOptionsFrom(["--no-remote"], {}), { remotes: [], command: [] });
+  assert.deepEqual(remoteOptionsFrom(["--no-remote"], {}).machines, []);
   for (const environment of [
     { SESSION_ANALYTICS_REMOTE: "server", SESSION_ANALYTICS_REMOTE_COMMAND: "node ~/sa/bin/session-analytics.ts" },
     { SESSION_ANALYTICS_REMOTE: "invalid host", SESSION_ANALYTICS_REMOTE_COMMAND: "$(touch x)" },
-  ]) assert.deepEqual(remoteOptionsFrom(["--no-remote"], environment), { remotes: [], command: [] });
+  ]) assert.deepEqual(remoteOptionsFrom(["--no-remote"], environment).machines, []);
   for (const argv of [["--no-remote", "--remote", "server"], ["--remote", "server", "--no-remote"]]) {
     assert.throws(() => remoteOptionsFrom(argv, {}), (error) => error instanceof OptionError && error.message === "--no-remote cannot be combined with --remote.");
   }
@@ -160,7 +161,8 @@ test("unreachable, outdated and noisy machines leave a warning and the rest of t
   assert.ok(snapshot.warnings.includes(remoteUnavailableWarning));
   assert.match(stderr, /Could not read down: SSH could not connect.*Connection refused/);
   assert.match(stderr, /Could not read old: the remote session-analytics rejected the request.*Unknown session analytics argument/);
-  assert.match(stderr, /Could not read missing: the remote command was not found; set --remote-command/);
+  assert.match(stderr, /Could not read missing: session-analytics was not found there\. bash: line 1: session-analytics: command not found\n {2}Fix: use the bundled runtime \(session-analytics machines add missing\), or name the command in full: --remote-command "node \/path\/to\/session-analytics\/bin\/session-analytics\.ts"/);
+  assert.match(stderr, /Could not read down: .*\n {2}Fix: check that down is up and its SSH server is reachable from here, then run ssh down true once in a terminal/);
   assert.match(stderr, /Could not read noisy: the remote output was not a valid full snapshot/);
   assert.match(stderr, /Could not read elsewhere: the remote snapshot used another time zone/);
   // The warning survives a filtered export like other discovery failures.
@@ -168,6 +170,42 @@ test("unreachable, outdated and noisy machines leave a warning and the rest of t
   const noSsh = spawnSync(process.execPath, [bin, "report", "--json", ...localFlags, "--remote", "copied"], { env: { ...environment, PATH: join(directory, "local") }, encoding: "utf8" });
   assert.equal(noSsh.status, 0, noSsh.stderr);
   assert.match(noSsh.stderr, /Could not read copied: ssh is not available on this machine/);
+  // Each machine is listed with its state; an ad-hoc destination has no last good snapshot to fall back on.
+  assert.deepEqual(snapshot.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [
+    ["local", "ok", null], ["down", "failed", "connection"], ["old", "failed", "rejected"], ["missing", "failed", "missing-command"],
+    ["noisy", "failed", "invalid"], ["elsewhere", "failed", "time-zone"], ["copied", "ok", null],
+  ]);
+  assert.equal(snapshot.machines!.find(({ key }) => key === "copied")!.sessions, copiedSessions);
+  // --strict turns a machine not read into exit 3, once the output is complete.
+  const strict = spawnSync(process.execPath, [bin, "report", ...localFlags, "--remote", "down,copied", "--strict"], { env: environment, encoding: "utf8" });
+  assert.equal(strict.status, 3, strict.stderr);
+  assert.match(strict.stdout, /^Session Analytics · this machine and copied \(not read: down\)\n/);
+  assert.match(strict.stdout, /\n {2}down {10}not read: unreachable\n {4}Fix: check that down is up/);
+  assert.match(strict.stdout, /\nWarnings\n/);
+  const output = join(directory, "strict-export");
+  const exported = spawnSync(process.execPath, [bin, "export", "--format", "csv", "--out", output, ...localFlags, "--remote", "down", "--strict"], { env: environment, encoding: "utf8" });
+  assert.equal(exported.status, 3, exported.stderr);
+  assert.match(exported.stderr, /Saved sessions\.csv.*\n--strict: down was not read now; exiting with 3\.\n$/);
+  assert.equal((await readFile(join(output, "sessions.csv"), "utf8")).trim().split("\r\n").length - 1, localSnapshot.summary.sessions);
+  const plain = spawnSync(process.execPath, [bin, "report", "--json", ...localFlags, "--remote", "copied", "--strict"], { env: environment, encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(plain.status, 0, plain.stderr);
+});
+
+test("--identify-machine lists this machine with a hash of its machine ID and account, for a reading machine only", async () => {
+  const own = spawnSync(process.execPath, [bin, "report", "--json", "--identify-machine", ...localFlags, "--no-remote"], { env: { ...environment, SESSION_ANALYTICS_MACHINE_ID: "fixture-machine" }, encoding: "utf8", maxBuffer: 1 << 28 });
+  assert.equal(own.status, 0, own.stderr);
+  const snapshot = validateSnapshot(JSON.parse(own.stdout));
+  assert.equal(snapshot.machines!.length, 1);
+  const [self] = snapshot.machines!;
+  assert.deepEqual([self!.key, self!.state, self!.sessions, self!.version], ["local", "ok", localSnapshot.summary.sessions, version]);
+  assert.match(self!.identity!, /^[0-9a-f]{16}$/);
+  assert.ok(snapshot.sessions.every(({ machine }) => machine === undefined));
+  assert.doesNotMatch(own.stdout, /fixture-machine/);
+  for (const args of [["--json", "--identify-machine"], ["--identify-machine", "--no-remote"], ["--json", "--identify-machine", "--no-remote", "--share"]]) {
+    const refused = spawnSync(process.execPath, [bin, "report", ...args, ...localFlags], { env: environment, encoding: "utf8" });
+    assert.equal(refused.status, 2, args.join(" "));
+    assert.equal(refused.stderr, "--identify-machine describes this machine's own scan; use it with --json --no-remote.\n");
+  }
 });
 
 test("--remote-command and forwarded switches reach the remote command line; local-only options are refused", async () => {
@@ -191,8 +229,10 @@ test("--remote-command and forwarded switches reach the remote command line; loc
   assert.equal(saved.status, 0, saved.stderr);
   assert.deepEqual(JSON.parse(saved.stdout), localSnapshot);
   assert.throws(() => remoteOptionsFrom([], { SESSION_ANALYTICS_REMOTE: "ok,-bad" }), OptionError);
-  assert.deepEqual(remoteOptionsFrom([], { SESSION_ANALYTICS_REMOTE: " a , user@b.example ", SESSION_ANALYTICS_REMOTE_COMMAND: "node ~/sa/bin/session-analytics.ts" }),
-    { remotes: ["a", "user@b.example"], command: ["node", "~/sa/bin/session-analytics.ts"] });
+  assert.deepEqual(remoteOptionsFrom([], { SESSION_ANALYTICS_REMOTE: " a , user@b.example ", SESSION_ANALYTICS_REMOTE_COMMAND: "node ~/sa/bin/session-analytics.ts" }).machines.map(({ ssh, runtime, command }) => [ssh, runtime, command]),
+    [["a", "installed", ["node", "~/sa/bin/session-analytics.ts"]], ["user@b.example", "installed", ["node", "~/sa/bin/session-analytics.ts"]]]);
+  // ~ after sudo expands to the SSH user's home, not the other account's.
+  assert.throws(() => remoteOptionsFrom(["--remote", "a", "--remote-command", "sudo -n -iu agents node ~/sa/bin/session-analytics.ts"], {}), OptionError);
 });
 
 test("export and the dashboard read remote machines, and refresh reads them again", async () => {
@@ -200,6 +240,9 @@ test("export and the dashboard read remote machines, and refresh reads them agai
   await run(process.execPath, [bin, "export", "--format", "csv", "--out", output, ...localFlags, "--remote", "copied"], { env: environment });
   const sessions = (await readFile(join(output, "sessions.csv"), "utf8")).trim().split("\r\n");
   assert.equal(sessions.length - 1, localSnapshot.summary.sessions + copiedSessions);
+  // Each row names its machine, so a split by machine needs no second export.
+  const machines = sessions.slice(1).map((row) => row.split(",").at(-1));
+  assert.deepEqual([machines.filter((key) => key === '"local"').length, machines.filter((key) => key === '"copied"').length], [localSnapshot.summary.sessions, copiedSessions]);
   const port = await new Promise<number>((resolve) => {
     const probe = createServer().listen(0, "127.0.0.1", () => { const address = probe.address(); probe.close(() => resolve(typeof address === "object" && address ? address.port : 0)); });
   });
@@ -214,9 +257,38 @@ test("export and the dashboard read remote machines, and refresh reads them agai
     assert.equal((await calls()).length, 1);
     await get("/api/analytics?refresh=1");
     assert.equal((await calls()).length, 2);
-    assert.match(stdout, /from copied\./);
+    assert.match(stdout, /from copied in /);
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");
   }
+});
+
+test("repeated --remote flags are merged in report and export, and --share stays on this machine", async () => {
+  await rm(sshLog, { force: true });
+  const { snapshot, stderr } = await report("--remote", "copied", "--remote", "server");
+  assert.equal(snapshot.summary.sessions, localSnapshot.summary.sessions + copiedSessions);
+  assert.match(stderr, /from copied in /);
+  assert.match(stderr, /from server in /);
+  assert.deepEqual((await calls()).map(({ destination }) => destination).sort(), ["copied", "server"]);
+  const output = join(directory, "repeated-export");
+  await rm(sshLog, { force: true });
+  await run(process.execPath, [bin, "export", "--format", "csv", "--out", output, ...localFlags, "--remote", "copied", "--remote", "server"], { env: environment });
+  assert.equal((await readFile(join(output, "sessions.csv"), "utf8")).trim().split("\r\n").length - 1, localSnapshot.summary.sessions + copiedSessions);
+  assert.deepEqual((await calls()).map(({ destination }) => destination).sort(), ["copied", "server"]);
+  assert.throws(() => remoteOptionsFrom(["--remote", "copied", "--remote", "copied"], {}), OptionError);
+  // Any other value flag given twice is refused rather than silently first-wins.
+  for (const command of [[bin, "report"], [new URL("../src/server.ts", import.meta.url).pathname]]) {
+    const repeated = spawnSync(process.execPath, [...command, "--no-remote", "--time-zone", "UTC", "--time-zone", "Asia/Tokyo"], { env: environment, encoding: "utf8" });
+    assert.deepEqual([repeated.status, repeated.stderr], [2, "Give --time-zone once.\n"]);
+  }
+  assert.throws(() => remoteOptionsFrom(["--remote", "a", "--remote-command", "x", "--remote-command", "y"], {}), OptionError);
+  // One keyed source ID covers a share, so other machines share their own and merge detects overlap.
+  await rm(sshLog, { force: true });
+  const refused = spawnSync(process.execPath, [bin, "report", "--share", ...localFlags, "--remote", "copied"], { env: environment, encoding: "utf8" });
+  assert.equal(refused.status, 2);
+  assert.equal(refused.stderr, "report --share describes this machine only; share from each machine and merge the files.\n");
+  const shared = spawnSync(process.execPath, [bin, "report", "--share", ...localFlags, "--min-sessions", "2", "--share-key-file", join(directory, "share.key")], { env: { ...environment, SESSION_ANALYTICS_REMOTE: "copied" }, encoding: "utf8" });
+  assert.equal(shared.status, 0, shared.stderr);
+  assert.deepEqual(await calls(), []);
 });

@@ -52,7 +52,7 @@ export function extractReleaseNotes(metadata: ReleaseMetadata, tag: string): str
 export function checkPackageFiles(paths: string[]): void {
   const required = [
     "package.json", "README.md", "LICENSE", "CHANGELOG.md",
-    "bin/session-analytics.js", "src/analysis-worker.js", "src/cursor-worker.js", "src/mcp/worker.js", "src/server.js",
+    "bin/session-analytics.js", "src/analysis-worker.js", "src/cursor-worker.js", "src/mcp/worker.js", "src/server.js", "src/remote/bootstrap.js", "src/remote/runtime.js",
     ...staticRoutes.map(([, file]) => `src/public/${file}`),
     "src/public/fonts/OFL-1.1.txt", "src/public/brands/NOTICE.md",
     "data/rate-cards.json", "schemas/snapshot.v1.schema.json", "schemas/shared.v1.schema.json",

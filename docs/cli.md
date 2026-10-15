@@ -12,6 +12,7 @@
 - [Pricing sources and history](#pricing-sources-and-history)
 - [Local index](#local-index)
 - [Subscription limits](#subscription-limits)
+- [Other machines](#other-machines)
 - [MCP server and agent skill](#mcp-server-and-agent-skill)
 - [Options](#options)
 - [Environment variables](#environment-variables)
@@ -60,6 +61,8 @@ A checkout runs unreleased `master`; `git checkout vX.Y.Z` runs a release. It ne
 
 The index fingerprints the code that runs: TypeScript in a checkout, JavaScript in an installed package. A checkout and an installed copy therefore never share a warm index, and every switch between them on the same data directory parses all present sessions again, which takes minutes on a large history. Give a checkout that you run beside an installed copy its own data directory, for example `export SESSION_ANALYTICS_DATA_DIR="$HOME/.session-analytics-checkout"` in the shell you develop in, or `--data-dir`. It then keeps its own index, pricing cache and limits ledger.
 
+A separate data directory separates this machine's index only. A [saved machine](interop.md#the-bundled-runtime) keeps its index in the data directory of the account read there, whoever reads it, and a checkout and an installed copy run different code there too. When both read the same machine, each read that follows one by the other parses that machine's history again, which on a large history can outlast the [read time limit](interop.md#reading) and leave the machine stale. Read each machine from one installation. When the checkout has to read it as well, read with `--no-index`, which leaves every index alone but parses all history here and there and leaves out what only the indexes retain, or save the machine in the checkout with `--runtime installed`, so the checkout runs the session-analytics installed there; when that is the same release as your installed copy, the two share that machine's index.
+
 `npm install github:rokas-tarasevicius/session-analytics` installs the TypeScript sources under `node_modules`, where Node refuses to run them (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`); install the release tarball instead. [Releases](release.md) documents how packages are built, checked and published.
 
 ## Dashboard
@@ -70,10 +73,10 @@ session-analytics --no-open       # serve without opening a browser
 session-analytics --port 4180     # use another loopback port
 session-analytics --offline       # use only cached and reviewed prices
 session-analytics --snapshot team.json --no-open   # open a saved or shared snapshot without scanning
-session-analytics --remote server # also read another machine over SSH
+session-analytics --no-remote    # this machine only, without the saved machines
 ```
 
-The server binds to `127.0.0.1` only and answers read-only `GET` requests. `--remote` adds machines read over your SSH configuration, such as a server where agents run; see [combine machines](interop.md#combine-machines). Running the command again reuses a verified live dashboard on that port only when it runs the same version with the same analysis options; otherwise stop it or choose `--port`. After an upgrade, a dashboard still running the old version is named with its version instead of being reused; the footer shows the version a dashboard runs. Saved-file dashboards are kept separate. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
+The server binds to `127.0.0.1` only and answers read-only `GET` requests. Machines saved with [`machines add`](#other-machines), such as a server where agents run, are read over your SSH configuration together with this one; see [combine machines](interop.md#combine-machines). Running the command again reuses a verified live dashboard on that port only when it runs the same version with the same analysis options and machines; otherwise stop it or choose `--port`. After an upgrade, a dashboard still running the old version is named with its version instead of being reused; the footer shows the version a dashboard runs. A dashboard that reads the saved machines follows `machines.json`, so after `machines add`, `set` or `remove` the same command still reuses it and its next request reads the new machines. Saved-file dashboards are kept separate. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
 
 ### Window and URL state
 
@@ -91,7 +94,7 @@ Missing or timezone-free session starts are counted as undated and excluded from
 session-analytics report
 ```
 
-Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, the 15 highest-value sessions by hashed key, and coverage warnings.
+Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, the 15 highest-value sessions by hashed key, and coverage warnings. When other machines are read, the header names the machines it covers and a `Machines` block lists each one's sessions, repositories and read time, or its reason and the command that fixes it; see [machine status](interop.md#machine-status).
 
 ## JSON snapshot
 
@@ -175,6 +178,20 @@ Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_l
 
 Readings are kept in `limits-v2.json` in the data directory; `--no-index` neither reads nor writes it. The 0.9.0 ledger, `limits.json`, is imported and never written, so an older installation can share the data directory. See [Subscription limits and value](subscription.md#accounts).
 
+## Other machines
+
+```bash
+session-analytics machines add server                    # save a server read over SSH, after checking it
+session-analytics machines add agentbox --user agent-t3  # read it as the account the agents run as
+session-analytics machines list [--json]                 # the saved machines and this machine's label
+session-analytics machines check [NAME...] [--find-users] [--json]   # the doctor: exits 1 when a check fails
+session-analytics machines set NAME --disable            # or --enable, --user NAME, --no-user, --no-login-shell, --node PATH, --ssh DEST
+session-analytics machines rename local laptop           # label this machine; rename NAME LABEL renames a saved one
+session-analytics machines remove NAME
+```
+
+Saved machines live in `machines.json` in the data directory. A plain `session-analytics`, `report` and `export` read every enabled one; `--machines NAME[,NAME]` reads only those, `--no-remote` none. The dashboard shows them in a Machines strip that also filters every view, and a saved machine that cannot be read is shown from its last good snapshot, marked stale; `report --strict` and `export --strict` exit 3 when any machine was not read now. By default each machine runs this install's own code from that account's `~/.cache/session-analytics/runtime`, copied over SSH on first use, and needs only Node.js 24 there; `--runtime installed` with `--command WORDS` runs a session-analytics installed there instead. `--user NAME` reads that account through `sudo -n -iu NAME`, which needs a passwordless sudo rule ([when sudo needs a password](interop.md#when-sudo-needs-a-password)), or through `sudo -n -H -u NAME` with `--no-login-shell`, for a service account whose shell is `nologin`; `check --find-users` lists the accounts there with agent history. `add` and `set` take `--user NAME`, `--no-login-shell`, `--node PATH` (`node` on the login `PATH` or an absolute path), `--runtime bundled|installed` and `--command WORDS`; `add` also takes `--name LABEL` (default: the host name before its first dot, or a whole IP address such as `192-168-1-20`), `--find-users` and `--no-check` (save without connecting), and `set` takes `--ssh DEST`, `--no-user`, `--login-shell`, `--enable` and `--disable`. `add` refuses a host it cannot log in to, an account that does not exist there, and a machine already read; any other failure is saved, and its last line says what to fix before it can be read. Every `machines` command changes `machines.json` under a lock from the file as it is, so concurrent commands never undo each other. `machines` commands take `--data-dir PATH`; `add` and `check` also take `--remote-timeout SECONDS`. See [combine machines](interop.md#combine-machines) for the bundled runtime and what it leaves on that machine, every check and its fix, and what crosses the network.
+
 ## MCP server and agent skill
 
 ```bash
@@ -208,6 +225,8 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 | `--port PORT` | dashboard | Loopback port, 1024 to 65535. Default `4174`, or `CONDUCTOR_PORT + 4` inside a Conductor workspace. |
 | `--json` | report, rates, index status | Print structured JSON instead of text; for `report`, the versioned content-free snapshot. |
 | `--share` | report | Preview aggregate-only JSON with pseudonymized repositories and a minimum of five sessions per bucket. |
+| `--strict` | report, export | Exit with status 3, after the report or export is complete, when another machine was not read now: it failed, only its last good snapshot was used, or a saved dashboard snapshot caught it still reading. |
+| `--identify-machine` | report | With `--json --no-remote`, list this machine in `machines` with a 16-digit hash of its machine ID and account. Remote reads with the bundled runtime ask for it, to recognise the same machine read twice. |
 | `--snapshot FILE` | dashboard, report, export | Read a validated snapshot file instead of scanning provider stores. |
 | `--repo-name NAME` | both | Narrow to one uniquely named repository. |
 | `--repo-root PATH` | both | Narrow to the repository whose canonical root is `PATH`. |
@@ -227,23 +246,25 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 | `--database PATH` | both | Conductor database to use for optional enrichment. |
 | `--rate-card PATH` | dashboard, report, export, rates, index rebuild, mcp | Pin an alternative reviewed rate card; bypass cached API prices and automatic pricing refresh. |
 | `--offline` | dashboard, report, export, rates, index rebuild, mcp | Disable public pricing requests; retain access to cached prices. |
-| `--data-dir PATH` | dashboard, report, export, rates, index, mcp | Private index, pricing cache and settings directory. |
+| `--data-dir PATH` | dashboard, report, export, rates, index, mcp, machines | Private index, pricing cache, saved machines and settings directory. |
 | `--pricing-policy MODE` | dashboard, report, export, rates, index rebuild, mcp | `reviewed-first` (default), `api-first`, or `reviewed-only`. |
 | `--pricing-sources LIST` | dashboard, report, export, rates, index rebuild, mcp | Ordered public sources; default `models.dev,litellm`. |
 | `--pricing-max-age-days DAYS` | dashboard, report, export, rates, index rebuild, mcp | Stale threshold, default `7`; `0` checks on every dashboard startup. |
 | `--no-index` | both | Read present provider evidence without accessing the index; also `SESSION_ANALYTICS_NO_INDEX=1`. |
 | `--time-zone ZONE` | dashboard, report, export, index rebuild, mcp | IANA time zone for activity days and hours, such as `Europe/London`. Default: `TZ`, then the system zone. |
-| `--remote HOST[,HOST]` | dashboard, report, export | Also read these machines over SSH and combine them with this one. Each needs session-analytics installed; see [combine machines](interop.md#combine-machines). Cannot be combined with `--snapshot`, repository filters or `--rate-card`. |
-| `--remote-command CMD` | dashboard, report, export | Words that start session-analytics on the remote machines. Default `session-analytics`; for example `sudo -n -iu agents session-analytics`. |
-| `--no-remote` | dashboard, report, export | Scan only this machine, ignoring `SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND`. Cannot be combined with `--remote`; always used for fetched reports. |
+| `--machines NAME[,NAME]` | dashboard, report, export | Read only these [saved machines](#other-machines), disabled ones included, instead of every enabled one. Cannot be combined with `--remote`, `--snapshot`, repository filters or `--rate-card`. |
+| `--remote HOST[,HOST]` | dashboard, report, export | Read these machines over SSH for this run instead of the saved ones; repeat the flag or separate hosts with commas. Each needs session-analytics installed; see [combine machines](interop.md#combine-machines). Cannot be combined with `--snapshot`, `report --share`, repository filters or `--rate-card`. |
+| `--remote-command CMD` | dashboard, report, export | Words that start session-analytics on the `--remote` machines. Default `session-analytics`; for example `sudo -n -iu agent-t3 node /opt/session-analytics/bin/session-analytics.ts`. `~` is refused after `sudo`. |
+| `--remote-timeout SECONDS` | dashboard, report, export, machines add, machines check | Stop a machine that has not answered by then, 1 to 86400. Default `300`. |
+| `--no-remote` | dashboard, report, export | Scan only this machine, ignoring saved machines, `SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND`. Cannot be combined with `--remote` or `--machines`; always used for fetched reports. |
 | `--portable-ids` | dashboard, report, export, mcp | Give every repository with a Git remote the remote-derived ID, including repositories registered in Conductor, so snapshots from several machines name the same repository identically. Output only; the index keeps local IDs. |
 | `--version`, `--help` | all | Print the version or command help. |
 
-"Both" means the dashboard and `report` commands. `export`, `rates` and `mcp` accept the same source, repository and pricing options (`--remote` applies to the dashboard, `report` and `export` only); `index rebuild` accepts the source, time-zone and pricing options but not repository filters; `merge` accepts only `--out`. Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations.
+"Both" means the dashboard and `report` commands. `export`, `rates` and `mcp` accept the same source, repository and pricing options (saved machines, `--machines` and `--remote` apply to the dashboard, `report` and `export` only); `index rebuild` accepts the source, time-zone and pricing options but not repository filters; `merge` accepts only `--out`. The dashboard and `report` refuse a value option given twice (`Give --time-zone once.`), except `--remote`, whose values add up. Incomplete primary transcripts are labeled partial and retain observed counters and independent provider durations.
 
 ## Environment variables
 
-The analysis settings and the dashboard port can also be set with `SESSION_ANALYTICS_*` environment variables, named after the flag; a command-line option wins over the environment. Dashboard: `SESSION_ANALYTICS_PORT`. Source paths: `SESSION_ANALYTICS_CLAUDE_ROOT`, `SESSION_ANALYTICS_CODEX_ROOT`, `SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT`, `SESSION_ANALYTICS_CURSOR_DATABASE`, `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, `SESSION_ANALYTICS_GEMINI_ROOT` and `SESSION_ANALYTICS_CONDUCTOR_DATABASE`. Repository filters: `SESSION_ANALYTICS_REPO_ID`, `SESSION_ANALYTICS_REPO_NAME`, `SESSION_ANALYTICS_REPO_REMOTE` and `SESSION_ANALYTICS_REPO_ROOT`. Machines: `SESSION_ANALYTICS_REMOTE`, `SESSION_ANALYTICS_REMOTE_COMMAND`, `SESSION_ANALYTICS_TIME_ZONE` and `SESSION_ANALYTICS_PORTABLE_IDS=1`; `--snapshot` ignores the remote settings. Pricing and storage: `SESSION_ANALYTICS_RATE_CARD`, `SESSION_ANALYTICS_PRICING_POLICY`, `SESSION_ANALYTICS_PRICING_SOURCES`, `SESSION_ANALYTICS_PRICING_MAX_AGE_DAYS`, `SESSION_ANALYTICS_DATA_DIR`, `SESSION_ANALYTICS_OFFLINE=1` and `SESSION_ANALYTICS_NO_INDEX=1`. `SESSION_ANALYTICS_CODEX_ACCOUNT=0` turns off the banked-reset read (same as `--no-codex-account` on the dashboard and `limits`; `--offline` also skips it); `SESSION_ANALYTICS_CODEX_BIN` names the Codex binary. `SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` lists directories of Claude Agent SDK event logs for limit meters. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable discovery of the five additional stores. Output flags such as `--no-open`, `--json`, `--share`, `--snapshot` and `--exclude-hidden` are command-line only.
+The analysis settings and the dashboard port can also be set with `SESSION_ANALYTICS_*` environment variables, named after the flag; a command-line option wins over the environment. Dashboard: `SESSION_ANALYTICS_PORT`. Source paths: `SESSION_ANALYTICS_CLAUDE_ROOT`, `SESSION_ANALYTICS_CODEX_ROOT`, `SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT`, `SESSION_ANALYTICS_CURSOR_DATABASE`, `SESSION_ANALYTICS_CURSOR_SDK_ROOT`, `SESSION_ANALYTICS_CURSOR_TRANSCRIPT_ROOT`, `SESSION_ANALYTICS_COPILOT_ROOT`, `SESSION_ANALYTICS_OPENCODE_DATABASE`, `SESSION_ANALYTICS_GEMINI_ROOT` and `SESSION_ANALYTICS_CONDUCTOR_DATABASE`. Repository filters: `SESSION_ANALYTICS_REPO_ID`, `SESSION_ANALYTICS_REPO_NAME`, `SESSION_ANALYTICS_REPO_REMOTE` and `SESSION_ANALYTICS_REPO_ROOT`. Machines: `SESSION_ANALYTICS_REMOTE_TIMEOUT`, `SESSION_ANALYTICS_TIME_ZONE` and `SESSION_ANALYTICS_PORTABLE_IDS=1`; `SESSION_ANALYTICS_MACHINE_ID` replaces the machine ID (`/etc/machine-id`, or a Mac's platform UUID) when several machines share one, such as cloned containers or VMs; plus the deprecated `SESSION_ANALYTICS_REMOTE` and `SESSION_ANALYTICS_REMOTE_COMMAND`, which override the saved machines with a notice unless `--machines` is given; `--snapshot` ignores the remote settings. Pricing and storage: `SESSION_ANALYTICS_RATE_CARD`, `SESSION_ANALYTICS_PRICING_POLICY`, `SESSION_ANALYTICS_PRICING_SOURCES`, `SESSION_ANALYTICS_PRICING_MAX_AGE_DAYS`, `SESSION_ANALYTICS_DATA_DIR`, `SESSION_ANALYTICS_OFFLINE=1` and `SESSION_ANALYTICS_NO_INDEX=1`. `SESSION_ANALYTICS_CODEX_ACCOUNT=0` turns off the banked-reset read (same as `--no-codex-account` on the dashboard and `limits`; `--offline` also skips it); `SESSION_ANALYTICS_CODEX_BIN` names the Codex binary. `SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` lists directories of Claude Agent SDK event logs for limit meters. Set `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0` to disable discovery of the five additional stores. Output flags such as `--no-open`, `--json`, `--share`, `--strict`, `--snapshot` and `--exclude-hidden` are command-line only.
 
 Profile discovery honors `CLAUDE_CONFIG_DIR` and `CODEX_HOME`; OpenCode also honors `XDG_DATA_HOME`. Each source override replaces only that source's default; isolated scans should supply all desired paths and disable additional discovery. The demo does this automatically. `--time-zone` (or `TZ`) selects the analysis timezone.
 

@@ -37,6 +37,8 @@ const files = browserOnly ? ["test/dashboard.browser.test.ts"] : [
 const temporary = temporaryDirectory();
 const child = spawn(process.execPath, ["--test", "--test-concurrency=2", ...process.argv.slice(browserOnly ? 3 : 2), ...files], {
   cwd: root, stdio: "inherit", env: {
+    // Tests never read the developer's private data directory, its index or its saved machines.
+    SESSION_ANALYTICS_DATA_DIR: join(temporary, "session-analytics-data"),
     ...process.env, TMPDIR: temporary, TMP: temporary, TEMP: temporary,
     ...(browserOnly ? { SESSION_ANALYTICS_REQUIRE_BROWSER: "1" } : {}),
   },

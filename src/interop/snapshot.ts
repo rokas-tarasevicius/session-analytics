@@ -91,8 +91,13 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
   if (repositories.size !== snapshot.repositories.length) fail();
   const sessions = new Set<string>();
   if (!validHistoryCoverage(snapshot)) fail();
+  // Every session and profile names a machine the snapshot lists; a single machine's report names none.
+  const machines = new Set(snapshot.machines?.map(({ key }) => key));
+  if (snapshot.machines && (machines.size !== snapshot.machines.length || snapshot.machines.some(({ readAt }) => readAt !== null && !date(readAt)))) fail();
+  if (snapshot.historyCoverage?.profiles.some(({ machine }) => machine !== undefined && !machines.has(machine))) fail();
   for (const session of snapshot.sessions) {
     if (!validSessionHistory(session)) fail();
+    if (session.machine !== undefined && !machines.has(session.machine)) fail();
     const key = `${session.provider}:${session.sessionKey}`;
     if (sessions.has(key) || repositories.get(session.repositoryId) !== session.repositoryName) fail();
     if (![session.createdAt, session.updatedAt, session.firstEventAt, session.lastEventAt].every((value) => value === null || date(value))) fail();

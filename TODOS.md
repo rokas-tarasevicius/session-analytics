@@ -43,8 +43,13 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
+| P2 | Read subscription limits from other machines: run `limits --json` there through the same bootstrap and merge the observations by account key, then let the Subscription value join count each machine whose limits were read, not only `local`. Only identified accounts (`claude-`/`codex-` and a hashed account ID) have the same key on every machine; the path-derived `-p-` fallback keys and the weekly-phase `claude-w-` keys can collide across machines for different logins, so never merge those. Join remote Claude sessions on (machine, original profile key), or have `combineSnapshots` return its per-input profile-key remap and rewrite remote accounts' `profileKeys` the same way: two Macs with the same user name, or two VMs as `ubuntu`, have colliding profile keys, and the later machine's sessions are remapped to `profile-<hash>` and would otherwise match no account. Apply the Codex one-account rule per machine. Per-account meters and session `machine` are in place. | Machines review (limits-never-read-remote) |
 | P3 | Persist portable repository IDs and session keys with retained index facts, so history whose sources were deleted keeps its portable identity across exports. | #62 review |
-| P3 | Show the machine as a dimension in combined snapshots and the dashboard. | #63 follow-up |
+| P3 | Compare pricing freshness across machines: each machine prices its own sessions with its own cache, and a remote's stale or older rate card is not flagged. | Machines review (no-cross-machine-consistency) |
+| P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
+| P3 | Compare ad-hoc `--remote` machines, and installed ones without a recorded check, for the same machine twice; needs `--identify-machine` there, which older versions reject. Return compact JSON from installed runtimes for the same reason. | Machines review (same-machine-twice, uncompressed-pretty-json) |
+| P3 | Add a Machines column (or filter chips) to the repository table. | Machines review (no-machine-dimension) |
+| P3 | Stop every saved Linux server from adding "Cursor local session history is missing." and an incomplete Cursor source: the default Cursor database is the macOS path on every platform. Use each platform's default (`~/.config/Cursor` on Linux, `%APPDATA%\Cursor` on Windows), and count an absent default store as not installed rather than missing for every provider's default roots alike, the Codex archive root included, so source health stays consistent. | Machines end-to-end review (cursor-missing-on-every-server) |
 
 ## Distribution and release metadata
 
@@ -64,6 +69,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Completed
 
+- **Completed: 2026-10-14 (unreleased).** Machines as a dimension: saved machines with a bundled runtime and `machines check`, per-machine status in combined snapshots, the report and the dashboard (Machines strip and filter, Machine details, Usage value by machine), last good snapshots and progressive loading: `src/machines/`, `src/remote.ts`, `src/remote/` and `src/public/machines.js`.
 - **Completed: 2026-10-14 (unreleased).** The tag workflow publishes the compiled package that `release:check` installs: a GitHub Release tarball with an unversioned alias and `SHA256SUMS`, attested for build provenance, after an installed smoke on Linux and macOS under Node.js 24.0.0, the newest 24.x and 26. It can send the same bytes to npm through trusted publishing and to a Homebrew tap formula, which it installs and tests with Homebrew first; each waits for a repository variable and its one-time setup. CHANGELOG compare links are added and required by `release:check`.
 - **Completed: 2026-10-13 (readiness candidate).** Mobile time-window selector, single-column KPIs below 400 px, and wrapped snapshot metadata: six views checked at 375, 768 and 1440 px through the collaborative preview; 375 px also checked in both themes and densities. Custom ranges focus the start date, and failed refreshes preserve the snapshot without widening the page. Synthetic mobile captures and their provenance are in `assets/SCREENSHOTS.md`.
 - **Completed: 2026-10-13 (0.8.0).** Formatter, shared type/focus/chart tokens, Summary hierarchy and view finishes (PR-E1–E4): `a383526`, `37a3e3d`, `cd65a99`, `20eadba`.

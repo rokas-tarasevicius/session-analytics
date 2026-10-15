@@ -55,6 +55,7 @@ import { desktopMetadataPath } from "./providers/claude-desktop.ts";
 import { createClaudeAdapter } from "./providers/claude.ts";
 import { buildClaudeUsageOwners, type ClaudeUsageOwners } from "./providers/claude-ownership.ts";
 import { mapConcurrent } from "./concurrency.ts";
+import { track } from "./processes.ts";
 import { additionalProviderSessions } from "./providers/index.ts";
 import { modelName, name as safeName, effortName, safeTime, statusName } from "./providers/common.ts";
 import { conductorFallback, conductorLegacyProviderIds } from "./providers/conductor.ts";
@@ -2029,9 +2030,9 @@ async function cursorSessionsSerialized(
   workspaceRepositories: Map<string, RepositoryRow>,
 ): Promise<string> {
   return await new Promise<string>((resolveWorker, rejectWorker) => {
-    const child = spawn(process.execPath, ["--max-old-space-size=192", fileURLToPath(moduleUrl("./cursor-worker.ts", import.meta.url))], {
+    const child = track(spawn(process.execPath, ["--max-old-space-size=192", fileURLToPath(moduleUrl("./cursor-worker.ts", import.meta.url))], {
       stdio: ["pipe", "pipe", "pipe"],
-    });
+    }));
     let output = "";
     let errorOutput = "";
     child.stdout.setEncoding("utf8");

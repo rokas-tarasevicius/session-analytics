@@ -114,6 +114,21 @@ test("CSV preserves quoted cells, null coverage, numeric sums and provider cost 
   for (const content of Object.values(csvTables(filterSnapshot(snapshot, { providers: [] })))) assert.equal(parseCsv(content).length, 1);
 });
 
+test("sessions.csv and OTLP logs name each session's machine in a combined snapshot, and leave it out for one machine", () => {
+  const column = (tables: Record<string, string>): string[] => { const [header, ...rows] = parseCsv(tables["sessions.csv"]!); return rows.map((row) => row[header!.indexOf("machine")]!); };
+  const machineAttributes = (value: MachineAnalytics): Array<string | undefined> => (otlpLogs(value) as any).resourceLogs[0].scopeLogs[0].logRecords
+    .map((record: any) => record.attributes.find((attribute: any) => attribute.key === "session_analytics.machine.key")?.value.stringValue);
+  assert.equal(parseCsv(csvTables(snapshot)["sessions.csv"]!)[0]!.at(-1), "machine");
+  assert.ok(column(csvTables(snapshot)).every((machine) => machine === ""));
+  assert.ok(machineAttributes(snapshot).every((machine) => machine === undefined));
+  const status = (key: string) => ({ key, label: key, state: "ok" as const, sessions: 1, repositories: 1, readAt: snapshot.generatedAt, durationMs: 1, version: null });
+  // A session without a key belongs to the first machine.
+  const combined = { ...snapshot, machines: [status("local"), status("box")], sessions: snapshot.sessions.map((session, index) => index ? session : { ...session, machine: "box" }) };
+  const expected = combined.sessions.map((_, index) => index ? "local" : "box");
+  assert.deepEqual(column(csvTables(combined)), expected);
+  assert.deepEqual(machineAttributes(combined), expected);
+});
+
 test("tools.csv applies the Tools eligibility rule", () => {
   const source = snapshot.sessions.find((s) => s.provider === "claude")!;
   const observed = structuredClone(source);

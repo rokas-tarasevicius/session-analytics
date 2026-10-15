@@ -11,7 +11,7 @@ if (Number(process.versions.node.split(".")[0]) < 24) {
 
 const [command, ...rawRest] = process.argv.slice(2);
 const rest = rawRest.map((arg) => arg === "-h" ? "--help" : arg);
-const commands = new Set(["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits"]);
+const commands = new Set(["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits", "machines"]);
 const forward = (args: string[]): void => {
   process.argv = [process.argv[0] ?? process.execPath, process.argv[1] ?? "", ...args];
 };
@@ -34,6 +34,7 @@ Usage:
   ${brand.command} mcp [options]          Serve metrics-only MCP tools over stdio
   ${brand.command} index <action>         Manage the local index: status, path, rebuild, prune
   ${brand.command} limits [statusline]    Harvest subscription limit meters (Claude, Codex) and show where they stand
+  ${brand.command} machines <command>     Save, check and manage other machines to read over SSH (add, list, check, set, rename, remove)
   ${brand.command} <command> --help       Show options for a command
   ${brand.command} --version              Print the version
 `);
@@ -55,6 +56,9 @@ Usage:
 } else if (command === "limits") {
   const { runLimits } = await import("../src/limits/cli.ts");
   process.exitCode = await runLimits(rest);
+} else if (command === "machines") {
+  const { runMachines } = await import("../src/machines/cli.ts");
+  process.exitCode = await runMachines(rest);
 } else if (command === "index") {
   forward(rest);
   await import("../src/store/cli.ts");

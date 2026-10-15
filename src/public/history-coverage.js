@@ -6,7 +6,8 @@ function node(tag, text, className) {
   return result;
 }
 
-export function renderHistoryCoverage(container, history, sessions = []) {
+/** `machines` names the machine of each Claude profile in a snapshot that combines machines. */
+export function renderHistoryCoverage(container, history, sessions = [], machines = []) {
   if (!container) return;
   container.replaceChildren(); container.hidden = !history;
   if (!history) return;
@@ -17,7 +18,8 @@ export function renderHistoryCoverage(container, history, sessions = []) {
     : "recovery calibration unavailable";
   details.append(node("summary", `History coverage: ${status} · details`));
   const disclosureBody = node("div", undefined, "evidence-body");
-  disclosureBody.append(node("p", "Session evidence and unattributed history stay separate. This machine-wide panel is independent of repository and date filters. API-equivalent value is not an invoice."));
+  const labels = new Map(machines.map(({ key, label }) => [key, label]));
+  disclosureBody.append(node("p", `Session evidence and unattributed history stay separate. ${labels.size > 1 ? `This panel covers all ${labels.size} machines and is independent of repository, date and machine filters.` : "This machine-wide panel is independent of repository and date filters."} API-equivalent value is not an invoice.`));
   disclosureBody.append(node("p", calibration?.aggregateValueRatio != null
     ? `Recovered history remains a lower bound on retained evidence. On ${calibration.comparedSessions} paired sessions it measured ${percent(calibration.aggregateValueRatio)} of native value (${money(calibration.recoveredValueUsd)} / ${money(calibration.nativeValueUsd)}); median ${percent(calibration.medianValueRatio)}, p10–p90 ${percent(calibration.p10ValueRatio)}–${percent(calibration.p90ValueRatio)}. ${calibration.excludedSessions}/${calibration.pairedSessions} pairs were excluded for incomplete, active, unpriced or small native denominators.`
     : "Recovered history remains a lower bound on retained evidence. Calibration is unavailable until at least five complete, fully priced native pairs with no observed active work each have $1 of value."));
@@ -37,7 +39,7 @@ export function renderHistoryCoverage(container, history, sessions = []) {
   disclosureBody.append(node("p", "We subtract same-profile stream counters from provider totals per UTC day and model, with a zero floor. Unknown-profile Conductor usage reserves possible overlap once across profiles. The remainder is priced using each model’s lifetime token proportions, ordinary rates and default cache-write TTL. Historical mix and request sizes are unknown. Claude v5 statistics repeat input across streamed blocks; remaining counters can overstate missing billable tokens. These estimates are not added to session or repository totals."));
   disclosureBody.append(node("p", "Provider retention can remove older transcripts while aggregate statistics survive. The earliest present transcript date is an evidence boundary, not proof of when work began."));
   for (const profile of history.profiles) {
-    disclosureBody.append(node("p", `Claude profile ${profile.ordinal} · ${profile.status} statistics${profile.statisticsThrough ? ` through ${profile.statisticsThrough}` : ""} · earliest present transcript ${profile.firstTranscriptDay ?? "unavailable"} · earliest statistics ${profile.firstStatisticsDay ?? "unavailable"}`));
+    disclosureBody.append(node("p", `Claude profile ${profile.ordinal}${labels.size > 1 && labels.has(profile.machine) ? ` (${labels.get(profile.machine)})` : ""} · ${profile.status} statistics${profile.statisticsThrough ? ` through ${profile.statisticsThrough}` : ""} · earliest present transcript ${profile.firstTranscriptDay ?? "unavailable"} · earliest statistics ${profile.firstStatisticsDay ?? "unavailable"}`));
     if (profile.sessionsWithoutStatisticsCounters) disclosureBody.append(node("p", `${profile.sessionsWithoutStatisticsCounters} indexed sessions lack stream counters; gaps may include known streamed blocks.`));
     for (const month of profile.months) for (const model of month.models) disclosureBody.append(node("p", `${month.month} · ${model.model}: ${count(model.sessionStatisticsTokens)} / ${count(model.providerTokens)} session / provider stream counters (${count(model.sessionTokens)} deduplicated session tokens) over ${model.statisticsDays} reported days; ${count(model.unattributedTokens)} unattributed after overlap reservation.`));
   }

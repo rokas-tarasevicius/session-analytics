@@ -138,7 +138,7 @@ test("review: isolated Claude JSON rejects private structured fields and malform
     const composer = JSON.parse(String(cursor.prepare("SELECT value FROM cursorDiskKV WHERE key='composerData:cursor-fixture'").get()!["value"]));
     composer.usageData = { [secret]: { costInCents: 100 }, "/private/SECOND-REVIEW-SECRET": { costInCents: 200 } };
     cursor.prepare("UPDATE cursorDiskKV SET value=? WHERE key='composerData:cursor-fixture'").run(JSON.stringify(composer)); cursor.close();
-    const child = spawnSync(process.execPath, ["bin/session-analytics.ts", "report", "--json", "--no-index", "--no-additional-providers", "--database", f.databasePath, "--claude-root", f.claudeRoot, "--codex-root", f.codexRoot, "--codex-archive-root", f.codexArchiveRoot, "--cursor-database", f.cursorDatabasePath], { encoding: "utf8", timeout: 20000 });
+    const child = spawnSync(process.execPath, ["bin/session-analytics.ts", "report", "--no-remote", "--json", "--no-index", "--no-additional-providers", "--database", f.databasePath, "--claude-root", f.claudeRoot, "--codex-root", f.codexRoot, "--codex-archive-root", f.codexArchiveRoot, "--cursor-database", f.cursorDatabasePath], { encoding: "utf8", timeout: 20000 });
     assert.equal(child.status, 0, child.stderr); assert.ok(!child.stdout.includes("REVIEW-SECRET")); assert.ok(!child.stdout.includes(root));
     const s = JSON.parse(child.stdout).sessions.find((s: { provider: string }) => s.provider === "claude"); assert.ok(s);
     assert.equal(s.status, "unknown"); assert.ok(Number.isFinite(Date.parse(s.createdAt)));

@@ -2,6 +2,10 @@ import { analyzeMachineSessions } from "./analyzer.ts";
 import type { AnalyzeOptions } from "./types.ts";
 import { indexErrorCode } from "./store/errors.ts";
 import { writeAnalysisSnapshot } from "./analysis-output.ts";
+import { stopOnSignals } from "./processes.ts";
+
+// A parent that stops this worker stops its Cursor worker too, rather than leave it scanning.
+stopOnSignals();
 
 let serializedInput = "";
 process.stdin.setEncoding("utf8");

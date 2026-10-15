@@ -272,6 +272,8 @@ export interface SessionAnalytics {
   agentIdentity?: AgentIdentity;
   velocity?: SessionVelocity;
   mcpEvidence?: McpSessionEvidence;
+  /** Key of the machine whose copy of this session was kept, in snapshots that combine machines. */
+  machine?: string;
   cost: CostBreakdown;
   costBasis: CostBasis;
   costByExecution: {
@@ -347,7 +349,39 @@ export interface RepositoryAnalytics {
   warnings: string[];
 }
 
+/** Why a machine was not read, or read with a caveat: a fixed reason, never remote text. */
+export type MachineReason = "no-ssh" | "unknown-host" | "connection" | "login-refused" | "dropped" | "sudo" | "no-account" | "login-shell" | "permission"
+  | "missing-command" | "no-node" | "node-too-old" | "local-runtime" | "runtime" | "cache-unwritable" | "corrupted" | "version-skew" | "rejected" | "busy"
+  | "index-newer" | "analysis" | "invalid" | "time-zone" | "timeout" | "too-large" | "cancelled" | "no-history" | "same-machine";
+
+/**
+ * One machine behind a combined snapshot. `stale` carries its last good snapshot after a failed read;
+ * `reading` appears only in a dashboard snapshot served before that machine answered.
+ */
+export interface MachineStatus {
+  key: string;
+  label: string;
+  state: "ok" | "stale" | "failed" | "reading";
+  reason?: MachineReason;
+  /** The exact next step, built from the saved configuration only. */
+  fix?: string;
+  /** Sessions and repositories read from this machine, before duplicates across machines are removed. */
+  sessions: number;
+  repositories: number;
+  /** When the snapshot in use was read; null when none is. */
+  readAt: string | null;
+  durationMs: number | null;
+  /** The session-analytics version that produced it, when known. */
+  version: string | null;
+  /** Hash of the machine ID and account (`host-` when only the host name told it); only a single machine's own report carries it. */
+  identity?: string;
+  /** Fixed discovery warnings that came from this machine. */
+  warnings?: string[];
+}
+
 export interface MachineAnalytics {
+  /** Present when the snapshot combines machines (and in a machine's own report for another one). */
+  machines?: MachineStatus[];
   historyCoverage?: HistoryCoverage;
   velocity?: VelocityMetadata;
   schemaVersion: 1;
@@ -431,7 +465,10 @@ export interface DashboardHealth {
   snapshot: "ready" | "building" | "not-started";
   status: "ok";
   instanceToken: string;
+  /** Every option that changes the snapshot, including the machines read. */
   optionsHash: string;
+  /** The same without the machines, so a launch can tell that only the machines differ. */
+  scanHash: string;
   /** Tool version: a launch reuses only a dashboard running the same version. */
   version: string;
 }

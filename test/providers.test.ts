@@ -294,7 +294,7 @@ test("Copilot counts only persisted activity, validates identity, and never inte
     assert.equal(s.pricedTokenCoverage, null); assert.equal(s.evidence!.tokens, "unavailable");
     privateOutput(result, root);
     const missing = join(root, "absent-store");
-    const report = spawnSync(process.execPath, ["bin/session-analytics.ts", "report", "--no-index", "--no-additional-providers", "--claude-root", missing, "--codex-root", missing, "--codex-archive-root", missing, "--cursor-database", missing, "--database", missing, "--copilot-root", store], { encoding: "utf8", timeout: 20000 });
+    const report = spawnSync(process.execPath, ["bin/session-analytics.ts", "report", "--no-remote", "--no-index", "--no-additional-providers", "--claude-root", missing, "--codex-root", missing, "--codex-archive-root", missing, "--cursor-database", missing, "--database", missing, "--copilot-root", store], { encoding: "utf8", timeout: 20000 });
     assert.equal(report.status, 0, report.stderr);
     assert.match(report.stdout, /Evidence: 0\/1 summary-only, 1\/1 activity-only/);
     assert.match(report.stdout, /Cache reads: N\/A;/);
@@ -397,7 +397,7 @@ test("token normalization rejects non-finite and negative counters and keeps rea
 test("isolated JSON report includes new evidence without exposing content", async () => {
   await fixture(async (root, f) => {
     const sdk = await sdkFixture(root, f.repositoryRoot);
-    const child = spawnSync(process.execPath, ["bin/session-analytics.ts", "report", "--json", "--no-index", "--no-additional-providers", "--claude-root", f.claudeRoot, "--codex-root", f.codexRoot, "--codex-archive-root", f.codexArchiveRoot, "--cursor-database", f.cursorDatabasePath, "--database", f.databasePath, "--cursor-sdk-root", sdk], { encoding: "utf8", timeout: 20000 });
+    const child = spawnSync(process.execPath, ["bin/session-analytics.ts", "report", "--no-remote", "--json", "--no-index", "--no-additional-providers", "--claude-root", f.claudeRoot, "--codex-root", f.codexRoot, "--codex-archive-root", f.codexArchiveRoot, "--cursor-database", f.cursorDatabasePath, "--database", f.databasePath, "--cursor-sdk-root", sdk], { encoding: "utf8", timeout: 20000 });
     assert.equal(child.status, 0, child.stderr);
     const snapshot = JSON.parse(child.stdout) as { sessions: SessionAnalytics[] };
     assert.ok(snapshot.sessions.some((s) => s.sessionKey === hash(`cursor:${sdkId}`)));

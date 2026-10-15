@@ -1,16 +1,19 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { AnalysisHeapLimitError } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteOptionsFrom, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
-import { analyzeMachines } from "./remote.ts";
+import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
+import { machinesPath, remoteFor } from "./machines/config.ts";
+import { stopOnSignals } from "./processes.ts";
+import { analyzeMachines, machineOptions, machineReads, type MachineReads } from "./remote.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
-import type { DashboardHealth, MachineAnalytics, SharedSnapshot } from "./types.ts";
+import type { DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
 import { loadSnapshot } from "./interop/snapshot.ts";
 import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
@@ -22,14 +25,22 @@ import { reuseRefusal } from "./dashboard-reuse.ts";
 import { collectLimits, emptyLimitsSnapshot } from "./limits/index.ts";
 import type { LimitsSnapshot } from "./limits/types.ts";
 import { staticRoutes } from "./static-routes.ts";
+import { localMachine } from "./public/machines.js";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, "--port", "--snapshot"]);
 const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--no-open", "--open", "--version", "--no-additional-providers", "--offline", "--no-codex-account"]);
+// A repeated value would otherwise be silently first-wins; only --remote adds up.
+const given = new Set<string>();
 for (let index = 2; index < process.argv.length; index += 1) {
   const flag = process.argv[index];
+  if (flag && valueFlags.has(flag) && flag !== "--remote" && given.has(flag)) {
+    process.stderr.write(`Give ${flag} once.\n`);
+    process.exit(2);
+  }
+  if (flag) given.add(flag);
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
     process.stderr.write(`Unknown session analytics server argument: ${flag ?? "<missing>"}\n`);
     process.exit(2);
@@ -142,14 +153,14 @@ try { assertSnapshotOptions(process.argv); } catch {
   process.exit(2);
 }
 const snapshotFile = argument(process.argv, "--snapshot");
-// A saved snapshot never scans, so a remote set in the environment does not apply to it.
-let remote: RemoteOptions = { remotes: [], command: [] };
+// A saved snapshot never scans, so saved machines and remote settings do not apply to it.
+let remote: RemoteOptions = { machines: [], timeoutMs: 0, digest: null, local: "this machine" };
 if (!snapshotFile) {
-  try { remote = remoteOptionsFrom(process.argv, process.env); assertRemoteAnalysis(analyzeOptions, remote); }
+  try { remote = remoteFor(process.argv, process.env, analyzeOptions, (line) => process.stderr.write(`${line}\n`)); assertRemoteAnalysis(analyzeOptions, remote); }
   catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); process.exit(2); }
 }
 const pricing = pricingConfiguration(analyzeOptions);
-const normalizedOptions = {
+const scanOptions = {
   ...analyzeOptions,
   dataDir: dataDirectory(analyzeOptions),
   includeHidden: analyzeOptions.includeHidden !== false,
@@ -159,29 +170,117 @@ const normalizedOptions = {
   pricingPolicy: pricing.policy,
   pricingSources: pricing.sources,
   pricingMaxAgeDays: pricing.maxAgeDays,
-  // Another set of machines is another dashboard.
-  ...(remote.remotes.length ? { remotes: remote.remotes, remoteCommand: remote.command } : {}),
 };
-const optionsHash = createHash("sha256").update(JSON.stringify(Object.fromEntries(
-  Object.entries(normalizedOptions).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) =>
+const hashOf = (options: object): string => createHash("sha256").update(JSON.stringify(Object.fromEntries(
+  Object.entries(options).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) =>
     [key, typeof value === "string" && (key.endsWith("Root") || key.endsWith("Path") || key === "dataDir") ? resolve(value) : value]),
 ))).digest("hex");
+// Another set of machines is another dashboard; the same saved machines match a plain launch.
+const scanHash = hashOf(scanOptions);
+const optionsHashFor = (digest: string | null): string => hashOf({ ...scanOptions, ...(digest ? { machines: digest } : {}) });
+let optionsHash = optionsHashFor(remote.digest);
 const instanceToken = randomBytes(32).toString("hex");
 
+const shutdown = new AbortController();
 let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
 let snapshotReady = false;
+const machineLine = (line: string, failed: boolean): void => { (failed ? process.stderr : process.stdout).write(`${line}\n`); };
+const machineScan = machineOptions(analyzeOptions);
+let scanned: { snapshot: MachineAnalytics; ms: number } | null = null;
+// Set while this machine's latest scan failed, so a machine that answers does not bring back the snapshot before it.
+let scanFailed = false;
+// Set when the saved machines changed during a scan, so the snapshot is rebuilt with the new ones once it is done.
+let machinesChanged = false;
+
+/**
+ * Other machines are read on their own: a snapshot is served once this machine's scan is done, with the
+ * last good snapshot of a machine still reading, and is rebuilt as each machine answers.
+ */
+function readsFor(options: RemoteOptions): MachineReads | null {
+  if (snapshotFile || !options.machines.length) return null;
+  const reads: MachineReads = machineReads(machineScan, options, {
+    report: machineLine, signal: shutdown.signal, preload: true,
+    onSettle: () => {
+      if (reads !== machines || !scanned || analyticsPending || scanFailed) return;
+      try { analyticsPromise = Promise.resolve(reads.combine(scanned.snapshot, scanned.ms)); }
+      catch { process.stderr.write("A machine's snapshot could not be combined; the previous snapshot stays.\n"); }
+    },
+  });
+  return reads;
+}
+let machines = readsFor(remote);
+
+// A local failure fails this refresh only: reads of other machines carry on, and their last good snapshots stay.
+async function scanWithMachines(reads: MachineReads): Promise<MachineAnalytics> {
+  void reads.start();
+  const started = performance.now();
+  const [snapshot] = await Promise.all([analyzeMachineSessionsIsolated(machineScan).catch((error: unknown) => { scanFailed = true; throw error; }), reads.loaded]);
+  scanned = { snapshot, ms: performance.now() - started };
+  scanFailed = false;
+  return reads.combine(snapshot, scanned.ms);
+}
+
+/**
+ * The snapshot again from this machine's last scan and the current machines; with no machines left, that scan alone.
+ * A dashboard without a usable scan (one started without machines scans with local IDs) scans now, not on the next request.
+ */
+function rebuild(): void {
+  if (analyticsPending) { machinesChanged = true; return; }
+  const reads = machines;
+  if (!reads) { analyticsPromise = scanned && !scanFailed ? Promise.resolve(scanned.snapshot) : null; return; }
+  if (!scanned || scanFailed) { analyticsPromise = null; void analytics(true).catch(() => {}); return; }
+  void reads.start();
+  analyticsPromise = reads.loaded.then(() => reads.combine(scanned!.snapshot, scanned!.ms));
+}
+
+// A dashboard that reads the saved machines follows machines.json, so machines add, set, rename and remove reach it
+// on its next request, and a plain launch afterwards reuses it. --remote, --no-remote and the variable fix the set.
+const followsSaved = !snapshotFile && !process.argv.includes("--remote") && !process.argv.includes("--no-remote")
+  && (process.argv.includes("--machines") || !process.env["SESSION_ANALYTICS_REMOTE"]);
+const machinesStamp = (): string => {
+  try { const info = statSync(machinesPath(analyzeOptions)); return `${info.ino}:${info.size}:${info.mtimeMs}`; } catch { return "none"; }
+};
+let followedStamp = followsSaved ? machinesStamp() : "";
+function followMachines(): void {
+  if (!followsSaved) return;
+  const stamp = machinesStamp();
+  if (stamp === followedStamp) return;
+  followedStamp = stamp;
+  let next: RemoteOptions;
+  try { next = remoteFor(process.argv, process.env, analyzeOptions); assertRemoteAnalysis(analyzeOptions, next); }
+  catch (error) { process.stderr.write(`${optionErrorMessage(error)} This dashboard keeps reading the machines it had.\n`); return; }
+  if (next.digest === remote.digest && next.local === remote.local) return;
+  machines?.abort();
+  remote = next;
+  optionsHash = optionsHashFor(remote.digest);
+  machines = readsFor(remote);
+  process.stdout.write(`Saved machines changed; now reading ${remote.local}${remote.machines.length ? ` and ${remote.machines.map(({ name }) => name).join(", ")}` : " only"}.\n`);
+  rebuild();
+}
+
+/** Every machine as it stands now; the dashboard polls this while a machine is still reading. */
+function machineStatuses(): MachineStatus[] {
+  if (!machines) return [];
+  const local: MachineStatus = { key: localMachine, label: remote.local, state: scanned && !analyticsPending ? "ok" : "reading", sessions: scanned?.snapshot.summary.sessions ?? 0,
+    repositories: scanned?.snapshot.summary.repositories ?? 0, readAt: scanned?.snapshot.generatedAt ?? null, durationMs: scanned ? Math.round(scanned.ms) : null, version };
+  return [local, ...machines.readings.map(({ status }) => status)];
+}
+
 function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> {
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
-    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : analyzeMachines(analyzeOptions, remote, (line, failed) => (failed ? process.stderr : process.stdout).write(`${line}\n`)))
+    // A scan without machines uses local IDs, so it cannot be combined with machines added later.
+    if (!machines) scanned = null;
+    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal))
       .then((result) => {
         snapshotReady = true;
         return result;
       })
       .finally(() => {
         analyticsPending = false;
+        if (machinesChanged) { machinesChanged = false; rebuild(); }
       });
   }
   return analyticsPromise;
@@ -223,6 +322,7 @@ const server = createServer(async (request, response) => {
       sendJson(response, 405, { error: "Session analytics is read-only." });
       return;
     }
+    if (url.pathname.startsWith("/api/")) followMachines();
     if (url.pathname === "/api/health") {
       const health: DashboardHealth = {
         service: serviceId,
@@ -231,6 +331,7 @@ const server = createServer(async (request, response) => {
         status: "ok",
         instanceToken,
         optionsHash,
+        scanHash,
         version,
       };
       sendJson(response, 200, health);
@@ -240,9 +341,14 @@ const server = createServer(async (request, response) => {
       sendJson(response, 200, await analytics(url.searchParams.get("refresh") === "1"));
       return;
     }
+    if (url.pathname === "/api/machines") {
+      // read=1 reads the other machines again without scanning this one, as after fixing one of them.
+      if (url.searchParams.get("read") === "1" && machines && scanned && !scanFailed && !analyticsPending) void machines.start();
+      sendJson(response, 200, { machines: machineStatuses() });
+      return;
+    }
     if (url.pathname === "/api/limits") {
-      // The Subscription view must know when the session snapshot combines other machines, whose sessions are not this machine's.
-      sendJson(response, 200, { ...await limits(url.searchParams.get("refresh") === "1"), remoteMachines: remote.remotes.length });
+      sendJson(response, 200, await limits(url.searchParams.get("refresh") === "1"));
       return;
     }
     const path = staticFiles.get(url.pathname);
@@ -311,7 +417,7 @@ server.on("error", (error: NodeJS.ErrnoException) => {
       process.exit(1);
     }
     // A saved-file dashboard never reuses the port: that server could be showing another file.
-    const refusal = reuseRefusal(await runningDashboard(), { version, optionsHash, instanceToken: snapshotFile ? null : launchToken() });
+    const refusal = reuseRefusal(await runningDashboard(), { version, optionsHash, scanHash, instanceToken: snapshotFile ? null : launchToken() });
     if (refusal) {
       process.stderr.write(`${refusal}\n`);
       process.exit(1);
@@ -349,13 +455,16 @@ server.listen(port, "127.0.0.1", () => {
       }).catch(() => process.stderr.write("Background pricing update unavailable; cached rates remain in use.\n"));
     })
     .catch((error) => {
-      process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);
+      if (!shutdown.signal.aborted) process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);
     });
   if (process.argv.includes("--open")) {
     void warmup.then(openDashboard, openDashboard);
   }
 });
 
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-  process.on(signal, () => server.close(() => process.exit(0)));
-}
+// In-flight requests are not awaited: remote reads, workers and connections stop at once.
+stopOnSignals(() => {
+  shutdown.abort();
+  server.close();
+  server.closeAllConnections();
+}, 0);

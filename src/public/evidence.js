@@ -11,6 +11,7 @@ export const sharedEvidenceCaveat = "Totals are observed lower bounds and may in
 export const indexParityWarning = "The local index failed a consistency check; a full scan of present sources was used. Retained history is unavailable; run index rebuild.";
 export const duplicateMachineWarning = "Some sessions appeared on more than one machine; each is counted once.";
 export const remoteUnavailableWarning = "A remote machine could not be read; its sessions are missing from this snapshot.";
+export const staleMachineWarning = "A remote machine could not be read; its last good snapshot is used instead.";
 export const discoveryWarnings = [
   "A provider evidence store could not be fully read; identified sessions were retained.",
   "A provider evidence directory could not be read; sibling directories were retained.",
@@ -29,6 +30,7 @@ export const discoveryWarnings = [
   "A provider evidence store could not be read or has an unsupported schema.",
   indexParityWarning,
   remoteUnavailableWarning,
+  staleMachineWarning,
 ];
 export const fixedWarnings = [
   "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters.",

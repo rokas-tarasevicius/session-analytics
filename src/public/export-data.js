@@ -10,6 +10,7 @@ import { normalizeTimestamp, timestampMilliseconds } from "./timestamps.js";
 import { calendarDays, ledgerCells, localDay } from "./velocity-data.js";
 import { metricEligible } from "./providers.js";
 import { callCount } from "./tools-data.js";
+import { sessionMachine } from "./machines.js";
 /** @type {Array<keyof import("../types.ts").TokenUsage>} */
 const tokenFields = ["inputTokens", "uncachedInputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "outputTokens", "reasoningOutputTokens", "nonReasoningOutputTokens"];
 /** @type {Array<keyof import("../types.ts").CostBreakdown>} */
@@ -50,6 +51,7 @@ export function csvTables(snapshot, { ledger = null } = {}) {
     ...Object.fromEntries(costFields.map((key) => [key, s.cost[key]])),
     toolCalls: s.metrics.toolCalls, modelCalls: s.metrics.modelCalls, userTurns: s.metrics.userTurns,
     compactions: s.metrics.compactions, durationMilliseconds: s.metrics.durationMilliseconds,
+    machine: sessionMachine(s, snapshot.machines),
   }));
   /** @type {Map<string, CsvBase & {day: string, contributingSessions: number, apiEquivalentSpendUsd: number, providerReportedSpendUsd: number}>} */
   const days = new Map();
@@ -96,7 +98,7 @@ export function csvTables(snapshot, { ledger = null } = {}) {
   const sorted = (map) => [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row);
   const base = ["schemaVersion", "repositoryId", "repositoryName", "provider"];
   return {
-    "sessions.csv": csv(sessions, ["schemaVersion", "sessionKey", "repositoryId", "repositoryName", "provider", "createdAt", "updatedAt", "firstEventAt", "lastEventAt", "costBasis", "costComplete", "pricedTokenCoverage", "executionKind", "transcriptStatus", ...tokenFields, ...costFields, "toolCalls", "modelCalls", "userTurns", "compactions", "durationMilliseconds"]),
+    "sessions.csv": csv(sessions, ["schemaVersion", "sessionKey", "repositoryId", "repositoryName", "provider", "createdAt", "updatedAt", "firstEventAt", "lastEventAt", "costBasis", "costComplete", "pricedTokenCoverage", "executionKind", "transcriptStatus", ...tokenFields, ...costFields, "toolCalls", "modelCalls", "userTurns", "compactions", "durationMilliseconds", "machine"]),
     "daily.csv": csv(sorted(days), [...base, "day", "contributingSessions", "apiEquivalentSpendUsd", "providerReportedSpendUsd"]),
     "models.csv": csv(sorted(models), [...base, "costBasis", "model", "contributingSessions", "calls", "priced", ...tokenFields, ...costFields]),
     "tools.csv": csv(sorted(tools), [...base, "tool", "contributingSessions", "calls"]),
@@ -199,6 +201,8 @@ export function filterSnapshot(snapshot, filters = {}) {
   const combined = aggregateSessions(sessions);
   const discovery = scanWarnings([...snapshot.warnings, ...snapshot.repositories.flatMap((r) => r.warnings)]);
   const extras = {
+    // Sessions keep their machine keys, so the machines they name stay listed.
+    ...(snapshot.machines ? { machines: snapshot.machines } : {}),
     ...(snapshot.historyCoverage && !Object.values(filters).some((value) => value !== null && value !== undefined) ? { historyCoverage: snapshot.historyCoverage } : {}),
     ...(snapshot.mcpSourceHealth ? { mcpSourceHealth: snapshot.mcpSourceHealth } : {}),
     ...(snapshot.mcpContext ? { mcpContext: snapshot.mcpContext } : {}),

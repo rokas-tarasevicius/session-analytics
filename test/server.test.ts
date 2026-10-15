@@ -139,10 +139,11 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.ok(["building", "not-started", "ready"].includes(String(healthBody.snapshot)));
     assert.match(health.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     await t.test("health exposes only content-free launch identity and stores a private per-port token", async () => {
-      assert.deepEqual(Object.keys(healthBody).sort(), ["dataSource", "instanceToken", "optionsHash", "service", "snapshot", "status", "version"]);
+      assert.deepEqual(Object.keys(healthBody).sort(), ["dataSource", "instanceToken", "optionsHash", "scanHash", "service", "snapshot", "status", "version"]);
       assert.equal(healthBody.version, version);
       assert.match(String(healthBody.instanceToken), /^[a-f0-9]{64}$/);
       assert.match(String(healthBody.optionsHash), /^[a-f0-9]{64}$/);
+      assert.match(String(healthBody.scanHash), /^[a-f0-9]{64}$/);
       const tokenFile = join(childEnvironment.SESSION_ANALYTICS_DATA_DIR, `dashboard-${port}.token`);
       assert.equal(await readFile(tokenFile, "utf8"), healthBody.instanceToken);
       assert.equal((await stat(tokenFile)).mode & 0o777, 0o600);
@@ -367,11 +368,13 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
 });
 
 test("a launch reuses only the same version with the same options and token", () => {
-  const token = "a".repeat(64), hash = "b".repeat(64);
-  const running = { service: "session-analytics", dataSource: "live", snapshot: "ready", status: "ok", instanceToken: token, optionsHash: hash, version: "1.2.3" } as const;
-  const expected = { version: "1.2.3", optionsHash: hash, instanceToken: token };
+  const token = "a".repeat(64), hash = "b".repeat(64), scanHash = "e".repeat(64);
+  const running = { service: "session-analytics", dataSource: "live", snapshot: "ready", status: "ok", instanceToken: token, optionsHash: hash, scanHash, version: "1.2.3" } as const;
+  const expected = { version: "1.2.3", optionsHash: hash, scanHash, instanceToken: token };
   const options = "Session Analytics is already running on this port with different options; stop it or choose --port.";
   assert.equal(reuseRefusal(running, expected), null);
+  assert.equal(reuseRefusal({ ...running, optionsHash: "c".repeat(64) }, expected),
+    "Session Analytics is already running on this port with other machines (--remote, --machines or --no-remote differ); stop it or choose --port.", "only the machines differ");
   const { version: _omitted, ...unversioned } = running;
   assert.equal(reuseRefusal(unversioned, expected), "An older Session Analytics is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
   assert.equal(reuseRefusal({ ...running, version: "1.2.2" }, expected), "An older Session Analytics (1.2.2) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
@@ -382,7 +385,7 @@ test("a launch reuses only the same version with the same options and token", ()
     assert.equal(reuseRefusal({ ...running, version }, expected), "Another Session Analytics is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.", "only a release-grammar version is printed");
   }
   assert.equal(reuseRefusal({ ...running, version: "1.2.2" }, { ...expected, instanceToken: null }), "An older Session Analytics (1.2.2) is running on this port; this is 1.2.3. Stop it (Ctrl+C where it runs) or choose --port.");
-  for (const health of [null, { ...running, optionsHash: "c".repeat(64) }, { ...running, instanceToken: "c".repeat(64) }, { ...running, dataSource: "snapshot" as const }, { ...running, service: "other" as "session-analytics" }]) {
+  for (const health of [null, { ...running, optionsHash: "c".repeat(64), scanHash: "c".repeat(64) }, { ...running, instanceToken: "c".repeat(64) }, { ...running, dataSource: "snapshot" as const }, { ...running, service: "other" as "session-analytics" }]) {
     assert.equal(reuseRefusal(health, expected), options);
   }
   assert.equal(reuseRefusal(running, { ...expected, instanceToken: null }), options, "a saved-file launch never reuses");
