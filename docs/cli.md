@@ -157,11 +157,12 @@ Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip se
 ## Subscription limits
 
 ```sh
-session-analytics limits                 # harvest meters and print each account's meters with reset and projection
+session-analytics limits                 # harvest meters here and on saved machines; print each account's meters with reset and projection
 session-analytics limits --json          # content-free limits snapshot
 session-analytics limits --quiet         # harvest only, for cron: */20 * * * * session-analytics limits --quiet
 session-analytics limits statusline      # Claude Code status line: records stdin rate_limits, prints them
-session-analytics limits --no-codex-account  # skip the banked-reset read through the local Codex app-server
+session-analytics limits --no-codex-account  # skip the banked-reset read through the Codex app-server, on every machine
+session-analytics limits --no-remote     # this machine only, without the saved machines
 ```
 
 Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. Each reading is attributed to an account, so two Claude logins used on one machine are reported separately.
@@ -173,8 +174,10 @@ Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_l
 - `--codex-root PATH` reads Codex rollouts from `PATH` and skips the Codex account read.
 - `--no-codex-account` (or `SESSION_ANALYTICS_CODEX_ACCOUNT=0`) and `--offline` skip the banked-reset read through the local Codex app-server.
 - `limits statusline` records the readings Claude Code passes on stdin for the account of the profile it runs in; add it to each profile's `settings.json`.
+- With [saved machines](interop.md#combine-machines), `limits` also reads each machine's limits over SSH, at the same time as this machine's, and merges them by account: the same login is one account on every machine. The header names the machines read, a `Machines` block gives each machine's state and accounts, or its reason and fix, and each account gets a `Reported by` line naming the machines logged into it. A machine that cannot be read is shown from its last good limits, marked stale. `--no-remote`, `--machines a,b`, `--remote HOST` and `--remote-timeout SECONDS` (at most 60 seconds are used for limits) work as for `report`; `--quiet` reads the machines too and prints nothing when one fails. See [Machines](subscription.md#machines).
+- `--unsettled` (with `--json --no-remote`) leaves full Claude readings that do not say whether work went on as reported, for a machine that merges them with others first; it is what each machine is asked to run.
 
-Readings are kept in `limits-v2.json` in the data directory; `--no-index` neither reads nor writes it. The 0.9.0 ledger, `limits.json`, is imported and never written, so an older installation can share the data directory. See [Subscription limits and value](subscription.md#accounts).
+Readings are kept in `limits-v2.json` in the data directory, other machines' readings of real accounts included; `--no-index` neither reads nor writes it, here or on the machines read. The 0.9.0 ledger, `limits.json`, is imported and never written, so an older installation can share the data directory. See [Subscription limits and value](subscription.md#accounts).
 
 ## Other machines
 

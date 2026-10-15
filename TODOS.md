@@ -43,7 +43,6 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P2 | Read subscription limits from other machines: run `limits --json` there through the same bootstrap and merge the observations by account key (the same login has the same key on every machine), then let the Subscription value join count each machine whose limits were read, not only `local`. Per-account meters and session `machine` are in place. | Machines review (limits-never-read-remote) |
 | P3 | Persist portable repository IDs and session keys with retained index facts, so history whose sources were deleted keeps its portable identity across exports. | #62 review |
 | P3 | Compare pricing freshness across machines: each machine prices its own sessions with its own cache, and a remote's stale or older rate card is not flagged. | Machines review (no-cross-machine-consistency) |
 | P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
@@ -68,6 +67,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Completed
 
+- **Completed: 2026-10-15 (unreleased).** Subscription limits from saved machines: `limits --json --no-remote` on each machine through the same bootstrap, merged by account key, cached last good limits, folded into this machine's ledger, and a Subscription value join that counts every machine whose limits were read: `src/limits/machines.ts`.
 - **Completed: 2026-10-14 (unreleased).** Machines as a dimension: saved machines with a bundled runtime and `machines check`, per-machine status in combined snapshots, the report and the dashboard (Machines strip and filter, Machine details, Usage value by machine), last good snapshots and progressive loading: `src/machines/`, `src/remote.ts`, `src/remote/` and `src/public/machines.js`.
 - **Completed: 2026-10-14 (unreleased).** The tag workflow publishes the compiled package that `release:check` installs: a GitHub Release tarball with an unversioned alias and `SHA256SUMS`, attested for build provenance, after an installed smoke on Linux and macOS under Node.js 24.0.0, the newest 24.x and 26. It can send the same bytes to npm through trusted publishing and to a Homebrew tap formula, which it installs and tests with Homebrew first; each waits for a repository variable and its one-time setup. CHANGELOG compare links are added and required by `release:check`.
 - **Completed: 2026-10-13 (readiness candidate).** Mobile time-window selector, single-column KPIs below 400 px, and wrapped snapshot metadata: six views checked at 375, 768 and 1440 px through the collaborative preview; 375 px also checked in both themes and densities. Custom ranges focus the start date, and failed refreshes preserve the snapshot without widening the page. Synthetic mobile captures and their provenance are in `assets/SCREENSHOTS.md`.
