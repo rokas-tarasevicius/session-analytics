@@ -30,7 +30,7 @@ session-analytics export --snapshot snapshot.json --format csv --out ./saved-csv
 
 | File | Grain and meaning |
 | --- | --- |
-| `sessions.csv` | One session, flattened tokens, costs, cost basis, pricing coverage, timestamps, execution/evidence labels, and execution counters. |
+| `sessions.csv` | One session, flattened tokens, costs, cost basis, pricing coverage, timestamps, execution/evidence labels, and execution counters. The last column, `machine`, is the session's [machine key](#machine-status) in a snapshot that combines machines and empty otherwise; the other files do not split by machine. |
 | `daily.csv` | The activity ledger: repository × provider × activity day in the snapshot's declared timezone (`velocity.timeZone`), with API-equivalent and provider-reported value (session-dated receipt value included) and contributing-session count. Only evidenced value dates appear; Cursor database totals are not assigned invented dates. |
 | `models.csv` | Repository × provider × cost basis × model, with contributing sessions, calls, priced flag, token classes, and cost components. Cursor model costs do not establish model-level token attribution. |
 | `tools.csv` | Repository × provider × tool name, with effective calls and contributing sessions. Like the Tools view, it includes only parsed sessions with observed tool evidence (legacy snapshots without evidence labels remain eligible) and finite, positive call counts. |
@@ -127,7 +127,7 @@ session-analytics machines remove NAME
 - **`--user NAME`** reads as that account through `sudo -n -iu NAME`, which needs passwordless sudo to that account ([below](#when-sudo-needs-a-password)). Labels, destinations, account names and node paths are validated words, so none can smuggle shell syntax.
 - **`--no-login-shell`** reads such an account with `sudo -n -H -u NAME` instead, for a service account whose shell is `nologin` or `false` and refuses the login shell `-i` starts (`check` names that failure and this fix). Without a login shell, nothing from that account's profile applies: `node` is found on sudo's own `PATH` (`secure_path`), or named with `--node /usr/bin/node`.
 - **Which machines a run reads**, first match wins: `--no-remote` reads none; `--remote` reads its own list for this run ([advanced](#advanced-ad-hoc-machines-with---remote)); the deprecated `SESSION_ANALYTICS_REMOTE` does the same for every launch; otherwise every enabled saved machine. `--machines a,b` narrows a run to those saved machines, disabled ones included, and `machines set NAME --disable` leaves one out until `--enable`. Repository filters and `--rate-card` describe this machine only, so saved machines step aside for them with a notice; with `--remote` or `--machines` they are refused.
-- **The dashboard** follows `machines.json`: `add`, `set`, `rename` and `remove` reach a running dashboard on its next request, which reads the machines again and rebuilds its snapshot from this machine's last scan, and a plain `session-analytics` afterwards reuses it. A dashboard started with `--remote`, `--no-remote` or the deprecated variable keeps the machines it was started with; a launch that differs from it only in its machines says so (`already running on this port with other machines`).
+- **The dashboard** follows `machines.json`: `add`, `set`, `rename` and `remove` reach a running dashboard on its next request, which reads the machines again and rebuilds its snapshot from this machine's last scan, and a plain `session-analytics` afterwards reuses it. A dashboard that read no other machines scanned with this machine's own repository IDs, so the first machine added to it starts a new scan of this machine at once, which takes as long as **Refresh snapshot**; removing the last machine serves this machine's last scan without scanning again. A dashboard started with `--remote`, `--no-remote` or the deprecated variable keeps the machines it was started with; a launch that differs from it only in its machines says so (`already running on this port with other machines`).
 
 ### When sudo needs a password
 
@@ -163,7 +163,7 @@ with a small fixed bootstrap (`src/remote/bootstrap.ts`, plain old JavaScript ke
 What a read leaves on that machine:
 
 - **The runtime**, in `~/.cache/session-analytics/runtime/<version>-<first 16 digits of the digest>/`: this install's `package.json`, `bin`, `src`, `data` and `schemas` (about 2 MB unpacked), plus `.manifest` (file names and sizes) and `.complete` (the digest). Directories are mode `0700`, files `0600`. It holds code only: no history, analytics or configuration. Each new version, or each local change to a checkout, adds one directory. `machines remove` leaves it in place; delete the directory there to reclaim the space.
-- **That account's own data directory** (`$XDG_DATA_HOME/session-analytics` or `~/.local/share/session-analytics` on Linux, `~/Library/Application Support/session-analytics` on macOS, or `SESSION_ANALYTICS_DATA_DIR` there): its private index, exactly as a `report` run there by hand would write it; `--no-index` reads without it. A `report` makes no network request of its own: it prices with that machine's cached and reviewed rates.
+- **That account's own data directory** (`$XDG_DATA_HOME/session-analytics` or `~/.local/share/session-analytics` on Linux, `~/Library/Application Support/session-analytics` on macOS, or `SESSION_ANALYTICS_DATA_DIR` there): its private index, exactly as a `report` run there by hand would write it; `--no-index` reads without it. Every reader of that account shares this index, and it is parsed again whenever the code that reads it changes. A checkout and an installed copy reading the same machine run different code, so each read that follows one by the other parses that machine's history again: read each machine from one installation ([workarounds](cli.md#from-source)). A `report` makes no network request of its own: it prices with that machine's cached and reviewed rates.
 - **Nothing else.** Provider history there is only read. No saved-machines file, dashboard, service or scheduled job is created, and nothing keeps running between reads.
 
 Measured against a real server with about 740 sessions, adding it took 20.7 s: 0.4 s to install the runtime, then 19.6 s for the first read, because a new runtime has a new parser revision and rebuilds that account's private index once. Later checks took about 3 s, of which the read took 2.0 to 2.7 s, and a `report` of a laptop with 6,400 sessions and that server took 35 s, set by the laptop's own scan.
@@ -196,7 +196,7 @@ All checks passed.
 | sudo needs a password | the rule [above](#when-sudo-needs-a-password), in `/etc/sudoers.d/session-analytics-ACCOUNT` |
 | account not found | `machines check NAME --find-users` lists the accounts with history (`add` lists them itself) |
 | login shell refuses commands (`nologin`) | `machines set NAME --no-login-shell` |
-| `node` missing or older than 24 | install Node.js 24 or later there, or `machines set NAME --node /usr/bin/node` |
+| `node` missing or older than 24 | install Node.js 24 or later there, or `machines set NAME --node /usr/bin/node`; when the Node.js path saved with `--node` is the one missing, `machines set NAME --node /path/to/node`, or `--node node` for the login `PATH` |
 | output other than asked for | make sure nothing in that account's login profile (`.bashrc`, `.profile`) prints to stdout |
 | cache not writable or not private | `machines set NAME --runtime installed`, or a writable, private `XDG_CACHE_HOME` in that account's profile |
 | no history (a warning) | that account has no agent history: `machines set NAME --user ACCOUNT`, naming the accounts that have some when they are known |
@@ -293,6 +293,7 @@ This is an OTLP **log export of session aggregates**, not standard GenAI inferen
 | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` | Authoritative session totals; input includes caches, output includes reasoning. Encoded as decimal `intValue` strings. |
 | `gen_ai.response.model` | Only when exactly one known model accounts for all of the session's token counters. Omitted for mixed or unattributable usage. |
 | `session_analytics.provider`, `.repository.key`, `.session.key` | Agent provider enum and existing pseudonymous local keys. Repository display names are omitted. |
+| `session_analytics.machine.key` | Only in a snapshot that combines machines: the session's [machine key](#machine-status), `local` or the saved machine name. |
 | `session_analytics.record.type` | Always `session_aggregate`. |
 | `session_analytics.cost.basis`, `.transcript.status` | Existing enums for interpretation and evidence coverage. |
 | `session_analytics.usage.cache_read_tokens`, `.cache_write_tokens`, `.reasoning_tokens` | Subsets of the input/output totals; never add them again. |
@@ -302,7 +303,7 @@ This is an OTLP **log export of session aggregates**, not standard GenAI inferen
 | Resource `service.name`, `session_analytics.schema.version` | Neutral service ID and snapshot version. |
 | Scope `name`, `version`, `.semconv.version`, `.semconv.commit`; `schemaUrl` | Exporter package and pinned convention identifiers. The last two attributes use the `session_analytics` prefix. |
 
-`gen_ai.provider.name` is omitted because an agent name does not establish the actual API endpoint/vendor. `gen_ai.operation.name`, raw conversation/request IDs, content attributes, tool arguments/results, hostnames, paths, trace/span IDs, and inferred outcomes are also omitted. The collector should route these custom aggregate logs separately from inference-call telemetry. Re-exporting overlapping snapshots repeats observations, so summing every import would double-count.
+`gen_ai.provider.name` is omitted because an agent name does not establish the actual API endpoint/vendor. `gen_ai.operation.name`, raw conversation/request IDs, content attributes, tool arguments/results, hostnames (other than a machine name you saved), paths, trace/span IDs, and inferred outcomes are also omitted. The collector should route these custom aggregate logs separately from inference-call telemetry. Re-exporting overlapping snapshots repeats observations, so summing every import would double-count.
 
 Local file output is the default. To send **the saved bytes** to a collector:
 

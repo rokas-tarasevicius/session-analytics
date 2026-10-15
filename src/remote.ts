@@ -158,7 +158,7 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
     "login-shell": `${account}'s login shell refuses to run commands (nologin or false)`,
     permission: "the remote command is not executable for that account",
     "missing-command": "session-analytics was not found there",
-    "no-node": `node was not found on ${account}'s ${machine?.loginShell === false ? "sudo" : "login"} PATH`,
+    "no-node": machine && machine.node !== "node" ? `${machine.node} was not found there` : `node was not found on ${account}'s ${machine?.loginShell === false ? "sudo" : "login"} PATH`,
     "node-too-old": `the remote Node.js is ${found || "too old"}; the bundled runtime needs 24 or later`,
     "local-runtime": "this machine could not pack its bundled runtime (its own install is missing files)",
     runtime: "the bundled runtime could not start there",
@@ -190,7 +190,9 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null, found = "
   const add = `${command} machines add ${ssh}${machine.user ? ` --user ${machine.user}` : ""}${machine.loginShell === false ? " --no-login-shell" : ""}`;
   const check = machine.saved ? `${command} machines check ${name}` : add;
   const bundled = machine.saved ? `${command} machines set ${name} --runtime bundled` : add;
-  const node = machine.saved ? `${command} machines set ${name} --node /usr/bin/node` : `${add} --node /usr/bin/node`;
+  // A Node.js path that was given and is missing there: name the way back to the login PATH too.
+  const node = machine.node !== "node" ? machine.saved ? `${command} machines set ${name} --node /path/to/node, or --node node to use the login PATH` : `${add} --node /path/to/node, or leave out --node to use the login PATH`
+    : machine.saved ? `${command} machines set ${name} --node /usr/bin/node` : `${add} --node /usr/bin/node`;
   const fixes: Record<RemoteFailure, string> = {
     "no-ssh": "install an OpenSSH client so that ssh is on PATH",
     "unknown-host": `check the name: ssh -G ${ssh} shows how your ~/.ssh/config resolves it, and ssh ${ssh} true tries it`,

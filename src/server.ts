@@ -229,11 +229,15 @@ async function scanWithMachines(reads: MachineReads): Promise<MachineAnalytics> 
   return reads.combine(snapshot, scanned.ms);
 }
 
-/** The snapshot again from this machine's last scan and the current machines; without a usable scan, the next request scans. */
+/**
+ * The snapshot again from this machine's last scan and the current machines; with no machines left, that scan alone.
+ * A dashboard without a usable scan (one started without machines scans with local IDs) scans now, not on the next request.
+ */
 function rebuild(): void {
   if (analyticsPending) { machinesChanged = true; return; }
   const reads = machines;
-  if (!reads || !scanned || scanFailed) { analyticsPromise = null; return; }
+  if (!reads) { analyticsPromise = scanned && !scanFailed ? Promise.resolve(scanned.snapshot) : null; return; }
+  if (!scanned || scanFailed) { analyticsPromise = null; void analytics(true).catch(() => {}); return; }
   void reads.start();
   analyticsPromise = reads.loaded.then(() => reads.combine(scanned!.snapshot, scanned!.ms));
 }
@@ -277,6 +281,8 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
+    // A scan without machines uses local IDs, so it cannot be combined with machines added later.
+    if (!machines) scanned = null;
     analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal))
       .then((result) => {
         snapshotReady = true;

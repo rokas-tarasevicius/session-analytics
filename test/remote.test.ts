@@ -240,6 +240,9 @@ test("export and the dashboard read remote machines, and refresh reads them agai
   await run(process.execPath, [bin, "export", "--format", "csv", "--out", output, ...localFlags, "--remote", "copied"], { env: environment });
   const sessions = (await readFile(join(output, "sessions.csv"), "utf8")).trim().split("\r\n");
   assert.equal(sessions.length - 1, localSnapshot.summary.sessions + copiedSessions);
+  // Each row names its machine, so a split by machine needs no second export.
+  const machines = sessions.slice(1).map((row) => row.split(",").at(-1));
+  assert.deepEqual([machines.filter((key) => key === '"local"').length, machines.filter((key) => key === '"copied"').length], [localSnapshot.summary.sessions, copiedSessions]);
   const port = await new Promise<number>((resolve) => {
     const probe = createServer().listen(0, "127.0.0.1", () => { const address = probe.address(); probe.close(() => resolve(typeof address === "object" && address ? address.port : 0)); });
   });

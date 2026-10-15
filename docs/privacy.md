@@ -634,6 +634,7 @@ All formats retain only the declared P0/P1 fields; no content is exported. These
 | `schemaVersion` (machine/repository JSON, shared JSON, every CSV and NDJSON record; OTLP resource attribute) | Always `1` for this contract | P0 |
 | CSV `sessionKey`, `repositoryId`, `repositoryName` | Existing public identity fields, unchanged for local exports | P1 |
 | CSV `transcriptStatus` | Flattened `session.transcript.status` | P0 |
+| CSV `machine` (`sessions.csv`) | The session's machine `key` in a snapshot that combines machines, as in session `machine`; empty for one machine | P1 |
 | CSV `day`, `tool`, `model`, `calls` | Existing date/tool/model labels and counters at the documented table grain | P0 |
 | CSV `contributingSessions` | Sessions contributing an entry to a daily/model/tool row | P0 |
 | Other CSV columns | Flattened existing session/token/cost/metric fields, with original units and cost basis | P0/P1 as above |
@@ -656,6 +657,7 @@ All formats retain only the declared P0/P1 fields; no content is exported. These
 | OTLP `logRecords[]`: `timeUnixNano`, `observedTimeUnixNano`, `body.stringValue` | Snapshot observation time and fixed label `Observed session usage aggregate` | P0 |
 | OTLP `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.model` | Existing usage counters and a model only when fully attributable | P0 |
 | OTLP `session_analytics.repository.key`, `session_analytics.session.key` | Existing pseudonymous local keys; repository names omitted | P1 |
+| OTLP `session_analytics.machine.key` | Only in a snapshot that combines machines: the session's machine `key`, as in session `machine` | P1 |
 | OTLP `session_analytics.provider`, `.record.type`, `.cost.basis`, `.transcript.status` | Source enum and fixed interpretation/evidence labels | P0 |
 | OTLP `session_analytics.usage.cache_read_tokens`, `.cache_write_tokens`, `.reasoning_tokens`, `.value_usd`, `.upper_value_usd`, `session_analytics.tool.calls`, `.model.calls`, `.pricing.coverage` | Existing counters/value/coverage; cache and reasoning counters are subsets, not extra tokens | P0 |
 
