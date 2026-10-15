@@ -35,24 +35,26 @@ Model is the default grouping. Provider colours keep the series easy to distingu
 
 ## Get started
 
-Requires **Node.js 24+**. macOS is the primary platform; Claude Code and Codex sources also work on Linux. The source is public; install from a checkout. The package is not on npm.
+Requires **Node.js 24+** on macOS or Linux. macOS is the primary platform; Claude Code and Codex sources also work on Linux.
+
+Releases after 0.9.0 attach a compiled package to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases). npm installs the latest one straight from the release, without the npm registry:
 
 ```bash
-git clone https://github.com/rokas-tarasevicius/session-analytics.git
-cd session-analytics
-npm ci
-npm run demo                  # explore synthetic data first
-```
-
-To analyze your own history:
-
-```bash
-npm link
+npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
 session-analytics             # opens http://127.0.0.1:4174
 session-analytics --offline   # disables public pricing refreshes
 ```
 
-Without `npm link`, run `node bin/session-analytics.ts`. See [installation and options](docs/cli.md) for source paths, ports and platform limits.
+Until the first packaged release, or to explore synthetic data and contribute, use a source checkout. Node runs its TypeScript directly, so there is no install step:
+
+```bash
+git clone https://github.com/rokas-tarasevicius/session-analytics.git
+cd session-analytics
+npm run demo                    # synthetic history only; never reads your sessions
+node bin/session-analytics.ts   # your own history at http://127.0.0.1:4174
+```
+
+A checkout runs unreleased `master`; check out a release tag to run released code, and `npm link` to get a `session-analytics` command. npm registry and Homebrew packages of the same tarball are planned but not published yet. See [installation](docs/cli.md#install) for verifying a download, pinning a version, upgrades, uninstalling and platform limits; `npm ci` is needed only for the checks in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What it does
 
@@ -103,7 +105,7 @@ Analysis runs in a child process with a capped heap. Only allowlisted results cr
 | [Exports and team sharing](docs/interop.md) | [Architecture](docs/architecture.md) |
 | [Subscription limits and value](docs/subscription.md) | |
 
-See the [changelog](CHANGELOG.md), [roadmap](docs/roadmap.md) and [release gates](docs/release.md) for shipped and planned work. [Competitive research](docs/proposals/competitive-landscape.md) covers related tools.
+See the [changelog](CHANGELOG.md), [roadmap](docs/roadmap.md) and [release process](docs/release.md) for shipped and planned work. [Competitive research](docs/proposals/competitive-landscape.md) covers related tools.
 
 ## Contributing
 

@@ -88,7 +88,7 @@ function readConductorRow(statement: StatementSync, row: SessionDatabaseRow): Co
   const receipts: Receipt[] = [], messages: ConductorMessage[] = [], resets: Array<[string, string]> = [], seenInit = new Set<string>();
   let epoch: string | null = null, version: Receipt["version"] = null, queryStart = 0;
   const queryReceipts = new Set<string>();
-  for (const item of statement.iterate(row.conductor_session_id)) {
+  for (const item of statement.iterate({ session: row.conductor_session_id })) {
     const data = parse(item["data"]); if (!data) continue;
     const id = text(data["uuid"]) ?? `message:${String(item["id"])}`;
     if (data["type"] === "system" && data["subtype"] === "init" && !seenInit.has(id)) {
@@ -336,7 +336,7 @@ export function conductorLegacyProviderIds(database: DatabaseSync | null, rows: 
   if (!database || !rows.length) return identities;
   const statement = conductorRecords(database);
   if (!statement) return identities;
-  for (const row of rows) for (const item of statement.iterate(row.conductor_session_id)) {
+  for (const row of rows) for (const item of statement.iterate({ session: row.conductor_session_id })) {
     const data = parse(item["data"]), identity = text(data?.["session_id"]);
     if (data?.["type"] !== "result" || !identity) continue;
     const values = identities.get(row.conductor_session_id) ?? new Set<string>();

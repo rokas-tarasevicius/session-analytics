@@ -19,19 +19,48 @@
 
 ## Install
 
-Requirements: **Node.js 24 or newer** and **macOS** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)).
+Requirements: **Node.js 24 or newer** and **macOS** or **Linux** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)). Windows is not supported; the package declares macOS and Linux, so npm refuses to install it there with `EBADPLATFORM`.
+
+Releases after 0.9.0 attach the compiled package to each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases). npm installs the latest one directly from the release, without the npm registry:
+
+```bash
+npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
+session-analytics --version
+```
+
+The release workflow installed and ran this `session-analytics-X.Y.Z.tgz` on Linux and macOS before publishing it; `session-analytics.tgz` is the same file under a name that always points to the latest release. The package has no dependencies and runs no install scripts. Until the first packaged release, and for 0.9.0 and earlier, run session-analytics [from source](#from-source).
+
+npm registry and Homebrew packages of the same tarball are planned: the release workflow can publish them, but neither is published yet. This page lists their commands once they are; until then, install from the release URL.
+
+- **Pin a version:** install the versioned asset, `https://github.com/rokas-tarasevicius/session-analytics/releases/download/vX.Y.Z/session-analytics-X.Y.Z.tgz`.
+- **Try once without installing:** `npx --package <tarball URL> session-analytics`. npx resolves the package again on every start, so configure MCP clients and the Claude Code status line with an installed command.
+- **Verify a download:** run `shasum -a 256 -c --ignore-missing SHA256SUMS` beside the downloaded asset, and `gh attestation verify session-analytics-X.Y.Z.tgz -R rokas-tarasevicius/session-analytics` to check that this repository's release workflow built it.
+
+### Upgrade, roll back and uninstall
+
+| Installed from | Upgrade | Roll back | Uninstall |
+| --- | --- | --- | --- |
+| Release tarball | Run the install command again | Install the versioned asset URL | `npm uninstall -g session-analytics` |
+| Source checkout | `git pull`, or check out a newer release tag | Check out an older release tag | Delete the checkout, after `npm uninstall -g session-analytics` if you ran `npm link` |
+
+There is no automatic update check. After an upgrade, the first scan parses present sessions again once, and a dashboard still running the old version is named instead of reused: stop it and start the command again. An older version refuses an index that a newer version migrated ("created by a newer version"); run it with `--no-index` until you upgrade again.
+
+Uninstalling removes the command only. The [data directory](#local-index) keeps the private index, pricing cache and limits ledger: `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (or `~/.local/share/session-analytics/`) on Linux, unless `--data-dir` or `SESSION_ANALYTICS_DATA_DIR` chose another; `session-analytics index path` prints the index file inside it. The sharing key stays in `$XDG_STATE_HOME/session-analytics/` (or `~/.local/state/session-analytics/`). Delete both directories to remove everything session-analytics stored; provider history is never modified. Also remove any MCP registration or status line that runs the command.
+
+### From source
 
 ```bash
 git clone https://github.com/rokas-tarasevicius/session-analytics.git
 cd session-analytics
-npm ci        # development tooling only; the runtime has no dependencies
-npm link      # puts the session-analytics command on your PATH
-session-analytics
+node bin/session-analytics.ts --version   # Node runs the TypeScript sources directly
+npm link                                  # optional: a session-analytics command for this checkout
 ```
 
-The package is not on npm. `npm install github:rokas-tarasevicius/session-analytics` or a tarball install fails on Node 24 with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` because the executable is a `.ts` file under `node_modules`. Without `npm link`, run `node bin/session-analytics.ts` from the checkout.
+A checkout runs unreleased `master`; `git checkout vX.Y.Z` runs a release. It needs no install step: `npm ci` installs TypeScript and type definitions for the checks in [CONTRIBUTING.md](../CONTRIBUTING.md) only. `npm link` and a global install share the `session-analytics` command, so use one at a time. `npm run demo` explores synthetic history without reading your own sessions.
 
-The source is publicly available. `npm run demo` explores synthetic history without reading your own sessions. [Source-release validation](release.md) documents the public launch and packaging gates.
+The index fingerprints the code that runs: TypeScript in a checkout, JavaScript in an installed package. A checkout and an installed copy therefore never share a warm index, and every switch between them on the same data directory parses all present sessions again, which takes minutes on a large history. Give a checkout that you run beside an installed copy its own data directory, for example `export SESSION_ANALYTICS_DATA_DIR="$HOME/.session-analytics-checkout"` in the shell you develop in, or `--data-dir`. It then keeps its own index, pricing cache and limits ledger.
+
+`npm install github:rokas-tarasevicius/session-analytics` installs the TypeScript sources under `node_modules`, where Node refuses to run them (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`); install the release tarball instead. [Releases](release.md) documents how packages are built, checked and published.
 
 ## Dashboard
 
@@ -44,7 +73,7 @@ session-analytics --snapshot team.json --no-open   # open a saved or shared snap
 session-analytics --remote server # also read another machine over SSH
 ```
 
-The server binds to `127.0.0.1` only and answers read-only `GET` requests. `--remote` adds machines read over your SSH configuration, such as a server where agents run; see [combine machines](interop.md#combine-machines). Running the command again reuses a verified live dashboard on that port only with the same analysis options; otherwise stop it or choose `--port`. Saved-file dashboards are kept separate. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
+The server binds to `127.0.0.1` only and answers read-only `GET` requests. `--remote` adds machines read over your SSH configuration, such as a server where agents run; see [combine machines](interop.md#combine-machines). Running the command again reuses a verified live dashboard on that port only when it runs the same version with the same analysis options; otherwise stop it or choose `--port`. After an upgrade, a dashboard still running the old version is named with its version instead of being reused; the footer shows the version a dashboard runs. Saved-file dashboards are kept separate. **Refresh snapshot** in the dashboard re-scans without restarting. Stop it with `Ctrl+C`.
 
 ### Window and URL state
 
@@ -154,19 +183,22 @@ session-analytics mcp
 
 The MCP server speaks stdio and exposes six read-only tools: usage summaries, budget status, repository profiles, tool statistics, recent sessions, and same-repository agent comparisons. It defaults to the launch repository and caches snapshots for 60 seconds. Every result includes source health and interpretation notes; budget periods carry their own pricing coverage, and typical-session baselines exclude active or unknown lifecycle evidence. No transcript content is exposed. See [MCP setup for Claude Code, Codex and Cursor](mcp.md), or try `node scripts/demo.ts mcp` with an MCP client against synthetic data.
 
-The repository ships an agent skill at [`skills/session-analytics`](../skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
+The package and the repository ship an agent skill at [`skills/session-analytics`](../skills/session-analytics/SKILL.md). Copy or symlink it into a skills directory your agent reads, either in a project or in your home directory:
 
 ```bash
+SKILL="$(npm root -g)/session-analytics/skills/session-analytics"   # release tarball install
+# SKILL="$PWD/skills/session-analytics"   # source checkout
+
 # Claude Code
 mkdir -p ~/.claude/skills
-ln -s "$PWD/skills/session-analytics" ~/.claude/skills/session-analytics
+ln -s "$SKILL" ~/.claude/skills/session-analytics
 
 # Codex and other agents that read .agents/skills
 mkdir -p ~/.agents/skills
-ln -s "$PWD/skills/session-analytics" ~/.agents/skills/session-analytics
+ln -s "$SKILL" ~/.agents/skills/session-analytics
 ```
 
-Then ask, for example, "open my session analytics" or "compare agent usage across my repositories". The skill runs `session-analytics` (or `node <checkout>/bin/session-analytics.ts` when the command is not on `PATH`), reports the dashboard URL, session and repository counts, pricing coverage, and warnings, and keeps API-equivalent and provider-reported values separate. It uses `report` or `report --json` only when you ask for terminal or machine-readable output.
+Then ask, for example, "open my session analytics" or "compare agent usage across my repositories". The skill runs `session-analytics` (or `node bin/session-analytics.ts` in a source checkout when the command is not on `PATH`), reports the dashboard URL, session and repository counts, pricing coverage, and warnings, and keeps API-equivalent and provider-reported values separate. It uses `report` or `report --json` only when you ask for terminal or machine-readable output.
 
 ## Options
 
@@ -223,7 +255,7 @@ npm run demo -- report            # terminal report of the same data
 node scripts/demo.ts mcp          # MCP server over the synthetic data
 ```
 
-The demo generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory, runs with `HOME` set to a synthetic home inside it, and deletes it on exit. It never reads real history. The synthetic home holds two Claude profiles (a Max plan and a Team seat) with synthetic `.claude.json` plan enums and T3-style limit event logs, and the Codex rollouts carry `rate_limits`, so the Subscription view shows two Claude accounts with different weekly reset days and their own 5-hour windows (a Team seat that runs past its weekly allowance onto extra usage, and a Max plan without extra usage with a capped 5-hour window and an in-place reset), and a ChatGPT Pro account with a banked reset. Every screenshot in this repository is rendered from it.
+The demo generates about 60 days of synthetic sessions for six fictional repositories in a temporary directory, points every source option at that directory,, runs with `HOME` set to a synthetic home inside it, and deletes it on exit. It never reads real history. The synthetic home holds two Claude profiles (a Max plan and a Team seat) with synthetic `.claude.json` plan enums and T3-style limit event logs, and the Codex rollouts carry `rate_limits`, so the Subscription view shows two Claude accounts with different weekly reset days and their own 5-hour windows (a Team seat that runs past its weekly allowance onto extra usage, and a Max plan without extra usage with a capped 5-hour window and an in-place reset), and a ChatGPT Pro account with a banked reset. Every screenshot in this repository is rendered from it. `--bin PATH` (or `SESSION_ANALYTICS_DEMO_BIN`) runs the same data through another build, such as the `bin/session-analytics.js` of an installed package, and `SESSION_ANALYTICS_DEMO_NOW=<ISO 8601 instant>` generates the data as of that instant, so two runs analyze the same sessions. `node scripts/smoke-installed.ts TARBALL` uses both to compare a packed release, installed into a temporary prefix, with the checkout.
 
 Developers can run `node scripts/parity.ts --machine` to compare full, cold-index and warm-index accounting. It uses the 1024 MB analysis worker, offline pricing, a fresh private index under `.lane/`, and the shared real-scan lock. Output contains month/provider totals and differences by hashed session key, never repository names or transcript content. Live source changes are reported separately and do not suppress the unfiltered diff or a failing exit status. Use `--demo-root PATH` with a retained synthetic demo for repeatable local checks.
 

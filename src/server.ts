@@ -18,8 +18,10 @@ import { version } from "./version.ts";
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
 import { dataDirectory } from "./store/database.ts";
 import { readDashboardToken, writeDashboardToken } from "./store/dashboard.ts";
+import { reuseRefusal } from "./dashboard-reuse.ts";
 import { collectLimits, emptyLimitsSnapshot } from "./limits/index.ts";
 import type { LimitsSnapshot } from "./limits/types.ts";
+import { staticRoutes } from "./static-routes.ts";
 
 const toolRoot = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(toolRoot, "public");
@@ -47,7 +49,7 @@ if (process.argv.includes("--help")) {
 Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
-If a compatible dashboard already uses the port, the command reuses it only with the same analysis options.
+If a dashboard already uses the port, the command reuses it only when it runs the same version with the same analysis options.
 ${pricingHelp}${machineHelp}${remoteHelp}--snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
 Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
 `);
@@ -91,7 +93,8 @@ async function sendFile(response: ServerResponse, path: string): Promise<void> {
     200,
     headers(contentTypes[extname(path)] ?? "application/octet-stream", cacheControl),
   );
-  response.end(content);
+  // The page names the running version, so a dashboard left open across an upgrade is recognisable.
+  response.end(extname(path) === ".html" ? content.toString("utf8").replace("<!--version-->", version) : content);
 }
 
 function safeError(error: unknown): string {
@@ -129,53 +132,7 @@ function sameOriginApiRequest(request: { headers: Record<string, string | string
   catch { return false; }
 }
 
-const staticFiles = new Map<string, string>([
-  ["/history-coverage.js", join(publicRoot, "history-coverage.js")],
-  ["/", join(publicRoot, "index.html")],
-  ["/app.js", join(publicRoot, "app.js")],
-  ["/format.js", join(publicRoot, "format.js")],
-  ["/view-model.js", join(publicRoot, "view-model.js")],
-  ["/url-state.js", join(publicRoot, "url-state.js")],
-  ["/theme-boot.js", join(publicRoot, "theme-boot.js")],
-  ["/ui.js", join(publicRoot, "ui.js")],
-
-  ["/providers.js", join(publicRoot, "providers.js")],
-  ["/chart-colors.js", join(publicRoot, "chart-colors.js")],
-  ["/chart-legend.js", join(publicRoot, "chart-legend.js")],
-  ["/chart-scale.js", join(publicRoot, "chart-scale.js")],
-
-  ["/velocity.js", join(publicRoot, "velocity.js")],
-  ["/velocity-data.js", join(publicRoot, "velocity-data.js")],
-  ["/velocity.css", join(publicRoot, "velocity.css")],
-
-  ["/subscription.js", join(publicRoot, "subscription.js")],
-  ["/subscription-data.js", join(publicRoot, "subscription-data.js")],
-  ["/subscription-plans.js", join(publicRoot, "subscription-plans.js")],
-  ["/subscription.css", join(publicRoot, "subscription.css")],
-
-  ["/tools.js", join(publicRoot, "tools.js")],
-  ["/tools-data.js", join(publicRoot, "tools-data.js")],
-  ["/tools.css", join(publicRoot, "tools.css")],
-
-  ["/styles.css", join(publicRoot, "styles.css")],
-  ["/fonts/geist-latin.woff2", join(publicRoot, "fonts", "geist-latin.woff2")],
-
-  ["/pricing.js", join(publicRoot, "pricing.js")],
-  ["/pricing-data.js", join(publicRoot, "pricing-data.js")],
-  ["/model-id.js", join(publicRoot, "model-id.js")],
-  ["/pricing.css", join(publicRoot, "pricing.css")],
-  ["/export-data.js", join(publicRoot, "export-data.js")],
-  ["/evidence.js", join(publicRoot, "evidence.js")],
-  ["/timestamps.js", join(publicRoot, "timestamps.js")],
-  ["/export-menu.js", join(publicRoot, "export-menu.js")],
-  ["/shared-view.js", join(publicRoot, "shared-view.js")],
-  ["/interop.css", join(publicRoot, "interop.css")],
-  ["/fonts/geist-mono-latin.woff2", join(publicRoot, "fonts", "geist-mono-latin.woff2")],
-  ["/brands/codex.svg", join(publicRoot, "brands", "codex.svg")],
-  ["/brands/claude.svg", join(publicRoot, "brands", "claude.svg")],
-  ["/brands/cursor.svg", join(publicRoot, "brands", "cursor.svg")],
-  ["/favicon.svg", join(publicRoot, "favicon.svg")],
-]);
+const staticFiles = new Map(staticRoutes.map(([route, file]) => [route, join(publicRoot, file)]));
 
 let analyzeOptions: import("./types.ts").AnalyzeOptions;
 try { analyzeOptions = analyzeOptionsFrom(process.argv, process.env); }
@@ -274,6 +231,7 @@ const server = createServer(async (request, response) => {
         status: "ok",
         instanceToken,
         optionsHash,
+        version,
       };
       sendJson(response, 200, health);
       return;
@@ -333,33 +291,34 @@ async function openDashboard(): Promise<void> {
   });
 }
 
-async function compatibleDashboardIsRunning(): Promise<boolean> {
+async function runningDashboard(): Promise<Partial<DashboardHealth> | null> {
   try {
-    const response = await fetch(`${dashboardUrl}/api/health`, {
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!response.ok) return false;
-    const body = await response.json() as Partial<DashboardHealth>;
-    return body.service === serviceId && body.status === "ok" && body.dataSource === "live" &&
-      body.optionsHash === optionsHash && body.instanceToken === readDashboardToken(analyzeOptions, port);
+    const response = await fetch(`${dashboardUrl}/api/health`, { signal: AbortSignal.timeout(2_000) });
+    return response.ok ? await response.json() as Partial<DashboardHealth> : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function launchToken(): string | null {
+  try { return readDashboardToken(analyzeOptions, port); } catch { return null; }
 }
 
 server.on("error", (error: NodeJS.ErrnoException) => {
   void (async () => {
-    if (error.code === "EADDRINUSE" && !snapshotFile && await compatibleDashboardIsRunning()) {
-      process.stdout.write(`${brand.name} already running: ${dashboardUrl}\n`);
-      if (process.argv.includes("--open")) await openDashboard();
-      process.exit(0);
-    }
-    if (error.code === "EADDRINUSE") {
-      process.stderr.write("Session Analytics is already running on this port with different options; stop it or choose --port.\n");
-    } else {
+    if (error.code !== "EADDRINUSE") {
       process.stderr.write(`${brand.name} could not start: ${safeError(error)}\n`);
+      process.exit(1);
     }
-    process.exit(1);
+    // A saved-file dashboard never reuses the port: that server could be showing another file.
+    const refusal = reuseRefusal(await runningDashboard(), { version, optionsHash, instanceToken: snapshotFile ? null : launchToken() });
+    if (refusal) {
+      process.stderr.write(`${refusal}\n`);
+      process.exit(1);
+    }
+    process.stdout.write(`${brand.name} already running: ${dashboardUrl}\n`);
+    if (process.argv.includes("--open")) await openDashboard();
+    process.exit(0);
   })();
 });
 

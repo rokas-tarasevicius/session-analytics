@@ -2,9 +2,9 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** A fixed recent synthetic session so the MCP demo always has settled current-day activity. */
-export function seedMcpDemo(root: string): void {
+export function seedMcpDemo(root: string, now = Date.now()): void {
   const project = join(root, "repos/acme-web");
-  const now = Date.now(), at = (offset: number): string => new Date(now + offset).toISOString();
+  const at = (offset: number): string => new Date(now + offset).toISOString();
   const id = "88888888-8888-4888-8888-888888888888";
   const usage = { input_tokens: 10_000, cached_input_tokens: 8_000, output_tokens: 500, reasoning_output_tokens: 200 };
   const rows = [

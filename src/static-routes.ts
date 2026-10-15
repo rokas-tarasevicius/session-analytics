@@ -1,0 +1,48 @@
+/** Every file the dashboard serves, by route, relative to `src/public`. Release checks require each one in the package. */
+export const staticRoutes: ReadonlyArray<readonly [route: string, file: string]> = [
+  ["/history-coverage.js", "history-coverage.js"],
+  ["/", "index.html"],
+  ["/app.js", "app.js"],
+  ["/format.js", "format.js"],
+  ["/view-model.js", "view-model.js"],
+  ["/url-state.js", "url-state.js"],
+  ["/theme-boot.js", "theme-boot.js"],
+  ["/ui.js", "ui.js"],
+
+  ["/providers.js", "providers.js"],
+  ["/chart-colors.js", "chart-colors.js"],
+  ["/chart-legend.js", "chart-legend.js"],
+  ["/chart-scale.js", "chart-scale.js"],
+
+  ["/velocity.js", "velocity.js"],
+  ["/velocity-data.js", "velocity-data.js"],
+  ["/velocity.css", "velocity.css"],
+
+  ["/subscription.js", "subscription.js"],
+  ["/subscription-data.js", "subscription-data.js"],
+  ["/subscription-plans.js", "subscription-plans.js"],
+  ["/subscription.css", "subscription.css"],
+
+  ["/tools.js", "tools.js"],
+  ["/tools-data.js", "tools-data.js"],
+  ["/tools.css", "tools.css"],
+
+  ["/styles.css", "styles.css"],
+  ["/fonts/geist-latin.woff2", "fonts/geist-latin.woff2"],
+
+  ["/pricing.js", "pricing.js"],
+  ["/pricing-data.js", "pricing-data.js"],
+  ["/model-id.js", "model-id.js"],
+  ["/pricing.css", "pricing.css"],
+  ["/export-data.js", "export-data.js"],
+  ["/evidence.js", "evidence.js"],
+  ["/timestamps.js", "timestamps.js"],
+  ["/export-menu.js", "export-menu.js"],
+  ["/shared-view.js", "shared-view.js"],
+  ["/interop.css", "interop.css"],
+  ["/fonts/geist-mono-latin.woff2", "fonts/geist-mono-latin.woff2"],
+  ["/brands/codex.svg", "brands/codex.svg"],
+  ["/brands/claude.svg", "brands/claude.svg"],
+  ["/brands/cursor.svg", "brands/cursor.svg"],
+  ["/favicon.svg", "favicon.svg"],
+];

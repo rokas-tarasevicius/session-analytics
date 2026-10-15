@@ -15,7 +15,7 @@ npm ci              # TypeScript and Node type definitions only
 npm run check       # type check and the full test suite
 ```
 
-There is no build step. Node runs the TypeScript sources directly.
+Development has no build step: Node runs the TypeScript sources directly. Releases ship the same code compiled into `dist/`, because Node refuses TypeScript under `node_modules`. Code that names a sibling file by path at run time, such as a worker entry, uses `moduleUrl("./worker.ts", import.meta.url)` from `src/module-url.ts`, which names the emitted `.js` in the compiled package; the build fails on a string path that still names a `.ts` file. Every other file under `src/` ships verbatim, and the build also fails when a literal `new URL("./file", import.meta.url)` names a file missing from the package. The dashboard serves only the files listed in `src/static-routes.ts`, and the release check requires each of them in the package.
 
 | Script | What it does |
 | --- | --- |
@@ -26,22 +26,28 @@ There is no build step. Node runs the TypeScript sources directly.
 | `npm test` | `node scripts/test.ts` runs the Node test runner with concurrency 2 over `test/`, `test/validation/` and `verify/` suites, using an isolated temporary directory. |
 | `npm run test:browser` | Run the two Chrome suites with isolated fixtures; missing or unlaunchable Chrome fails. Set `SESSION_ANALYTICS_CHROME` to your Chrome/Chromium executable outside the default macOS location. |
 | `npm run check` | Type check, then tests. CI requires GitHub-hosted Ubuntu and macOS source checks plus a required Ubuntu Chrome check for pull requests, pushes to `master` and manual runs, in both private and public repositories. |
-| `npm run release:check` | Validate the source release locally: version metadata, type check, tests, snapshot schemas, synthetic JSON report and package contents. Does not publish. |
+| `npm run build` | Compile the installable package into `dist/`: JavaScript, dashboard files, rate card, schemas and skill, with a generated manifest that has no install scripts or dependencies. `node scripts/build.ts --out DIR` builds elsewhere; DIR is emptied first, so it must be new, empty or an earlier build, and never the checkout, your home directory or a directory containing either. |
+| `npm run pack:release` | Build, then pack `dist/` into `release/session-analytics-X.Y.Z.tgz`. |
+| `npm run release:check` | Validate a release locally: version metadata, type check, tests, snapshot schemas and synthetic JSON report, then build and pack the package, check its files and manifest, install it into a temporary prefix and run every command, the demo report, MCP and the dashboard from the installed copy (`scripts/smoke-installed.ts`). Does not publish. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
+
+If you also have an installed copy, give the checkout its own data directory (`SESSION_ANALYTICS_DATA_DIR` or `--data-dir`) for `npm start`, `npm run report` and `npm link`. The index fingerprints the code that runs, so a checkout and an installed copy sharing one data directory parse every present session again each time you switch between them.
 
 The test wrapper chooses a writable temporary directory outside ancestor Git repositories and passes it to fixtures through `TMPDIR`, `TMP` and `TEMP`. This prevents repository-discovery tests from inheriting an unrelated parent Git root. It removes only its own run directory on exit. If neither the system temp directory nor `/var/tmp` is usable, set `TMPDIR` to a writable directory outside any Git checkout.
 
 ## Project layout
 
 ```text
-bin/session-analytics.ts     command dispatcher (dashboard, report, rates, export, merge, index, mcp)
+bin/session-analytics.ts     command dispatcher (dashboard, report, rates, export, merge, index, mcp, limits)
 src/
   analyzer.ts                discovery, identity, repository assignment, parsers, pricing, aggregation
   analysis-process.ts        runs an analysis in a child process
   analysis-worker.ts         child-process entry point
   cursor-worker.ts           child process for the Cursor database
   server.ts                  loopback dashboard server
+  static-routes.ts           every file the dashboard serves
+  module-url.ts              sibling module paths for source and compiled runs
   cli.ts                     terminal report and JSON snapshot
   types.ts                   public snapshot types and internal correlation types
   brand.ts, version.ts       product identity and version
@@ -53,7 +59,10 @@ src/
   public/                    dashboard (HTML, ES module, CSS, fonts, provider marks)
 data/rate-cards.json         versioned model rates with source URLs
 skills/session-analytics/    agent skill
-scripts/demo.ts              synthetic dataset and demo launcher
+scripts/demo.ts              synthetic dataset and demo launcher (--bin runs another build)
+scripts/build.ts             compiles the installable package into dist/
+scripts/smoke-installed.ts   installs a packed tarball and runs it end to end
+scripts/homebrew-formula.ts  renders the Homebrew tap formula for a release
 test/                        node:test suites and fixtures
 verify/                      independent accounting oracles and verification guide
 schemas/                     closed public snapshot and sharing schemas
@@ -113,9 +122,9 @@ Public pricing fetches belong only in `src/pricing/`; analysis stays network-fre
 
 ## Changelog
 
-`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time.
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). User-visible changes (new metrics, changed numbers, CLI options, dashboard behavior, rate-card updates) add a line under `## [Unreleased]`. Accounting fixes say what was wrong and in which direction totals move. Maintainers move entries into a version section at release time and update the compare links at the bottom of the file.
 
-Pushing a `vX.Y.Z` tag runs the release workflow. Every release requires GitHub-hosted Ubuntu and macOS validation plus the required Ubuntu Chrome check before publication, regardless of repository visibility. Validation checks that the tag, package, source version and latest changelog release agree, then checks types, tests, schemas and a synthetic report. Only the publishing job has write permission. It creates a GitHub Release through the REST API using the matching `## [X.Y.Z]` section from `CHANGELOG.md`; missing or inconsistent metadata fails before publication. See [docs/release.md](docs/release.md) for the preflight and public launch gates.
+Pushing a `vX.Y.Z` tag runs the release workflow. Every release requires GitHub-hosted Ubuntu and macOS validation, the required Ubuntu Chrome check, and an installed smoke of the packed tarball on Ubuntu and macOS under Node.js 24.0.0, the newest 24.x and 26 before publication. Validation checks that the tag, package, source version, latest changelog release and its compare links agree, then runs `release:check`. Only the publishing job has write permission: it attests the tarball's provenance and creates the GitHub Release with the tarball, an unversioned alias and `SHA256SUMS`, using the matching `## [X.Y.Z]` section from `CHANGELOG.md` as its notes. The same bytes then go to npm and the Homebrew tap when those channels are enabled. See [docs/release.md](docs/release.md) for the preflight, the jobs and the one-time maintainer steps.
 
 ## Style
 

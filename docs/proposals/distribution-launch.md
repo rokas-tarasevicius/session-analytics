@@ -1,6 +1,6 @@
 # Distribution and open-source launch proposal
 
-Status: proposed, 2026-10-02. This document changes no installation behavior and claims no published package, tap, executable, or docs deployment. It accompanies [the product strategy](product-strategy.md). External references were checked on the date above; packaging experiments below remain release gates, not completed validation.
+Status: proposed 2026-10-02; the release workflow for the GitHub Release tarball, npm and a Homebrew tap implemented 2026-10-14 as described in [releases](../release.md), with npm and the tap waiting for their one-time setup; the standalone executable is still open. The package layout differs from the sketch below: `dist/` is the package root with its own generated manifest, while the root `package.json` stays private. The rest of this document is the original proposal and claims no published package, tap, executable, or docs deployment. It accompanies [the product strategy](product-strategy.md). External references were checked on the date above; packaging experiments below remain release gates, not completed validation.
 
 ## Decision
 

@@ -432,6 +432,8 @@ export interface DashboardHealth {
   status: "ok";
   instanceToken: string;
   optionsHash: string;
+  /** Tool version: a launch reuses only a dashboard running the same version. */
+  version: string;
 }
 
 export interface ProviderEvidence {
