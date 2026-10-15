@@ -26,11 +26,23 @@ The release version must agree in `package.json`, `package-lock.json`, `src/vers
 
 1. On a branch, move user-facing entries out of `Unreleased` into `## [X.Y.Z] - YYYY-MM-DD`, preserving existing release history. Set the version with `npm version X.Y.Z --no-git-tag-version` and in `src/version.ts`. Point `[Unreleased]` at `compare/vX.Y.Z...HEAD` and add `[X.Y.Z]: https://github.com/rokas-tarasevicius/session-analytics/compare/vPREVIOUS...vX.Y.Z`. On a new minor version, update the supported versions in [SECURITY.md](../SECURITY.md).
 2. Run `npm run release:check`, open a pull request and merge it through the required checks.
-3. Tag the merge commit on `master` and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`. A tag push is a publication action, so do not use scratch tags merely to test workflow parsing.
+3. Run the [dry run](#dry-run) on `master` and wait for it to pass.
+4. Tag the merge commit on `master` and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`. A tag push is a publication action, so test the workflow with a dry run, never with a scratch tag.
+
+### Dry run
+
+```bash
+gh workflow run release.yml --ref master
+gh run watch
+```
+
+A manual run of the release workflow is a dry run of tagging that commit. It takes the tag name from `package.json` (`v` and its version) instead of from a pushed tag, and runs `validate` on Ubuntu and macOS (the tag and release notes check against that name, then `npm run release:check`), `browser`, `package` and every `smoke` leg exactly as a tag does; its `release` artifact keeps the tarball, `SHA256SUMS` and notes for 7 days. `release`, `npm` and `homebrew` run only when the run is a pushed `v*` tag, so a dry run has read-only repository permission, enters no environment, sees no secret and publishes nothing.
+
+A passing dry run shows that the version metadata, changelog section and compare links agree, that the checks pass on both platforms and in Chrome, and that the packed tarball installs and runs on every operating system and Node.js leg. It does not exercise anything after that: the REST calls that create, fill and publish the GitHub Release and the provenance attestation, npm's trusted publishing and the registry install, or the Homebrew install from the published asset and the push to the tap, nor the environments, variables and deploy key they use. It also does not check that `vX.Y.Z` is still unused. The first tag runs those steps for the first time; re-running them is safe (see [below](#the-tag-workflow)).
 
 ## The tag workflow
 
-`.github/workflows/release.yml` runs on `v*` tags with read-only repository permission by default, one run per tag and no cancellation. Every action is pinned to a full commit SHA.
+`.github/workflows/release.yml` runs on `v*` tags, and by hand as a [dry run](#dry-run), with read-only repository permission by default, one run per tag or branch at a time and no cancellation. Every action is pinned to a full commit SHA.
 
 | Job | Runs on | What it does |
 | --- | --- | --- |
@@ -38,15 +50,15 @@ The release version must agree in `package.json`, `package-lock.json`, `src/vers
 | `browser` | Ubuntu | Required Chrome suites; a missing Chrome fails. |
 | `package` | Ubuntu | `npm ci`, the notes check and `npm run pack:release`; copies the tarball to the unversioned alias `session-analytics.tgz`, writes `SHA256SUMS` for both, and uploads them with the release notes as a workflow artifact kept for 7 days. |
 | `smoke` | Ubuntu, macOS × Node.js 24.0.0, 24, 26 | Downloads the artifact, verifies `SHA256SUMS`, and runs `scripts/smoke-installed.ts` on that exact tarball. Node.js 24.0.0 is the oldest version `engines` allows, 24 the newest 24.x, and 26 Homebrew's `node`. The checkout supplies only the smoke script, demo and test fixtures. |
-| `release` | Ubuntu | Publishes the GitHub Release. Runs only when `validate`, `browser`, `package` and every `smoke` leg succeeded and the run was not cancelled. |
-| `npm` | Ubuntu | Publishes the same tarball to npm when the repository variable `NPM_PUBLISH` is `true`. |
-| `homebrew` | macOS | When the repository variable `HOMEBREW_TAP` is `true`, installs, tests and audits the rendered formula with Homebrew, then updates the tap. |
+| `release` | Ubuntu | Publishes the GitHub Release. Runs only for a pushed tag, when `validate`, `browser`, `package` and every `smoke` leg succeeded and the run was not cancelled. |
+| `npm` | Ubuntu | For a pushed tag, publishes the same tarball to npm when the repository variable `NPM_PUBLISH` is `true`. |
+| `homebrew` | macOS | For a pushed tag, when the repository variable `HOMEBREW_TAP` is `true`, installs, tests and audits the rendered formula with Homebrew, then updates the tap. |
 
 Every job that downloads the artifact verifies `SHA256SUMS` before using it. Only `release` has `contents: write`, and with `id-token: write` and `attestations: write` it attests build provenance for the tarball (`gh attestation verify session-analytics-X.Y.Z.tgz -R rokas-tarasevicius/session-analytics`). It runs no repository code: REST calls with the workflow token create the release as a draft, or resume this tag's draft on a re-run, upload `session-analytics-X.Y.Z.tgz`, `session-analytics.tgz` and `SHA256SUMS`, check each upload against the verified file, and only then publish the release. It is marked latest unless the current latest release has a higher version, so a backport or a late re-run never moves `/releases/latest/download/session-analytics.tgz` back. That URL also never names a release without files. A published release is never changed: a re-run succeeds only when it already carries identical files.
 
 The `npm` job runs after the GitHub Release in the `npm` environment with `id-token: write` and read-only contents. It installs npm 11.21.0 (trusted publishing needs 11.5.1 or newer) and runs `npm publish` on the release tarball with dist-tag `latest`, or `backport` when the registry's `latest` is already a higher version: an explicit `--tag` turns off npm's own guard against tagging an older version `latest`. Trusted publishing exchanges the job's OIDC token for a short-lived credential and adds provenance, so no npm token is stored. A re-run finds the same bytes already published and skips the publish. The job then waits until `npm view session-analytics@X.Y.Z dist.integrity` equals the tarball's SHA-512 integrity, and runs the installed smoke against `session-analytics@X.Y.Z` from the registry.
 
-The `homebrew` job runs on macOS in the `homebrew` environment after the GitHub Release, and after `npm` when that job ran. `scripts/homebrew-formula.ts` renders `Formula/session-analytics.rb` from the version and the tarball's SHA-256. The job copies it into a throwaway local tap (`brew tap-new --no-git`) and runs `brew install`, `brew test` and `brew audit --strict` on it, because the tap's own CI only checks syntax on pushes to `main`. Then it commits the formula to `main` of [rokas-tarasevicius/homebrew-tap](https://github.com/rokas-tarasevicius/homebrew-tap) through the contents API with the `TAP_TOKEN` secret; an unchanged formula makes no commit, and a tap that already has a higher version is left unchanged. The formula installs the release tarball with `npm install *std_npm_args`, depends on Homebrew's `node`, and pins that Node.js ahead of any older one on `PATH`. Its test runs `--version` and an offline `report --json --no-index` with an empty `HOME`. The script is the formula's only source; the tap's copy is overwritten on each release.
+The `homebrew` job runs on macOS in the `homebrew` environment after the GitHub Release, and after `npm` when that job ran. `scripts/homebrew-formula.ts` renders `Formula/session-analytics.rb` from the version and the tarball's SHA-256. The job copies it into a throwaway local tap (`brew tap-new --no-git`) and runs `brew install`, `brew test` and `brew audit --strict` on it, because the tap's own CI only checks syntax on pushes to `main`. Then it pushes the formula to `main` of [rokas-tarasevicius/homebrew-tap](https://github.com/rokas-tarasevicius/homebrew-tap) over SSH with the `TAP_DEPLOY_KEY` deploy key, the only secret in the workflow and visible only to that step. The step writes the key to a private temporary file that it removes however it ends, trusts only github.com's host keys as GitHub publishes them (`gh api meta --jq .ssh_keys`), shallow-clones `main` (or starts `main` in an empty tap), and commits as `github-actions[bot]` with the message `session-analytics X.Y.Z`. An unchanged formula makes no commit, and a tap that already has a higher version is left unchanged. Should GitHub rotate a host key, update the pinned keys in the step and the fingerprints in `test/integration-release.test.ts`. The formula installs the release tarball with `npm install *std_npm_args`, depends on Homebrew's `node`, and pins that Node.js ahead of any older one on `PATH`. Its test runs `--version` and an offline `report --json --no-index` with an empty `HOME`. The script is the formula's only source; the tap's copy is overwritten on each release.
 
 With neither variable set, a tag still produces a complete GitHub Release, and the tarball URL install works. `release:check` refuses prerelease versions today; should it allow one, the workflow would publish a GitHub prerelease that is not marked latest, use npm's `next` dist-tag and leave the tap alone.
 
@@ -67,10 +79,11 @@ These account and repository actions turn on the npm and Homebrew jobs. Until th
 
 ### Homebrew
 
-1. Run `brew tap-new rokas-tarasevicius/homebrew-tap`, then publish it as the public repository `rokas-tarasevicius/homebrew-tap` with a `main` branch, for example `gh repo create rokas-tarasevicius/homebrew-tap --public --source "$(brew --repository rokas-tarasevicius/homebrew-tap)" --push`.
-2. Create a fine-grained personal access token for that repository only, with **Contents: Read and write**. In this repository, create the environment `homebrew`, limit its deployments to tags matching `v*`, and add the token as its secret `TAP_TOKEN`.
-3. Set the repository variable `HOMEBREW_TAP` to `true`. The next tag commits the formula. For a release that is already published, commit the formula yourself: run `node scripts/homebrew-formula.ts --version X.Y.Z --sha256 <SHA-256 from SHA256SUMS>` and save its output as `Formula/session-analytics.rb` in the tap.
-4. Check the result with `brew install rokas-tarasevicius/tap/session-analytics` and `brew test session-analytics`, then add the Homebrew install, upgrade and uninstall commands to the user guides.
+1. Create the public repository `rokas-tarasevicius/homebrew-tap`. Publishing the scaffold of `brew tap-new rokas-tarasevicius/homebrew-tap` gives it a `main` branch and Homebrew's syntax check: `gh repo create rokas-tarasevicius/homebrew-tap --public --source "$(brew --repository rokas-tarasevicius/homebrew-tap)" --push`. An empty repository, or one with only a README, also works: the first release adds `Formula/session-analytics.rb` to `main`.
+2. Create an ed25519 key pair without a passphrase, for example `ssh-keygen -t ed25519 -N '' -C 'session-analytics release' -f tap-deploy-key`, and add the public half to the tap as a deploy key with write access: `gh repo deploy-key add tap-deploy-key.pub --repo rokas-tarasevicius/homebrew-tap --allow-write --title 'session-analytics release'`. A deploy key can write to that one repository only, so no personal access token is needed.
+3. In this repository, create the environment `homebrew` and limit its deployments to tags matching `v*`. Store the private key as its secret `TAP_DEPLOY_KEY`: `gh secret set TAP_DEPLOY_KEY --env homebrew --repo rokas-tarasevicius/session-analytics < tap-deploy-key`. Then delete both key files.
+4. Set the repository variable `HOMEBREW_TAP` to `true`. The next tag commits the formula. For a release that is already published, commit the formula yourself: run `node scripts/homebrew-formula.ts --version X.Y.Z --sha256 <SHA-256 from SHA256SUMS>` and save its output as `Formula/session-analytics.rb` in the tap.
+5. Check the result with `brew install rokas-tarasevicius/tap/session-analytics` and `brew test session-analytics`, then add the Homebrew install, upgrade and uninstall commands to the user guides.
 
 ## Public launch gates
 
