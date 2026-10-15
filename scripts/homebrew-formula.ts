@@ -12,7 +12,8 @@ export const repository = "rokas-tarasevicius/session-analytics";
 
 /**
  * The formula installs the exact release asset; its test runs no scan of the tester's history, only an empty HOME.
- * Lines other than the url stay within Homebrew's 118 columns, so the tap's style check passes.
+ * It must pass Homebrew's style cops, which every release workflow run checks with `brew style` before anything publishes:
+ * lines other than the url stay within 118 columns, and Homebrew's Node is named by `formula_opt_bin`, not `Formula[...]`.
  */
 export function homebrewFormula(version: string, sha256: string): string {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Formula version must be a stable X.Y.Z, not ${JSON.stringify(version)}.`);
@@ -31,7 +32,7 @@ class SessionAnalytics < Formula
   def install
     system "npm", "install", *std_npm_args
     # Pin Homebrew's Node ahead of any older node on PATH; the analysis workers reuse the same runtime.
-    env = { PATH: "#{Formula["node"].opt_bin}:$PATH" }
+    env = { PATH: "#{formula_opt_bin("node")}:$PATH" }
     (bin/"session-analytics").write_env_script libexec/"bin/session-analytics", env
   end
 
