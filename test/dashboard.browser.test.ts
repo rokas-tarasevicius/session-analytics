@@ -83,8 +83,14 @@ interface Browser {
 
 async function connect(port: number): Promise<{ browser: Browser; close: () => void }> {
   let targets: Array<{ type: string; webSocketDebuggerUrl: string }> = [];
-  for (let attempt = 0; attempt < 100 && !targets.some((target) => target.type === "page"); attempt += 1) {
-    try { targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as typeof targets; } catch { await delay(100); }
+  // Chrome can answer /json/list before its first tab exists, so wait between every attempt, then open a tab ourselves.
+  const hasPage = (): boolean => targets.some((target) => target.type === "page");
+  for (let attempt = 0; attempt < 100 && !hasPage(); attempt += 1) {
+    try { targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as typeof targets; } catch { /* Not listening yet. */ }
+    if (!hasPage()) await delay(100);
+  }
+  if (!hasPage()) {
+    try { targets = [(await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" })).json()) as (typeof targets)[number]]; } catch { /* Reported below. */ }
   }
   const page = targets.find((target) => target.type === "page");
   assert.ok(page, "Chrome exposed no page target");
