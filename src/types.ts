@@ -469,6 +469,8 @@ export interface DashboardHealth {
   optionsHash: string;
   /** The same without the machines, so a launch can tell that only the machines differ. */
   scanHash: string;
+  /** Tool version: a launch reuses only a dashboard running the same version. */
+  version: string;
 }
 
 export interface ProviderEvidence {

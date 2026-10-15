@@ -275,7 +275,7 @@ h1, h2, h3, p { margin: 0; }
 [hidden] { display: none !important; }
 svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 svg .fill { fill: currentColor; stroke: none; }
-.line-chart svg, .donut svg, svg.spark { stroke: none; stroke-width: 0; }
+.line-chart svg, .donut svg, svg.spark, svg.subscription-chart { stroke: none; stroke-width: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 kbd { display: inline-flex; min-width: 18px; height: 18px; align-items: center; justify-content: center; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--radius-xs); background: var(--surface); color: var(--text-2); font: 500 var(--fs-xs)/1 var(--font-mono); letter-spacing: 0; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

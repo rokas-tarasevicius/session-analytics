@@ -2,9 +2,10 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import type { AnalyzeOptions, MachineAnalytics } from "./types.ts";
-import { indexErrorMessage } from "./store/errors.ts";
+import { workerExitMessage } from "./store/errors.ts";
 import { analysisEnvironment } from "./options.ts";
 import { track } from "./processes.ts";
+import { moduleUrl } from "./module-url.ts";
 
 /** Machine-wide history with thousands of indexed sessions peaks well above 256 MB. */
 export const analysisHeapLimitMegabytes = 1024;
@@ -23,7 +24,7 @@ export async function analyzeMachineSessionsIsolated(
   return await new Promise<MachineAnalytics>((resolve, reject) => {
     const child = track(spawn(
       process.execPath,
-      [`--max-old-space-size=${analysisHeapLimitMegabytes}`, fileURLToPath(new URL("./analysis-worker.ts", import.meta.url))],
+      [`--max-old-space-size=${analysisHeapLimitMegabytes}`, fileURLToPath(moduleUrl("./analysis-worker.ts", import.meta.url))],
       { stdio: ["pipe", "pipe", "pipe"], env: analysisEnvironment(options) },
     ));
     let output = "";
@@ -35,8 +36,7 @@ export async function analyzeMachineSessionsIsolated(
     child.once("error", reject);
     child.once("close", (code) => {
       if (code !== 0) {
-        let message: string | null = null;
-        try { message = indexErrorMessage((JSON.parse(output) as { analysisError?: unknown }).analysisError); } catch { /* No raw child error is forwarded. */ }
+        const message = workerExitMessage(output, errorOutput);
         if (!message && /heap out of memory|allocation failed.*heap/i.test(errorOutput)) {
           reject(new AnalysisHeapLimitError(output.startsWith("{") ? "serialization" : "analysis"));
           return;

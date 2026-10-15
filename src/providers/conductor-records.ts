@@ -9,6 +9,10 @@ const usage = (source: string, path: string) => `json_object(${pick(source, path
   'cache_creation', json_object(${pick(source, `${path}.cache_creation`, ["ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"])}),
   'output_tokens_details', json_object(${pick(source, `${path}.output_tokens_details`, ["thinking_tokens"])}))`;
 
+/**
+ * One Conductor session's records, bound as `{ session }`. A named parameter, because Node.js before 24.7 binds
+ * positional arguments to `?` only and fails on the `?1` both representations would share.
+ */
 export function conductorRecords(database: DatabaseSync): StatementSync | null {
   const columns = new Set((database.prepare("PRAGMA table_info(session_messages)").all() as Array<{ name: string }>).map((row) => row.name));
   if (!["session_id", "id", "content"].every((key) => columns.has(key))) return null;
@@ -16,7 +20,7 @@ export function conductorRecords(database: DatabaseSync): StatementSync | null {
   const sources = ["content", ...(columns.has("full_message") ? ["full_message"] : [])];
   const sql = sources.map((source, representation) => `SELECT id, ${column("created_at")}, ${column("sdk_message_id")},
     ${representation} representation, CASE WHEN json_valid(${source}) THEN ${source} ELSE '{}' END d
-    FROM session_messages WHERE session_id = ?1`).join(" UNION ALL ");
+    FROM session_messages WHERE session_id = :session`).join(" UNION ALL ");
   return database.prepare(`WITH records AS (${sql})
     SELECT id, created_at, sdk_message_id, json_object(
       ${pick("d", "$", ["type", "subtype", "uuid", "session_id", "new_conversation_id", "claude_code_version", "timestamp", "parent_tool_use_id", "isSidechain", "agentId", "requestId", "effort"])},

@@ -8,13 +8,18 @@
  *   node scripts/demo.ts --port 4180       choose another loopback port
  *   node scripts/demo.ts report [--json]   terminal report or JSON snapshot
  *   node scripts/demo.ts --keep            keep the generated data after exit
+ *   node scripts/demo.ts --bin PATH        run another build, such as an installed package's bin
+ *                                          (or set SESSION_ANALYTICS_DEMO_BIN)
+ *   SESSION_ANALYTICS_DEMO_NOW=ISO-TIME    generate the data as of that instant, so two builds see the same sessions
  *
- * Every provider source is passed explicitly, and the child process runs with
- * HOME pointed at an empty directory inside the demo root, so neither the
- * explicit flags nor profile discovery can reach the machine's real history.
+ * The child process runs with HOME pointed at a synthetic home inside the demo
+ * root, and every other provider source is passed explicitly, so neither the
+ * flags nor profile discovery can reach the machine's real history. Claude is
+ * discovered there: two profiles, `~/.claude` (a Max plan) and `~/.claude-work`
+ * (a Team seat), with synthetic limit meters for the Subscription view.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -25,10 +30,10 @@ import { generateProviderDemo } from "./demo-providers.ts";
 import { seedDemoPricing } from "./demo-pricing.ts";
 
 import { seedHistoryDemo } from "./demo-history.ts";
+import { claudeWork, demoCodexAccount, seedLimitsDemo, workRepositories, type Activity, type ClaudeDemoSession, type CodexDemoFile, type CodexRecord } from "./demo-limits.ts";
 import { seedMcpDemo } from "./mcp-demo.ts";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const bin = join(projectRoot, "bin", "session-analytics.ts");
 const DAY = 86_400_000;
 const DAYS = 60;
 
@@ -44,22 +49,31 @@ function valueOf(flag: string): string | undefined {
   const index = options.indexOf(flag);
   return index >= 0 ? options[index + 1] : undefined;
 }
-const known = new Set(["--json", "--keep", "--no-open", "--port", "--help"]);
+const known = new Set(["--json", "--keep", "--no-open", "--port", "--bin", "--help"]);
 for (let index = 0; index < options.length; index += 1) {
   const flag = options[index] ?? "";
   if (!known.has(flag)) fail(`Unknown demo argument: ${flag}`);
-  if (flag === "--port") index += 1;
+  if (flag === "--port" || flag === "--bin") index += 1;
 }
 if (has("--json") && !reportMode) fail("--json is only valid with report.");
 if (has("--help")) {
   process.stdout.write(
-    "Usage: node scripts/demo.ts [report [--json] | mcp] [--no-open] [--port PORT] [--keep]\n" +
-      "Generates synthetic sessions in a temporary directory and analyzes only that data.\n",
+    "Usage: node scripts/demo.ts [report [--json] | mcp] [--no-open] [--port PORT] [--keep] [--bin PATH]\n" +
+      "Generates synthetic sessions in a temporary directory and analyzes only that data.\n" +
+      "--bin (or SESSION_ANALYTICS_DEMO_BIN) runs another session-analytics build, such as an installed package.\n" +
+      "SESSION_ANALYTICS_DEMO_NOW (an ISO 8601 instant) pins the generated data, so two runs analyze the same sessions.\n",
   );
   process.exit(0);
 }
 const port = Number(valueOf("--port") ?? "4175");
 if (!Number.isInteger(port) || port < 1024 || port > 65_535) fail("--port must be an integer from 1024 through 65535.");
+// The same synthetic sources and scrubbed environment drive any build, so an installed package is checked like the source.
+if (has("--bin") && !valueOf("--bin")) fail("--bin requires a path.");
+const bin = resolve(valueOf("--bin") ?? process.env["SESSION_ANALYTICS_DEMO_BIN"] ?? join(projectRoot, "bin", "session-analytics.ts"));
+if (!existsSync(bin)) fail(`No session-analytics bin at ${bin}.`);
+// One clock for every generated record; SESSION_ANALYTICS_DEMO_NOW pins it so two builds analyze identical data.
+const demoNow = process.env["SESSION_ANALYTICS_DEMO_NOW"] ? Date.parse(process.env["SESSION_ANALYTICS_DEMO_NOW"]) : Date.now();
+if (!Number.isFinite(demoNow) || demoNow > Date.now()) fail("SESSION_ANALYTICS_DEMO_NOW must be an ISO 8601 instant that is not in the future.");
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -244,7 +258,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   const effort = model.includes("haiku") ? undefined : weighted(effortLevels);
   const coldCache = repository.name === "data-pipeline" && !options.subagent;
   const longCache = !coldCache && !options.subagent && chance(0.35);
-  const base = { entrypoint: options.entrypoint, ...(options.attributionAgent ? { attributionAgent: options.attributionAgent } : {}), cwd, sessionId, version: options.start < Date.now() - 30 * DAY ? "2.3.0" : "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
+  const base = { entrypoint: options.entrypoint, ...(options.attributionAgent ? { attributionAgent: options.attributionAgent } : {}), cwd, sessionId, version: options.start < demoNow - 30 * DAY ? "2.3.0" : "2.4.0", gitBranch: "main", ...(options.agentId ? { agentId: options.agentId, isSidechain: true } : {}) };
   let humanStarted = state.clock;
   let parent: string | null = null;
   let spawned = 0;
@@ -336,7 +350,16 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
   return { records, end: state.clock, spawned };
 }
 
-function writeClaudeSession(root: string, repository: Repository, start: number): void {
+/** The final record of each streamed assistant message, as activity for the synthetic limit meters. */
+function claudeActivity(records: unknown[]): Activity[] {
+  const messages = new Map<string, Activity>();
+  for (const record of records as Array<{ type?: string; timestamp?: string; message?: { id: string; model: string; usage?: Record<string, number> } }>) {
+    if (record.type === "assistant" && record.message?.usage) messages.set(record.message.id, { t: Date.parse(record.timestamp!) / 1000, work: claudeWork(record.message.model, record.message.usage) });
+  }
+  return [...messages.values()];
+}
+
+function writeClaudeSession(root: string, repository: Repository, start: number): { sessionId: string; activity: Activity[] } {
   const cwd = workingDirectory(repository);
   const sessionId = uuid();
   const model = weighted(claudeModels);
@@ -345,6 +368,7 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
   const entrypoint = weighted([["cli", 40], ["sdk-ts", 50], ["local-agent", 10]] as const);
   const main = claudeTranscript({ entrypoint, cwd, messages, model, repository, sessionId, start, subagent: false });
   writeJsonl(join(projectDirectory, `${sessionId}.jsonl`), main.records);
+  const activity = claudeActivity(main.records);
   const subagents = main.spawned + (chance(0.18) ? 1 : 0);
   for (let index = 0; index < subagents; index += 1) {
     const agentId = hex(8);
@@ -362,7 +386,9 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
       subagent: true,
     });
     writeJsonl(join(projectDirectory, sessionId, "subagents", `agent-${agentId}.jsonl`), transcript.records);
+    activity.push(...claudeActivity(transcript.records));
   }
+  return { sessionId, activity };
 }
 
 interface CodexCounter {
@@ -372,6 +398,9 @@ interface CodexCounter {
   reasoning_output_tokens: number;
   total_tokens: number;
 }
+
+/** Rollouts are written after the synthetic limit meters add `rate_limits` to their `token_count` records. */
+const codexFiles: CodexDemoFile[] = [];
 
 function writeCodexSession(
   activeRoot: string,
@@ -385,13 +414,13 @@ function writeCodexSession(
   const cwd = workingDirectory(repository);
   const model = parentThreadId ? pick(["gpt-5.4-mini", "gpt-5.6-terra"] as const) : weighted(codexModels);
   const effort = weighted(effortLevels);
-  const records: unknown[] = [];
+  const records: CodexRecord[] = [];
   let clock = start;
   const push = (type: string, payload: Record<string, unknown>): void => {
     records.push({ timestamp: iso(clock), type, payload });
   };
   const source = parentThreadId ? { subagent: { thread_spawn: { parent_thread_id: parentThreadId, depth: 1 } } } : pick(["cli", "vscode", "exec", "review"]);
-  push("session_meta", { id, cwd, source, originator: source === "exec" ? "codex_exec" : source === "vscode" ? "codex_vscode" : "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock) });
+  push("session_meta", { id, cwd, source, originator: source === "exec" ? "codex_exec" : source === "vscode" ? "codex_vscode" : "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock), creator_account_id: demoCodexAccount });
   push("turn_context", { cwd, model, effort, approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } });
   const total: CodexCounter = { cached_input_tokens: 0, input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 };
   let context = integer(9_000, 18_000);
@@ -459,7 +488,7 @@ function writeCodexSession(
         String(date.getUTCDate()).padStart(2, "0"),
         `rollout-${stamp}-${id}.jsonl`,
       );
-  writeJsonl(path, records);
+  codexFiles.push({ path, model, records });
   for (const childStart of children) writeCodexSession(activeRoot, archiveRoot, repository, childStart, now, id);
   return id;
 }
@@ -525,13 +554,22 @@ function initializeRepository(root: string): void {
   }
 }
 
-function generate(root: string): { claudeRoot: string; codexRoot: string; codexArchiveRoot: string; cursorDatabase: string; home: string } {
-  const claudeRoot = join(root, "claude", "projects");
+function generate(root: string): {
+  claudeRoot: string; claudeProfiles: Record<"default" | "work", string>; claudeSessions: ClaudeDemoSession[];
+  codexRoot: string; codexArchiveRoot: string; cursorDatabase: string; home: string;
+} {
+  const claudeProfiles = { default: join(root, "claude"), work: join(root, "claude-work") };
+  const claudeRoot = join(claudeProfiles.default, "projects");
   const codexRoot = join(root, "codex", "sessions");
   const codexArchiveRoot = join(root, "codex", "archived_sessions");
   const cursorDatabase = join(root, "cursor", "User", "globalStorage", "state.vscdb");
   const home = join(root, "home");
-  for (const directory of [claudeRoot, codexRoot, codexArchiveRoot, home]) mkdirSync(directory, { recursive: true });
+  for (const directory of [claudeRoot, join(claudeProfiles.work, "projects"), codexRoot, codexArchiveRoot, home]) mkdirSync(directory, { recursive: true });
+  // The synthetic home holds the profiles Claude discovery and the limits reader look for: ~/.claude, ~/.claude-work and ~/.codex.
+  symlinkSync(claudeProfiles.default, join(home, ".claude"));
+  symlinkSync(claudeProfiles.work, join(home, ".claude-work"));
+  symlinkSync(join(root, "codex"), join(home, ".codex"));
+  const claudeSessions: ClaudeDemoSession[] = [];
 
   const repositories: Repository[] = repositorySpecs.map((spec) => {
     const repository: Repository = { ...spec, directories: [...spec.directories], files: [...spec.files], root: join(root, "repos", spec.name) };
@@ -555,8 +593,8 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
     if (!priced.has(model)) process.stderr.write(`Demo model ${model} is not in data/rate-cards.json and will appear unpriced.\n`);
   }
 
-  const now = Date.now();
-  const today = new Date();
+  const now = demoNow;
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const cursorSessions: Array<{ repository: Repository; start: number }> = [];
   let sessions = 0;
@@ -572,7 +610,11 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
       if (start > now) continue;
       const repository = weighted(repositories.map((item) => [item, item.weight] as const));
       const provider = weighted([["claude", 54], ["codex", 38], ["cursor", 8]] as const);
-      if (provider === "claude") writeClaudeSession(claudeRoot, repository, start);
+      if (provider === "claude") {
+        // Company repositories run on the Team seat, the rest on the personal Max plan.
+        const profile = workRepositories.has(repository.name) ? "work" : "default";
+        claudeSessions.push({ profile, ...writeClaudeSession(join(claudeProfiles[profile], "projects"), repository, start) });
+      }
       else if (provider === "codex") writeCodexSession(codexRoot, codexArchiveRoot, repository, start, now);
       else cursorSessions.push({ repository, start });
       sessions += 1;
@@ -580,7 +622,7 @@ function generate(root: string): { claudeRoot: string; codexRoot: string; codexA
   }
   writeCursorDatabase(cursorDatabase, cursorSessions);
   process.stderr.write(`Generated ${sessions} synthetic top-level sessions across ${repositories.length} repositories in ${root}\n`);
-  return { claudeRoot, codexRoot, codexArchiveRoot, cursorDatabase, home };
+  return { claudeRoot, claudeProfiles, claudeSessions, codexRoot, codexArchiveRoot, cursorDatabase, home };
 }
 
 // ---------------------------------------------------------------------------
@@ -631,13 +673,16 @@ const cleanup = (): void => {
 
 let sources: ReturnType<typeof generate>;
 let providerFlags: string[];
+let claudeEventLogs: string;
 try {
   sources = generate(root);
-  providerFlags = generateProviderDemo(root, repositorySpecs.map(({ name }) => ({ name, root: join(root, "repos", name) })), Date.now());
+  providerFlags = generateProviderDemo(root, repositorySpecs.map(({ name }) => ({ name, root: join(root, "repos", name) })), demoNow);
 
-  await seedDemoPricing(join(root, "analytics-data"));
-  seedMcpDemo(root);
-  seedHistoryDemo(root, sources.claudeRoot, Date.now());
+  await seedDemoPricing(join(root, "analytics-data"), new Date(demoNow));
+  seedMcpDemo(root, demoNow);
+  seedHistoryDemo(root, sources.claudeRoot, demoNow);
+  claudeEventLogs = seedLimitsDemo({ home: sources.home, profiles: sources.claudeProfiles, dataDir: join(root, "analytics-data"), claude: sources.claudeSessions, codex: codexFiles, now: demoNow / 1000 });
+  for (const file of codexFiles) writeJsonl(file.path, file.records);
 } catch (error) {
   cleanup();
   throw error;
@@ -649,12 +694,13 @@ for (const [key, value] of Object.entries(process.env)) {
   environment[key] = value;
 }
 environment["HOME"] = sources.home;
+environment["USERPROFILE"] = sources.home;
+environment["SESSION_ANALYTICS_CLAUDE_EVENT_LOGS"] = claudeEventLogs;
 environment["SESSION_ANALYTICS_DATA_DIR"] = join(root, "analytics-data");
 environment["SESSION_ANALYTICS_OFFLINE"] = "1";
 
 const sourceFlags = [
   "--data-dir", join(root, "analytics-data"),
-  "--claude-root", sources.claudeRoot,
   "--codex-root", sources.codexRoot,
   "--codex-archive-root", sources.codexArchiveRoot,
   "--cursor-database", sources.cursorDatabase,

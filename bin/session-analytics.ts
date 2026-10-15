@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // One dispatcher for every local analytics surface.
+// Only plain constants load statically; every command loads below the guard, so an older Node stops with a reason.
 import { brand } from "../src/brand.ts";
 import { version } from "../src/version.ts";
+
+if (Number(process.versions.node.split(".")[0]) < 24) {
+  process.stderr.write(`${brand.name} needs Node.js 24 or newer; this is ${process.version}.\n`);
+  process.exit(1);
+}
 
 const [command, ...rawRest] = process.argv.slice(2);
 const rest = rawRest.map((arg) => arg === "-h" ? "--help" : arg);

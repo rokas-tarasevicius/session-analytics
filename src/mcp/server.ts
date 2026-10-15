@@ -1,5 +1,6 @@
 import type { Readable, Writable } from "node:stream";
 import { AnalysisHeapLimitError } from "../analysis-process.ts";
+import { indexErrorCode, indexErrorMessage } from "../store/errors.ts";
 import { brand, serviceId } from "../brand.ts";
 import { version } from "../version.ts";
 import type { AnalyzeOptions } from "../types.ts";
@@ -164,7 +165,7 @@ export function serveMcp(options: McpServerOptions): { close: () => void; closed
       const payload = buildPayload(value, name, args, now(), options.ttlSeconds);
       success(id, { content: [{ type: "text", text: summarize(payload) }, { type: "text", text: JSON.stringify(payload) }], structuredContent: payload, isError: false }, modern);
     } catch (failure) {
-      if (!request.cancelled && !stopped) toolError(id, failure instanceof ScopeError || failure instanceof AnalysisHeapLimitError ? failure.message : "Local metrics are unavailable. Check configured evidence sources and retry; no local error details are exposed.", modern);
+      if (!request.cancelled && !stopped) toolError(id, failure instanceof ScopeError || failure instanceof AnalysisHeapLimitError ? failure.message : indexErrorMessage(indexErrorCode(failure)) ?? "Local metrics are unavailable. Check configured evidence sources and retry; no local error details are exposed.", modern);
     } finally { pending.delete(id); }
   };
 

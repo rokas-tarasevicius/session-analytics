@@ -62,8 +62,9 @@ import { conductorFallback, conductorLegacyProviderIds } from "./providers/condu
 import { loadReviewed, loadPricingCatalog, mergeProvenance, publicRateCard, resolveRate, type PricingCatalog } from "./pricing/catalog.ts";
 import { projectModelId } from "./public/model-id.js";
 import { priceUsage } from "./pricing/usage.ts";
+import { moduleUrl } from "./module-url.ts";
+import { workerExitMessage } from "./store/errors.ts";
 
-const toolRoot = new URL(".", import.meta.url);
 const publicMetadataName = new RegExp(metadataPattern);
 const zeroTokens = (): TokenUsage => ({
   cacheWrite1hInputTokens: 0,
@@ -2029,7 +2030,7 @@ async function cursorSessionsSerialized(
   workspaceRepositories: Map<string, RepositoryRow>,
 ): Promise<string> {
   return await new Promise<string>((resolveWorker, rejectWorker) => {
-    const child = track(spawn(process.execPath, ["--max-old-space-size=192", fileURLToPath(new URL("./cursor-worker.ts", import.meta.url))], {
+    const child = track(spawn(process.execPath, ["--max-old-space-size=192", fileURLToPath(moduleUrl("./cursor-worker.ts", import.meta.url))], {
       stdio: ["pipe", "pipe", "pipe"],
     }));
     let output = "";
@@ -2041,8 +2042,7 @@ async function cursorSessionsSerialized(
     child.once("error", rejectWorker);
     child.once("close", (code) => {
       if (code !== 0) {
-        void errorOutput;
-        rejectWorker(new Error("Cursor analysis process exited before returning a result."));
+        rejectWorker(new Error(workerExitMessage(output, errorOutput) ?? "Cursor analysis process exited before returning a result."));
         return;
       }
       resolveWorker(output);
