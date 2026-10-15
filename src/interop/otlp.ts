@@ -2,6 +2,7 @@ import { InteropError } from "./error.ts";
 import { serviceId } from "../brand.ts";
 import { version } from "../version.ts";
 import type { MachineAnalytics } from "../types.ts";
+import { sessionMachine } from "../public/machines.js";
 const maximumOtlpBytes = 64 * 1024 * 1024;
 
 export const semanticConventionsVersion = "1.37.0";
@@ -44,6 +45,8 @@ export function otlpLogs(snapshot: MachineAnalytics): object {
           double("session_analytics.usage.upper_value_usd", session.cost.upperEstimateUsd),
         ];
         if (session.pricedTokenCoverage !== null) attributes.push(double("session_analytics.pricing.coverage", session.pricedTokenCoverage));
+        const machine = sessionMachine(session, snapshot.machines);
+        if (machine) attributes.push(string("session_analytics.machine.key", machine));
         const model = session.models.length === 1 ? session.models[0] : null;
         if (model && model.model && model.model !== "<unknown>" && model.inputTokens === session.tokens.inputTokens && model.outputTokens === session.tokens.outputTokens) attributes.push(string("gen_ai.response.model", model.model));
         return { timeUnixNano, observedTimeUnixNano: timeUnixNano, body: { stringValue: "Observed session usage aggregate" }, attributes };

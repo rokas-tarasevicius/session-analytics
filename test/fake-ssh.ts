@@ -1,8 +1,11 @@
 // Shared by test/machines.test.ts and the installed-package smoke (scripts/smoke-installed.ts).
 /**
  * A stand-in for `ssh` that runs the remote words on this machine the way sshd does: through pipes
- * it owns, so killing it closes the "channel". Each destination and account gets its own HOME,
- * machine ID and account list; `sudo -n -iu NAME` switches HOME, and the named failures mimic real ones.
+ * it owns, so killing it closes the "channel". Each destination gets its own machine ID and account list,
+ * and each account its own HOME; `sudo -n -iu NAME` switches HOME, and the named failures mimic real ones.
+ * The SSH account is this test's own uid. Every other account has a uid of its own, which the probe's
+ * `id -u` and the identity hash of every node started there both see, so the check and the runtime
+ * identify an account alike; file ownership checks still see the real uid.
  * It needs FAKE_SSH_LOG (one JSON line per call), FAKE_SSH_HOMES and FAKE_SSH_ENVS (extra environment by destination).
  */
 export const fakeSsh = `#!/usr/bin/env node
@@ -33,6 +36,10 @@ if (words[0] === "sudo") {
 }
 const home = join(machine, account);
 mkdirSync(home, { recursive: true });
+const uid = account === "ssh-user" ? process.getuid() : [...account].reduce((sum, letter) => sum + letter.charCodeAt(0), 1000);
+const uidPreload = join(machine, "uid.cjs");
+// Only the caller in src/machines/identity hashes this uid; everything else compares file owners with the real one.
+writeFileSync(uidPreload, "const real = process.getuid;\\nprocess.getuid = () => /machines.identity[.][jt]s:[0-9]/.test(String(new Error().stack)) ? Number(process.env.FAKE_SSH_UID) : real.call(process);\\n");
 writeFileSync(join(machine, "machine-id"), "id-" + destination.replace(/-again$/, "") + "\\n");
 writeFileSync(join(machine, "passwd"), ["root:x:0:0::" + join(machine, "root") + ":/bin/bash", "daemon:x:1:1::/usr/sbin:/usr/sbin/nologin", "agents:x:995:995::" + join(machine, "agents") + ":/bin/bash", "svc:x:990:990::" + join(machine, "svc") + ":/usr/sbin/nologin", "ssh-user:x:1000:1000::" + join(machine, "ssh-user") + ":/bin/bash"].join("\\n") + "\\n");
 mkdirSync(join(machine, "agents", ".claude"), { recursive: true });
@@ -43,6 +50,7 @@ delete env.XDG_CACHE_HOME;
 const hostOnly = destination.startsWith("hostonly");
 if (hostOnly) delete env.SESSION_ANALYTICS_MACHINE_ID;
 if (listed("FAKE_SSH_HANG")) env.NODE_OPTIONS = "--require " + process.env.FAKE_SSH_HANG_SCRIPT;
+if (uid !== process.getuid()) Object.assign(env, { FAKE_SSH_UID: String(uid), NODE_OPTIONS: [env.NODE_OPTIONS, "--require \\"" + uidPreload + "\\""].filter(Boolean).join(" ") });
 if (words[0] === "true") process.exit(0);
 // A login profile that prints, as some do.
 if (destination === "chatty") process.stdout.write("Welcome to chatty!\\n");
@@ -63,7 +71,7 @@ if (program === "sh") {
     .replaceAll("/usr/sbin/ioreg", "false")
     .replaceAll("$(hostname)", hostOnly ? "clone" : "$(hostname)")
     .replace("\\nid -un\\n", "\\necho " + account + "\\n")
-    .replace("\\nid -u\\n", "\\necho " + [...account].reduce((sum, letter) => sum + letter.charCodeAt(0), 1000) + "\\n")
+    .replace("\\nid -u\\n", "\\necho " + uid + "\\n")
     .replaceAll("command -v node", destination === "nonode" ? "command -v sa-no-such-node" : "command -v node")
     .replace("getent passwd", "cat " + join(machine, "passwd"))
     .replace("sudo -n true", "true")
