@@ -511,18 +511,21 @@ test("release: the Homebrew formula installs the release tarball with Homebrew's
   else assert.equal(ruby.status, 0, ruby.stderr);
 });
 
-test("release: every run checks the style of the formula a tag would commit, on one macOS smoke leg", async (t) => {
+test("release: while the tap is on, every run checks the style of the formula a tag would commit, on one macOS smoke leg", async (t) => {
   const { smoke, homebrew } = workflowJobs(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as Record<string, string>;
   const style = stepOf(smoke!, "Check the Homebrew formula's style");
-  // The macOS leg on the newest Node.js, Homebrew's own, on a pushed tag and on every dry run alike; it needs no secret or permission.
+  // The macOS leg on the newest Node.js, Homebrew's own, on a pushed tag and on every dry run alike, while the tap is on; with the
+  // tap off, Homebrew never holds back the other channels. It needs no secret or permission.
   const condition = /^        if: (.+)$/m.exec(style)?.[1] ?? "";
-  assert.doesNotMatch(condition, /needs\.|vars\.|secrets\./, "the step depends on the matrix leg and the run alone");
+  assert.doesNotMatch(condition, /needs\.|secrets\./, "the step depends on the matrix leg, the run and the tap switch alone");
   const [oses, nodes] = ["os", "node"].map((key) => new RegExp(`^        ${key}: \\[([^\\]]+)\\]$`, "m").exec(smoke!)?.[1]!.split(", ").map((value) => value.replace(/^'|'$/g, "")) ?? []);
   const legs = oses!.flatMap((os) => nodes!.map((node) => ({ os, node })));
-  for (const { event, ref } of [{ event: "push", ref: "refs/tags/v1.2.3" }, ...untagged.filter(({ event }) => event === "workflow_dispatch")]) {
+  for (const { event, ref } of [{ event: "push", ref: "refs/tags/v1.2.3" }, ...untagged.filter(({ event }) => event === "workflow_dispatch"), { event: "workflow_dispatch", ref: "refs/heads/fix/a-branch" }]) {
     const github = { event_name: event, ref, ref_name: ref.replace(/^refs\/(?:heads|tags)\//, "") };
-    const checks = legs.filter((matrix) => new Function("matrix", "github", `return ${condition};`)(matrix, github));
-    assert.deepEqual(checks, [{ os: "macos-latest", node: nodes!.at(-1) }], `${event} ${ref}`);
+    for (const vars of [{ HOMEBREW_TAP: "true" }, { HOMEBREW_TAP: "false" }, {}] as Array<Record<string, string>>) {
+      const checks = legs.filter((matrix) => new Function("matrix", "github", "vars", `return ${condition};`)(matrix, github, vars));
+      assert.deepEqual(checks, vars["HOMEBREW_TAP"] === "true" ? [{ os: "macos-latest", node: nodes!.at(-1) }] : [], `${event} ${ref} ${JSON.stringify(vars)}`);
+    }
   }
   assert.match(style, /\n        env:\n          HOMEBREW_NO_AUTO_UPDATE: '1'\n/);
   assert.doesNotMatch(stepScript(smoke!, "Check the Homebrew formula's style"), /brew (?:install|test|audit|update|upgrade)\b/, "a style check installs nothing");
@@ -563,6 +566,14 @@ esac
     assert.equal(await readFile(join(work, "session-analytics.rb"), "utf8"), expected, "the homebrew job renders the same bytes from the tag");
 
     assert.equal(run(smoke!, "Check the Homebrew formula's style", { RELEASE_TAG: "v1.2.3", BREW_STYLE_STATUS: "1" }).status, 1, "a style offence fails the leg");
+
+    // A prerelease leaves the tap alone, so its leg passes without rendering a formula or calling brew.
+    await Promise.all([log, styled, join(work, "session-analytics.rb")].map((path) => rm(path)));
+    const prerelease = run(smoke!, "Check the Homebrew formula's style", { RELEASE_TAG: "v1.2.3-rc.1", BREW_STYLE_STATUS: "1" });
+    assert.equal(prerelease.status, 0, prerelease.stderr);
+    assert.match(prerelease.stdout, /Prereleases leave the tap alone\./);
+    assert.deepEqual((await readdir(directory)).sort(), ["bin", "tap", "work"], "no brew call");
+    assert.deepEqual((await readdir(work)).sort(), ["release", "scripts"], "no formula rendered");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

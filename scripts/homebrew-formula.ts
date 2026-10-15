@@ -12,7 +12,7 @@ export const repository = "rokas-tarasevicius/session-analytics";
 
 /**
  * The formula installs the exact release asset; its test runs no scan of the tester's history, only an empty HOME.
- * It must pass Homebrew's style cops, which every release workflow run checks with `brew style` before anything publishes:
+ * It must pass Homebrew's style cops, which the release workflow checks with `brew style` before publishing while the tap is on:
  * lines other than the url stay within 118 columns, and Homebrew's Node is named by `formula_opt_bin`, not `Formula[...]`.
  */
 export function homebrewFormula(version: string, sha256: string): string {
