@@ -2,8 +2,9 @@
 /**
  * Install a packed session-analytics tarball, or a registry spec, into a temporary prefix whose path contains a space,
  * and run it the way a user would: every command's help and version, the synthetic demo report (compared with this
- * checkout's), MCP, the dashboard with every static file, and a read-only installation; then print the tested tarball's
- * SHA-256 and npm integrity. Reads synthetic data only and never uses the real data directory or the global npm prefix.
+ * checkout's), MCP, the dashboard with every static file, a saved machine read through a stand-in `ssh` with the bundled
+ * runtime, and a read-only installation; then print the tested tarball's SHA-256 and npm integrity. Reads synthetic data
+ * only and never uses the real data directory, the global npm prefix or a real SSH connection.
  *
  *   node scripts/smoke-installed.ts release/session-analytics-X.Y.Z.tgz [--port PORT]
  *   node scripts/smoke-installed.ts session-analytics@X.Y.Z
@@ -11,7 +12,7 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, extname, join, resolve } from "node:path";
@@ -22,11 +23,13 @@ import { staticRoutes } from "../src/static-routes.ts";
 import type { LimitsSnapshot } from "../src/limits/types.ts";
 import type { MachineAnalytics } from "../src/types.ts";
 import { version } from "../src/version.ts";
+import { fakeSsh } from "../test/fake-ssh.ts";
+import { createSessionAnalyticsFixture } from "../test/fixtures.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** The limits snapshot version this checkout serves; a schema change fails the typecheck here instead of the smoke. */
 const limitsSchemaVersion: LimitsSnapshot["schemaVersion"] = 2;
-const commands = ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits"];
+const commands = ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits", "machines"];
 const providers = ["claude", "codex", "cursor", "copilot", "opencode", "gemini"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
 const contentTypes: Record<string, string> = {
@@ -198,6 +201,37 @@ async function main(): Promise<void> {
     } finally {
       await stop(dashboard, ["SIGTERM", "SIGKILL"]);
     }
+
+    // A saved machine is read with the bundled runtime: the installed bin packs its own compiled files, the stand-in ssh runs
+    // the bootstrap under a separate HOME, which installs them there and runs the report. A missing bootstrap or runtime fails here.
+    const fake = join(work, "fake-ssh"), homes = join(fake, "homes"), sshLog = join(fake, "ssh.log");
+    mkdirSync(join(fake, "bin"), { recursive: true });
+    writeFileSync(join(fake, "bin", "ssh"), fakeSsh, { mode: 0o755 });
+    const remote = await createSessionAnalyticsFixture(join(fake, "remote"));
+    const machineEnvironment: NodeJS.ProcessEnv = {
+      ...environment, PATH: `${join(fake, "bin")}${delimiter}${path}`, FAKE_SSH_LOG: sshLog, FAKE_SSH_HOMES: homes,
+      FAKE_SSH_ENVS: JSON.stringify({ smokebox: {
+        SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0", SESSION_ANALYTICS_DATA_DIR: join(fake, "remote-data"), SESSION_ANALYTICS_CLAUDE_ROOT: remote.claudeRoot,
+        SESSION_ANALYTICS_CODEX_ROOT: remote.codexRoot, SESSION_ANALYTICS_CODEX_ARCHIVE_ROOT: remote.codexArchiveRoot,
+        SESSION_ANALYTICS_CONDUCTOR_DATABASE: remote.databasePath, SESSION_ANALYTICS_CURSOR_DATABASE: remote.cursorDatabasePath,
+      } }),
+    };
+    const machinesCli = (cliArgs: string[]): string => ran(spawnSync(bin, cliArgs, { cwd: work, env: machineEnvironment, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 180_000 }), `session-analytics ${cliArgs.join(" ")}`);
+    machinesCli(["machines", "add", "smokebox", "--no-check"]);
+    const calls = (): string[][] => readFileSync(sshLog, "utf8").split("\n").filter(Boolean).map((line) => (JSON.parse(line) as { words: string[] }).words.slice(2, 4));
+    for (const [round, expected] of [["first", [["sa1", "run"], ["sa1", "install"]]], ["second", [["sa1", "run"]]]] as const) {
+      rmSync(sshLog, { force: true });
+      const combined = validateSnapshot(JSON.parse(machinesCli(["report", "--json", "--no-index"])));
+      const read = combined.machines?.find((machine) => machine.key === "smokebox");
+      check(read?.state === "ok" && read.version === version && read.sessions > 0, `the ${round} bundled-runtime read reports ${JSON.stringify(read ?? null)}`);
+      check(combined.sessions.filter((session) => session.machine === "smokebox").length === read.sessions, `the ${round} read's sessions are not tagged with their machine`);
+      // The first read installs the runtime; the second runs the verified copy without sending it again.
+      check(JSON.stringify(calls()) === JSON.stringify(expected), `the ${round} read sent ${JSON.stringify(calls())}`);
+    }
+    const runtimes = join(homes, "smokebox", "ssh-user", ".cache", "session-analytics", "runtime");
+    const installedRuntime = readdirSync(runtimes).filter((name) => name.startsWith(`${version}-`));
+    check(installedRuntime.length === 1 && existsSync(join(runtimes, installedRuntime[0]!, "bin", "session-analytics.js")), "the bundled runtime is not the compiled package");
+    console.log("A saved machine reads through the bundled runtime: installed once, then run from the verified copy.");
 
     ran(spawnSync("chmod", ["-R", "a-w", packageRoot], { encoding: "utf8" }), "chmod");
     check(report("read-only installed demo report").sessions.length === installed.sessions.length, "the read-only installation reports differently");

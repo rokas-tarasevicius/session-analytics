@@ -28,7 +28,7 @@ Development has no build step: Node runs the TypeScript sources directly. Releas
 | `npm run check` | Type check, then tests. CI requires GitHub-hosted Ubuntu and macOS source checks plus a required Ubuntu Chrome check for pull requests, pushes to `master` and manual runs, in both private and public repositories. |
 | `npm run build` | Compile the installable package into `dist/`: JavaScript, dashboard files, rate card, schemas and skill, with a generated manifest that has no install scripts or dependencies. `node scripts/build.ts --out DIR` builds elsewhere; DIR is emptied first, so it must be new, empty or an earlier build, and never the checkout, your home directory or a directory containing either. |
 | `npm run pack:release` | Build, then pack `dist/` into `release/session-analytics-X.Y.Z.tgz`. |
-| `npm run release:check` | Validate a release locally: version metadata, type check, tests, snapshot schemas and synthetic JSON report, then build and pack the package, check its files and manifest, install it into a temporary prefix and run every command, the demo report, MCP and the dashboard from the installed copy (`scripts/smoke-installed.ts`). Does not publish. |
+| `npm run release:check` | Validate a release locally: version metadata, type check, tests, snapshot schemas and synthetic JSON report, then build and pack the package, check its files and manifest, install it into a temporary prefix and run every command, the demo report, MCP, the dashboard and a saved machine read with the bundled runtime from the installed copy (`scripts/smoke-installed.ts`). Does not publish. |
 
 Use the demo for screenshots, bug reproductions, and UI work. Never attach screenshots or JSON from your own history to an issue or pull request.
 

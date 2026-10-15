@@ -325,7 +325,7 @@ test("release: the compiled package carries workers, served files and notices, a
       "src/analyzer.ts", "src/public/format.d.ts", "src/server.js.map", "bin/session-analytics.ts", ".DS_Store"]) {
       assert.throws(() => checkPackageFiles([...files, extra]), /Unexpected package file/, extra);
     }
-    for (const missing of ["src/analysis-worker.js", "src/cursor-worker.js", "src/mcp/worker.js", "src/public/fonts/OFL-1.1.txt", "src/public/subscription.css", "CHANGELOG.md"]) {
+    for (const missing of ["src/analysis-worker.js", "src/cursor-worker.js", "src/mcp/worker.js", "src/remote/bootstrap.js", "src/public/machines.js", "src/public/fonts/OFL-1.1.txt", "src/public/subscription.css", "CHANGELOG.md"]) {
       assert.throws(() => checkPackageFiles(files.filter((path) => path !== missing)), /Package is missing/, missing);
     }
     const manifest = JSON.parse(await readFile(join(out, "package.json"), "utf8")) as Record<string, unknown>;

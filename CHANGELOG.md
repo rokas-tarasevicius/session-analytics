@@ -27,6 +27,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - A saved machine's last good snapshot is kept privately in the data directory after each read. When a later read fails, it is shown instead, marked stale with its age, rather than dropping that machine's sessions; it is reused only for the same version, time zone and switches (`--no-index` included), the same SSH destination and account, and when the snapshot's digest matches its record, for at most 7 days.
 - `report --strict` and `export --strict` exit with status 3 when any machine was not read now (failed, stale, or still reading in a saved dashboard snapshot), for scheduled runs.
 - `/api/machines` returns each machine's current state while the dashboard reads other machines.
+- `release:check`'s installed smoke runs `machines --help` and reads a saved machine through a stand-in `ssh` with the bundled runtime the installed bin packs from its own compiled files, first installing it and then running the verified copy, so a package missing the bootstrap or a runtime file fails before publication. The package check requires `src/remote/bootstrap.js` and `src/remote/runtime.js`.
 
 ### Changed
 
