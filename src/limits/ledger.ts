@@ -79,12 +79,24 @@ export interface Ledger {
   resetCreditHistory: Array<[LimitProvider, string, number, number]>;
   /** Last opt-in Codex account read, Unix seconds; reads are throttled. */
   codexAccountReadAt: number | null;
+  /**
+   * The newest reading each of this machine's own sources gave, Unix seconds. Readings folded in from other machines never
+   * advance it, so source health describes this machine.
+   */
+  sourceLatest: Partial<Record<LimitSource, number>>;
 }
 
 export const emptyLedger = (): Ledger => ({
   version: 2, harvestedThrough: null, importedV1Through: null, cursors: {}, accounts: {}, profiles: {}, aliases: {}, creators: {}, limitNames: {}, rows: [],
-  resetCreditHistory: [], codexAccountReadAt: null,
+  resetCreditHistory: [], codexAccountReadAt: null, sourceLatest: {},
 });
+
+/** `latest` advanced by these readings, per source. */
+export function advanceSources(latest: Ledger["sourceLatest"], rows: Array<Pick<LimitObservation, "source" | "observedAt">>): Ledger["sourceLatest"] {
+  const next = { ...latest };
+  for (const { source, observedAt } of rows) next[source] = Math.max(next[source] ?? 0, Math.floor(observedAt));
+  return next;
+}
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const time = (value: unknown): number | null => finite(value) && value >= 1_500_000_000 && value <= 4_000_000_000 ? Math.floor(value) : null;
@@ -150,7 +162,8 @@ function planEvidence(value: unknown): PlanEvidence | null {
 const planSources = new Set<string>(["claude-config", "claude-credentials", "codex-account", "codex-session"]);
 const profileKeyPattern = /^profile-[0-9a-f]{20}$/;
 
-function ledgerAccount(key: string, value: unknown): LedgerAccount | null {
+/** An account record from the ledger or another machine, through the same allowlists. */
+export function ledgerAccount(key: string, value: unknown): LedgerAccount | null {
   const account = record(value);
   const provider = providerOf(account?.["provider"]);
   if (!account || !provider || key === "" || !validAccount(provider, key)) return null;
@@ -436,14 +449,17 @@ export function readLedger(directory: string, now = Date.now() / 1000): LedgerRe
   }
   const limitNames: Record<string, string> = {};
   for (const [key, name] of Object.entries(record(value["limitNames"]) ?? {})) if (/^[a-z0-9_-]{1,40}$/.test(key) && limitName(name)) limitNames[key] = name as string;
+  const rows = (value["rows"] as LedgerRow[]).map(fromRow).filter((row): row is LimitObservation => row !== null);
+  // A ledger without `sourceLatest` predates other machines' readings being folded in: every reading in it is this machine's.
+  const latest = record(value["sourceLatest"]), sourceLatest: Ledger["sourceLatest"] = {};
+  for (const [source, at] of Object.entries(latest ?? {})) if (sources.has(source) && time(at) !== null) sourceLatest[source as LimitSource] = time(at)!;
   return {
     status: "ok",
     ledger: {
       version: 2, harvestedThrough: time(value["harvestedThrough"]), importedV1Through: time(value["importedV1Through"]),
-      cursors: pruneCursors(cursors, now), accounts, profiles, aliases, creators, limitNames,
-      rows: (value["rows"] as LedgerRow[]).map(fromRow).filter((row): row is LimitObservation => row !== null).map(toRow),
+      cursors: pruneCursors(cursors, now), accounts, profiles, aliases, creators, limitNames, rows: rows.map(toRow),
       resetCreditHistory: resetCreditHistory(value["resetCreditHistory"]),
-      codexAccountReadAt: time(value["codexAccountReadAt"]),
+      codexAccountReadAt: time(value["codexAccountReadAt"]), sourceLatest: latest ? sourceLatest : advanceSources({}, rows),
     },
   };
 }
@@ -514,6 +530,7 @@ export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
     rows: compactObservations([...first.rows, ...second.rows].map(fromRow).filter((row): row is LimitObservation => row !== null), now).map(toRow),
     resetCreditHistory: resetCreditHistory([...first.resetCreditHistory, ...second.resetCreditHistory]),
     codexAccountReadAt: max(left.codexAccountReadAt, right.codexAccountReadAt),
+    sourceLatest: advanceSources(left.sourceLatest, Object.entries(right.sourceLatest).map(([source, observedAt]) => ({ source: source as LimitSource, observedAt }))),
   };
 }
 
@@ -538,7 +555,7 @@ export function writeLedger(directory: string, ledger: Ledger, now = Date.now() 
     const claims = inbox ? claimInbox(directory) : [];
     const samples = claims.flatMap((claim) => claim.observations);
     try {
-      const merged = mergeLedgers(current.ledger, samples.length ? { ...ledger, rows: [...ledger.rows, ...samples.map(toRow)] } : ledger, now);
+      const merged = mergeLedgers(current.ledger, samples.length ? { ...ledger, rows: [...ledger.rows, ...samples.map(toRow)], sourceLatest: advanceSources(ledger.sourceLatest, samples) } : ledger, now);
       const temporary = `${path}.${randomBytes(16).toString("hex")}.next`;
       writeFileSync(temporary, `${JSON.stringify(merged)}\n`, { mode: 0o600, flag: "wx" });
       try { renameSync(temporary, path); }

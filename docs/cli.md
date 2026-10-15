@@ -159,24 +159,28 @@ Pruned sources keep only keyed exclusion checkpoints, so unchanged files skip se
 ## Subscription limits
 
 ```sh
-session-analytics limits                 # harvest meters and print each account's meters with reset and projection
+session-analytics limits                 # harvest meters here and on saved machines; print each account's meters with reset and projection
 session-analytics limits --json          # content-free limits snapshot
 session-analytics limits --quiet         # harvest only, for cron: */20 * * * * session-analytics limits --quiet
 session-analytics limits statusline      # Claude Code status line: records stdin rate_limits, prints them
-session-analytics limits --no-codex-account  # skip the banked-reset read through the local Codex app-server
+session-analytics limits --no-codex-account  # skip the banked-reset read through the Codex app-server, on every machine
+session-analytics limits --no-remote     # this machine only, without the saved machines
 ```
 
 Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_limit_event` records in host event logs (`SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` overrides the T3 Code default), and status-line input. Each reading is attributed to an account, so two Claude logins used on one machine are reported separately.
 
-`limits` prints one block per account, labelled with its plan and local profile names, for example `Claude Max 20x · work ($200/mo)` or `Claude Team · client`. A price is shown only for plans you pay for yourself; a Team seat instead lists its seat evidence. Each meter shows the share used and its reset, then what applies: the projected level at the reset or the run-out time when it comes first, "too early in the window to project", a cap, a restart in place, extra usage past the allowance, a stale last reading, or that the window is idle or no longer reported. Then come the account's extra-usage state, banked Codex resets and Codex credit balance, and each source's status. `--json` prints the content-free snapshot (`schemaVersion` 2) with `accounts`, `meters` and an account key on every reading; its fields are listed in the [privacy manifest](privacy.md#limits-endpoint-limitssnapshot).
+`limits` prints one block per account, labelled with its plan and local profile names, for example `Claude Max 20x · work ($200/mo)` or `Claude Team · client`. A price is shown only for plans you pay for yourself; a Team seat instead lists its seat evidence. Each meter shows the share used and its reset, then what applies: the projected level at the reset or the run-out time when it comes first, "too early in the window to project", a cap, a restart in place, extra usage past the allowance, a stale last reading, or that the window is idle or no longer reported. Then come the account's extra-usage state, banked Codex resets and Codex credit balance, and the status of each of this machine's sources. `--json` prints the content-free snapshot (`schemaVersion` 2) with `accounts`, `meters` and an account key on every reading; its fields are listed in the [privacy manifest](privacy.md#limits-endpoint-limitssnapshot).
 
 - `--quiet` harvests without printing, for cron. One entry covers every account on the machine.
 - `--claude-root PATH` reads only that profile: event-log and profile discovery are skipped unless `SESSION_ANALYTICS_CLAUDE_EVENT_LOGS` is set.
 - `--codex-root PATH` reads Codex rollouts from `PATH` and skips the Codex account read.
 - `--no-codex-account` (or `SESSION_ANALYTICS_CODEX_ACCOUNT=0`) and `--offline` skip the banked-reset read through the local Codex app-server.
 - `limits statusline` records the readings Claude Code passes on stdin for the account of the profile it runs in; add it to each profile's `settings.json`.
+- With [saved machines](interop.md#combine-machines), `limits` also reads each machine's limits over SSH, at the same time as this machine's, and merges them by account: the same login is one account on every machine. The header names the machines read, a `Machines` block gives each machine's state and accounts, or its reason and fix, and each account gets a `Reported by` line naming the machines logged into it. A machine that cannot be read is shown from its last good limits, marked stale. `--no-remote`, `--machines a,b`, `--remote HOST` and `--remote-timeout SECONDS` work as for `report`, except that once a machine has answered, at most 60 seconds are used for its limits (its first read, which harvests weeks of records, may use all of `--remote-timeout`); a machine reached twice counts once; `--quiet` reads the machines too and prints nothing when one fails. See [Machines](subscription.md#machines).
+- `--unsettled` (with `--json --no-remote`) leaves full Claude readings that do not say whether work went on as reported, for a machine that merges them with others first; it is what each machine is asked to run.
+- `--identify-machine` (with `--json --no-remote`) lists this machine in `machines` with a hash of its machine ID and account, as for `report`; a machine reading this one with the bundled runtime asks for it, to count it once.
 
-Readings are kept in `limits-v2.json` in the data directory; `--no-index` neither reads nor writes it. The 0.9.0 ledger, `limits.json`, is imported and never written, so an older installation can share the data directory. See [Subscription limits and value](subscription.md#accounts).
+Readings are kept in `limits-v2.json` in the data directory, other machines' readings of real accounts included; `--no-index` neither reads nor writes it, here or on the machines read. The 0.9.0 ledger, `limits.json`, is imported and never written, so an older installation can share the data directory. See [Subscription limits and value](subscription.md#accounts).
 
 ## Other machines
 
@@ -226,7 +230,7 @@ Then ask, for example, "open my session analytics" or "compare agent usage acros
 | `--json` | report, rates, index status | Print structured JSON instead of text; for `report`, the versioned content-free snapshot. |
 | `--share` | report | Preview aggregate-only JSON with pseudonymized repositories and a minimum of five sessions per bucket. |
 | `--strict` | report, export | Exit with status 3, after the report or export is complete, when another machine was not read now: it failed, only its last good snapshot was used, or a saved dashboard snapshot caught it still reading. |
-| `--identify-machine` | report | With `--json --no-remote`, list this machine in `machines` with a 16-digit hash of its machine ID and account. Remote reads with the bundled runtime ask for it, to recognise the same machine read twice. |
+| `--identify-machine` | report, limits | With `--json --no-remote`, list this machine in `machines` with a 16-digit hash of its machine ID and account. Remote reads with the bundled runtime ask for it, to recognise the same machine read twice. |
 | `--snapshot FILE` | dashboard, report, export | Read a validated snapshot file instead of scanning provider stores. |
 | `--repo-name NAME` | both | Narrow to one uniquely named repository. |
 | `--repo-root PATH` | both | Narrow to the repository whose canonical root is `PATH`. |

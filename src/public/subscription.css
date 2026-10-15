@@ -17,6 +17,8 @@
 .limit-row:first-child { border-top: 0; }
 .limit-account { grid-area: account; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .limit-account strong { font-size: var(--fs-sm); font-weight: 500; overflow-wrap: anywhere; }
+.limit-account-name { display: grid; gap: 1px; min-width: 0; }
+.limit-machines { color: var(--muted); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .limit-bars { grid-area: bars; display: grid; gap: 5px; min-width: 0; }
 .limit-meter { display: grid; grid-template-columns: 3.6em minmax(0, 1fr); align-items: center; gap: 8px; }
 .limit-meter-name { color: var(--muted); font-size: var(--fs-xs); }
@@ -84,6 +86,7 @@
 .subscription-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 0 calc(var(--gap) * 2); }
 .subscription-card-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 10px; }
 .subscription-card-header h3 { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.subscription-card-machines { margin: -4px 0 10px; color: var(--muted); font-size: var(--fs-xs); }
 .plan-chip { position: relative; display: inline-flex; max-width: 100%; }
 .plan-chip select { height: 28px; max-width: 260px; padding: 0 26px 0 10px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font: 500 var(--fs-xs) var(--font-sans); appearance: none; -webkit-appearance: none; text-overflow: ellipsis; }
 .plan-chip select:hover { border-color: var(--line-strong); }

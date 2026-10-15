@@ -31,8 +31,24 @@ export interface LastGood {
   identity?: string;
 }
 
+/** What `<dataDir>/machines/<key>.limits.json` keeps of a saved machine's last good limits read. Content-free. */
+export interface LastGoodLimits {
+  version: 1;
+  /** The session-analytics that read and stored it; another version reads the machine again instead. */
+  tool: string;
+  request: string;
+  target: string;
+  readAt: string;
+  durationMs: number;
+  /** Whether that machine's reads also ask its Codex app-server: it reports a Codex account whose banked resets are not known here. */
+  codexAccount: boolean;
+  /** The validated limits snapshot that machine returned. */
+  limits: unknown;
+}
+
 const directory = (options: Pick<AnalyzeOptions, "dataDir">): string => join(dataDirectory(options), "machines");
-const paths = (options: Pick<AnalyzeOptions, "dataDir">, key: string): [string, string] => [join(directory(options), `${key}.json`), join(directory(options), `${key}.snapshot.json`)];
+const paths = (options: Pick<AnalyzeOptions, "dataDir">, key: string): [string, string, string] =>
+  [join(directory(options), `${key}.json`), join(directory(options), `${key}.snapshot.json`), join(directory(options), `${key}.limits.json`)];
 
 /** Private (0600) and atomic; a link or a foreign owner is refused. */
 function writePrivate(path: string, content: string): void {
@@ -73,12 +89,31 @@ export async function readLastGood(
   } catch { return null; }
 }
 
-/** Forget a machine's last good snapshot, as when it is removed or now reaches another account. */
+/** Store a machine's last good limits after a good read. */
+export function writeLastGoodLimits(options: Pick<AnalyzeOptions, "dataDir">, key: string, record: Omit<LastGoodLimits, "version" | "tool">): void {
+  secureDirectory(directory(options));
+  writePrivate(paths(options, key)[2], `${JSON.stringify({ version: 1, tool: version, ...record } satisfies LastGoodLimits)}\n`);
+}
+
+/** The last good limits of a machine for this request and target, at most 7 days old; `validate` checks them again. */
+export async function readLastGoodLimits<T>(
+  options: Pick<AnalyzeOptions, "dataDir">, key: string, expected: { request: string; target: string }, validate: (value: unknown) => T, now = Date.now(),
+): Promise<{ record: LastGoodLimits; limits: T } | null> {
+  try {
+    const record = await readJsonFile(paths(options, key)[2], 64 * 1024 * 1024) as LastGoodLimits;
+    const age = now - Date.parse(record.readAt);
+    if (record.version !== 1 || record.tool !== version || record.request !== expected.request || record.target !== expected.target || !(age >= 0 && age <= lastGoodMaxAgeMs)) return null;
+    if (!Number.isFinite(record.durationMs) || typeof record.codexAccount !== "boolean") return null;
+    return { record, limits: validate(record.limits) };
+  } catch { return null; }
+}
+
+/** Forget a machine's last good snapshot and limits, as when it is removed or now reaches another account. */
 export function forgetLastGood(options: Pick<AnalyzeOptions, "dataDir">, key: string): void {
   for (const path of paths(options, key)) rmSync(path, { force: true });
 }
 
-/** Keep a renamed machine's last good snapshot. */
+/** Keep a renamed machine's last good snapshot and limits. */
 export function renameLastGood(options: Pick<AnalyzeOptions, "dataDir">, from: string, to: string): void {
   const source = paths(options, from), target = paths(options, to);
   forgetLastGood(options, to);

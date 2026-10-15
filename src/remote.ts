@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { brand } from "./brand.ts";
-import { combineSnapshots } from "./interop/combine.ts";
+import { combineSnapshots, historyProfileKeys, profileKeyRemaps } from "./interop/combine.ts";
 import { maximumSnapshotBytes } from "./interop/files.ts";
 import { validateSnapshot } from "./interop/snapshot.ts";
 import { canonicalTimeZone, type RemoteMachine, type RemoteOptions } from "./options.ts";
@@ -171,8 +171,8 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
     analysis: "the remote analysis failed",
     invalid: found ? `the remote answered ${found} with something else` : "the remote output was not a valid full snapshot",
     "time-zone": "the remote snapshot used another time zone",
-    timeout: `no snapshot within ${Math.round(timeoutMs / 1000)} second${Math.round(timeoutMs / 1000) === 1 ? "" : "s"}`,
-    "too-large": "the remote snapshot exceeded the snapshot size limit",
+    timeout: `no ${found === "limits" ? "limits" : "snapshot"} within ${Math.round(timeoutMs / 1000)} second${Math.round(timeoutMs / 1000) === 1 ? "" : "s"}`,
+    "too-large": found === "limits" ? "the remote limits exceeded their size limit" : "the remote snapshot exceeded the snapshot size limit",
     cancelled: "the read was stopped",
     "same-machine": found ? `the same machine and account as ${found}, so its history is counted once` : "this machine and account, which is always read",
   };
@@ -182,8 +182,9 @@ function failureText(reason: RemoteFailure, machine: RemoteMachine | null, found
 /**
  * The exact next step for each reason; empty when there is none to take. A saved machine's fix changes it with
  * `machines set`; an unsaved one, including one `machines add` has not saved yet, is added again with other options.
+ * `found` is `limits` for a limits read, whose time-out and size limit are its own.
  */
-function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
+function fixText(reason: RemoteFailure, machine: RemoteMachine | null, found = ""): string {
   if (!machine) return "";
   const command = brand.command, name = machine.name, ssh = machine.ssh;
   const add = `${command} machines add ${ssh}${machine.user ? ` --user ${machine.user}` : ""}${machine.loginShell === false ? " --no-login-shell" : ""}`;
@@ -222,8 +223,9 @@ function fixText(reason: RemoteFailure, machine: RemoteMachine | null): string {
     analysis: `run ${check}`,
     invalid: `make sure nothing in that account's login profile prints to stdout${machine.runtime === "installed" ? `, and run the same version on both machines (${bundled})` : ""}`,
     "time-zone": "",
-    timeout: `allow more time with --remote-timeout SECONDS, or warm its index once with ${check}`,
-    "too-large": "read it with --exclude-hidden, or merge snapshot files instead (see docs/interop.md)",
+    timeout: found === "limits" ? "allow more time with --remote-timeout SECONDS: a machine's limits read may use all of it until one has answered, later reads stop after 60 seconds"
+      : `allow more time with --remote-timeout SECONDS, or warm its index once with ${check}`,
+    "too-large": found === "limits" ? "" : "read it with --exclude-hidden, or merge snapshot files instead (see docs/interop.md)",
     cancelled: "",
     "same-machine": `${machine.saved ? `${command} machines remove ${name}` : `leave ${ssh} out of --remote`}; if it is another machine cloned from the same image, set SESSION_ANALYTICS_MACHINE_ID to a different value in each account's profile instead`,
   };
@@ -250,7 +252,7 @@ export class RemoteError extends Error {
     super(failureText(reason, machine, found, timeoutMs));
     this.reason = reason;
     this.detail = stderrDetail(stderr);
-    this.fix = fixText(reason, machine);
+    this.fix = fixText(reason, machine, found);
   }
 }
 
@@ -321,6 +323,17 @@ export function machineKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64) || "machine";
 }
 
+/** Each machine's key, in order: its `machineKey`, numbered `-2`, `-3`… when another machine or `local` has it already. */
+export function machineKeys(machines: ReadonlyArray<Pick<RemoteMachine, "name">>): string[] {
+  const keys = new Set<string>([localMachine]);
+  return machines.map(({ name }) => {
+    let key = machineKey(name);
+    for (let attempt = 2; keys.has(key); attempt++) key = `${machineKey(name).slice(0, 60)}-${attempt}`;
+    keys.add(key);
+    return key;
+  });
+}
+
 /**
  * What a remote read asks for, so a last good snapshot answers only the same request. Only --offline is left
  * out: the remote report makes no network request either way. --no-index changes the result (no retained history).
@@ -375,6 +388,8 @@ export interface MachineReads {
   abort(): void;
   /** This machine's snapshot with each other machine's current one, and how each was read. */
   combine(local: MachineAnalytics, localMs: number): MachineAnalytics;
+  /** Each machine's Claude profile keys as the last combined snapshot names them, by machine key; null before the first. */
+  profileKeys(): Map<string, Map<string, string>> | null;
 }
 
 /** The options every machine is read with: this machine's zone and portable repository IDs, so snapshots combine. */
@@ -397,13 +412,10 @@ export function machineReads(
   let controller = new AbortController();
   const abort = (): void => { controller.abort(); controller = new AbortController(); };
   signal?.addEventListener("abort", abort, { once: true });
-  const keys = new Set<string>([localMachine]);
-  const readings: MachineReading[] = remote.machines.map((machine) => {
-    let key = machineKey(machine.name);
-    for (let attempt = 2; keys.has(key); attempt++) key = `${machineKey(machine.name).slice(0, 60)}-${attempt}`;
-    keys.add(key);
-    return { machine, pending: null, snapshot: null, status: { key, label: machine.name, state: "reading", sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } };
-  });
+  const keys = machineKeys(remote.machines);
+  const readings: MachineReading[] = remote.machines.map((machine, index) =>
+    ({ machine, pending: null, snapshot: null, status: { key: keys[index]!, label: machine.name, state: "reading", sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } }));
+  let remapped: Map<string, Map<string, string>> | null = null;
   const lastGood = async (reading: MachineReading): Promise<Pick<MachineReading, "snapshot" | "status" | "identity"> | null> => {
     const { machine } = reading;
     const found = machine.saved ? await readLastGood(options, reading.status.key, { request, target: targetDigest(machine), ...(machine.identity ? { identity: machine.identity } : {}) }) : null;
@@ -488,10 +500,13 @@ export function machineReads(
       inputs.push(null);
     }
     const warnings = [...(statuses.some(({ state }) => state === "failed") ? [remoteUnavailableWarning] : []), ...(statuses.some(({ state }) => state === "stale") ? [staleMachineWarning] : [])];
-    return combineSnapshots(inputs, { machines: statuses, warnings });
+    const combined = combineSnapshots(inputs, { machines: statuses, warnings });
+    const remaps = profileKeyRemaps(inputs.map(historyProfileKeys));
+    remapped = new Map(statuses.map(({ key }, index) => [key, new Map(remaps[index])]));
+    return combined;
   };
 
-  return { readings, loaded, start, abort, combine };
+  return { readings, loaded, start, abort, combine, profileKeys: () => remapped };
 }
 
 /**

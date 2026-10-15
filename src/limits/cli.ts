@@ -2,14 +2,19 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { brand } from "../brand.ts";
-import { argument, setting } from "../options.ts";
+import { remoteFor } from "../machines/config.ts";
+import { localIdentity } from "../machines/identity.ts";
+import { argument, optionErrorMessage, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, type RemoteOptions } from "../options.ts";
+import { stopOnSignals, stopping } from "../processes.ts";
 import { dataDirectory, secureDirectory, secureFile } from "../store/database.ts";
+import { machineAge, machineReasons, machineTally } from "../public/machines.js";
 import { buildMeters, formatDuration, identified, latestReading, liveMeter, providerNames, type LiveMeter } from "../public/subscription-data.js";
 import { planFor } from "../public/subscription-plans.js";
 import { collectLimits, statuslineAccount, type LimitsOptions } from "./index.ts";
 import { appendInbox } from "./ledger.ts";
+import { limitsReads, localLimitsMachine, mergeMachineLimits } from "./machines.ts";
 import { statuslineObservations } from "./sources.ts";
-import type { LimitAccount, LimitMeterInfo, LimitObservation, LimitsSnapshot } from "./types.ts";
+import type { LimitAccount, LimitMeterInfo, LimitObservation, LimitsMachine, LimitsSnapshot } from "./types.ts";
 
 const help = `${brand.name} limits
 
@@ -35,10 +40,20 @@ Options:
                      app-server is asked at most once per 10 minutes (Codex contacts OpenAI with its own
                      login); it never redeems a reset. SESSION_ANALYTICS_CODEX_ACCOUNT=0 does the same
   --offline          No network reads, including the Codex account read
-`;
+  --unsettled        With --json --no-remote: leave full Claude readings that do not say whether work went on
+                     unsettled, for a machine that merges them with other machines' readings first
+  --identify-machine With --json --no-remote: list this machine with a hash of its machine ID and account,
+                     so a machine reading it counts it once
 
-const valueFlags = new Set(["--data-dir", "--codex-root", "--codex-archive-root", "--claude-root"]);
-const booleanFlags = new Set(["--json", "--quiet", "--no-index", "--help", "--no-codex-account", "--offline"]);
+Other machines: saved machines (see machines --help) are read too, over the same SSH and bundled runtime as
+reports. Each runs its own harvest and ledger; readings merge by account, since a login has the same key on
+every machine, and are kept in this machine's ledger. --no-codex-account and --offline apply on every machine.
+A machine's first read harvests weeks of records and may take all of --remote-timeout; once it has answered, its
+reads stop after 60 seconds, or --remote-timeout when that is shorter. A machine reached twice counts once.
+${remoteHelp}`;
+
+const valueFlags = new Set(["--data-dir", "--codex-root", "--codex-archive-root", "--claude-root", ...remoteValueFlags]);
+const booleanFlags = new Set(["--json", "--quiet", "--no-index", "--help", "--no-codex-account", "--offline", "--unsettled", "--identify-machine", ...remoteBooleanFlags]);
 
 function options(args: string[]): LimitsOptions {
   return {
@@ -49,6 +64,7 @@ function options(args: string[]): LimitsOptions {
     noIndex: args.includes("--no-index") || process.env["SESSION_ANALYTICS_NO_INDEX"] === "1",
     codexAccount: !args.includes("--no-codex-account"),
     offline: args.includes("--offline") || process.env["SESSION_ANALYTICS_OFFLINE"] === "1",
+    ...(args.includes("--unsettled") ? { settle: false } : {}),
   };
 }
 
@@ -100,12 +116,63 @@ function accountFacts(account: LimitAccount, codexAccount: LimitsSnapshot["codex
   return lines;
 }
 
+const names = (list: string[]): string => list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0] ?? "";
+
+/** Which machines' limits are shown, with timing and accounts, and each one not read now with its reason and fix. */
+function machineLines(snapshot: LimitsSnapshot, list: LimitsMachine[]): string[] {
+  const width = Math.max(...list.map(({ label }) => label.length)), { ok, stale, total } = machineTally(list);
+  const lines = [`Machines: ${ok} of ${total} read now${stale ? `, ${stale} from ${stale === 1 ? "its" : "their"} last good limits` : ""}`];
+  for (const machine of list) {
+    const accounts = snapshot.accounts.filter((account) => account.machines?.some(({ key }) => key === machine.key)).length;
+    const reason = machine.reason ? machineReasons[machine.reason] ?? machine.reason : "", counts = `${accounts} account${accounts === 1 ? "" : "s"}`;
+    lines.push(`  ${machine.label.padEnd(width)}  ${machine.state === "failed" || (machine.state === "reading" && !machine.readAt) ? `not read: ${reason || "no answer"}`
+      : machine.state === "ok" ? `${counts} in ${((machine.durationMs ?? 0) / 1000).toFixed(1)} s`
+      : `${reason || "no answer"}; its last good limits from ${machineAge(machine.readAt) ?? "an earlier read"} (${counts})`}`);
+    if (machine.fix) lines.push(`    Fix: ${machine.fix}`);
+  }
+  return lines;
+}
+
+/** This machine's harvest and every other machine's limits, read at the same time and merged by account. */
+async function collect(settings: LimitsOptions, args: string[]): Promise<LimitsSnapshot | number> {
+  let remote: RemoteOptions;
+  try { remote = remoteFor(args, process.env, settings, (line) => process.stderr.write(`${line}\n`)); }
+  catch (error) { process.stderr.write(`${optionErrorMessage(error)}\n`); return 2; }
+  if (!remote.machines.length) {
+    const started = performance.now(), own = await collectLimits(settings);
+    // A reading machine asks which machine and account answered, so one it reaches twice counts once.
+    return args.includes("--identify-machine") ? { ...own, machines: [{ ...localLimitsMachine(remote.local, own, performance.now() - started), identity: localIdentity() }] } : own;
+  }
+  stopOnSignals();
+  const started = performance.now();
+  const local = collectLimits({ ...settings, settle: false }).then((own) => ({ own, ms: performance.now() - started }));
+  // A scheduled --quiet harvest stays silent; the next interactive run names a machine that cannot be read.
+  const reads = limitsReads(settings, remote, { report: (line) => { if (!args.includes("--quiet")) process.stderr.write(`${line}\n`); } });
+  const settled = reads.start(local.then(({ own }) => own, () => null));
+  const harvest = await local.catch(async (error: unknown) => { reads.abort(); await settled; throw error; });
+  await settled;
+  // A signal stopped the reads; its handler exits once the children are gone, and a partial result is never printed.
+  if (stopping()) await new Promise(() => {});
+  return mergeMachineLimits(harvest.own, localLimitsMachine(remote.local, harvest.own, harvest.ms), reads.current());
+}
+
 async function report(args: string[]): Promise<number> {
-  const snapshot = await collectLimits(options(args));
+  for (const flag of ["--unsettled", "--identify-machine"]) {
+    if (!args.includes(flag) || (args.includes("--json") && args.includes("--no-remote"))) continue;
+    process.stderr.write(`${flag} describes this machine's own readings; use it with --json --no-remote.\n`);
+    return 2;
+  }
+  const snapshot = await collect(options(args), args);
+  if (typeof snapshot === "number") return snapshot;
   if (args.includes("--quiet")) return 0;
-  if (args.includes("--json")) { process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`); return 0; }
+  // A reading machine gets compact JSON; a person or a file gets the indented form.
+  if (args.includes("--json")) { process.stdout.write(`${JSON.stringify(snapshot, null, args.includes("--unsettled") || args.includes("--identify-machine") ? undefined : 2)}\n`); return 0; }
   const now = Date.now() / 1000;
-  const lines = [`${brand.name} · subscription limits`, ""];
+  const machines = snapshot.machines ?? null, label = (key: string) => machines?.find((machine) => machine.key === key)?.label ?? key;
+  const shown = machines?.filter(({ state, readAt }) => state === "ok" || readAt !== null) ?? [], missing = machines?.filter((machine) => !shown.includes(machine)) ?? [];
+  const covered = shown.map(({ label: name, state }) => state === "ok" ? name : `${name} (stale)`);
+  const lines = [`${brand.name} · subscription limits${machines ? ` · ${names(covered)}${missing.length ? ` (not read: ${missing.map(({ label: name }) => name).join(", ")})` : ""}` : ""}`, ""];
+  if (machines) lines.push(...machineLines(snapshot, machines), "");
   for (const provider of ["claude", "codex"] as const) {
     const accounts = snapshot.accounts.filter((account) => account.provider === provider);
     if (!accounts.length) lines.push(providerNames[provider], "  No meter readings yet.", "");
@@ -113,6 +180,9 @@ async function report(args: string[]): Promise<number> {
       // Only a plan you pay for yourself has a price here; organization seats are billed to the organization.
       const plan = planFor(provider, account.plan);
       lines.push(`${account.label}${plan?.payer === "individual" && plan.monthlyUsd ? ` ($${plan.monthlyUsd}/mo)` : ""}`);
+      if (machines && identified(account.key)) {
+        lines.push(account.machines?.length ? `  Reported by ${names(account.machines.map(({ key }) => label(key)))}` : "  No machine read now is logged into it; shown from the history kept here");
+      }
       // Each account is its own series: cycles, pace and "no longer reported" never mix two accounts.
       const own = buildMeters(snapshot.observations.filter((row) => row.provider === provider && row.account === account.key), now, snapshot.meters);
       if (!own.length) lines.push("  No meter readings yet.");
@@ -123,8 +193,8 @@ async function report(args: string[]): Promise<number> {
       lines.push(...accountFacts(account, snapshot.codexAccount, now), "");
     }
   }
-  for (const source of snapshot.sources) lines.push(`Source ${source.source}: ${source.status}${source.latest ? `, latest ${clock(source.latest)}` : ""}`);
-  lines.push(snapshot.persisted ? "History is kept in the private ledger. Value, capacity and reset history: open the dashboard's Subscription view."
+  for (const source of snapshot.sources) lines.push(`Source ${source.source}${machines ? ` on ${machines[0]!.label}` : ""}: ${source.status}${source.latest ? `, latest ${clock(source.latest)}` : ""}`);
+  lines.push(snapshot.persisted ? `History is kept in the private ledger${machines ? ", other machines' readings included" : ""}. Value, capacity and reset history: open the dashboard's Subscription view.`
     : snapshot.ledger === "unreadable" ? "History is not kept: the ledger was written by another version of session-analytics and was left untouched."
     : snapshot.ledger === "unwritable" ? "History could not be saved this time; the next harvest reads the same records again."
     : "History is not persisted (--no-index).");

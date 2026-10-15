@@ -19,7 +19,7 @@ const now = at("2026-10-14T12:00:00Z");
 const team = "claude-aaaaaaaaaaaaaaaa", max = "claude-bbbbbbbbbbbbbbbb", codex = "codex-cccccccccccccccc";
 
 function account(key: string, provider: "claude" | "codex", label: string, plan: LimitAccount["plan"]): LimitAccount {
-  return { key, provider, attribution: "account", label, profileNames: [label.split(" · ")[1]!], profileKeys: [], plan, planSource: null, planEvidence: null, extraUsage: null, codex: null, weeklyAnchor: null, lastSeen: now };
+  return { key, provider, attribution: "account", label, profileNames: [label.split(" · ")[1]!], profileKeys: [], plan, planSource: null, planEvidence: null, planObservedAt: null, extraUsage: null, codex: null, weeklyAnchor: null, lastSeen: now };
 }
 const reading = (provider: "claude" | "codex", accountKey: string, meter: string, resetsAt: number, observedAt: number, usedPercent: number, status: LimitObservation["status"] = "allowed"): LimitObservation =>
   ({ provider, account: accountKey, meter, windowMinutes: meter === "five_hour" ? 300 : 10_080, resetsAt, observedAt, usedPercent, status, source: provider === "codex" ? "codex-session" : "claude-sdk-log" });
@@ -195,4 +195,66 @@ test("with other machines combined, value counts this machine's sessions and nam
   assert.match(container.querySelector(".subscription-sources")!.textContent, /This dashboard reads laptop and agentbox\. Limits are read on laptop only, so value counts only its sessions/);
   render(container, { sessions: [spent("local", 40)] });
   assert.doesNotMatch(container.textContent, /not counted: limits are read|This dashboard reads/, "one machine says nothing about others");
+});
+
+test("with limits from several machines, value counts every machine read, accounts name their machines, and one not read is named", () => {
+  const spent = (machine: string, value: number) => ({ provider: "codex", machine, velocity: { version: 1, dimensions: [], undated: [],
+    buckets: [["2026-10-13", 10, 0, [value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } });
+  const base = limits();
+  const read = (key: string, label: string, state: "ok" | "failed") => ({ key, label, state, readAt: state === "ok" ? new Date(now * 1000).toISOString() : null, durationMs: state === "ok" ? 900 : null, ...(state === "failed" ? { reason: "connection" as const } : {}) });
+  const machines = { ...base, machines: [read("local", "laptop", "ok"), read("agentbox", "agentbox", "ok"), read("box2", "box2", "failed")],
+    accounts: base.accounts.map((item) => ({ ...item, machines: item.key === codex ? [{ key: "local", profileKeys: [] }, { key: "agentbox", profileKeys: [] }] : [{ key: "local", profileKeys: [] }] })) };
+  const container = new Element();
+  render(container, { limits: machines, sessions: [spent("local", 40), spent("agentbox", 25), spent("box2", 7)], scope: { label: "laptop", others: ["agentbox", "box2"] } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters and value from laptop \+ agentbox; box2 not read$/);
+  const row = container.querySelectorAll(".limit-row").find((item) => /ChatGPT/.test(item.textContent))!;
+  assert.equal(row.querySelector(".limit-machines")!.textContent, "laptop and agentbox");
+  assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop and agentbox");
+  assert.equal(cardOf(container, team).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop");
+  const worth = container.querySelector(".subscription-worth")!.textContent;
+  assert.match(worth, /\$65 2 Codex sessions on laptop and agentbox in these dates; the only Codex account there/);
+  assert.match(worth, /\$7 on box2 is not counted: its limits could not be read/);
+  assert.match(container.querySelector(".subscription-sources")!.textContent, /This dashboard reads laptop, agentbox and box2\. Meters and value come from laptop and agentbox, each machine's limits read through its own harvest; box2 could not be read, so its sessions are not counted\./);
+  // A machine still reading is named as such, not as one that failed.
+  const reading = { ...machines, machines: machines.machines.map((item) => item.key === "box2" ? { ...item, state: "reading" as const, reason: undefined } : item) };
+  render(container, { limits: reading, sessions: [spent("local", 40), spent("box2", 7)], scope: { label: "laptop", others: ["agentbox", "box2"] } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters and value from laptop \+ agentbox; reading box2$/);
+  assert.match(container.querySelector(".subscription-worth")!.textContent, /\$7 on box2 is not counted: its limits are still being read/);
+  // An account no machine read now is logged into is shown from saved history.
+  render(container, { limits: { ...machines, accounts: machines.accounts.map((item) => item.key === codex ? { ...item, machines: [] } : item) }, sessions: [spent("local", 40)], scope: { label: "laptop", others: ["agentbox"] } });
+  assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "No machine read now is logged into it; shown from saved history");
+});
+
+test("a machine whose limits are in but whose sessions are not moves the meters, and its value is said not to be counted", () => {
+  const spent = (machine: string, value: number) => ({ provider: "codex", machine, velocity: { version: 1, dimensions: [], undated: [],
+    buckets: [["2026-10-13", 10, 0, [value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]] } });
+  const base = limits(), readAt = new Date(now * 1000).toISOString();
+  const machines = { ...base, machines: [{ key: "local", label: "laptop", state: "ok" as const, readAt, durationMs: 900 }, { key: "agentbox", label: "agentbox", state: "ok" as const, readAt, durationMs: 900 }],
+    accounts: base.accounts.map((item) => ({ ...item, machines: [{ key: "local", profileKeys: [] }, ...item.key === codex ? [{ key: "agentbox", profileKeys: [] }] : []] })) };
+  const container = new Element();
+  // agentbox's limits were read, but its snapshot failed: none of its sessions are here.
+  render(container, { limits: machines, sessions: [spent("local", 40)], scope: { label: "laptop", others: [], sessions: new Set(["local"]) } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters from laptop \+ agentbox, value from laptop \(agentbox: sessions not read\)$/);
+  assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop and agentbox", "its meters still come from it");
+  const worth = container.querySelector(".subscription-worth")!.textContent;
+  assert.match(worth, /agentbox's sessions were not read: its usage moves these meters, but its value is not counted/, "said even though no value of it is here");
+  assert.match(worth, /\$40 1 Codex session on laptop in these dates; the only Codex account there/);
+  assert.match(container.querySelector(".subscription-sources")!.textContent, /Meters come from laptop and agentbox and value from laptop, each machine's limits read through its own harvest; agentbox's sessions were not read/);
+  // Once its sessions arrive, it counts like any other machine.
+  render(container, { limits: machines, sessions: [spent("local", 40), spent("agentbox", 25)], scope: { label: "laptop", others: ["agentbox"], sessions: new Set(["local", "agentbox"]) } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters and value from laptop \+ agentbox$/);
+  assert.doesNotMatch(container.textContent, /sessions were not read|sessions not read/);
+});
+
+test("another machine's last good limits say how old they are", () => {
+  const base = limits(), readAt = new Date(now * 1000).toISOString(), earlier = new Date((now - 2 * HOUR) * 1000).toISOString();
+  const machines = { ...base, machines: [{ key: "local", label: "laptop", state: "ok" as const, readAt, durationMs: 900 }, { key: "agentbox", label: "agentbox", state: "stale" as const, reason: "connection" as const, readAt: earlier, durationMs: 900 }],
+    accounts: base.accounts.map((item) => ({ ...item, machines: [{ key: "local", profileKeys: [] }, ...item.key === codex ? [{ key: "agentbox", profileKeys: [] }] : []] })) };
+  const container = new Element();
+  render(container, { limits: machines, scope: { label: "laptop", others: ["agentbox"], sessions: new Set(["local", "agentbox"]) } });
+  assert.match(container.querySelector(".limits-now")!.querySelector(".panel-meta")!.textContent, / · meters and value from laptop \+ agentbox \(last good limits, 2 h ago\)$/);
+  const row = container.querySelectorAll(".limit-row").find((item) => /ChatGPT/.test(item.textContent))!;
+  assert.equal(row.querySelector(".limit-machines")!.textContent, "laptop and agentbox (stale)");
+  assert.equal(cardOf(container, codex).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop and agentbox (stale)");
+  assert.equal(cardOf(container, team).querySelector(".subscription-card-machines")!.textContent, "Reported by laptop");
 });

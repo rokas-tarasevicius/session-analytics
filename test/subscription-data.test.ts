@@ -20,7 +20,7 @@ function reading(provider: "claude" | "codex", meter: string, resetsAt: number, 
 function account(provider: "claude" | "codex", key: string, extra: Partial<LimitAccount> = {}): LimitAccount {
   return {
     key, provider, attribution: key === "" ? "unattributed" : key.includes("-w-") ? "weekly-phase" : "account", label: `${provider} ${key}`,
-    profileNames: [], profileKeys: [], plan: null, planSource: null, planEvidence: null, extraUsage: null, codex: null, weeklyAnchor: null, lastSeen: null, ...extra,
+    profileNames: [], profileKeys: [], plan: null, planSource: null, planEvidence: null, planObservedAt: null, extraUsage: null, codex: null, weeklyAnchor: null, lastSeen: null, ...extra,
   };
 }
 
@@ -284,7 +284,7 @@ test("hero ratios compare like with like and prorate only the time since the fir
 
   // With other machines combined, only this machine's sessions join its accounts; the others' value is reported beside them.
   const remote = { ...spending("codex", start - 10 * DAY, now, 3), machine: "agentbox" }, here = sessions.map((session) => ({ ...session, machine: "local" }));
-  const combined = subscriptionModel({ limits: { accounts: [claude, team, codex], observations, meters: [], resetCreditHistory: [] }, sessions: [...here, remote], timeZone: "UTC", now, range: { from: start, to: now }, local: (session) => session.machine === "local" });
+  const combined = subscriptionModel({ limits: { accounts: [claude, team, codex], observations, meters: [], resetCreditHistory: [] }, sessions: [...here, remote], timeZone: "UTC", now, range: { from: start, to: now } });
   const localCodex = combined.accounts[2]!;
   assert.equal(localCodex.value.basis, "provider", "the only Codex account takes this machine's Codex sessions");
   assert.ok(Math.abs(localCodex.economics.extracted! - codexItem!.economics.extracted!) < 1e-6, "another machine's Codex value never joins it");
@@ -325,7 +325,7 @@ test("sessions join accounts by profile key; other machines' sessions never cali
   ]);
   assert.deepEqual([local.unattributed.claude.length, local.unattributed.codex.length], [2, 0], "two Claude accounts: a session without a profile is not guessed");
   const machines = sessions.map((session, index) => ({ ...session, machine: index % 2 ? "agentbox" : "local" }));
-  const combined = attributeSessions(machines, accounts, { local: (session) => session.machine === "local" });
+  const combined = attributeSessions(machines, accounts);
   assert.deepEqual([...combined.byAccount].map(([key, list]) => [key, list.map(({ machine }) => machine)]), [
     ["claude-aaaaaaaaaaaaaaaa", ["local"]], ["claude-bbbbbbbbbbbbbbbb", []], ["claude-w-100", []], ["codex-aaaaaaaaaaaaaaaa", ["local"]], ["", []],
   ], "Claude joins by profile key and machine, Codex by machine");

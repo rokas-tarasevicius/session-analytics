@@ -14,7 +14,7 @@ const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const args = process.argv.slice(2), at = args.indexOf("--");
 let [destination, ...words] = args.slice(at + 1);
-appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ destination, words: words.filter((word) => word.length < 80).slice(0, 12) }) + "\\n");
+appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ destination, words: words.filter((word) => word.length < 80).slice(0, 20) }) + "\\n");
 const fail = (code, text) => { if (text) process.stderr.write(text + "\\n"); process.exit(code); };
 const listed = (name) => (process.env[name] || "").split(",").includes(destination);
 if (destination === "down" || listed("FAKE_SSH_DOWN")) fail(255, "ssh: connect to host " + destination + " port 22: Connection refused");

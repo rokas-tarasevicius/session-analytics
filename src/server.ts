@@ -23,6 +23,7 @@ import { dataDirectory } from "./store/database.ts";
 import { readDashboardToken, writeDashboardToken } from "./store/dashboard.ts";
 import { reuseRefusal } from "./dashboard-reuse.ts";
 import { collectLimits, emptyLimitsSnapshot } from "./limits/index.ts";
+import { limitsReads, localLimitsMachine, mergeMachineLimits, type LimitsReads } from "./limits/machines.ts";
 import type { LimitsSnapshot } from "./limits/types.ts";
 import { staticRoutes } from "./static-routes.ts";
 import { localMachine } from "./public/machines.js";
@@ -210,6 +211,13 @@ function readsFor(options: RemoteOptions): MachineReads | null {
   return reads;
 }
 let machines = readsFor(remote);
+const limitsOptions = { ...analyzeOptions, codexAccount: !process.argv.includes("--no-codex-account") };
+/** The same machines' limits, read each time this machine harvests its own. */
+function limitReadsFor(options: RemoteOptions): LimitsReads | null {
+  if (snapshotFile || !options.machines.length) return null;
+  return limitsReads(limitsOptions, options, { report: (line) => process.stderr.write(`${line}\n`), signal: shutdown.signal, preload: true });
+}
+let limitMachines = limitReadsFor(remote);
 
 // A local failure fails this refresh only: reads of other machines carry on, and their last good snapshots stay.
 async function scanWithMachines(reads: MachineReads): Promise<MachineAnalytics> {
@@ -252,9 +260,11 @@ function followMachines(): void {
   catch (error) { process.stderr.write(`${optionErrorMessage(error)} This dashboard keeps reading the machines it had.\n`); return; }
   if (next.digest === remote.digest && next.local === remote.local) return;
   machines?.abort();
+  limitMachines?.abort();
   remote = next;
   optionsHash = optionsHashFor(remote.digest);
   machines = readsFor(remote);
+  limitMachines = limitReadsFor(remote);
   process.stdout.write(`Saved machines changed; now reading ${remote.local}${remote.machines.length ? ` and ${remote.machines.map(({ name }) => name).join(", ")}` : " only"}.\n`);
   rebuild();
 }
@@ -287,19 +297,32 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
 }
 
 // Limit meters are harvested incrementally in this process (new log tails only) and shared by concurrent requests.
-let limitsPromise: Promise<LimitsSnapshot> | null = null;
+let limitsPromise: Promise<{ snapshot: LimitsSnapshot; ms: number }> | null = null;
 let limitsAt = 0;
 let limitsPending = false;
-/** A harvest still running is always shared, however old: a second one would only re-read the same tails. */
+/**
+ * A harvest still running is always shared, however old: a second one would only re-read the same tails. Other machines
+ * are read at the same time and never hold this machine's meters back: each request merges the machines as they stand,
+ * one still reading shown from its last good limits, and the page asks again while one is reading.
+ */
 function limits(refresh: boolean): Promise<LimitsSnapshot> {
   if (snapshotFile) return Promise.resolve(emptyLimitsSnapshot("snapshot"));
-  if (limitsPromise && (limitsPending || Date.now() - limitsAt < (refresh ? 5_000 : 30_000))) return limitsPromise;
-  limitsAt = Date.now();
-  limitsPending = true;
-  limitsPromise = collectLimits({ ...analyzeOptions, codexAccount: !process.argv.includes("--no-codex-account") })
-    .finally(() => { limitsPending = false; })
-    .catch((error: unknown) => { limitsPromise = null; throw error; });
-  return limitsPromise;
+  const reads = limitMachines;
+  const fresh = limitsPromise !== null && (limitsPending || Date.now() - limitsAt < (refresh ? 5_000 : 30_000));
+  if (!fresh) {
+    limitsAt = Date.now();
+    limitsPending = true;
+    const started = performance.now();
+    limitsPromise = collectLimits({ ...limitsOptions, settle: false })
+      .then((snapshot) => ({ snapshot, ms: performance.now() - started }))
+      .finally(() => { limitsPending = false; })
+      .catch((error: unknown) => { limitsPromise = null; throw error; });
+  }
+  const harvest = limitsPromise!;
+  // Machines that changed since the last harvest are read now rather than at the next one.
+  if (reads && (!fresh || reads.readings.some(({ pending, status }) => !pending && status.state === "reading"))) void reads.start(harvest.then(({ snapshot }) => snapshot, () => null));
+  return Promise.all([harvest, reads?.loaded]).then(([{ snapshot, ms }]) =>
+    mergeMachineLimits(snapshot, localLimitsMachine(remote.local, snapshot, ms), reads?.current() ?? [], machines?.profileKeys() ?? null));
 }
 
 process.on("unhandledRejection", () => {

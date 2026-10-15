@@ -109,8 +109,11 @@ export function liveMeter(meter: Meter, now: number, reportedUntil?: number | nu
 export function latestReading(meters: Meter[]): number | null;
 export function hourlyValue(sessions: unknown[], timeZone?: string): HourlyValue;
 export function zonedDayStart(day: string, timeZone?: string): number;
+export function limitMachines(limits: Pick<LimitsSnapshot, "machines"> | null | undefined): Set<string> | null;
+export function sessionMachines(snapshot: { machines?: Array<{ key: string; state: string; readAt: string | null }> } | null | undefined): Set<string> | null;
+export function valuedMachines(limits: Pick<LimitsSnapshot, "machines"> | null | undefined, sessions: Set<string> | null): Set<string> | null;
 export function attributeSessions<S extends SessionLike>(
-  sessions: S[], accounts: LimitAccount[], options?: { local?: ((session: S) => boolean) | null },
+  sessions: S[], accounts: LimitAccount[], options?: { read?: Set<string> | null },
 ): { byAccount: Map<string, S[]>; unattributed: { claude: S[]; codex: S[] }; elsewhere: { claude: S[]; codex: S[] } };
 export function calibrate(meter: Meter | null, value: { between(from: number, to: number): number }): Calibration;
 export function resetHistory(meter: Meter | null, perPercent?: number | null, creditHistory?: LimitsSnapshot["resetCreditHistory"]): ResetCycle[];
@@ -143,9 +146,8 @@ export function accountUtilization(input: {
 }): AccountUtilization;
 export function subscriptionTotals(items: Array<AccountUtilization & { excluded?: boolean }>, unattributed?: { claude?: number; codex?: number }): SubscriptionTotals;
 export function subscriptionModel(input: {
-  limits: Pick<LimitsSnapshot, "accounts" | "observations" | "meters" | "resetCreditHistory">; sessions: SessionLike[];
+  limits: Pick<LimitsSnapshot, "accounts" | "observations" | "meters" | "resetCreditHistory" | "machines">; sessions: SessionLike[];
   timeZone?: string; now: number; range: ValueRange; plans?: Record<string, string | null | undefined>; payers?: Record<string, PlanPayer | null | undefined>;
-  local?: ((session: SessionLike) => boolean) | null;
 }): SubscriptionModel;
 export function recommendations(items: AccountUtilization[], options: {
   now: number; sources?: LimitSourceHealth[]; persisted?: boolean; ledger?: LimitsSnapshot["ledger"]; codexAccount?: "off" | "ok" | "unavailable"; formatTime?: (seconds: number) => string;

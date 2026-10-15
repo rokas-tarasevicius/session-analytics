@@ -165,18 +165,26 @@ test("while a machine is reading, the dashboard polls /api/machines and fetches 
 
 test("Subscription values this machine's sessions only, whatever the strip shows, and names the others", async () => {
   const { context, document, run } = await rendered();
-  type Options = { sessions: SessionAnalytics[]; local: ((session: SessionAnalytics) => boolean) | null; scope: { label: string; others: string[] } };
+  type Options = { sessions: SessionAnalytics[]; scope: { label: string; others: string[]; sessions: Set<string> | null } };
   const calls: Options[] = [];
   context["renderSubscription"] = (_container: unknown, options: Options) => { calls.push(options); };
   context["fetch"] = async () => ({ ok: false, json: async () => ({}) });
   run("setMachine('local', false)");
   assert.equal(run("snapshot.sessions.length"), 1);
   run("switchView('subscription')");
-  const { sessions: all, local, scope } = calls.at(-1)!;
+  const { sessions: all, scope } = calls.at(-1)!;
   assert.equal(all.length, 2, "the strip does not narrow Subscription");
-  assert.deepEqual(all.filter((session) => local!(session)).map(({ machine }) => machine), ["local"], "limits are read on this machine, so only its sessions are matched");
-  assert.deepEqual(JSON.parse(JSON.stringify(scope)), { label: "laptop", others: ["agentbox"] }, "a machine that was not read is not named");
+  // Without other machines' limits, only this machine's sessions can join an account.
+  const { attributeSessions } = await import(new URL("../src/public/subscription-data.js", import.meta.url).href) as typeof import("../src/public/subscription-data.js");
+  const accounts = [{ key: "codex-aaaaaaaaaaaaaaaa", provider: "codex", profileKeys: [] }] as unknown as Parameters<typeof attributeSessions>[1];
+  const codex = all.map((session) => ({ ...session, provider: "codex" }));
+  assert.deepEqual(attributeSessions(codex, accounts).byAccount.get("codex-aaaaaaaaaaaaaaaa")!.map(({ machine }) => machine), ["local"], "limits are read on this machine, so only its sessions are matched");
+  assert.deepEqual(JSON.parse(JSON.stringify({ ...scope, sessions: [...scope.sessions!] })), { label: "laptop", others: ["agentbox"], sessions: ["local", "agentbox"] }, "a machine that was not read is not named");
   assert.equal(document.querySelector("#machine-strip-meta")!.textContent, "Subscription counts this machine only");
+  // boxa's limits were read but its snapshot failed: it moves the meters, but none of its sessions are counted.
+  const read = (key: string) => ({ key, label: key === "local" ? "laptop" : key, state: "ok", readAt: hoursAgo(0), durationMs: 1 });
+  run(`limits = ${JSON.stringify({ schemaVersion: 2, dataSource: "live", accounts: [], observations: [], meters: [], sources: [], machines: ["local", "agentbox", "boxa"].map(read) })}; renderStripMeta()`);
+  assert.equal(document.querySelector("#machine-strip-meta")!.textContent, "Subscription counts laptop + agentbox");
   run("switchView('summary')");
   assert.match(document.querySelector("#machine-strip-meta")!.textContent, /^snapshot \d\d:\d\d$/);
 });
