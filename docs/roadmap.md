@@ -12,8 +12,8 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 - [ ] Validate the proposed repository investigation workflow with consenting pilot users and synthetic tasks; collect no automatic telemetry or real histories.
 - [ ] Resolve the documented comparison/denominator/context prerequisites and agree shared schema semantics before promoting new ratios or period comparisons.
 - [x] Build a compiled package and gate it on installing and running the packed tarball (`npm run release:check`).
-- [ ] Publish that package from the tag workflow as a GitHub Release tarball with `SHA256SUMS` and a build provenance attestation. The workflow is ready; the first packaged release is pending (0.9.0, the latest release, has no package).
-- [ ] Publish the same bytes on npm and in a Homebrew tap. The tag workflow is ready; the [one-time setup](release.md#one-time-maintainer-steps) and the first publish are pending.
+- [x] Publish that package from the tag workflow as a GitHub Release tarball with `SHA256SUMS` and a build provenance attestation, from 0.10.0.
+- [ ] Publish the same bytes on npm and in a Homebrew tap. The tap exists and the tag workflow updates it from 0.10.0; npm's [one-time setup](release.md#one-time-maintainer-steps) and first publish are pending.
 - [ ] Evaluate standalone executable packaging separately.
 
 ## M0: Correctness

@@ -37,7 +37,7 @@ Model is the default grouping. Provider colours keep the series easy to distingu
 
 Requires **Node.js 24+** on macOS or Linux. macOS is the primary platform; Claude Code and Codex sources also work on Linux.
 
-From the first packaged release (after 0.9.0), each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) attaches a compiled package, and npm installs the latest one straight from the release, without the npm registry. While 0.9.0 is the latest release, no packaged release exists yet and this command fails with a 404: use the source checkout below until the first one.
+Each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) from 0.10.0 attaches a compiled package, and npm installs the latest one straight from the release, without the npm registry:
 
 ```bash
 npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
@@ -45,7 +45,7 @@ session-analytics             # opens http://127.0.0.1:4174
 session-analytics --offline   # disables public pricing refreshes
 ```
 
-Before the first packaged release, or to explore synthetic data and contribute, use a source checkout. Node runs its TypeScript directly, so there is no install step:
+To explore synthetic data or contribute, use a source checkout. Node runs its TypeScript directly, so there is no install step:
 
 ```bash
 git clone https://github.com/rokas-tarasevicius/session-analytics.git

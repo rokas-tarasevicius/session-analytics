@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-15
+
 ### Added
 
 - Install a compiled package instead of running a source checkout: `npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz` installs the latest release without the npm registry. Every GitHub Release attaches `session-analytics-X.Y.Z.tgz`, an unversioned `session-analytics.tgz` so that URL always names the latest release, and `SHA256SUMS`; the tarball has a build provenance attestation (`gh attestation verify`). The release workflow can also publish the same bytes to npm and a Homebrew tap; neither is published yet, and the installation guide will name them once they are. See [installation](docs/cli.md#install).
@@ -549,7 +551,8 @@ First standalone release.
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
 
-[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/67b0281...v0.9.0
 [0.8.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.8.0...67b0281
 [0.8.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.7.0...v0.8.0
