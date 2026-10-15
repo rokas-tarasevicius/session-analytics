@@ -66,15 +66,240 @@ jobs:
           SESSION_ANALYTICS_CHROME: /usr/bin/google-chrome
           SESSION_ANALYTICS_REQUIRE_BROWSER: '1'
 
+  package:
+    name: release package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify tag and release notes
+        run: node scripts/release-check.ts --notes "$GITHUB_REF_NAME"
+
+      - name: Build and pack
+        # One tarball for every channel: the GitHub Release, npm and Homebrew all receive these bytes.
+        run: |
+          npm run pack:release
+          cp "release/session-analytics-${GITHUB_REF_NAME#v}.tgz" release/session-analytics.tgz
+          cd release && sha256sum "session-analytics-${GITHUB_REF_NAME#v}.tgz" session-analytics.tgz > SHA256SUMS && cat SHA256SUMS
+
+      - name: Upload release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            release/
+            notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    name: installed smoke (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # The oldest Node.js that engines allows, the newest 24.x, and the Node.js that Homebrew's formula uses.
+        node: ['24.0.0', '24', '26']
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        # The smoke script and demo fixtures only; the code under test is the packed tarball.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Download release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: Verify checksums
+        working-directory: release
+        run: if [ "$RUNNER_OS" = macOS ]; then shasum -a 256 -c SHA256SUMS; else sha256sum -c SHA256SUMS; fi
+
+      - name: Install and run the tarball
+        run: node scripts/smoke-installed.ts "release/session-analytics-${GITHUB_REF_NAME#v}.tgz"
+
   release:
     name: publish release
-    needs: [validate, browser]
-    # No tag can bypass platform or browser checks, including skipped or cancelled jobs.
-    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.browser.result == 'success' }}
+    needs: [validate, browser, package, smoke]
+    # No tag can bypass platform, browser or installed-package checks, including skipped or cancelled jobs.
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.browser.result == 'success' && needs.package.result == 'success' && needs.smoke.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    timeout-minutes: 5
+      id-token: write
+      attestations: write
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      - name: Download release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: Verify checksums
+        working-directory: release
+        run: sha256sum -c SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/session-analytics-*.tgz
+
+      - name: Publish GitHub Release
+        # REST calls with the workflow token: no gh CLI dependency on the runner. Files go to a draft first, so
+        # /releases/latest/download/session-analytics.tgz never 404s; a re-run resumes this tag's draft, and a published release is never changed.
+        # A tag published after a newer release, such as a backport or a late re-run, never becomes latest.
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          const tag = process.env.GITHUB_REF_NAME, version = tag.slice(1), prerelease = version.includes('-');
+          const api = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases`;
+          const call = async (url, init = {}, missing = undefined) => {
+            const response = await fetch(url, { ...init, headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', ...init.headers } });
+            if (response.status === 404 && missing !== undefined) return missing;
+            if (!response.ok) { console.error(`${init.method ?? 'GET'} ${new URL(url).pathname} failed: HTTP ${response.status}`); console.error(await response.text()); process.exit(1); }
+            return response.status === 204 ? null : response.json();
+          };
+          const stable = (name) => /^v(\d+)\.(\d+)\.(\d+)$/.exec(name ?? '')?.slice(1).map(Number) ?? null;
+          const newer = (a, b) => a.reduce((order, part, index) => order || Math.sign(part - b[index]), 0) > 0;
+          const files = [`session-analytics-${version}.tgz`, 'session-analytics.tgz', 'SHA256SUMS'].map((name) => {
+            const bytes = readFileSync(`release/${name}`);
+            return { name, bytes, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` };
+          });
+          let release = null;
+          for (let page = 1; !release; page++) {
+            const releases = await call(`${api}?per_page=100&page=${page}`);
+            if (!releases.length) break;
+            release = releases.find((candidate) => candidate.tag_name === tag) ?? null;
+          }
+          if (release && !release.draft) {
+            if (files.every((file) => release.assets.some((asset) => asset.name === file.name && asset.digest === file.digest))) { console.log(`Release ${tag} is already published with these files.`); process.exit(0); }
+            console.error(`Release ${tag} is already published with other files; published releases are never changed.`); process.exit(1);
+          }
+          const fields = { tag_name: tag, name: tag, body: readFileSync('notes.md', 'utf8'), prerelease };
+          release = release ? await call(`${api}/${release.id}`, { method: 'PATCH', body: JSON.stringify(fields) }) : await call(api, { method: 'POST', body: JSON.stringify({ ...fields, draft: true }) });
+          for (const file of files) {
+            for (const asset of release.assets.filter((asset) => asset.name === file.name)) await call(`${api}/assets/${asset.id}`, { method: 'DELETE' });
+            const uploaded = await call(`${release.upload_url.replace(/\{.*\}$/, '')}?name=${encodeURIComponent(file.name)}`, {
+              method: 'POST', body: file.bytes, headers: { 'Content-Type': file.name.endsWith('.tgz') ? 'application/gzip' : 'text/plain' },
+            });
+            if (uploaded.size !== file.bytes.length || (uploaded.digest && uploaded.digest !== file.digest)) { console.error(`Uploaded ${file.name} does not match the verified file.`); process.exit(1); }
+          }
+          const latest = stable((await call(`${api}/latest`, {}, null))?.tag_name);
+          const makeLatest = !prerelease && !(latest && newer(latest, stable(tag)));
+          await call(`${api}/${release.id}`, { method: 'PATCH', body: JSON.stringify({ draft: false, make_latest: makeLatest ? 'true' : 'false' }) });
+          console.log(`Published release ${tag} with ${files.map((file) => file.name).join(', ')}${makeLatest ? ' as the latest release' : ''}`);
+          if (!prerelease && !makeLatest) console.log(`v${latest.join('.')} is newer and stays the latest release.`);
+          NODE
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  npm:
+    name: publish npm
+    needs: [release]
+    # Off until the one-time npm bootstrap in docs/release.md sets the NPM_PUBLISH repository variable.
+    if: ${{ !cancelled() && needs.release.result == 'success' && vars.NPM_PUBLISH == 'true' }}
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        # The smoke script and demo fixtures only; the published bytes are the release tarball.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install npm
+        # Trusted publishing needs npm 11.5.1 or newer; pinned so the publishing client never changes unreviewed.
+        run: npm install --global npm@11.21.0
+
+      - name: Download release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: Verify checksums
+        working-directory: release
+        run: sha256sum -c SHA256SUMS
+
+      - name: Publish the release tarball
+        # Trusted publishing exchanges this job's OIDC token for a one-time credential and adds provenance; no npm token is stored.
+        # A re-run after a successful publish finds the same bytes and publishes nothing. An explicit --tag turns off npm's own
+        # guard against tagging an older version latest, so a version older than the current latest is published as `backport`.
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          INTEGRITY="sha512-$(openssl dgst -sha512 -binary "release/session-analytics-$V.tgz" | openssl base64 -A)"
+          if [ "$(npm view "session-analytics@$V" dist.integrity 2>/dev/null)" = "$INTEGRITY" ]; then echo "session-analytics@$V is already on npm with these bytes."; exit 0; fi
+          LATEST="$(npm view session-analytics dist-tags.latest)" || { echo "Could not read the latest dist-tag; nothing was published." >&2; exit 1; }
+          case "$V" in
+            *-*) DIST_TAG=next ;;
+            *) if [ "$(printf '%s\n%s\n' "$LATEST" "$V" | sort -V | tail -n 1)" = "$V" ]; then DIST_TAG=latest; else DIST_TAG=backport; fi ;;
+          esac
+          echo "Publishing session-analytics@$V with dist-tag $DIST_TAG; latest is ${LATEST:-unset}."
+          npm publish "release/session-analytics-$V.tgz" --tag "$DIST_TAG"
+
+      - name: Verify npm serves the release bytes
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          EXPECTED="sha512-$(openssl dgst -sha512 -binary "release/session-analytics-$V.tgz" | openssl base64 -A)"
+          for _ in $(seq 30); do
+            ACTUAL="$(npm view "session-analytics@$V" dist.integrity 2>/dev/null || true)"
+            if [ "$ACTUAL" = "$EXPECTED" ]; then echo "npm serves session-analytics@$V as $EXPECTED"; exit 0; fi
+            if [ -n "$ACTUAL" ]; then break; fi
+            sleep 10
+          done
+          echo "npm reports ${ACTUAL:-no version} for session-analytics@$V; the release tarball is $EXPECTED" >&2
+          exit 1
+
+      - name: Install from npm and run it
+        run: node scripts/smoke-installed.ts "session-analytics@${GITHUB_REF_NAME#v}"
+
+  homebrew:
+    name: update Homebrew tap
+    needs: [release, npm]
+    # Off until the tap and its token exist (docs/release.md) and the HOMEBREW_TAP repository variable is set.
+    # Waits for npm only when npm publishing ran; prereleases leave the tap alone.
+    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.npm.result == 'success' || needs.npm.result == 'skipped') && vars.HOMEBREW_TAP == 'true' && !contains(github.ref_name, '-') }}
+    # macOS, so the formula is installed and tested with Homebrew before it is committed; the tap's CI checks only syntax on main.
+    runs-on: macos-latest
+    environment: homebrew
+    timeout-minutes: 30
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -86,22 +311,57 @@ jobs:
         with:
           node-version: 24
 
-      - name: Extract release notes
-        run: node scripts/release-check.ts --notes "$GITHUB_REF_NAME"
+      - name: Download release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
 
-      - name: Create GitHub Release
-        # REST call with the workflow token: no gh CLI dependency on the runner. Re-running for an existing tag updates nothing and fails loudly.
+      - name: Verify checksums
+        working-directory: release
+        run: shasum -a 256 -c SHA256SUMS
+
+      - name: Render the formula
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          node scripts/homebrew-formula.ts --version "$V" --sha256 "$(shasum -a 256 "release/session-analytics-$V.tgz" | cut -d ' ' -f 1)" > session-analytics.rb
+          cat session-analytics.rb
+
+      - name: Install, test and audit the formula
+        # A throwaway local tap: the formula downloads the published release asset, installs with Homebrew's Node and runs its test.
+        run: |
+          brew tap-new --no-git session-analytics/release-check
+          cp session-analytics.rb "$(brew --repository session-analytics/release-check)/Formula/session-analytics.rb"
+          brew install --formula session-analytics/release-check/session-analytics
+          brew test session-analytics/release-check/session-analytics
+          brew audit --strict --formula session-analytics/release-check/session-analytics
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+
+      - name: Commit the formula to the tap
+        # Contents API with a token limited to the tap: one commit to main, or none when the formula is unchanged or the tap
+        # already has a newer version, so a backport or a late re-run never downgrades `brew upgrade`.
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
-          const tag = process.env.GITHUB_REF_NAME;
-          const body = { tag_name: tag, name: tag, body: readFileSync('notes.md', 'utf8'), draft: false, prerelease: false };
-          const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases`, {
-            method: 'POST', headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          if (!response.ok) { console.error(`Release creation failed: HTTP ${response.status}`); console.error(await response.text()); process.exit(1); }
-          console.log(`Created release ${tag}`);
+          const url = 'https://api.github.com/repos/rokas-tarasevicius/homebrew-tap/contents/Formula/session-analytics.rb';
+          const headers = { Authorization: `Bearer ${process.env.TAP_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+          const formula = readFileSync('session-analytics.rb', 'utf8');
+          const current = await fetch(`${url}?ref=main`, { headers });
+          if (!current.ok && current.status !== 404) { console.error(`Reading the tap failed: HTTP ${current.status}`); console.error(await current.text()); process.exit(1); }
+          const existing = current.ok ? await current.json() : null;
+          const text = existing ? Buffer.from(existing.content, 'base64').toString('utf8') : '';
+          if (existing && text === formula) { console.log('The tap already has this formula.'); process.exit(0); }
+          const version = (source) => /\/releases\/download\/v(\d+)\.(\d+)\.(\d+)\//.exec(source)?.slice(1).map(Number) ?? null;
+          const [tapped, releasing] = [version(text), version(formula)];
+          if (tapped && tapped.reduce((order, part, index) => order || Math.sign(part - releasing[index]), 0) > 0) {
+            console.log(`The tap already has the newer ${tapped.join('.')}; leaving it unchanged.`); process.exit(0);
+          }
+          const response = await fetch(url, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({
+            message: `session-analytics ${process.env.GITHUB_REF_NAME.slice(1)}`, content: Buffer.from(formula).toString('base64'), branch: 'main', ...(existing ? { sha: existing.sha } : {}),
+          }) });
+          if (!response.ok) { console.error(`Updating the tap failed: HTTP ${response.status}`); console.error(await response.text()); process.exit(1); }
+          console.log(`Updated Formula/session-analytics.rb in rokas-tarasevicius/homebrew-tap to ${process.env.GITHUB_REF_NAME}`);
           NODE
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}

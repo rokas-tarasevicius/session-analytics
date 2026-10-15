@@ -15,6 +15,7 @@ import { mapConcurrent } from "../concurrency.ts";
 import { projectSession, sessionForIndex } from "./projection.ts";
 import { assertIndexParity, IndexParityError, rotatingSample } from "./parity.ts";
 import { velocityMetadata } from "../metrics/velocity.ts";
+import { moduleUrl } from "../module-url.ts";
 
 interface StoredSession {
   identity_key: string;
@@ -124,10 +125,10 @@ export class IndexScan {
     if (options.noIndex ?? process.env["SESSION_ANALYTICS_NO_INDEX"] === "1") return null;
     const connection = openIndexDatabase(options);
     try {
-      const source = await readFile(new URL("../analyzer.ts", import.meta.url), "utf8");
-      const ledgerSource = await readFile(new URL("./codex-ledger.ts", import.meta.url), "utf8");
-      const storeSource = await readFile(new URL("./index.ts", import.meta.url), "utf8");
-      const projectionSource = await readFile(new URL("./projection.ts", import.meta.url), "utf8");
+      const source = await readFile(moduleUrl("../analyzer.ts", import.meta.url), "utf8");
+      const ledgerSource = await readFile(moduleUrl("./codex-ledger.ts", import.meta.url), "utf8");
+      const storeSource = await readFile(moduleUrl("./index.ts", import.meta.url), "utf8");
+      const projectionSource = await readFile(moduleUrl("./projection.ts", import.meta.url), "utf8");
       // Every parser/metric module participates; moving the Claude adapter cannot hide a revision.
       const parserSources: string[] = [];
       const directory = async (root: URL): Promise<void> => {

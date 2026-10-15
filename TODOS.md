@@ -50,10 +50,9 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Pass the compiled installed-artifact gate before npm publication. | §6, Not in scope for 0.8.0; distribution-launch proposal |
-| P3 | Evaluate Homebrew distribution separately. | §6, Not in scope for 0.8.0 |
-| P3 | Review declaration files and verify compiled installed artifacts before npm publication. CHANGELOG and required license assets are checked by the source-release preflight. | §4 P3; §6, Not in scope for 0.8.0 |
-| P3 | Add release compare links to CHANGELOG. | §4 P3; §6, Not in scope for 0.8.0 |
+| P1 | Maintainer step: right after the first packaged tag, claim the unscoped npm name by publishing that release's tarball, so nobody else can register `session-analytics`; then configure trusted publishing and set `NPM_PUBLISH`. Create the Homebrew tap and its `TAP_TOKEN` and set `HOMEBREW_TAP`. | [One-time maintainer steps](docs/release.md#one-time-maintainer-steps) |
+| P2 | Once npm and the tap serve a release, add their install, upgrade and uninstall commands to the README, `docs/cli.md#install`, the FAQ and the agent skill. They are held back until then, so no guide names a package that does not exist or that someone else could register. | [One-time maintainer steps](docs/release.md#one-time-maintainer-steps) |
+| P3 | Decide whether the package should ship declaration files; it ships none today. The release check already installs and runs the compiled artifact and requires CHANGELOG and license assets. | §4 P3; §6, Not in scope for 0.8.0 |
 | P3 | Upload the social preview through repository settings at release time. | §4 P3; §6 Release 0.8.0, maintainer step |
 
 ## Security tooling and product validation
@@ -65,6 +64,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Completed
 
+- **Completed: 2026-10-14 (unreleased).** The tag workflow publishes the compiled package that `release:check` installs: a GitHub Release tarball with an unversioned alias and `SHA256SUMS`, attested for build provenance, after an installed smoke on Linux and macOS under Node.js 24.0.0, the newest 24.x and 26. It can send the same bytes to npm through trusted publishing and to a Homebrew tap formula, which it installs and tests with Homebrew first; each waits for a repository variable and its one-time setup. CHANGELOG compare links are added and required by `release:check`.
 - **Completed: 2026-10-13 (readiness candidate).** Mobile time-window selector, single-column KPIs below 400 px, and wrapped snapshot metadata: six views checked at 375, 768 and 1440 px through the collaborative preview; 375 px also checked in both themes and densities. Custom ranges focus the start date, and failed refreshes preserve the snapshot without widening the page. Synthetic mobile captures and their provenance are in `assets/SCREENSHOTS.md`.
 - **Completed: 2026-10-13 (0.8.0).** Formatter, shared type/focus/chart tokens, Summary hierarchy and view finishes (PR-E1–E4): `a383526`, `37a3e3d`, `cd65a99`, `20eadba`.
 - **Completed: 2026-10-13 (0.8.0).** Focused-repository provider breakdowns and fleet comparator: `20eadba` and current `src/public/app.js`.

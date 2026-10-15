@@ -11,11 +11,14 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 - [x] Document five personas/jobs, 84 individually scored feature ideas, primary-source competitive research, bounded local evidence, dashboard navigation/wireframes, metric contracts, and packaging/open-source launch gates.
 - [ ] Validate the proposed repository investigation workflow with consenting pilot users and synthetic tasks; collect no automatic telemetry or real histories.
 - [ ] Resolve the documented comparison/denominator/context prerequisites and agree shared schema semantics before promoting new ratios or period comparisons.
-- [ ] Pass compiled npm installed-artifact gates before advertising registry installation; evaluate Homebrew and executable packaging separately.
+- [x] Build a compiled package and gate it on installing and running the packed tarball (`npm run release:check`).
+- [x] Publish that package from the tag workflow as a GitHub Release tarball with `SHA256SUMS` and a build provenance attestation.
+- [ ] Publish the same bytes on npm and in a Homebrew tap. The tag workflow is ready; the [one-time setup](release.md#one-time-maintainer-steps) and the first publish are pending.
+- [ ] Evaluate standalone executable packaging separately.
 
 ## M0: Correctness
 
-**0.8.0 shipped.** The completed items below are available in the current release; remaining correctness work stays open.
+**0.9.0 shipped.** The completed items below are available in the current release; remaining correctness work stays open.
 
 - [x] Extract into a standalone repository with a single brand module (`src/brand.ts`).
 - [x] Discover every local profile: `~/.claude-*`, `CLAUDE_CONFIG_DIR`, `~/.config/claude`, `~/.codex-*`, and `CODEX_HOME`, deduplicated by real path.
@@ -151,7 +154,7 @@ surfaces/    cli, dashboard, mcp, skill, export
 - The index lives outside repositories by default: `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (fallback `~/.local/share/session-analytics/`) on Linux. `SESSION_ANALYTICS_DATA_DIR` or `--data-dir` overrides it. Only derived facts and keyed fingerprints are stored.
 - An optional raw-transcript archive, so history can outlive provider retention, is content and therefore **opt-in and off by default**.
 - The JSON output carries a `schemaVersion`, and MCP tool names and custom telemetry attributes will stay brand-neutral.
-- The runtime stays dependency-free. Distribution is `git clone` today; an npm package or a single binary may follow.
+- The runtime stays dependency-free. Releases after 0.9.0 ship one compiled package through the GitHub Release; npm and a Homebrew tap follow once their one-time setup is done, and a single binary may follow.
 
 ## Interpretation guardrails
 

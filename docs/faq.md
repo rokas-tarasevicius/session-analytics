@@ -3,9 +3,9 @@
 [Back to the README](../README.md) · [Command-line reference](cli.md)
 
 <details>
-<summary><strong>Can I install from npm, GitHub, or a tarball?</strong></summary>
+<summary><strong>Can I install from npm, Homebrew, or a tarball?</strong></summary>
 
-The package is not on npm. Install from a checkout with `npm link`; see [installation](cli.md#install). `npm install github:rokas-tarasevicius/session-analytics` or a tarball install fails on Node 24 with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` because the executable is a `.ts` file under `node_modules`. Without `npm link`, run `node bin/session-analytics.ts` from the checkout.
+Releases after 0.9.0 attach a compiled package to the GitHub Release. Install it with `npm install -g` and the release tarball's URL, which needs no npm registry; see [installation](cli.md#install) for pinning, upgrades and uninstalling. npm registry and Homebrew packages of the same tarball are planned but not published yet. Before the first packaged release, run a source checkout with `node bin/session-analytics.ts`. `npm install github:rokas-tarasevicius/session-analytics` installs the TypeScript sources instead, which Node refuses to run under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
 </details>
 
 <details>

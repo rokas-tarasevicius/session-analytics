@@ -9,14 +9,6 @@
   "bin": {
     "session-analytics": "bin/session-analytics.ts"
   },
-  "files": [
-    "CHANGELOG.md",
-    "bin",
-    "src",
-    "data",
-    "schemas",
-    "skills"
-  ],
   "engines": {
     "node": ">=24"
   },
@@ -48,6 +40,8 @@
     "test:browser": "node scripts/test.ts --browser",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
+    "build": "node scripts/build.ts",
+    "pack:release": "node scripts/build.ts && mkdir -p release && npm pack ./dist --pack-destination release",
     "release:check": "npm run check && node scripts/release-check.ts",
     "verify:real": "node scripts/verify-real.ts"
   },
