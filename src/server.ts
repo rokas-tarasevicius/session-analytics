@@ -7,7 +7,7 @@ import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
-import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, argument, type RemoteOptions } from "./options.ts";
+import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, sourceHelp, argument, type RemoteOptions } from "./options.ts";
 import { machinesPath, remoteFor } from "./machines/config.ts";
 import { stopOnSignals } from "./processes.ts";
 import { analyzeMachines, machineOptions, machineReads, type MachineReads } from "./remote.ts";
@@ -62,8 +62,14 @@ Usage: ${brand.command} [dashboard] [--no-open] [--port PORT] [analysis options]
 The server always binds to 127.0.0.1 and accepts read-only GET requests.
 With --open, this one command performs the complete scan and opens the dashboard.
 If a dashboard already uses the port, the command reuses it only when it runs the same version with the same analysis options.
-${pricingHelp}${machineHelp}${remoteHelp}--snapshot FILE loads a versioned full or shared snapshot; refresh re-reads that file and never scans local stores.
-Use --no-index for a full scan, or --data-dir PATH to choose the private index directory.
+  --snapshot FILE        Load a versioned full or shared snapshot; refresh re-reads that file and never scans local stores
+  --exclude-hidden       Exclude hidden optional repository/session metadata
+  --repo-id ID           Narrow to one stable repository ID
+  --repo-name NAME       Narrow to one uniquely named repository
+  --repo-root PATH       Narrow by canonical repository root
+  --repo-remote URL      Narrow by canonical Git remote
+${sourceHelp}${pricingHelp}${machineHelp}${remoteHelp}  --no-codex-account     Skip the banked-reset read through the Codex app-server
+  --no-index             Full scan without reading or writing the index
 `);
   process.exit(0);
 }

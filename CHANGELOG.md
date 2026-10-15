@@ -93,7 +93,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - A machine that could not be read is visible in the dashboard and named with its reason, instead of a single unnamed note behind the Coverage button; the "some sessions appeared on more than one machine" note is shown in the dashboard too.
 - A read whose `ssh` exited while a helper it started (a `ProxyCommand` that backgrounds) still held its output settles a second later instead of waiting for the time limit and reporting a time-out.
 - Remote stderr lines lose C1 control, format and bidirectional-override characters too, not only C0 controls.
-- `mcp --help` lists every option `mcp` accepts, as the command reference does, including `--data-dir`, `--offline`, `--time-zone`, `--no-index`, the pricing options and every source path.
+- `mcp --help` lists every documented `mcp` option, as the command reference does, including `--data-dir`, `--offline`, `--time-zone`, `--no-index`, the pricing options and every source path, and says that `mcp` never fetches prices and keeps tool windows in UTC whatever those options say. `dashboard --help` now lists the source paths, `--rate-card`, the repository filters, `--exclude-hidden`, `--no-codex-account` and `--no-index` too.
 
 ## [0.9.0] - 2026-10-14
 

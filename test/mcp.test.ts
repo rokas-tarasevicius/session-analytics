@@ -277,8 +277,9 @@ test("MCP startup options and snapshot failures do not expose paths or exception
   }
   const help = spawnSync(process.execPath, [bin, "mcp", "--help"], { encoding: "utf8" });
   assert.equal(help.status, 0); assert.match(help.stdout, /stdio/);
-  // Every option mcp accepts is in its help, as docs/cli.md lists them for mcp.
+  // Every documented mcp option is in its help, as docs/cli.md lists them for mcp, with what the shared ones mean here.
   for (const flag of [...analysisValueFlags, ...analysisBooleanFlags, "--mcp-ttl", "--mcp-cwd", "--exclude-hidden"]) assert.match(help.stdout, new RegExp(`^  ${flag} `, "m"), flag);
+  assert.match(help.stdout, /^mcp never fetches prices: .*\ntool windows stay UTC whatever --time-zone says\.$/m);
   const f = await fixture();
   const c = client([...f.args, "--rate-card", join(f.root, "SECRET_MISSING_RATE_CARD")], f.source.repositoryRoot);
   try {

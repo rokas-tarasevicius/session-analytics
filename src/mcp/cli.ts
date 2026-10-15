@@ -39,6 +39,8 @@ ${sourceHelp}${pricingHelp}${machineHelp}  --no-index             Full scan with
   --version              Print the version
   --help                 Show this help
 
+mcp never fetches prices: --offline and the pricing options only set how the cache is read and reported;
+tool windows stay UTC whatever --time-zone says.
 Flags override SESSION_ANALYTICS_* settings, including MCP_TTL and MCP_CWD.
 Paths are accepted only at process launch, never from tool arguments or client roots.
 Allow up to 300 seconds for the first scan on large histories. Later calls reuse the cache.
