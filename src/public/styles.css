@@ -629,7 +629,8 @@ tbody tr:first-child th { border-top: 0; }
 .view-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); margin-top: var(--gap); }
 
 /* heatmap */
-.activity-panel { min-height: auto; margin-top: 0; overflow-x: auto; }
+.activity-panel { min-width: 0; min-height: auto; margin-top: 0; overflow-x: auto; }
+.activity-heatmap-scroll { max-width: 100%; overflow-x: auto; }
 .activity-heatmap { display: grid; grid-template-columns: 64px repeat(24, minmax(16px, 1fr)); gap: 3px; align-items: center; min-width: 720px; }
 .activity-heatmap .heat-label, .activity-heatmap .heat-hour { color: var(--muted); font: 500 var(--fs-xs) var(--font-mono); }
 .activity-heatmap .heat-label { padding-right: 8px; text-align: right; font-family: var(--font-sans); }

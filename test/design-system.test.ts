@@ -310,3 +310,12 @@ test("Summary defaults to three KPI columns before responsive overrides and Velo
   assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection")!.body, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection > strong")!.body, /grid-column:\s*1\s*\/\s*-1/);
 });
+
+
+test("Activity heatmap scrolls inside its panel without widening the view", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /class="activity-heatmap-scroll"[^>]*role="region"[^>]*tabindex="0"><div class="activity-heatmap/);
+  const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".activity-panel")!.body, /min-width:\s*0/);
+  assert.match(cssRules.find(({ selector }) => selector === ".activity-heatmap-scroll")!.body, /max-width:\s*100%;\s*overflow-x:\s*auto/);
+});
