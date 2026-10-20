@@ -898,14 +898,6 @@ dialog::backdrop { background: var(--backdrop); }
   [data-view-panel="summary"] > #repository-comparison { grid-column: 1 / -1; margin-top: 12px; }
 }
 
-@media (min-width: 1400px) {
-  .summary-overview-charts > .panel:first-child { display: contents; }
-  .summary-overview-charts .daily-usage-header { grid-column: 1 / -1; margin-bottom: 0; }
-  .summary-overview-charts #daily-spend { grid-column: 1 / span 8; }
-  .summary-overview-charts > .panel:first-child > .chart-note { grid-column: 1 / span 8; }
-  .summary-overview-charts > .panel:last-child { grid-column: 9 / -1; grid-row: 2 / span 2; border-top: 0; padding-top: 0; }
-}
-
 /* ---------------------------------------------------------------- responsive */
 @media (min-width: 761px) {
   .cost-stack-row > strong:last-child, .cost-model-row > strong { display: grid; grid-template-columns: auto 7rem; align-items: center; justify-items: end; column-gap: 6px; }

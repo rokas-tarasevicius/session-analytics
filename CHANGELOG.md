@@ -55,7 +55,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Snapshot metadata wraps without leaving a dangling separator on narrow screens.
 - Velocity labels its increases-only ranking “Top increases”.
 - Pricing refresh notices display the CLI command as code.
-- Wide Summary layouts place sessions by provider beside the daily chart to make better use of the available space.
 - Export downloads appear first; the detailed scope and privacy explanation sits under “What’s included”.
 - Checkbox controls, including Velocity’s 7-day average, use a larger visible box and a full-height clickable label.
 - Tool detail metrics use readable columns and a shorter per-session label.

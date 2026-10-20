@@ -401,22 +401,11 @@ test("export actions precede the collapsible scope and privacy explanation", asy
 });
 
 
-test("wide Summary places provider sessions alongside the daily chart", async () => {
-  const css = await readCss("styles.css");
-  const wide = css.slice(css.indexOf("@media (min-width: 1400px)"), css.indexOf("/* ---------------------------------------------------------------- responsive */"));
-  assert.match(wide, /\.daily-usage-header\s*\{\s*grid-column:\s*1 \/ -1/);
-  assert.match(wide, /#daily-spend\s*\{\s*grid-column:\s*1 \/ span 8/);
-  assert.match(wide, /\.panel:last-child\s*\{\s*grid-column:\s*9 \/ -1;\s*grid-row:\s*2 \/ span 2/);
-});
-
-
 test("pricing refresh instructions mark the runnable command as code", async () => {
   const source = await readFile(new URL("../src/public/pricing.js", import.meta.url), "utf8");
   assert.match(source, /el\("code", "session-analytics rates update"\)/);
   assert.match(await readCss("pricing.css"), /\.pricing-notice code\s*\{[^}]*var\(--font-mono\)/);
 });
-
-
 
 
 test("Velocity docs describe Top increases and compact evidence with exact accessible counts", async () => {
