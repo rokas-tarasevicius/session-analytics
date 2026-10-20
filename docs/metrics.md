@@ -489,6 +489,7 @@ at least 3 active dates, and a minimum-activity guard. Zero dates count. Metric 
 must be complete for the whole observed month
 (including today) and every sampled day. Gaps are not zero samples and are not silently
 dropped. Month/sample evidence counts stay visible even when the projection is unavailable.
+Unavailable burn ratios and projections name the failed guard with observed and required figures: calendar coverage, complete metric evidence, sample/active days, minimum value or model calls, or an ended month/historical window.
 The band is a **rate scenario, not a confidence interval**: no normality, independence or probability
 of future usage is claimed. It assumes the workload continues and cannot anticipate
 project changes. API-equivalent value is not an invoice; activity counters do not prove

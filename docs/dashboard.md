@@ -66,6 +66,8 @@ Velocity answers "is this going up, and what is driving it?" It opens grouped by
 
 Every panel has an **Evidence & limits** note that states what the number includes, what was excluded, and why a comparison is partial or unavailable. A missing comparison is shown as a dash with its reason, never as zero.
 
+When a Velocity burn ratio or projection is unavailable, its visible explanation names the failed calendar, activity, evidence or baseline guard with the observed and required figures.
+
 ### Costs: one money ledger
 
 Costs answers "where does the value go?" The usage value is the sum of an API-equivalent part, priced from observed tokens, and a provider-reported part for sources such as Cursor that record their own figure and have no rate card. Cost by provider shows each provider's bar segmented by model with its priced share; cost by model lists every model with its provider, sessions, calls, input and output tokens, value and share. Summary, Velocity and Costs read the same activity-dated ledger, so their totals agree for any window.

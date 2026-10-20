@@ -189,3 +189,30 @@ test("card text covers every comparison status and uses shared date ranges to ag
   // A Sunday names the whole week; the label never reads like a rolling "last 7 days" comparison.
   assert.match(comparisonLabels(indicators([session], "2026-10-08", "2026-10-04"), "2026-10-08").week, /^Week through 4 Oct 2026 \(Mon–Sun\) vs same days prior week$/);
 });
+
+
+test("burn and projection explanations name the failed guard with its figures", () => {
+  const full = ledger(every("2026-08-01", "2026-10-20", () => 10));
+  const partial = indicators([ledger(every("2026-08-01", "2026-10-20", () => 10), { priced: 0.973 })], "2026-10-20");
+  assert.equal(partial.projection, null);
+  assert.match(partial.projectionReason!, /Pricing coverage completed month: 97\.3%; 100% needed/);
+  assert.match(partial.burn.reason!, /Pricing coverage 14-day baseline: 97\.3%; 100% needed/);
+  assert.doesNotMatch(partial.projectionReason!, /at least 7|at least 3/);
+  const todayOnly = ledger([["2026-10-20", 10]], { priced: 0 });
+  assert.match(indicators([full, todayOnly], "2026-10-20").projectionReason!, /Pricing coverage this month/);
+  assert.match(indicators([full, todayOnly], "2026-10-20").burn.reason!, /Pricing coverage today/);
+  assert.match(indicators([ledger(every("2026-10-01", "2026-10-05", () => 10))], "2026-10-05").projectionReason!, /4 completed sample days; at least 7 needed/);
+  const inactive = ledger([["2026-09-01", 10], ["2026-10-10", 10], ["2026-10-19", 10]]);
+  assert.match(indicators([inactive], "2026-10-20").projectionReason!, /2 active sample days; at least 3 needed/);
+  assert.match(indicators([inactive], "2026-10-20").burn.reason!, /2 active days; at least 3 needed/);
+  const tiny = ledger(every("2026-08-01", "2026-10-20", () => 0.00001));
+  assert.match(indicators([tiny], "2026-10-20").projectionReason!, /Baseline is .* USD; at least 0\.01 USD needed/);
+  assert.match(indicators([tiny], "2026-10-20").burn.reason!, /Baseline is .* USD; at least 0\.01 USD needed/);
+  const clipped = velocityIndicators(buildVelocity([full], { start: "2026-10-10", end: "2026-10-20" }), "2026-10-20");
+  assert.match(clipped.projectionReason!, /10\/19 calendar days observed/);
+  assert.match(clipped.burn.reason!, /10\/14 calendar days observed/);
+  assert.match(indicators([full], "2026-10-20", "2026-09-30").projectionReason!, /0 days left to project/);
+  assert.match(indicators([full], "2026-10-20", "2026-10-19").burn.reason!, /Today .* outside the window/);
+  assert.equal(indicators([full], "2026-10-20").projectionReason, null);
+  assert.equal(indicators([full], "2026-10-20").burn.reason, null);
+});

@@ -276,7 +276,7 @@ export function renderVelocity(container, sessions, context) {
       totals.replaceChildren(
         kpi({ label: weekLabel, value: comparisonValue(indicators.week), reason: indicators.week.reason, note: shortNote(indicators.week) }),
         kpi({ label: monthLabel, value: comparisonValue(indicators.month), reason: indicators.month.reason, note: shortNote(indicators.month) }),
-        kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number(indicators.burn.ratio)}×`, reason: "Needs a 14-day baseline with complete evidence", note: `${indicators.burn.days}/14 baseline days covered` }),
+        kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number(indicators.burn.ratio)}×`, reason: indicators.burn.reason, note: `${indicators.burn.days}/14 baseline days covered` }),
       );
       comparisons.replaceChildren(el("summary", "How the comparisons are built"), (() => { const body = el("div", null, "evidence-body"); for (const text of [
         `${weekLabel}: ${comparisonNote(indicators.week, "week")}`,
@@ -287,8 +287,8 @@ export function renderVelocity(container, sessions, context) {
       const forecast = indicators.projection;
       projection.article.replaceChildren(projection.header);
       if (!forecast) {
-        projection.heading.textContent = "More complete history needed";
-        projection.article.append(el("p", "Needs at least 7 completed days and 3 active days of observed history this month. Complete metric evidence is required for the month, today and every sampled day.", "empty-line"));
+        projection.heading.textContent = "Projection unavailable";
+        projection.article.append(el("p", indicators.projectionReason, "empty-line"));
       } else {
         projection.heading.textContent = `Projected by ${forecast.monthEnd}`;
         projection.article.append(el("p", formatMetric(forecast.value, options.metric), "projected"));
