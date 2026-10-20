@@ -4,13 +4,6 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-10-20
-
-### Added
-
-- Antigravity local usage from schema-v1 SQLite conversation stores for the App, IDE and CLI, including cache and reasoning counters, observed tools, dated API-equivalent pricing where model names are known, and full-scan/index parity. `--antigravity-root` replaces discovery. Legacy protobuf conversation files remain unsupported and produce a coverage warning; no usage is inferred from display transcripts or quota percentages.
-- `session-analytics upgrade` upgrades the installation with the package manager that installed it: `brew upgrade` for Homebrew, and `npm install -g session-analytics@latest` in the same prefix for npm and release-tarball installs. `upgrade --check` prints the installed and latest versions without changing anything. A source checkout is left alone. See [upgrade](docs/cli.md#upgrade-roll-back-and-uninstall).
-
 ### Fixed
 
 - Invalid Gemini cache counts no longer inflate inclusive input totals. Cache reads are bounded by recorded input and accounting is marked partial; affected input/cache totals and any configured API-equivalent estimates decrease.
@@ -57,6 +50,17 @@ All notable changes to this project are documented here. The format follows [Kee
 - Release automation approves CI only for its own release pull request, even when another pull request shares the same commit.
 - Synthetic index benchmarks no longer discover real provider stores or fetch prices, and the test runner always isolates its data directory even when `SESSION_ANALYTICS_DATA_DIR` is exported.
 - The build resolves symlinked output paths before emptying a directory, preserving the checkout and home-directory protections through symlink aliases.
+- `node scripts/build.ts` invoked through a symlinked path, such as a macOS temporary directory under `/var/folders`, now builds instead of exiting silently with status 0.
+
+## [0.11.0] - 2026-10-20
+
+### Added
+
+- Antigravity local usage from schema-v1 SQLite conversation stores for the App, IDE and CLI, including cache and reasoning counters, observed tools, dated API-equivalent pricing where model names are known, and full-scan/index parity. `--antigravity-root` replaces discovery. Legacy protobuf conversation files remain unsupported and produce a coverage warning; no usage is inferred from display transcripts or quota percentages.
+- `session-analytics upgrade` upgrades the installation with the package manager that installed it: `brew upgrade` for Homebrew, and `npm install -g session-analytics@latest` in the same prefix for npm and release-tarball installs. `upgrade --check` prints the installed and latest versions without changing anything. A source checkout is left alone. See [upgrade](docs/cli.md#upgrade-roll-back-and-uninstall).
+
+### Fixed
+
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20
