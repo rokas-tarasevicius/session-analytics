@@ -248,11 +248,15 @@ export class RemoteError extends Error {
   readonly reason: RemoteFailure;
   readonly detail: string;
   readonly fix: string;
+  /** Snapshot hints use only the public label; the terminal keeps the exact configuration. */
+  readonly snapshotFix: string;
   constructor(reason: RemoteFailure, machine: RemoteMachine | null = null, stderr = "", found = "", timeoutMs = 0) {
     super(failureText(reason, machine, found, timeoutMs));
     this.reason = reason;
     this.detail = stderrDetail(stderr);
     this.fix = fixText(reason, machine, found);
+    this.snapshotFix = this.fix && machine?.saved && ["unknown-host", "connection", "login-refused", "sudo"].includes(reason)
+      ? `run ${brand.command} machines check ${machine.name} for the exact diagnostic and fix` : this.fix;
   }
 }
 
@@ -461,7 +465,7 @@ export function machineReads(
       const kept = error.reason === "same-machine" ? null
         : reading.snapshot && age <= lastGoodMaxAgeMs ? { snapshot: reading.snapshot, status: reading.status, ...(reading.identity ? { identity: reading.identity } : {}) }
         : stopped ? null : await lastGood(reading);
-      const reason = error.reason, fix = error.fix ? { fix: error.fix } : {};
+      const reason = error.reason, fix = error.snapshotFix ? { fix: error.snapshotFix } : {};
       if (kept) Object.assign(reading, kept, { status: { ...kept.status, state: "stale", reason, ...fix } });
       else Object.assign(reading, { snapshot: null, identity: undefined, status: { key, label, state: "failed", reason, ...fix, sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } });
       if (stopped) return;
@@ -496,7 +500,7 @@ export function machineReads(
       const error = new RemoteError("same-machine", reading.machine, "", twin);
       if (reading.twin !== twin) { reading.twin = twin; report(`Not counting ${reading.machine.name}: ${error.message}.${error.fix ? `\n  Fix: ${error.fix}` : ""}`, true); }
       const { key, label } = reading.status;
-      statuses.push({ key, label, state: "failed", reason: "same-machine", ...(error.fix ? { fix: error.fix } : {}), sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null });
+      statuses.push({ key, label, state: "failed", reason: "same-machine", ...(error.snapshotFix ? { fix: error.snapshotFix } : {}), sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null });
       inputs.push(null);
     }
     const warnings = [...(statuses.some(({ state }) => state === "failed") ? [remoteUnavailableWarning] : []), ...(statuses.some(({ state }) => state === "stale") ? [staleMachineWarning] : [])];

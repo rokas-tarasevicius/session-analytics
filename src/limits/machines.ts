@@ -347,7 +347,7 @@ export function limitsReads(
       const kept = error.reason === "same-machine" ? null
         : reading.snapshot && age <= lastGoodMaxAgeMs ? { snapshot: reading.snapshot, status: reading.status }
         : stopped ? null : await lastGood(reading);
-      const fix = error.fix ? { fix: error.fix } : {};
+      const fix = error.snapshotFix ? { fix: error.snapshotFix } : {};
       if (kept) Object.assign(reading, kept, { status: { ...kept.status, state: "stale", reason: error.reason, ...fix } });
       else Object.assign(reading, { snapshot: null, identity: undefined, status: { key, label, state: "failed", reason: error.reason, ...fix, readAt: null, durationMs: null } });
       if (!stopped && reported.get(reading) !== error.reason) { reported.set(reading, error.reason); report(limitsReadLines(machine, reading.status, error)); }
@@ -379,7 +379,7 @@ export function limitsReads(
       if (!twin) { reading.twin = undefined; return reading; }
       const error = new RemoteError("same-machine", reading.machine, "", twin), { key, label } = reading.status;
       if (reading.twin !== twin) { reading.twin = twin; report(`Not counting limits from ${reading.machine.name}: ${error.message}.${error.fix ? `\n  Fix: ${error.fix}` : ""}`); }
-      return { snapshot: null, status: { key, label, state: "failed", reason: "same-machine", ...(error.fix ? { fix: error.fix } : {}), readAt: null, durationMs: null } };
+      return { snapshot: null, status: { key, label, state: "failed", reason: "same-machine", ...(error.snapshotFix ? { fix: error.snapshotFix } : {}), readAt: null, durationMs: null } };
     });
   };
 

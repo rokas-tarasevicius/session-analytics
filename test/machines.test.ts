@@ -283,6 +283,23 @@ test("exit codes and stderr map to fixed reasons with the exact fix", () => {
   assert.equal(classifyRemote(saved, result(127))!.message, "node was not found on agents's login PATH");
 });
 
+test("failed machine snapshots keep destinations, accounts, paths and stderr in this terminal only", async () => {
+  const data = dataDir("private-failures");
+  await machinesFile("private-failures", { version: 1, machines: [
+    { name: "box", ssh: "SECRET-HOST", user: "secret-account", runtime: "bundled", enabled: true },
+    { name: "lockbox", ssh: "server", user: "locked", runtime: "bundled", enabled: true },
+    { name: "nodebox", ssh: "SECRET-NODE-HOST", node: "/SECRET/PATH/node", runtime: "bundled", enabled: true },
+  ] });
+  const read = cli(["report", "--json", ...localFlags, "--data-dir", data], { FAKE_SSH_DOWN: "SECRET-HOST" });
+  assert.equal(read.status, 0, read.stderr);
+  const snapshot = validateSnapshot(JSON.parse(read.stdout));
+  assert.deepEqual(snapshot.machines!.slice(1).map(({ reason }) => reason), ["connection", "sudo", "no-node"]);
+  assert.ok(snapshot.machines!.slice(1).every(({ fix }) => fix));
+  assert.doesNotMatch(read.stdout, /SECRET|secret-account|locked|Connection refused/);
+  assert.match(read.stderr, /SECRET-HOST.*Connection refused/);
+  assert.match(read.stderr, /SECRET\/PATH/);
+});
+
 test("machines.json is strict, private and decides which machines a run reads", async () => {
   const valid: MachinesConfig = { version: 1, local: { label: "laptop" }, machines: [
     { name: "agentbox", ssh: "agentbox", user: "agent-t3", runtime: "bundled", enabled: true, addedAt: "2026-10-14T11:00:00Z" },
@@ -483,7 +500,7 @@ test("a plain report reads saved machines with the bundled runtime: install once
   assert.match(first.stderr, /empty: no agent history for this account \(0 sessions read\)\.\n {2}Fix: if agents run as another account there: session-analytics machines set empty --user NAME/);
   assert.match(first.stderr, /Could not read down: SSH could not connect/);
   // The header lists what was read, with counts and timing, and each machine not read with its reason and fix.
-  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: check that down is up/);
+  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: run session-analytics machines check down/);
   assert.deepEqual((await calls()).filter(({ destination }) => destination === "server").map(({ words }) => words[7]), ["run", "install"]);
   assert.deepEqual((await calls()).find(({ destination }) => destination === "server")!.words.slice(0, 6), ["sudo", "-n", "-iu", "agents", "node", "-"]);
   await rm(sshLog, { force: true });
@@ -663,7 +680,7 @@ test("a machine that fails is shown from its last good snapshot, marked stale, a
   const text = cli(["report", ...localFlags, "--data-dir", data, "--strict"], down);
   assert.equal(text.status, 3, text.stderr);
   assert.match(text.stdout, /^Session Analytics · laptop and server \(stale\)\n/);
-  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 from a last good snapshot\n.*\n {2}server {2}unreachable; its last good snapshot from (?:just now|\d+ min ago) \(5 sessions, 3 repositories\)\n {4}Fix: check that server is up/);
+  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 from a last good snapshot\n.*\n {2}server {2}unreachable; its last good snapshot from (?:just now|\d+ min ago) \(5 sessions, 3 repositories\)\n {4}Fix: run session-analytics machines check server/);
   assert.match(text.stderr, /Could not read server: SSH could not connect.*\n {2}Fix: .*\n {2}Using its last good snapshot from (?:just now|\d+ min ago) \(5 sessions\)\./);
   assert.match(text.stderr, /--strict: server was not read now; exiting with 3\.\n$/);
   const stale = validateSnapshot(JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data], down).stdout));
