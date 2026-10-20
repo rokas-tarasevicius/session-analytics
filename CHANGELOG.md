@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Manually running the Release PR workflow from another branch still prepares the release from `master`, so unrelated branch changes cannot enter the release pull request.
 - Release preparation generates notes from commit titles when Unreleased contains only empty category headings, instead of creating an empty release that preflight rejects.
 - The demo rejects `--port` or `--bin` without a value before generating data; a missing port no longer silently uses the default dashboard port.
 - Independent Codex verification uses the snapshot's time zone, so verifying a saved snapshot in another time zone no longer reports false hourly discrepancies.

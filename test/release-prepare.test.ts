@@ -106,6 +106,7 @@ test("release PR: the workflow runs on merges to master with write access in its
   assert.match(workflow, /\npermissions:\n  contents: read\n/);
   assert.match(workflow, /\n    permissions:\n      contents: write\n      pull-requests: write\n      actions: write\n/);
   assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /\n          ref: master\n/, "a manual run on another ref still prepares the release from master");
   assert.doesNotMatch(workflow, /secrets\.|pull_request_target/, "no secret");
   for (const line of workflow.split("\n").filter((line) => line.includes("${{ steps."))) assert.match(line, /^ {8}if: |^ {10}[A-Z_]+: \$\{\{ steps\./, `step outputs reach scripts only through env: ${line}`);
   assert.match(workflow, /node scripts\/release-prepare\.ts --write --output "\$GITHUB_OUTPUT"/);

@@ -27,6 +27,8 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          # Manual dispatches may select another ref; release preparation always starts from master.
+          ref: master
           # The whole history and its tags: the next version comes from the commits since the last release tag.
           fetch-depth: 0
           persist-credentials: false
