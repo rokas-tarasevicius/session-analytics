@@ -40,6 +40,16 @@ if (destination === "probe-hangs") {
   return;
 }
 if (destination === "limits-static") { process.stdout.write(process.env.FAKE_SSH_LIMITS); process.exit(0); }
+if (destination === "oversize") { process.stdout.write(Buffer.alloc(1024)); process.exit(0); }
+if (destination === "resists-term") { process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); return; }
+if (destination === "newer" && command.includes("--version")) { process.stdout.write("999.0.0"); process.exit(0); }
+if (["bom", "garbage", "schema", "newer"].includes(destination)) {
+  let text = readFileSync(process.env.FAKE_SSH_COPIED, "utf8");
+  if (destination === "bom") text = "\\uFEFF" + text;
+  else if (destination === "garbage") text += "SECRET-TRAILING-GARBAGE";
+  else text = JSON.stringify({ ...JSON.parse(text), schemaVersion: 2 });
+  process.stdout.write(text); process.exit(0);
+}
 if (destination === "down") { process.stderr.write("ssh: connect to host down port 22: Connection refused\\n"); process.exit(255); }
 if (destination === "old") { process.stderr.write("Unknown session analytics argument: --no-remote\\n"); process.exit(2); }
 if (destination === "missing") { process.stderr.write("bash: line 1: session-analytics: command not found\\n"); process.exit(127); }
@@ -194,6 +204,28 @@ test("machine readers given an already-aborted signal start no SSH calls", async
   }, timeout: 5000 });
   assert.deepEqual(JSON.parse(read.stdout), ["cancelled", "cancelled"]);
   assert.equal((await calls()).length, count);
+});
+
+test("SSH bounds stdout and kills a hung client that ignores SIGTERM", async () => {
+  const module = new URL("../src/remote.ts", import.meta.url).href;
+  const script = `import { runSsh } from ${JSON.stringify(module)};
+    const large = await runSsh("oversize", [], { deadline: Date.now() + 3000, limit: 16 });
+    const hung = await runSsh("resists-term", [], { deadline: Date.now() + 500 });
+    process.stdout.write(JSON.stringify({ failure: large.failure, bytes: large.stdout.length, hung: hung.failure, ms: hung.ms }));`;
+  const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: environment, timeout: 6000 });
+  const result = JSON.parse(read.stdout) as { failure: string; bytes: number; hung: string; ms: number };
+  assert.equal(result.failure, "too-large");
+  assert.ok(result.bytes <= 16);
+  assert.equal(result.hung, "timeout");
+  assert.ok(result.ms >= 1400 && result.ms < 3000, `SIGKILL took ${result.ms} ms`);
+});
+
+test("BOMs, trailing output and unsupported schemas fail closed; a newer installed version is identified", async () => {
+  const { snapshot, stderr } = await report("--remote", "bom,garbage,schema,newer,copied");
+  assert.deepEqual(snapshot.machines!.slice(1).map(({ reason }) => reason ?? null), ["invalid", "invalid", "invalid", "version-skew", null]);
+  assert.equal(snapshot.summary.sessions, localSnapshot.summary.sessions + copiedSessions);
+  assert.match(stderr, /the remote runs session-analytics 999\.0\.0/);
+  assert.doesNotMatch(JSON.stringify(snapshot), /SECRET-TRAILING-GARBAGE/);
 });
 
 test("--no-remote ignores remote environment settings and conflicts with explicit --remote", () => {
