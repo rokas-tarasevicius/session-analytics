@@ -384,6 +384,7 @@ select:hover { border-color: var(--line-strong); }
 .status[data-state="error"] i { background: var(--danger); }
 .status[data-state="warn"] i { background: var(--warn); }
 .status[data-state="reading"] i { animation: pulse 1.4s ease-in-out infinite; }
+.status .sync-short { display: none; }
 #sync-label { display: inline-block; min-width: 13em; }
 .status[data-state="loading"] i { animation: pulse 1.4s ease-in-out infinite; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: var(--control); height: var(--control); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast); }
@@ -955,6 +956,8 @@ dialog::backdrop { background: var(--backdrop); }
   .topbar { position: static; }
   .snapshot-meta { min-width: 0; max-width: 100%; flex-wrap: wrap; white-space: normal; }
   .status span, #sync-label { display: none; }
+  .status .sync-short { display: inline; }
+  .status[data-state="loading"] .sync-short { display: none; }
   .status[data-state="loading"] #sync-label { display: inline-block; min-width: 0; }
   .span-4, .span-6, .span-8 { grid-column: 1 / -1; }
   .panel { min-height: auto; }

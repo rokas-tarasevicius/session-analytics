@@ -322,3 +322,13 @@ test("Tools add break opportunities after name separators without interpreting m
   assert.equal(button.children.filter(n => n.tag === "wbr").length, 6);
   assert.equal(button.children.filter(n => n.tag === "text").map(n => n.textContent).join(""), "mcp__github__get-pull.request");
 });
+
+
+test("compact sync status retains a full accessible description for every state", async () => {
+  const h = await harness();
+  for (const [state, short] of [["live", "Ready"], ["reading", "Reading…"], ["warn", "Check"], ["error", "Failed"]]) {
+    h.run(`elements.sync.dataset.state=${JSON.stringify(state)}; elements.syncLabel.textContent="Full synthetic snapshot status"; describeSyncStatus()`);
+    assert.equal(h.elements.get("#sync-context")!.attributes["aria-label"], "Full synthetic snapshot status");
+    assert.equal(h.elements.get("#sync-short")!.textContent, short);
+  }
+});
