@@ -2404,6 +2404,7 @@ async function analyzeSelectedRepositories(
       home: homedir(), options, environment: process.env, pricing, existingSessions: allSessions,
       claimRequest: index ? index.claimProviderRequest.bind(index) : undefined,
       completeRequests: index ? index.completeProviderRequests.bind(index) : undefined,
+      reconcileAntigravityRequests: index ? index.reconcileProviderRequests.bind(index, "antigravity") : undefined,
       knownPaths: [...new Set([...availableRepositories.map((r) => r.root_path), ...workspaceRepositories.keys(), ...discovered.keys(), ...noRepositoryPathsOf(discovered), ...candidates.map((c) => c.cwd)])],
       async repositoryForSession(identity, source) {
         if (identity.cwd) return repositoryForPath(identity.cwd, availableRepositories, workspaceRepositories, discovered);

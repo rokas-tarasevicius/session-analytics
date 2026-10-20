@@ -51,7 +51,7 @@ test("Antigravity: discovers app, IDE and CLI roots, explicit roots and opt-out 
       const target = join(root, surface, "conversations", `${id}.db`);
       await mkdir(dirname(target), { recursive: true }); await copyFile(path, target);
     }
-    assert.equal((await parse(root)).sessions.length, 3); // The host selects one copy per session identity.
+    assert.equal((await parse(root)).sessions.length, 1); // The freshest copy is selected before ownership reconciliation.
     assert.equal((await parse(join(root, "antigravity"))).sessions.length, 1);
     assert.equal((await parse(join(root, "missing"))).sessions.length, 0);
   });
@@ -263,6 +263,29 @@ test("Antigravity: a complete rewritten owner releases old claims to surviving f
     const full = await selected(true), refreshed = await selected();
     assert.equal(refreshed.reduce((n, s) => n + s.tokens.inputTokens, 0), 3100);
     assert.deepEqual(refreshed, full); assert.deepEqual(await selected(), full);
+  });
+});
+
+test("Antigravity: a healthy fork relinquishes removed claims before its restored parent is analyzed", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-20T15:00:00Z") });
+  await fixture(async (root, path) => {
+    const f = await createSessionAnalyticsFixture(join(root, "native"));
+    const options: AnalyzeOptions = { ...f, noIndex: false, repositoryRoot: undefined, offline: true, antigravityRoot: root, pricingPolicy: "reviewed-only" };
+    const backup = join(root, "parent-backup.db"), child = join(dirname(path), `${otherId}.db`);
+    await copyFile(path, backup); await copyFile(path, child); await rm(path);
+    change(child, (db) => {
+      db.prepare("UPDATE trajectory_meta SET cascade_id=?").run(otherId);
+      db.prepare("INSERT INTO parent_references VALUES (0,?)").run(proto([1, id]));
+      db.prepare("INSERT INTO gen_metadata VALUES (1,?,0)").run(generation(proto([2, 17], [3, 5], [11, "fork-owned-new-response"])));
+    });
+    const selected = async (noIndex = false) => validateSnapshot(await analyzeMachineSessions({ ...options, noIndex })).sessions.filter((s) => s.provider === "antigravity");
+    const total = (sessions: Awaited<ReturnType<typeof selected>>) => sessions.reduce((n, s) => n + s.tokens.inputTokens, 0);
+    assert.equal(total(await selected()), 3117);
+    await copyFile(backup, path); assert.equal(total(await selected()), 3117);
+    change(child, (db) => db.exec("DELETE FROM gen_metadata WHERE idx=0; DELETE FROM steps WHERE idx=1"));
+    const full = await selected(true), refreshed = await selected();
+    assert.equal(total(refreshed), 3117); assert.deepEqual(refreshed, full);
+    assert.deepEqual(await selected(), full);
   });
 });
 

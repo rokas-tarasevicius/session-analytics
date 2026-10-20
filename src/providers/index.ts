@@ -15,6 +15,7 @@ interface AdditionalContext extends ProviderEnvironment {
   pricing: Pick<ProviderContext, "rateCard" | "price" | "resolveRate">;
   claimRequest?: ProviderContext["claimRequest"];
   completeRequests?: (session: SessionAnalytics) => void;
+  reconcileAntigravityRequests?: Parameters<typeof antigravityAdapter>[0];
   repositoryForSession(identity: ProviderSession, source: string): Promise<ProviderContext["repository"]>;
 }
 
@@ -25,7 +26,7 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
     [opencodeAdapter, context.options.opencodeDatabasePath],
     [copilotAdapter, context.options.copilotRoot],
     [geminiAdapter(context.knownPaths), context.options.geminiRoot],
-    [antigravityAdapter(), context.options.antigravityRoot],
+    [antigravityAdapter(context.reconcileAntigravityRequests), context.options.antigravityRoot],
     [cursorTranscriptAdapter(context.knownPaths), context.options.cursorTranscriptRoot],
   ];
   const sessions: SessionAnalytics[] = [], warnings: string[] = [];

@@ -538,6 +538,17 @@ export class IndexScan {
 
   /** A successful complete reparse replaces its old reservations before forks
    * are read. Partial reads keep unseen reservations until evidence is repaired. */
+  reconcileProviderRequests(provider: string, sessionKey: string, responses: string[], complete: boolean): void {
+    if (!complete) return;
+    const owner = this.privateKey("provider-owner", `${provider}:${sessionKey}`);
+    const prior = this.priorProviderClaims.get(owner);
+    if (!prior) return;
+    const present = new Set(responses.map((id) => `provider-request:${this.privateKey(provider, id)}`));
+    for (const key of prior) if (!present.has(key) && this.providerOwners.get(key) === owner) this.providerOwners.delete(key);
+    this.priorProviderClaims.delete(owner);
+  }
+
+  /** Preserve unresolved prior ownership when a source only supplied partial evidence. */
   completeProviderRequests(session: SessionAnalytics): void {
     if (session.provider !== "antigravity") return;
     const owner = this.privateKey("provider-owner", `${session.provider}:${session.sessionKey}`);

@@ -1,4 +1,4 @@
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
@@ -7,7 +7,7 @@ import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import { projectModelId } from "../public/model-id.js";
 import type { TokenUsage } from "../types.ts";
 import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
-import { addUsage, emptySession, finish, increment, name, observeTime, timestamp, tokens } from "./common.ts";
+import { addUsage, emptySession, finish, hash, increment, name, observeTime, timestamp, tokens } from "./common.ts";
 
 const limit = 1024 * 1024, rowLimit = 100_000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -155,14 +155,14 @@ function projection(path: string): Projection | null {
 
 /** Field map: CortexStepMetadata.9 / ChatModelMetadata.4 = ModelUsageStats.
  * See docs/providers.md for the pinned descriptor and accounting evidence. */
-export function antigravityAdapter(): ProviderAdapter {
+export function antigravityAdapter(reconcile?: (sessionKey: string, responses: string[], complete: boolean) => void): ProviderAdapter {
   const requests = new Map<string, string>();
   let requestBytes = 0;
   return {
     id: "antigravity-db", provider: "antigravity",
     async discoverRoots({ home, options }) { return [options.antigravityRoot ?? join(home, ".gemini")]; },
     async *identify(root, onWarning) {
-      const candidates: ProviderSession[] = [];
+      const candidates = new Map<string, { identity: ProviderSession; modified: number }>();
       // An override accepts one surface's data root; the default contains all three.
       const directories = [root, ...["antigravity", "antigravity-ide", "antigravity-cli"].map((surface) => join(root, surface))];
       for (const directory of directories) {
@@ -176,11 +176,29 @@ export function antigravityAdapter(): ProviderAdapter {
           if (!entry.isFile()) continue; // Never traverse source symlinks.
           if (entry.name.endsWith(".pb")) { onWarning?.(antigravityWarnings.legacy); continue; }
           if (!entry.name.endsWith(".db") || !uuid.test(entry.name.slice(0, -3))) continue;
-          try { const data = projection(join(directory, "conversations", entry.name)); if (data) candidates.push(data.identity); }
+          try {
+            const path = join(directory, "conversations", entry.name), data = projection(path);
+            if (!data) continue;
+            const modified = (await stat(path)).mtimeMs, prior = candidates.get(data.identity.id);
+            if (!prior || data.identity.updatedAt > prior.identity.updatedAt || (data.identity.updatedAt === prior.identity.updatedAt && modified > prior.modified)) candidates.set(data.identity.id, { identity: data.identity, modified });
+          }
           catch (error) { if (!onWarning) throw error; onWarning(antigravityWarnings.unreadable); }
         }
       }
-      yield* candidates.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.path.localeCompare(b.path));
+      const selected = [...candidates.values()].map(({ identity }) => identity).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.path.localeCompare(b.path));
+      // Reconcile every readable owner before any session claims requests. A
+      // healthy fork can relinquish a copied response to a restored parent even
+      // when the parent is visited first. Accounting partiality is independent
+      // of whether the metadata itself was read completely.
+      if (reconcile) for (const identity of selected) {
+        try {
+          const data = projection(identity.path);
+          if (!data || data.identity.cwd !== identity.cwd) continue;
+          const ledger = data.generations.length ? data.generations : data.steps;
+          reconcile(hash(`antigravity:${identity.id}`), ledger.flatMap((row) => row.usage?.response ? [row.usage.response] : []), !data.partial);
+        } catch { onWarning?.(antigravityWarnings.unreadable); }
+      }
+      yield* selected;
     },
     async analyze(identity, context) {
       const data = projection(identity.path);
