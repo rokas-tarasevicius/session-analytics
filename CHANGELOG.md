@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-20
+
 ### Added
 
 - Install with Homebrew on macOS or Linux: `brew install rokas-tarasevicius/tap/session-analytics`. The tap installs the release tarball and runs it with Homebrew's Node.js; `brew upgrade` and `brew uninstall` manage it. See [installation](docs/cli.md#install).
@@ -555,7 +557,8 @@ First standalone release.
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
 
-[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/67b0281...v0.9.0
 [0.8.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.8.0...67b0281
