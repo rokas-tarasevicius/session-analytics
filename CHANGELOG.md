@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `session-analytics upgrade` upgrades the installation with the package manager that installed it: `brew upgrade` for Homebrew, and `npm install -g session-analytics@latest` in the same prefix for npm and release-tarball installs. `upgrade --check` prints the installed and latest versions without changing anything. A source checkout is left alone. See [upgrade](docs/cli.md#upgrade-roll-back-and-uninstall).
+
 ## [0.10.2] - 2026-10-20
 
 ### Added
