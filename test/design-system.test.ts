@@ -345,3 +345,11 @@ test("tool names wrap only at separators and small baseline stays together", asy
   assert.match(name.body, /word-break:\s*normal/);
   assert.match(cssRules.find(({ selector }) => selector === "#tools-view .tools-change-detail")!.body, /white-space:\s*nowrap/);
 });
+
+
+test("Costs reserve a separate fixed badge slot so all amounts align", async () => {
+  const css = await readCss("styles.css");
+  const desktop = css.slice(css.indexOf("@media (min-width: 761px)"));
+  assert.match(desktop, /\.cost-stack-row > strong:last-child, \.cost-model-row > strong\s*\{[^}]*grid-template-columns:\s*auto 7rem/);
+  assert.match(desktop, /> \.coverage\s*\{[^}]*justify-self:\s*start;[^}]*margin-left:\s*0/);
+});
