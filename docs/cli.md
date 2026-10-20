@@ -45,6 +45,8 @@ With Homebrew on macOS or Linux, `brew install rokas-tarasevicius/tap/session-an
 
 ### Upgrade, roll back and uninstall
 
+`session-analytics upgrade` upgrades an installation with the package manager that installed it: `brew upgrade rokas-tarasevicius/tap/session-analytics` for Homebrew, and `npm install -g session-analytics@latest` in the same npm prefix for npm and the release tarball. It reads the latest version from the npm registry first and does nothing when that is the version installed. `session-analytics upgrade --check` prints the installed and latest versions and the command without running it. A source checkout is never changed; the command names it and exits with 1.
+
 | Installed from | Upgrade | Roll back | Uninstall |
 | --- | --- | --- | --- |
 | npm | `npm install -g session-analytics@latest` | `npm install -g session-analytics@X.Y.Z` | `npm uninstall -g session-analytics` |
@@ -52,7 +54,7 @@ With Homebrew on macOS or Linux, `brew install rokas-tarasevicius/tap/session-an
 | Homebrew | `brew upgrade session-analytics` | `brew uninstall session-analytics`, then install the versioned asset URL with npm | `brew uninstall session-analytics` |
 | Source checkout | `git pull`, or check out a newer release tag | Check out an older release tag | Delete the checkout, after `npm uninstall -g session-analytics` if you ran `npm link` |
 
-There is no automatic update check. After an upgrade, the first scan parses present sessions again once (on a terminal, one line on stderr says so, since it can take several minutes; the same happens on a first scan and after a price list change), and a dashboard still running the old version is named instead of reused: stop it and start the command again. An older version refuses an index that a newer version migrated ("created by a newer version"); run it with `--no-index` until you upgrade again.
+Nothing checks for updates in the background. After an upgrade, the first scan parses present sessions again once (on a terminal, one line on stderr says so, since it can take several minutes; the same happens on a first scan and after a price list change), and a dashboard still running the old version is named instead of reused: stop it and start the command again. An older version refuses an index that a newer version migrated ("created by a newer version"); run it with `--no-index` until you upgrade again.
 
 Uninstalling removes the command only. The [data directory](#local-index) keeps the private index, pricing cache and limits ledger: `~/Library/Application Support/session-analytics/` on macOS and `$XDG_DATA_HOME/session-analytics/` (or `~/.local/share/session-analytics/`) on Linux, unless `--data-dir` or `SESSION_ANALYTICS_DATA_DIR` chose another; `session-analytics index path` prints the index file inside it. The sharing key stays in `$XDG_STATE_HOME/session-analytics/` (or `~/.local/state/session-analytics/`). Delete both directories to remove everything session-analytics stored; provider history is never modified. Also remove any MCP registration or status line that runs the command.
 

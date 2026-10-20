@@ -29,7 +29,7 @@ import { createSessionAnalyticsFixture } from "../test/fixtures.ts";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** The limits snapshot version this checkout serves; a schema change fails the typecheck here instead of the smoke. */
 const limitsSchemaVersion: LimitsSnapshot["schemaVersion"] = 2;
-const commands = ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits", "machines"];
+const commands = ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits", "machines", "upgrade"];
 const providers = ["claude", "codex", "cursor", "copilot", "opencode", "gemini"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
 const contentTypes: Record<string, string> = {
