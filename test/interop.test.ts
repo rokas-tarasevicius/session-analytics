@@ -549,6 +549,30 @@ test("review: malformed provider model/tool labels are replaced before any publi
   for (const format of ["csv", "ndjson", "otlp-json"] as const) for (const content of Object.values(exportFiles(result, format))) assert.doesNotMatch(content, /secret-path|secret-command/);
 });
 
+test("imports reject private model identifiers in rate cards, provenance and velocity dimensions", async () => {
+  const source = cohort(1);
+  const provenance = source.sessions[0]!.models.flatMap((model) => model.pricing ?? [])[0]!;
+  assert.ok(provenance);
+  assert.ok(source.sessions[0]!.velocity!.dimensions.length);
+  const mutations: Array<(value: MachineAnalytics, model: string) => void> = [
+    (s, model) => { s.rateCard.models[0]!.model = model; },
+    (s, rateModel) => { s.rateCard.models[0]!.provenance = { ...provenance, rateModel }; },
+    (s, rateModel) => { s.sessions[0]!.models[0]!.pricing = [{ ...provenance, rateModel }]; },
+    (s, model) => { s.sessions[0]!.velocity!.dimensions[0]!.model = model; },
+  ];
+  for (const [index, mutate] of mutations.entries()) for (const model of ["sk-content-is-not-returned", "private/secret-path", "leaked-session.json"]) {
+    const bad = structuredClone(source); mutate(bad, model);
+    // Rebuild rollups so rejection must come from identifier validation, not inconsistent totals.
+    const consistent = filterSnapshot(bad);
+    assert.equal(matchesSchema(consistent, snapshotSchema), true);
+    assert.throws(() => validateSnapshot(consistent), /Snapshot is invalid/, `${index}: ${model}`);
+    for (const format of ["csv", "ndjson", "otlp-json"] as const) assert.throws(() => exportFiles(consistent, format), /Snapshot is invalid/);
+    const path = join(directory, `private-model-${index}.json`);
+    await writeFile(path, JSON.stringify(consistent));
+    await assert.rejects(loadSnapshot(path), /Snapshot file is invalid/);
+  }
+});
+
 test("integration: every metric namespace and pricing provenance survives filtered exports", () => {
   const filtered = filterSnapshot(snapshot, { providers: ["claude"] });
   validateSnapshot(filtered);
