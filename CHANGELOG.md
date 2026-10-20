@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Tools tables wrap structured names at separators and keep “small baseline” together.
 - Velocity increase tables keep names intact and show compact evidence counts, with exact figures available to assistive technology and in tooltips.
 - Phone chart legends keep provider names intact in a single column.
 - The dashboard Activity heatmap scrolls within its panel at tablet widths so every hour remains reachable.

@@ -311,3 +311,14 @@ test("Tools reveals the replacement profile after selection and respects reduced
     delete document.getElementById;
   }
 });
+
+
+test("Tools add break opportunities after name separators without interpreting markup", async () => {
+  const h = await harness(), s = sample(undefined), container = new Element();
+  s.tools = { "mcp__github__get-pull.request": 8 };
+  h.context["sessions"] = [s]; h.context["container"] = container;
+  h.run('renderToolsView(container, { sessions, repositories: [], days: [], timeZone: "UTC" })');
+  const button = descend(container).find(n => n.className === "tools-select")!;
+  assert.equal(button.children.filter(n => n.tag === "wbr").length, 6);
+  assert.equal(button.children.filter(n => n.tag === "text").map(n => n.textContent).join(""), "mcp__github__get-pull.request");
+});

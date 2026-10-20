@@ -336,3 +336,12 @@ test("Velocity mover names keep their full identity inside the table scroll area
   assert.match(name.body, /min-width:\s*20ch/);
   assert.match(name.body, /white-space:\s*nowrap/);
 });
+
+
+test("tool names wrap only at separators and small baseline stays together", async () => {
+  const cssRules = rules(await readCss("tools.css"));
+  const name = cssRules.find(({ selector }) => selector === "#tools-view .tools-select")!;
+  assert.match(name.body, /overflow-wrap:\s*normal/);
+  assert.match(name.body, /word-break:\s*normal/);
+  assert.match(cssRules.find(({ selector }) => selector === "#tools-view .tools-change-detail")!.body, /white-space:\s*nowrap/);
+});
