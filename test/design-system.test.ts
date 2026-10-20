@@ -359,6 +359,11 @@ test("Costs reserve a separate fixed badge slot so all amounts align", async () 
 test("selected sidebar repositories preserve the unselected label width", async () => {
   const cssRules = rules(await readCss("styles.css"));
   const selected = cssRules.find(({ selector }) => selector === '.repo-row[aria-pressed="true"]')!;
+  const label = cssRules.find(({ selector }) => selector === ".repo-row .repo-name")!;
+  assert.match(label.body, /flex:\s*1;/);
+  assert.match(label.body, /min-width:\s*0;/);
+  assert.match(label.body, /font-weight:\s*450;/, "the label keeps the same font metrics in active and inactive rows");
+  assert.ok(!cssRules.some(({ selector }) => selector.includes("aria-pressed") && selector.includes("repo-name")), "selection cannot reduce the label's width budget");
   assert.match(selected.body, /box-shadow:\s*inset 0 0 0 1px/);
   assert.doesNotMatch(selected.body, /(?:^|;)\s*(?:border(?:-width)?|padding(?:-inline)?|gap):/);
 });
