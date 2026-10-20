@@ -28,7 +28,7 @@
 #tools-profile-title { font-family: var(--font-mono); }
 #tools-view h4 { margin: 0 0 14px; font-size: var(--fs-sm); font-weight: 600; }
 #tools-profile { container-type: inline-size; container-name: tool-profile; scroll-margin-top: calc(var(--topbar-height) + 12px); }
-#tools-view .tools-profile-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+#tools-view .tools-profile-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 16px; margin: 0 0 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 #tools-view .tools-profile-stats dt { color: var(--muted); font-size: var(--fs-xs); }
 #tools-view .tools-profile-stats dd { margin: 6px 0 0; font: 500 var(--fs-lg) var(--font-mono); font-variant-numeric: tabular-nums; }
 #tools-view .tools-trend { position: relative; }
@@ -52,12 +52,9 @@
   #tools-profile { position: sticky; top: calc(var(--topbar-height) + 12px); max-height: calc(100vh - var(--topbar-height) - 24px); overflow: auto; }
 }
 @container tool-profile (max-width: 640px) {
-  #tools-view .tools-profile-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   #tools-view .tools-splits { grid-template-columns: minmax(0, 1fr); }
 }
-@container tool-profile (max-width: 380px) {
-  #tools-view .tools-profile-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+
 /* Narrow screens: one card per tool instead of a sideways-scrolling table; labels come from each cell's data-label. */
 @media (max-width: 760px) {
   #tools-view .tools-ranking { border: 0; border-radius: 0; }

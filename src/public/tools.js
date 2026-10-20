@@ -218,7 +218,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
     const stats = el("dl", null, "tools-profile-stats");
     for (const [label, value] of [["Calls", integer(profile.calls)], ["Share of calls", percent(profile.share)],
       ["Sessions using it", integer(profile.sessions)], ["Repositories", integer(profile.repositories)],
-      ["Calls per session using it", decimal(profile.callsPerSession)]]) {
+      ["Per session using it", decimal(profile.callsPerSession)]]) {
       const stat = el("div"); stat.append(el("dt", label), el("dd", value)); stats.append(stat);
     }
     profilePanel.result.append(stats, trend(profile, timeZone));

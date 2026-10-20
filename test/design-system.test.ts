@@ -370,3 +370,11 @@ test("snapshot metadata wraps with spacing and no dangling separator", async () 
   assert.match(rule.body, /flex-wrap:\s*wrap/);
   assert.match(rule.body, /gap:\s*6px 12px/);
 });
+
+
+test("tool profile metrics fit readable columns without a fixed three-column orphan", async () => {
+  const css = await readCss("tools.css");
+  const rule = rules(css).find(({ selector }) => selector === "#tools-view .tools-profile-stats")!;
+  assert.match(rule.body, /grid-template-columns:\s*repeat\(auto-fit, minmax\(100px, 1fr\)\)/);
+  assert.equal(rules(css).filter(({ selector }) => selector === "#tools-view .tools-profile-stats").length, 1);
+});
