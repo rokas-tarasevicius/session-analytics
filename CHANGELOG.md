@@ -12,17 +12,11 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - Subscription shows section headings and a meter-row skeleton while limits load, with a screen-reader loading status.
-
 - Dashboard and metrics documentation now describe Top increases, positive absolute rankings, and compact evidence cells with exact accessible counts.
-
 - Wide Summary daily charts use a taller plot to reduce the empty band before repository breakdowns beside the totals rail.
-
 - Dashboard comparisons above ten times the prior value show a compact multiple across Summary, Tools and Velocity, including Top increases; zero baselines keep the existing new-activity label.
-
 - Dashboard repositories with the same display name receive stable ordinal suffixes across navigation, charts, tables and the command palette, without revealing paths or changing exported names.
-
 - Focused sidebar repository labels keep the same font weight and width budget as unfocused labels.
-
 - Invalid Gemini cache counts no longer inflate inclusive input totals. Cache reads are bounded by recorded input and accounting is marked partial; affected input/cache totals and any configured API-equivalent estimates decrease.
 - Claude and Codex liveness checks now interpret timestamps without a zone as UTC and reject impossible calendar dates, matching accounting timestamps across host timezones.
 - Empty or entirely invalid OpenCode step counters no longer suppress valid assistant snapshot usage; affected token and API-equivalent cost totals increase, with partial accounting flagged.
@@ -70,7 +64,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Velocity increase tables keep names intact and show compact evidence counts, with exact figures available to assistive technology and in tooltips.
 - Phone chart legends keep provider names intact in a single column.
 - The dashboard Activity heatmap scrolls within its panel at tablet widths so every hour remains reachable.
-
 - Release builds copy only the public reviewed rate card from `data/`; a private index, saved-machine file or cached snapshot stored alongside it can no longer enter the package.
 - Independent Claude and Codex verification skips malformed non-object JSON records while retaining later valid evidence; a `null` record no longer aborts a file or the oracle.
 - Manually running the Release PR workflow from another branch still prepares the release from `master`, so unrelated branch changes cannot enter the release pull request.
@@ -81,27 +74,16 @@ All notable changes to this project are documented here. The format follows [Kee
 - Synthetic index benchmarks no longer discover real provider stores or fetch prices, and the test runner always isolates its data directory even when `SESSION_ANALYTICS_DATA_DIR` is exported.
 - The build resolves symlinked output paths before emptying a directory, preserving the checkout and home-directory protections through symlink aliases.
 - View regions have distinct overview headings so screen readers do not hear duplicate page headings.
-
 - Command search has an accessible name and updates its expanded state as results open, empty or close.
-
 - Daily and hour-profile chart ticks use even calendar steps; short windows label each day when space permits and hour profiles use six-hour steps.
-
 - Dashboard percentage changes share arrows and one decimal place, with an explicit day count for adjacent-window comparisons.
-
 - Velocity labels its daily usage-value mean “Average per active day” instead of “Average price”.
-
 - Rate-card effective dates use the dashboard calendar-date format in the header and pricing dialog.
-
 - Snapshot status names sessions in progress and omits the opaque “0 live” suffix.
-
 - Summary and Velocity provider chips share the registry names, marks and order used by Tools and Activity, including Copilot CLI and Gemini CLI.
-
 - Selected provider chips use the chart provider colour in both themes; deselected chips keep a hollow state mark.
-
 - Velocity explains the actual guard blocking a burn ratio or projection, including calendar days, pricing coverage and minimum activity figures.
-
 - Costs shows wholly unpriced model, provider and total values and shares as unavailable rather than free; accounting totals are unchanged.
-
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20
