@@ -562,7 +562,9 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
       await browser.until(`document.querySelector(${JSON.stringify(chip)}).checked`, false);
       await browser.evaluate(`history.forward()`);
       await browser.until(`document.querySelector(${JSON.stringify(chip)}).checked`, true);
-      await browser.open(await browser.evaluate<string>("location.href"));
+      await browser.evaluate("window.__leaving = true");
+      await browser.send("Page.reload");
+      await browser.until("!window.__leaving && document.querySelector('#sync-context')?.dataset.state === 'live'");
       assert.equal(await browser.evaluate(`document.querySelector(${JSON.stringify(chip)}).checked`), true);
       await browser.open(`${origin}/?view=${view}&window=all&providers=none&open=palette`);
       await browser.until(`document.querySelector('#command-palette').open`, true);
