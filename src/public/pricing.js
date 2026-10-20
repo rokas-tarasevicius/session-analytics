@@ -177,7 +177,7 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   const status = rateCard.pricing;
   if (!status) { container.append(note("Pricing source details are unavailable for this snapshot.", "empty-line")); return; }
   const mode = status.policy === "reviewed-only" ? "Reviewed card only; public sources bypassed"
-    : status.offline ? "Cached prices only; no public price requests" : "Checked at startup and every 6 hours";
+    : status.offline ? "Cached prices only; no public price requests" : "Checked at startup, every 6 hours and on refresh";
   const updateAvailable = options.pricingUpdate?.updateAvailable === true && !status.offline && status.policy !== "reviewed-only";
   if (status.stale || updateAvailable || status.warnings.length) {
     const warning = el("aside", null, "notice pricing-notice");

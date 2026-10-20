@@ -292,7 +292,7 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
     if (!machines) scanned = null;
     // Reserve the analytics flight before awaiting pricing, so every concurrent request shares the whole refresh.
     analyticsPromise = (async () => {
-      if (refresh) await dashboardPricing.check();
+      if (refresh) await dashboardPricing.check("manual");
       const pricingRevision = dashboardPricing.revision();
       // Machines can change while a price request is pending; use the current readers when the scan actually starts.
       const result = await (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal));

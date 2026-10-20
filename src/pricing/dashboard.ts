@@ -5,7 +5,8 @@ import { refreshPricingIfStale, updatePricing } from "./update.ts";
 
 const DAY = 86_400_000;
 const unavailable = "Background pricing update unavailable; cached rates remain in use.";
-type Reason = "stale" | "unpriced";
+/** stale: policy age only; manual: Refresh snapshot, also pulls sources older than a day; unpriced: a scan saw unmatched models. */
+type Reason = "stale" | "manual" | "unpriced";
 
 /** Server-owned cache checks only. This never starts analysis or changes a displayed snapshot. */
 export function createDashboardPricing(options: AnalyzeOptions, fixtures: {
@@ -43,16 +44,16 @@ export function createDashboardPricing(options: AnalyzeOptions, fixtures: {
     pending = (async () => {
       try {
         const at = now(), before = await loadPricingCatalog(options, at);
+        const aged = before.status.sources.some(({ fetchedAt }) => !fetchedAt || at.valueOf() - Date.parse(fetchedAt) > DAY);
         if (reason === "unpriced") {
-          if (at.valueOf() - lastUnpricedAttempt < DAY ||
-              !before.status.sources.some(({ fetchedAt }) => !fetchedAt || at.valueOf() - Date.parse(fetchedAt) > DAY) ||
+          if (at.valueOf() - lastUnpricedAttempt < DAY || !aged ||
               ![...new Set(models)].some((model) => validModelId(model) && /^(?:openai\/|anthropic\/)?(?:gpt-|claude-|chatgpt-|o[1-9])/.test(model)
                 && !resolveRate(before, model))) return null;
           // Failed attempts count too; a missing model cannot cause a request loop.
           lastUnpricedAttempt = at.valueOf();
         }
         const fetchOptions = { urls: fixtures.urls, timeoutMs: fixtures.timeoutMs, now: at };
-        const result = reason === "unpriced" ? await updatePricing(options, fetchOptions)
+        const result = reason === "unpriced" || (reason === "manual" && aged) ? await updatePricing(options, fetchOptions)
           : await refreshPricingIfStale(options, fetchOptions);
         if (!result) return null;
         if (result.status === "failed" || result.status === "partial") error(unavailable);

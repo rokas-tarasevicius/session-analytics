@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- Refresh snapshot checks stale public pricing sources before scanning and retains cached/reviewed prices on update failure.
+- Refresh snapshot updates public pricing sources that are absent, stale or fetched more than 24 hours ago before scanning, and retains cached/reviewed prices on update failure.
 - Running dashboards check stale pricing every six hours and show a Refresh snapshot notice with the fetch time when new cached rates await a scan; displayed totals never update automatically.
 - Scans that observe unmatched models trigger one extra public pricing check per day when a source is over 24 hours old, making newly listed prices available on the next manual refresh. Offline and pinned dashboards skip public checks.
 - Newly listed public models can price historical requests whose selected source snapshot predates their first listing, labeled as oldest available evidence. Already priced requests and later feed removals keep their existing selection; previously unpriced API-equivalent totals can increase.

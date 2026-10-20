@@ -395,7 +395,7 @@ test("Stale online pricing offers one refresh action; offline, pinned and warnin
     assert.ok(buttons[0]!.className.split(" ").includes("button")); assert.equal(buttons[0]!.attributes.type, "button");
     assert.equal(buttons[0]!.dataset.focusKey, "pricing:refresh");
     buttons[0]!.dispatch("click"); assert.equal(refreshes, 1);
-    assert.match(root.text(), /Automatic/); assert.match(root.text(), /Checked at startup and every 6 hours · reviewed card effective 1 Jan 2026/);
+    assert.match(root.text(), /Automatic/); assert.match(root.text(), /Checked at startup, every 6 hours and on refresh · reviewed card effective 1 Jan 2026/);
     renderPricingPanel(root, online, sessions, window);
     assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
     renderPricingPanel(root, rateCard, sessions, window, options);

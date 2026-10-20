@@ -106,3 +106,16 @@ test("manual update failure retains the cache and resolves normally with one fix
   assert.equal(coordinator.status().updateAvailable, false);
   assert.doesNotMatch(JSON.stringify(errors), new RegExp(privateSentinel));
 }));
+
+test("manual refresh updates a source fetched more than 24 hours ago even when fresh by policy; background checks wait for staleness", async () => fixture(async (f) => {
+  const options = { dataDir: f.dataDir, pricingSources: ["models.dev" as const], pricingMaxAgeDays: 7 };
+  await saveSnapshot(pricingDirectory(options), sourceSnapshot("models.dev", new Date(f.now().valueOf() - 2 * DAY).toISOString()));
+  const coordinator = createDashboardPricing(options, { ...f, log: () => {} });
+  await coordinator.check();
+  assert.equal(f.requests(), 0, "a two-day-old source is fresh under a seven-day policy");
+  await coordinator.check("manual");
+  assert.equal(f.requests(), 1, "a manual refresh pulls a source older than 24 hours");
+  f.advance(3600000);
+  await coordinator.check("manual");
+  assert.equal(f.requests(), 1, "a manual refresh an hour later keeps the day-old cache");
+}));
