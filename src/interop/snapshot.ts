@@ -13,6 +13,9 @@ const close = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-10 * Math
 const tokenKeys = ["inputTokens", "uncachedInputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWrite5mInputTokens", "cacheWrite1hInputTokens", "outputTokens", "reasoningOutputTokens", "nonReasoningOutputTokens"] as const;
 const costKeys = ["inputUsd", "cachedInputUsd", "cacheWriteUsd", "outputUsd", "totalUsd", "upperEstimateUsd"] as const;
 const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0);
+const validModel = (value: string): boolean => value === "<unknown>" || validModelId(value);
+const validModelEvidence = (value: ModelUsage): boolean => validModel(value.model) &&
+  (value.pricing ?? []).every(({ rateModel }) => validModel(rateModel));
 function tokensReconcile(tokens: TokenUsage): boolean {
   return tokens.inputTokens === tokens.uncachedInputTokens + tokens.cachedInputTokens + tokens.cacheWriteInputTokens &&
     // A missing reasoning breakdown leaves an unclassified output remainder.
@@ -42,6 +45,7 @@ function namedEqual(actual: NamedMetric[], expected: NamedMetric[], integer = fa
   });
 }
 function modelsEqual(actual: ModelUsage[], expected: ModelUsage[]): boolean {
+  if (!actual.every(validModelEvidence)) return false;
   const byName = new Map(actual.map((row) => [row.model, row]));
   return byName.size === actual.length && actual.length === expected.length && expected.every((row) => {
     const value = byName.get(row.model);
@@ -79,9 +83,15 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
   if (!matchesSchema(value, snapshotSchema)) fail();
   const snapshot = value as MachineAnalytics;
   const date = (value: string) => Number.isFinite(timestampMilliseconds(value));
+  const day = (value: string) => /^\d{4}-\d\d-\d\d$/.test(value) && date(`${value}T00:00:00Z`);
   if (!date(snapshot.generatedAt)) fail();
-  if (!/^\d{4}-\d\d-\d\d$/.test(snapshot.rateCard.effectiveDate) || !date(`${snapshot.rateCard.effectiveDate}T00:00:00Z`)) fail();
-  for (const { source } of snapshot.rateCard.models) {
+  if (!day(snapshot.rateCard.effectiveDate)) fail();
+  if (snapshot.velocity) {
+    try { new Intl.DateTimeFormat("en", { timeZone: snapshot.velocity.timeZone }); }
+    catch { fail(); }
+  }
+  for (const { model, source, provenance } of snapshot.rateCard.models) {
+    if (!validModel(model) || provenance && !validModel(provenance.rateModel)) fail();
     try {
       const url = new URL(source);
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) fail();
@@ -97,6 +107,19 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
   if (snapshot.historyCoverage?.profiles.some(({ machine }) => machine !== undefined && !machines.has(machine))) fail();
   for (const session of snapshot.sessions) {
     if (!validSessionHistory(session)) fail();
+    if (session.velocity?.dimensions.some(({ model }) => !validModel(model))) fail();
+    if (session.velocity) {
+      const { dimensions, buckets, sessionDated, undated } = session.velocity;
+      for (const cells of [buckets, sessionDated ?? []]) for (const [date, hour, dimension] of cells) {
+        if (!day(date) || hour >= 24 || dimension >= dimensions.length) fail();
+      }
+      if (undated.some(([dimension]) => dimension >= dimensions.length)) fail();
+    }
+    const pricingDays = new Set<string>();
+    for (const row of session.mcpEvidence?.pricingByDay ?? []) {
+      if (!day(row.day) || pricingDays.has(row.day) || row.pricedTokens > row.eligibleTokens) fail();
+      pricingDays.add(row.day);
+    }
     if (session.machine !== undefined && !machines.has(session.machine)) fail();
     const key = `${session.provider}:${session.sessionKey}`;
     if (sessions.has(key) || repositories.get(session.repositoryId) !== session.repositoryName) fail();
@@ -104,7 +127,7 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
     if (!session.transcript.warnings.every(approvedWarning)) fail();
     if (session.pricedTokenCoverage !== null && session.pricedTokenCoverage > 1) fail();
     if (new Set(session.models.map(({ model }) => model)).size !== session.models.length) fail();
-    if (Object.keys(session.spendByDay).some((day) => !/^\d{4}-\d\d-\d\d$/.test(day) || !date(`${day}T00:00:00Z`))) fail();
+    if (Object.keys(session.spendByDay).some((value) => !day(value))) fail();
     const source = session.evidence?.source;
     const cursor = session.provider === "cursor" && !source;
     const receipt = source === "conductor-result";
@@ -113,7 +136,7 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
     const activity = session.evidence?.fidelity === "activity-only";
     if (!tokensReconcile(session.tokens) || !costReconciles(session.cost, reported)) fail();
     for (const model of session.models) {
-      if (model.model !== "<unknown>" && !validModelId(model.model)) fail();
+      if (!validModelEvidence(model)) fail();
       if (!tokensReconcile(model) || !costReconciles(model, reported)) fail();
       const coverage = model.pricingCoverage;
       if (coverage && (coverage.eligibleTokens !== model.inputTokens + model.outputTokens || coverage.pricedTokens > coverage.eligibleTokens || model.priced !== (coverage.pricedTokens === coverage.eligibleTokens))) fail();

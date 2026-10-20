@@ -51,6 +51,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Dashboard calendar comparisons normalize timezone-free snapshot timestamps as UTC, preventing Velocity from crashing and keeping window bounds in the snapshot timezone, including empty snapshots.
 
+- MCP rejects any request that reuses an in-flight tool request's ID, including pings and catalog requests, so each active ID receives at most one result.
+- Snapshot imports reject impossible ledger dates, hours outside 0–23, missing velocity dimensions, unsupported time zones, and inconsistent daily MCP pricing coverage.
+- Snapshot imports apply the public model-ID privacy checks to rate cards, pricing provenance and velocity dimensions, rejecting credential-shaped identifiers and paths before export.
+- MCP's integrated API-equivalent summary excludes provider-reported value, includes session-dated value, and retains undated tokens in its pricing denominator.
+- MCP tool statistics and profile tool mixes exclude invalid sessions and unavailable tool evidence, matching their coverage totals and CSV exports.
+- OTLP exports interpret offset-free snapshot timestamps as UTC, matching snapshot validation regardless of the exporting machine's time zone or daylight saving time.
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20

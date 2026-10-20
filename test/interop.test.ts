@@ -294,6 +294,28 @@ test("OTLP logs use valid integer encodings and avoid fabricated spans and model
   for (const endpoint of ["file:///secret", "http://example.test/v1/logs", "https://name:secret@example.test/v1/logs", "https://example.test/#secret"]) assert.throws(() => otlpEndpoint(endpoint));
 });
 
+test("OTLP timestamps preserve the validated UTC instant across host time zones", () => {
+  const script = `
+    import { readFileSync } from 'node:fs';
+    import { exportFiles } from './src/interop/exports.ts';
+    const snapshot = JSON.parse(readFileSync(0, 'utf8'));
+    const dates = ['2026-03-29T01:30:00', '2026-10-25 01:30:00', '2026-07-21T00:30:00.123456+02:00'];
+    console.log(JSON.stringify(dates.map(generatedAt => {
+      const payload = JSON.parse(exportFiles({ ...snapshot, generatedAt }, 'otlp-json')['otlp-logs.json']);
+      return payload.resourceLogs[0].scopeLogs[0].logRecords[0].timeUnixNano;
+    })));
+  `;
+  const expected = ["2026-03-29T01:30:00Z", "2026-10-25T01:30:00Z", "2026-07-20T22:30:00.123Z"]
+    .map((date) => String(BigInt(Date.parse(date)) * 1_000_000n));
+  for (const zone of ["UTC", "Europe/London", "America/New_York"]) {
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      input: JSON.stringify(snapshot), encoding: "utf8", env: { ...process.env, TZ: zone },
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.deepEqual(JSON.parse(child.stdout), expected, zone);
+  }
+});
+
 test("OTLP delivery posts the saved bytes only on opt-in and refuses redirects and partial success", async () => {
   const received: string[] = []; let responseCode = 200, responseBody = "{}";
   const collector = createServer(async (request, response) => {
@@ -525,6 +547,51 @@ test("review: malformed provider model/tool labels are replaced before any publi
   assert.ok(session.models.some((model) => model.model === "<unknown>" && !model.priced));
   assert.doesNotMatch(JSON.stringify(result), /secret-path|secret-command/);
   for (const format of ["csv", "ndjson", "otlp-json"] as const) for (const content of Object.values(exportFiles(result, format))) assert.doesNotMatch(content, /secret-path|secret-command/);
+});
+
+test("imports reject private model identifiers in rate cards, provenance and velocity dimensions", async () => {
+  const source = cohort(1);
+  const provenance = source.sessions[0]!.models.flatMap((model) => model.pricing ?? [])[0]!;
+  assert.ok(provenance);
+  assert.ok(source.sessions[0]!.velocity!.dimensions.length);
+  const mutations: Array<(value: MachineAnalytics, model: string) => void> = [
+    (s, model) => { s.rateCard.models[0]!.model = model; },
+    (s, rateModel) => { s.rateCard.models[0]!.provenance = { ...provenance, rateModel }; },
+    (s, rateModel) => { s.sessions[0]!.models[0]!.pricing = [{ ...provenance, rateModel }]; },
+    (s, model) => { s.sessions[0]!.velocity!.dimensions[0]!.model = model; },
+  ];
+  for (const [index, mutate] of mutations.entries()) for (const model of ["sk-content-is-not-returned", "private/secret-path", "leaked-session.json"]) {
+    const bad = structuredClone(source); mutate(bad, model);
+    // Rebuild rollups so rejection must come from identifier validation, not inconsistent totals.
+    const consistent = filterSnapshot(bad);
+    assert.equal(matchesSchema(consistent, snapshotSchema), true);
+    assert.throws(() => validateSnapshot(consistent), /Snapshot is invalid/, `${index}: ${model}`);
+    for (const format of ["csv", "ndjson", "otlp-json"] as const) assert.throws(() => exportFiles(consistent, format), /Snapshot is invalid/);
+    const path = join(directory, `private-model-${index}.json`);
+    await writeFile(path, JSON.stringify(consistent));
+    await assert.rejects(loadSnapshot(path), /Snapshot file is invalid/);
+  }
+});
+
+test("snapshot imports reject invalid ledger dates, hours and dimension references", () => {
+  const source = cohort(1);
+  const mutations: Array<(s: MachineAnalytics) => void> = [
+    (s) => { s.velocity!.timeZone = "Invalid/Time_Zone"; },
+    (s) => { s.sessions[0]!.velocity!.buckets[0]![0] = "2026-02-30"; },
+    (s) => { s.sessions[0]!.velocity!.buckets[0]![1] = 24; },
+    (s) => { s.sessions[0]!.velocity!.buckets[0]![2] = s.sessions[0]!.velocity!.dimensions.length; },
+    (s) => { s.sessions[0]!.velocity!.undated.push([1000, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]); },
+    (s) => { s.sessions[0]!.velocity!.sessionDated = [["2026-02-30", 0, 0, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]]; },
+    (s) => { s.sessions[0]!.mcpEvidence!.pricingByDay![0]!.day = "2026-02-30"; },
+    (s) => { const row = s.sessions[0]!.mcpEvidence!.pricingByDay![0]!; row.pricedTokens = row.eligibleTokens + 1; },
+    (s) => { const rows = s.sessions[0]!.mcpEvidence!.pricingByDay!; rows.push({ ...rows[0]! }); },
+  ];
+  validateSnapshot(source);
+  for (const [index, mutate] of mutations.entries()) {
+    const bad = structuredClone(source); mutate(bad);
+    assert.equal(matchesSchema(bad, snapshotSchema), true, String(index));
+    assert.throws(() => validateSnapshot(bad), /Snapshot is invalid/, String(index));
+  }
 });
 
 test("integration: every metric namespace and pricing provenance survives filtered exports", () => {
