@@ -3,6 +3,7 @@ import { serviceId } from "../brand.ts";
 import { version } from "../version.ts";
 import type { MachineAnalytics } from "../types.ts";
 import { sessionMachine } from "../public/machines.js";
+import { timestampMilliseconds } from "../public/timestamps.js";
 const maximumOtlpBytes = 64 * 1024 * 1024;
 
 export const semanticConventionsVersion = "1.37.0";
@@ -17,7 +18,7 @@ const double = (key: string, value: number): Attribute => ({ key, value: { doubl
 
 /** These are explicitly session aggregates, not reconstructed inference calls. */
 export function otlpLogs(snapshot: MachineAnalytics): object {
-  const timestamp = Date.parse(snapshot.generatedAt);
+  const timestamp = timestampMilliseconds(snapshot.generatedAt);
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) throw new InteropError("OTLP snapshot timestamp is invalid.");
   const timeUnixNano = (BigInt(timestamp) * 1_000_000n).toString();
   if (BigInt(timeUnixNano) > 18_446_744_073_709_551_615n) throw new InteropError("OTLP snapshot timestamp is out of range.");

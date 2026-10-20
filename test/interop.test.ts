@@ -294,6 +294,28 @@ test("OTLP logs use valid integer encodings and avoid fabricated spans and model
   for (const endpoint of ["file:///secret", "http://example.test/v1/logs", "https://name:secret@example.test/v1/logs", "https://example.test/#secret"]) assert.throws(() => otlpEndpoint(endpoint));
 });
 
+test("OTLP timestamps preserve the validated UTC instant across host time zones", () => {
+  const script = `
+    import { readFileSync } from 'node:fs';
+    import { exportFiles } from './src/interop/exports.ts';
+    const snapshot = JSON.parse(readFileSync(0, 'utf8'));
+    const dates = ['2026-03-29T01:30:00', '2026-10-25 01:30:00', '2026-07-21T00:30:00.123456+02:00'];
+    console.log(JSON.stringify(dates.map(generatedAt => {
+      const payload = JSON.parse(exportFiles({ ...snapshot, generatedAt }, 'otlp-json')['otlp-logs.json']);
+      return payload.resourceLogs[0].scopeLogs[0].logRecords[0].timeUnixNano;
+    })));
+  `;
+  const expected = ["2026-03-29T01:30:00Z", "2026-10-25T01:30:00Z", "2026-07-20T22:30:00.123Z"]
+    .map((date) => String(BigInt(Date.parse(date)) * 1_000_000n));
+  for (const zone of ["UTC", "Europe/London", "America/New_York"]) {
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      input: JSON.stringify(snapshot), encoding: "utf8", env: { ...process.env, TZ: zone },
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.deepEqual(JSON.parse(child.stdout), expected, zone);
+  }
+});
+
 test("OTLP delivery posts the saved bytes only on opt-in and refuses redirects and partial success", async () => {
   const received: string[] = []; let responseCode = 200, responseBody = "{}";
   const collector = createServer(async (request, response) => {
