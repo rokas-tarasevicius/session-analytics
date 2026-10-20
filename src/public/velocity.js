@@ -239,7 +239,7 @@ export function renderVelocity(container, sessions, context) {
     const chart = el("div"), coverage = evidence([], { title: "Evidence & limits" });
     main.article.append(chart, coverage);
     const projection = panelShell("Projection");
-    const movers = panelShell("Top movers");
+    const movers = panelShell("Top increases");
     container.append(lead, controls, main.article, totals, comparisons, projection.article, movers.article);
     controller = { sessions, context, update: null, selectedProviders };
     const update = () => {
@@ -315,7 +315,7 @@ export function renderVelocity(container, sessions, context) {
       ]));
       const movement = topMovers(scoped, options, today);
       movers.article.replaceChildren(movers.header);
-      movers.heading.textContent = "Top movers";
+      movers.heading.textContent = "Top increases";
       movers.article.append(el("p", "Last 7 completed days vs preceding 7", "chart-note"));
       if (!movement.available || !movement.rows.length) movers.article.append(el("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
       else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), moverEvidence(item.previousEvidence, item.currentEvidence, options.metric)]), { className: "velocity-movers" }));

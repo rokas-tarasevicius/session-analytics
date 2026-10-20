@@ -382,6 +382,8 @@ test("movers compact their evidence while preserving exact token counts", async 
     });
     const container = new Element();
     renderVelocity(container, [session], { start: "2026-09-01", end: "2026-09-14", generatedAt: "2026-09-15T12:00:00Z", timeZone: "UTC" });
+    assert.match(container.textContent, /Top increases/);
+    assert.doesNotMatch(container.textContent, /Top movers/);
     const cell = container.querySelector(".velocity-movers")!.querySelector("tbody")!.children[0]!.children[6]!.children[0]!;
     assert.match(cell.textContent, /14M priced \(100%\) → 14M priced \(100%\)/);
     assert.equal(cell.getAttribute("aria-label"), (cell as any).title);
