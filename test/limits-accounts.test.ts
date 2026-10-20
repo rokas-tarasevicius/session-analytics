@@ -378,6 +378,24 @@ test("a truncated file saves its shorter cursor, so the next harvest resumes ins
   }
 });
 
+test("a regrown file with a matching cursor suffix is reread when its beginning changed", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-regrown-cursor-")), logs = join(home, "logs");
+  mkdirSync(logs);
+  const log = join(logs, "events.log"), dataDir = join(home, "data");
+  const options = { dataDir, codexRoot: join(home, "none") };
+  const environment = { ...environmentFor(home), SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: logs };
+  // Repeated trailing records (or whitespace) are common after copy-truncate rotation; a tail hash alone misses this.
+  const line = (level: number) => sdkEvent(now - 300, null, { five_hour: [level, now + 3600] }).trimEnd() + " ".repeat(128) + "\n";
+  writeFileSync(log, line(0.31));
+  await collectLimits(options, environment, now);
+  writeFileSync(log, line(0.92));
+  const replacement = await collectLimits(options, environment, now + 60);
+  assert.equal(replacement.sources.find((source) => source.source === "claude-sdk-log")!.read, 1);
+  assert.equal(replacement.observations.at(-1)!.usedPercent, 92);
+  const unchanged = await collectLimits(options, environment, now + 120);
+  assert.equal(unchanged.sources.find((source) => source.source === "claude-sdk-log")!.read, 0);
+});
+
 test("readings kept under a profile's fallback key join its account once the login is known, and stay joined across merges", async () => {
   const home = mkdtempSync(join(tmpdir(), "limits-alias-"));
   const logs = join(home, "logs");

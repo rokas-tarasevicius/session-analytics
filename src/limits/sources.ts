@@ -158,19 +158,25 @@ export function statuslineObservations(value: unknown, now: number, account = ""
 /**
  * Read cursors keyed by file identity (`dev:ino`): provider files are append-only and rotate by rename, so a later harvest
  * reads only each file's new tail, including after `events.log` becomes `events.log.1`. A cursor resumes only when a hash
- * of the bytes just before its offset still matches, which also catches truncation and inode reuse.
+ * of the beginning and bytes just before its offset still matches, which also catches truncation and inode reuse even
+ * when a regrown file happens to repeat the old cursor's suffix. Only bounded samples are hashed, never stored.
  */
 export type Cursors = Map<string, Cursor>;
 const fingerprintBytes = 64;
+const fingerprintPrefixBytes = 4096;
 
 async function fingerprint(path: string, offset: number): Promise<string> {
   const length = Math.min(fingerprintBytes, offset);
-  const buffer = Buffer.alloc(length);
+  const prefix = Math.min(fingerprintPrefixBytes, offset - length);
+  const buffer = Buffer.alloc(prefix + length);
   if (length) {
     const handle = await open(path, "r");
-    try { await handle.read(buffer, 0, length, offset - length); } finally { await handle.close(); }
+    try {
+      if (prefix) await handle.read(buffer, 0, prefix, 0);
+      await handle.read(buffer, prefix, length, offset - length);
+    } finally { await handle.close(); }
   }
-  return createHash("sha256").update("session-analytics/limits/cursor/v1\0").update(buffer).digest("hex").slice(0, 16);
+  return createHash("sha256").update("session-analytics/limits/cursor/v2\0").update(buffer).digest("hex").slice(0, 16);
 }
 
 const newline = 0x0a;
