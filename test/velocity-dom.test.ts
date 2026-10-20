@@ -168,12 +168,12 @@ test("Velocity leads with value cards before filters and keeps them independent 
     const lead = container.querySelector(".velocity-lead")!;
     assert.equal(container.children[0], lead); assert.ok(container.children[1]!.classList.contains("filter-bar"));
     assert.ok(container.children[2]!.classList.contains("panel")); assert.equal(container.children[3], container.querySelector(".velocity-totals"));
-    assert.deepEqual(lead.querySelectorAll(".kpi-label").map((node) => node.textContent.trim()), ["Average price", "Usage value"]);
+    assert.deepEqual(lead.querySelectorAll(".kpi-label").map((node) => node.textContent.trim()), ["Average per active day", "Usage value"]);
     assert.ok(lead.children[0]!.classList.contains("accent"));
     const total = buildVelocity(sessions, { ...context, metric: "value" }).totals[0]!;
     const assertLead = (value: number) => assert.equal(lead.querySelectorAll("strong")[1]!.textContent.trim(), formatMetric(value, "value"));
     assertLead(total); assert.equal(lead.querySelector("strong")!.textContent.trim(), "$5.00");
-    assert.match(lead.textContent, /Per active day/);
+    assert.equal(lead.querySelector(".kpi-note")!.textContent, "Usage value");
     assert.match(container.querySelector(".evidence")!.textContent, /2 active days; \$2.50 per calendar day/);
     assert.match(container.querySelector(".evidence")!.textContent, /4 calendar days · API-equivalent and provider-reported · partially observed/);
     assert.equal(container.querySelectorAll(".velocity-totals")[0]!.children.length, 3);

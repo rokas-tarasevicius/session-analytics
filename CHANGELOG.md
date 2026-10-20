@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Velocity labels its daily usage-value mean “Average per active day” instead of “Average price”.
+
 - Rate-card effective dates use the dashboard calendar-date format in the header and pricing dialog.
 
 - Snapshot status names sessions in progress and omits the opaque “0 live” suffix.

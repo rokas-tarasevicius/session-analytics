@@ -258,8 +258,8 @@ dated value. It is shown in the API-equivalent card's note, not as a separate to
 `agentIdentity` and `velocity`. Old snapshots without these additions remain readable;
 the velocity view asks for a refresh instead of reconstructing activity from session totals.
 
-Velocity opens with **Average price** and **Usage value**, both from dated usage value for the selected
-window and provider chips, independent of the chart's Metric selector. Average price divides dated
+Velocity opens with **Average per active day** and **Usage value**, both from dated usage value for the selected
+window and provider chips, independent of the chart's Metric selector. Average per active day divides dated
 usage value by the number of calendar days with value greater than zero; it is unavailable when no
 days are active. Its note also shows active days out of all calendar days and value per calendar day.
 The chart header shows the selected metric's period total.

@@ -254,7 +254,7 @@ export function renderVelocity(container, sessions, context) {
       const usageCard = kpi({ label: "Usage value", value: availability.eligible ? formatMetric(price.total, "value") : null, reason: "No session in this selection has activity dates", coverage: availability, what: "activity dates", note: "Activity-dated. Not an invoice." });
       if (availability.eligible > 0 && availability.eligible < availability.selected) usageCard.querySelector(".coverage").prepend(el("span", "partial"));
       lead.replaceChildren(
-        kpi({ label: "Average price", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: "Per active day", accent: true }),
+        kpi({ label: "Average per active day", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: "Usage value", accent: true }),
         usageCard,
       );
       const indicators = velocityIndicators(comparisonData, today);
