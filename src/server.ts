@@ -367,7 +367,19 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/analytics") {
-      sendJson(response, 200, await analytics(url.searchParams.get("refresh") === "1"));
+      const result = analytics(url.searchParams.get("refresh") === "1");
+      // ?wait=SECONDS answers 202 while the scan runs on, so a browser never holds one request open for a scan of
+      // several minutes (Safari drops a fetch that waits about a minute); the dashboard asks again.
+      const wait = Number(url.searchParams.get("wait"));
+      if (Number.isFinite(wait) && wait > 0) {
+        let timer: NodeJS.Timeout | undefined;
+        const pending = new Promise<null>((done) => { timer = setTimeout(() => done(null), Math.min(wait, 30) * 1_000); });
+        const settled = await Promise.race([result, pending]).finally(() => clearTimeout(timer));
+        if (settled === null) { sendJson(response, 202, { pending: true }); return; }
+        sendJson(response, 200, settled);
+        return;
+      }
+      sendJson(response, 200, await result);
       return;
     }
     if (url.pathname === "/api/machines") {

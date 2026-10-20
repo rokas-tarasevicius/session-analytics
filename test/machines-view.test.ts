@@ -164,7 +164,7 @@ test("while a machine is reading, the dashboard polls /api/machines and fetches 
   state = "ok";
   ticks[0]!();
   for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(requests, ["/api/machines", "/api/machines", "/api/analytics"]);
+  assert.deepEqual(requests, ["/api/machines", "/api/machines", "/api/analytics?wait=10"]);
   assert.equal(run("fullSnapshot.machines.every(({ state }) => state === 'ok')"), true);
   assert.match(document.querySelector("#sync-label")!.textContent, /^2 of 2 machines ready · \d+ live$/);
 });
@@ -203,7 +203,7 @@ test("Read them again re-reads the machines without a full refresh, and a failed
   context["clearInterval"] = () => {};
   context["fetch"] = async (url: string) => {
     requests.push(url);
-    if (url === "/api/analytics") {
+    if (url === "/api/analytics?wait=10") {
       analytics += 1;
       // The first fetch of the new snapshot fails; polling carries on rather than leave the machine shown as reading.
       return analytics === 1 ? { ok: false, json: async () => ({}) } : { ok: true, json: async () => ({ ...context["fixture"] as object, machines: machines().map((machine) => ({ ...machine, state: "ok", reason: undefined, fix: undefined })) }) };
@@ -219,10 +219,10 @@ test("Read them again re-reads the machines without a full refresh, and a failed
   state = "ok";
   ticks.at(-1)!();
   for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(requests.slice(1), ["/api/machines", "/api/analytics"]);
+  assert.deepEqual(requests.slice(1), ["/api/machines", "/api/analytics?wait=10"]);
   assert.equal(ticks.length, 2);
   ticks.at(-1)!();
   for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(requests.slice(3), ["/api/machines", "/api/analytics"]);
+  assert.deepEqual(requests.slice(3), ["/api/machines", "/api/analytics?wait=10"]);
   assert.equal(document.querySelector("#machines-read")!.hidden, true);
 });

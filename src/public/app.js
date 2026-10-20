@@ -1816,7 +1816,27 @@ const urlParameters = new URLSearchParams(window.location.search);
 function describeLoadError(error) {
   const message = error instanceof Error && error.message ? error.message.replace(/\.$/, "") : "Failed to fetch";
   const status = /^HTTP (\d{3})$/.exec(message);
-  return status ? `The analysis failed (HTTP ${status[1]}).` : `The local server did not answer (${message}).`;
+  if (!status) return `The local server did not answer (${message}).`;
+  // The server's reason is a fixed, content-free sentence, such as the worker's heap limit.
+  const reason = typeof error.reason === "string" && error.reason ? ` ${error.reason.replace(/\.?$/, ".")}` : "";
+  return `The analysis failed (HTTP ${status[1]}).${reason}`;
+}
+
+/**
+ * The snapshot, asked for again every few seconds while the server is still analyzing: a first scan or one after an
+ * upgrade can take minutes, longer than a browser keeps one request open. Only the first request asks for a new scan.
+ */
+async function fetchAnalytics(refresh) {
+  for (let query = refresh ? "?refresh=1&wait=10" : "?wait=10"; ; query = "?wait=10") {
+    const response = await fetch(`/api/analytics${query}`);
+    if (response.status === 202) continue;
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.reason = await response.json().then((body) => body?.error, () => null);
+      throw error;
+    }
+    return await response.json();
+  }
 }
 
 function showError(message, title = "Analysis failed", tone = "danger") {
@@ -1881,9 +1901,7 @@ function render(data) {
 /** Fetch the snapshot a machine just completed, without the loading state or an error banner; false when it failed. */
 async function loadQuietly() {
   try {
-    const response = await fetch("/api/analytics");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    render(await response.json()); showReady(snapshot ? activeView() : null);
+    render(await fetchAnalytics(false)); showReady(snapshot ? activeView() : null);
     return true;
   } catch { return false; /* The snapshot on screen stays. */ }
 }
@@ -1902,10 +1920,7 @@ async function loadSnapshot(refresh = false) {
     if (!elements.repositoryList.childElementCount) for (let index = 0; index < 5; index += 1) elements.repositoryList.append(node("div", null, "repo-skeleton"));
   }
   try {
-    const response = await fetch(`/api/analytics${refresh && previous ? "?refresh=1" : ""}`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const body = await response.json();
-    render(body);
+    render(await fetchAnalytics(refresh && previous));
     showReady(snapshot ? activeView() : null);
   } catch (error) {
     elements.sync.dataset.state = "error";
@@ -1921,7 +1936,7 @@ async function loadSnapshot(refresh = false) {
       loadFailed = true;
       clear(elements.repositoryList);
       elements.generated.textContent = "No snapshot";
-      showError("The local analysis did not finish. Retry, or check the terminal running the dashboard.", "No snapshot yet");
+      showError(`The local analysis did not finish. ${describeLoadError(error)} Retry, or check the terminal running the dashboard.`, "No snapshot yet");
       showActivePanel(); renderViewStatus(null);
     }
   } finally {

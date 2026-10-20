@@ -242,6 +242,16 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       }));
       assert.equal(new Set(snapshots.map((snapshot) => snapshot.generatedAt)).size, 1);
     });
+    await t.test("?wait answers 202 while a scan runs, then the snapshot", async () => {
+      // A worker process cannot finish within a millisecond, so the first answer is the pending one.
+      const pending = await fetch(`${origin}/api/analytics?refresh=1&wait=0.001`);
+      assert.equal(pending.status, 202);
+      assert.deepEqual(await pending.json(), { pending: true });
+      let response = await fetch(`${origin}/api/analytics?wait=10`);
+      while (response.status === 202) response = await fetch(`${origin}/api/analytics?wait=10`);
+      assert.equal(response.status, 200);
+      assert.equal(((await response.json()) as { summary: { analyzedSessions: number } }).summary.analyzedSessions, 5 + unsafeModelSessions);
+    });
     const page = await fetch(origin);
     assert.equal(page.status, 200);
     const pageText = await page.text();
