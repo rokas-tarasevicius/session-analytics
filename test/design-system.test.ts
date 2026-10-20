@@ -353,3 +353,11 @@ test("Costs reserve a separate fixed badge slot so all amounts align", async () 
   assert.match(desktop, /\.cost-stack-row > strong:last-child, \.cost-model-row > strong\s*\{[^}]*grid-template-columns:\s*auto 7rem/);
   assert.match(desktop, /> \.coverage\s*\{[^}]*justify-self:\s*start;[^}]*margin-left:\s*0/);
 });
+
+
+test("selected sidebar repositories preserve the unselected label width", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  const selected = cssRules.find(({ selector }) => selector === '.repo-row[aria-pressed="true"]')!;
+  assert.match(selected.body, /box-shadow:\s*inset 0 0 0 1px/);
+  assert.doesNotMatch(selected.body, /(?:^|;)\s*(?:border(?:-width)?|padding(?:-inline)?|gap):/);
+});
