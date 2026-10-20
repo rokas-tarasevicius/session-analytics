@@ -115,6 +115,8 @@ Subscription answers "which of my accounts can I still use, and until when?" fir
 5. **History**: each account's weekly closes on one time axis (hatched when a reset came early, outlined when the close was not observed) and the last week's 5-hour windows, one lane per account with a 5-hour limit.
 6. **Sources and method**: the accounts found, each source's last reading, and what the readings cover.
 
+While limit meters are loading, Subscription keeps its section headings and a shimmer placeholder for an account row; a screen-reader status says “Reading limit meters…”. Live meters replace the skeleton as soon as they arrive, even if session analysis is still running.
+
 Charts take Left, Right, Home and End to inspect readings. The two-minute refresh keeps keyboard focus, the inspected reading and open sections. See [Subscription limits and value](subscription.md).
 
 <p align="center">

@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Subscription shows section headings and a meter-row skeleton while limits load, with a screen-reader loading status.
+
 - Dashboard and metrics documentation now describe Top increases, positive absolute rankings, and compact evidence cells with exact accessible counts.
 
 - Wide Summary daily charts use a taller plot to reduce the empty band before repository breakdowns beside the totals rail.
