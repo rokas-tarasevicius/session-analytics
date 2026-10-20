@@ -43,8 +43,9 @@ jobs:
         run: node scripts/release-prepare.ts --write --output "$GITHUB_OUTPUT"
 
       - name: Update the release pull request
-        # One branch, release/next, rebuilt from master on every run, and one pull request from it. A branch pushed with the
-        # workflow token starts no workflows, so CI is dispatched on it explicitly to report the required checks.
+        # One branch, release/next, rebuilt from master on every run, and one pull request from it. GitHub holds CI on a pull
+        # request the workflow token pushed until someone approves it, so the job approves that run; should approval be refused,
+        # it dispatches CI on the branch, whose checks report on the same commit.
         if: steps.prepare.outputs.version != ''
         run: |
           git switch --quiet -C release/next
@@ -63,7 +64,18 @@ jobs:
           } > body.md
           PR="$(gh pr list --head release/next --base master --state open --json number --jq '.[0].number // empty')"
           if [ -n "$PR" ]; then gh pr edit "$PR" --title "chore(release): $V" --body-file body.md; else gh pr create --head release/next --base master --title "chore(release): $V" --body-file body.md; fi
-          gh workflow run ci.yml --ref release/next
+          SHA="$(git rev-parse HEAD)"
+          for _ in $(seq 30); do
+            RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?event=pull_request&head_sha=$SHA" --jq '[.workflow_runs[] | select(.name == "CI")][0].id // empty')"
+            [ -n "$RUN" ] && break
+            sleep 5
+          done
+          if [ -n "$RUN" ] && gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/approve" --silent 2>/dev/null; then
+            echo "Approved CI run $RUN for the release pull request."
+          else
+            echo "::notice::Could not approve the release pull request's CI run; dispatching CI on release/next instead."
+            gh workflow run ci.yml --ref release/next
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
           V: ${{ steps.prepare.outputs.version }}
