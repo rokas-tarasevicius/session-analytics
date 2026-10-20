@@ -22,25 +22,32 @@
 
 Requirements: **Node.js 24 or newer** and **macOS** or **Linux** (Claude Code and Codex history also works on Linux; see [platform support](faq.md)). Windows is not supported; the package declares macOS and Linux, so npm refuses to install it there with `EBADPLATFORM`.
 
-Each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) from 0.10.0 attaches the compiled package, and npm installs the latest one directly from the release, without the npm registry:
+Install the compiled package from npm:
+
+```bash
+npm install -g session-analytics
+session-analytics --version
+```
+
+Each [GitHub Release](https://github.com/rokas-tarasevicius/session-analytics/releases) from 0.10.0 attaches the same package, and npm also installs the latest one directly from the release, without the npm registry:
 
 ```bash
 npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/latest/download/session-analytics.tgz
-session-analytics --version
 ```
 
 The release workflow installed and ran this `session-analytics-X.Y.Z.tgz` on Linux and macOS before publishing it; `session-analytics.tgz` is the same file under a name that always points to the latest release. The package has no dependencies and runs no install scripts. 0.9.0 and earlier run only [from source](#from-source).
 
-With Homebrew on macOS or Linux, `brew install rokas-tarasevicius/tap/session-analytics` installs the same tarball and runs it with Homebrew's Node.js. The release workflow updates the [tap](https://github.com/rokas-tarasevicius/homebrew-tap) after Homebrew installs, tests and audits the formula. An npm registry package is planned: the release workflow can publish it, but it is not published yet, so install from the release URL or Homebrew.
+With Homebrew on macOS or Linux, `brew install rokas-tarasevicius/tap/session-analytics` installs the same tarball and runs it with Homebrew's Node.js. The release workflow updates the [tap](https://github.com/rokas-tarasevicius/homebrew-tap) after Homebrew installs, tests and audits the formula. The release workflow publishes the same tarball to npm, with provenance, from 0.10.2; 0.10.1 was published by hand, without provenance.
 
-- **Pin a version:** install the versioned asset, `https://github.com/rokas-tarasevicius/session-analytics/releases/download/vX.Y.Z/session-analytics-X.Y.Z.tgz`.
-- **Try once without installing:** `npx --package <tarball URL> session-analytics`. npx resolves the package again on every start, so configure MCP clients and the Claude Code status line with an installed command.
+- **Pin a version:** `npm install -g session-analytics@X.Y.Z`, or install the versioned asset, `https://github.com/rokas-tarasevicius/session-analytics/releases/download/vX.Y.Z/session-analytics-X.Y.Z.tgz`.
+- **Try once without installing:** `npx session-analytics`, or `npx --package <tarball URL> session-analytics`. npx resolves the package again on every start, so configure MCP clients and the Claude Code status line with an installed command.
 - **Verify a download:** run `shasum -a 256 -c --ignore-missing SHA256SUMS` beside the downloaded asset, and `gh attestation verify session-analytics-X.Y.Z.tgz -R rokas-tarasevicius/session-analytics` to check that this repository's release workflow built it.
 
 ### Upgrade, roll back and uninstall
 
 | Installed from | Upgrade | Roll back | Uninstall |
 | --- | --- | --- | --- |
+| npm | `npm install -g session-analytics@latest` | `npm install -g session-analytics@X.Y.Z` | `npm uninstall -g session-analytics` |
 | Release tarball | Run the install command again | Install the versioned asset URL | `npm uninstall -g session-analytics` |
 | Homebrew | `brew upgrade session-analytics` | `brew uninstall session-analytics`, then install the versioned asset URL with npm | `brew uninstall session-analytics` |
 | Source checkout | `git pull`, or check out a newer release tag | Check out an older release tag | Delete the checkout, after `npm uninstall -g session-analytics` if you ran `npm link` |
