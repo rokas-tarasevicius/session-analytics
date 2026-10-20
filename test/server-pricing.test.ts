@@ -33,8 +33,11 @@ async function fixture(run: (context: {
 }
 
 test("manual pricing refresh awaits a single flight and reads the updated cache before a scan", async () => fixture(async (f) => {
-  const coordinator = createDashboardPricing({ dataDir: f.dataDir, pricingSources: ["models.dev"] }, { ...f, log: () => {} });
+  let announced = 0;
+  const coordinator: ReturnType<typeof createDashboardPricing> = createDashboardPricing({ dataDir: f.dataDir, pricingSources: ["models.dev"] }, { ...f,
+    log: () => { announced++; assert.equal(coordinator.status().updateAvailable, true, "the health hint is set before the update is announced"); } });
   await Promise.all([coordinator.check(), coordinator.check(), coordinator.check()]);
+  assert.equal(announced, 1);
   assert.equal(f.requests(), 1);
   const catalog = await loadPricingCatalog({ dataDir: f.dataDir }, f.now());
   assert.equal(resolveRate(catalog, "gpt-fixture")?.rate.inputPerMillion, 2);
