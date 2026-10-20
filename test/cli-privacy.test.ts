@@ -33,3 +33,19 @@ test("invalid dashboard ports exit 2 with one fixed diagnostic", () => {
     assert.equal(result.stderr, "Session analytics port must be an integer from 1024 through 65535.\n");
   }
 });
+
+test("report and dashboard reject missing and duplicate values before scanning", () => {
+  for (const command of ["report", "dashboard"]) {
+    for (const args of [["--data-dir"], ["--data-dir", "--offline"], ["--data-dir", secret, "--data-dir", secret]]) {
+      const result = spawnSync(process.execPath, [bin, command, ...args], { encoding: "utf8", env: environment, timeout: 10_000 });
+      assert.equal(result.status, 2, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.doesNotMatch(result.stderr, /CLI-ARGUMENT-SENTINEL/);
+      assert.match(result.stderr, /requires a value|Give --data-dir once/);
+    }
+  }
+  const unknown = spawnSync(process.execPath, [bin, secret], { encoding: "utf8", env: environment, timeout: 10_000 });
+  assert.equal(unknown.status, 2);
+  assert.equal(unknown.stdout, "");
+  assert.equal(unknown.stderr, "Unknown command. Run session-analytics --help.\n");
+});
