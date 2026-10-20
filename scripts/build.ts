@@ -100,7 +100,13 @@ export function build(out: string): void {
   if (problems.length) throw new Error(`The compiled package would fail at run time:\n  ${problems.join("\n  ")}`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Compare canonical paths: Node resolves the main module through symlinks (macOS keeps /var/folders behind one) while argv[1] stays as typed.
+const invokedDirectly = (): boolean => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try { return realpathSync(resolve(entry)) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+};
+if (invokedDirectly()) {
   const args = process.argv.slice(2);
   try {
     if (args.length && (args.length !== 2 || args[0] !== "--out")) throw new Error("Usage: node scripts/build.ts [--out DIR]");

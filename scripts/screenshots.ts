@@ -6,13 +6,12 @@
  *
  * Options: --url URL (default http://127.0.0.1:4175), --out DIR (default assets),
  * --only NAME (one capture, both themes), --chrome PATH (or the CHROME environment variable).
- * Requires Google Chrome and `cwebp` on PATH. Captures are 1280 CSS pixels wide at 2x, comfortable
+ * Requires Google Chrome and `cwebp` or ImageMagick (`magick`) on PATH. Captures are 1280 CSS pixels wide at 2x, comfortable
  * density, in light and dark themes, written as lossless WebP to assets/screenshot-<name>[-dark].webp.
  * The mobile capture uses 375 × 812 CSS pixels, compact density, at the same 2x scale.
  * Point --url at the demo only: the captured page content is written to the repository.
  */
-import { spawn } from "node:child_process";
-import { execFileSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -74,6 +73,20 @@ const WIDTH = 1280;
 const SCALE = 2;
 const FIT_PAD = 12;
 const COMMAND_TIMEOUT_MS = 30_000;
+
+function losslessWebp(png: string, target: string): void {
+  for (const [command, args] of [
+    ["cwebp", ["-quiet", "-lossless", "-z", "9", png, "-o", target]],
+    ["magick", [png, "-define", "webp:lossless=true", target]],
+  ] as const) {
+    const result = spawnSync(command, args, { encoding: "utf8" });
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") continue;
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`${command} failed: ${result.stderr.trim()}`);
+    return;
+  }
+  throw new Error("Lossless WebP conversion needs cwebp or ImageMagick (magick) on PATH.");
+}
 
 function option(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -196,7 +209,7 @@ async function capture(session: Session, base: string, item: Capture, theme: "li
   const png = `${target}.png`;
   writeFileSync(png, Buffer.from(data, "base64"));
   try {
-    execFileSync("cwebp", ["-quiet", "-lossless", "-z", "9", png, "-o", target]);
+    losslessWebp(png, target);
   } finally {
     unlinkSync(png);
   }
