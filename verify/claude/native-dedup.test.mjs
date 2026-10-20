@@ -28,7 +28,7 @@ test('independent Claude oracle deduplicates message snapshots and copies withou
         content: [{ type: 'text', text: 'PRIVATE_CLAUDE_ORACLE_SENTINEL' }] }, ...extra });
     const start = '2026-09-30T23:00:00Z', end = '2026-10-01T00:01:00Z';
     const rows = [
-      [a, [message(a, 'response-one', 10, 1, start), message(a, 'response-one', 10, 5, end),
+      [a, [message(a, 'response-one', 10, 1, start), null, false, 'invalid-record', [], message(a, 'response-one', 10, 5, end),
         message(a, 'response-one', 10, 5, end), message(a, 'response-two', 7, 3, end),
         message(a, 'failed-response', 999, 999, end, { isApiErrorMessage: true })]],
       [b, [message(b, 'response-one', 10, 5, end), message(b, 'response-three', 4, 2, end)]],
@@ -49,6 +49,7 @@ test('independent Claude oracle deduplicates message snapshots and copies withou
       return JSON.parse(text);
     };
     const report = await run();
+    assert.equal(report.observations.malformed, 4);
     assert.deepEqual(report.diffs, []);
     assert.equal(report.sessions.reduce((n, row) => n + row.calls, 0), 3);
     assert.equal(report.sessions.reduce((n, row) => n + row.tokens.inputTokens, 0), 21);

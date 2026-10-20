@@ -32,7 +32,7 @@ test('independent Codex census owns broadcast counters once, retains a distinct 
     const a = 'a0000000-0000-4000-8000-000000000001', b = 'b0000000-0000-4000-8000-000000000002';
     const prefix = id => [record('23:00:00', 'session_meta', { id, cwd: root, source: 'cli' }), record('23:00:01', 'turn_context', { model }), count('23:20:00', usage(100, 10, 0))];
     const broadcast = count('23:30:00', usage(130, 16, 2));
-    const rowsA = [...prefix(a), record('23:29:59.500', 'response_item', { type: 'message', role: 'assistant', content: 'PRIVATE_ORACLE_SENTINEL' }), broadcast, broadcast];
+    const rowsA = [...prefix(a), null, false, 'invalid-record', [], record('23:29:59.500', 'response_item', { type: 'message', role: 'assistant', content: 'PRIVATE_ORACLE_SENTINEL' }), broadcast, broadcast];
     const rowsB = [...prefix(b), record('23:29:59', 'response_item', { type: 'message', role: 'assistant' }), broadcast,
       record('23:39:59', 'response_item', { type: 'message', role: 'assistant' }), count('23:40:00', usage(150, 20, 3), usage(20, 4, 1))];
     for (const [id, rows] of [[a, rowsA], [b, rowsB]]) await writeFile(join(source, `${id}.jsonl`), rows.map(row => JSON.stringify(row)).join('\n') + '\n');
@@ -44,6 +44,8 @@ test('independent Codex census owns broadcast counters once, retains a distinct 
       assert.equal(result.status, 0, result.stderr);
     };
     await run('oracle.mjs');
+    const projection = JSON.parse(await readFile(join(root, '.lane/codex-observations.json'), 'utf8'));
+    assert.equal(projection.stats.malformed, 4);
     await run('current-reconciliation.mjs');
     const text = await readFile(join(root, '.lane/codex-current.json'), 'utf8'), report = JSON.parse(text);
     assert.doesNotMatch(text, /PRIVATE_ORACLE_SENTINEL/);
