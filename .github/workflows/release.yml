@@ -364,8 +364,9 @@ jobs:
         run: |
           V="${RELEASE_TAG#v}"
           EXPECTED="sha512-$(openssl dgst -sha512 -binary "release/session-analytics-$V.tgz" | openssl base64 -A)"
-          for _ in $(seq 30); do
-            ACTUAL="$(npm view "session-analytics@$V" dist.integrity 2>/dev/null || true)"
+          # The registry can take several minutes to serve a new version; --prefer-online skips npm's cached metadata.
+          for _ in $(seq 60); do
+            ACTUAL="$(npm view --prefer-online "session-analytics@$V" dist.integrity 2>/dev/null || true)"
             if [ "$ACTUAL" = "$EXPECTED" ]; then echo "npm serves session-analytics@$V as $EXPECTED"; exit 0; fi
             if [ -n "$ACTUAL" ]; then break; fi
             sleep 10
