@@ -120,7 +120,9 @@ test("before the session scan finishes, the meters render and value says it is c
   assert.match(container.textContent, /No limit readings yet.*status line/);
 });
 
-test("the dashboard shows the meters before the session snapshot arrives, and a refresh puts focus back on the redrawn chart", async () => {
+test("the dashboard shows the meters before the session snapshot arrives, and a refresh puts focus back on the redrawn chart", async (t) => {
+  // The app renders with the real clock; pin it to the fixture's, before the Team week resets and its burn chart goes.
+  t.mock.timers.enable({ apis: ["Date"], now: now * 1000 });
   const { run, context, document } = await harness([sample()]);
   context["fixtureLimits"] = limits();
   run("snapshot = null; limits = fixtureLimits; renderSubscriptionView()");
