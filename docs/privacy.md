@@ -681,7 +681,7 @@ These optional, bounded summaries use the selected sessions. The envelope contai
 | --- | --- | --- |
 | `basis` | Fixed `whole-sessions-selected-by-start` label | P0 |
 | `pricing.policy`, `.stale`, `.sources[]` (`source`, `fetchedAt`, `stale`, `models`) | Fixed policy/source enums, dates, freshness and catalog counts | P0 |
-| `velocity.coveredSessions`, `.selectedSessions`, `.timeZone`, `.datedApiEquivalentUsd`, `.undatedApiEquivalentUsd`, `.pricedTokens`, `.eligibleTokens` | Coverage and additive usage operands; timezone is identifying | P0/P1 |
+| `velocity.coveredSessions`, `.selectedSessions`, `.timeZone`, `.datedApiEquivalentUsd`, `.undatedApiEquivalentUsd`, `.pricedTokens`, `.eligibleTokens` | Ledger coverage across selected sessions; value and token operands include only API-equivalent sessions. Dated value includes activity-dated and session-dated cells; token operands also include undated cells. Timezone is identifying | P0/P1 |
 
 ### History recovery and coverage
 

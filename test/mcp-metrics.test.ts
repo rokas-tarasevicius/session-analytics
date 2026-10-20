@@ -7,7 +7,7 @@ import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { SnapshotCache } from "../src/mcp/cache.ts";
 import { McpEvidenceCollector } from "../src/mcp/evidence.ts";
 import { buildPayload, profile, ratio, windowStart } from "../src/mcp/metrics.ts";
-import type { MachineAnalytics, McpSnapshot, SessionAnalytics } from "../src/types.ts";
+import type { MachineAnalytics, McpSnapshot, SessionAnalytics, SessionVelocity, VelocityValues } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
@@ -210,4 +210,30 @@ test("integration: MCP exposes the shared metric families and partial pricing co
   assert.equal(unavailable.totals.sessions, 1);
   assert.equal(unavailable.totals.inputTokens, null);
   assert.equal(unavailable.totals.coverage?.tokenSessions, 0);
+});
+
+test("integrated MCP API value excludes other cost bases and conserves all ledger cells", () => {
+  const values = (usd: number, input: number, output: number, priced: number): VelocityValues =>
+    [usd, input, input, 0, 0, output, 0, 1, 0, 0, priced, 0, input, 0];
+  const velocity: SessionVelocity = {
+    dimensions: [{ agent: "claude-cli", model: "claude-opus-5", executionKind: "top-level", effort: "unknown" }],
+    buckets: [["2026-10-02", 10, 0, values(2, 100, 10, 110)]],
+    sessionDated: [["2026-10-02", 11, 0, values(3, 200, 20, 220)]],
+    undated: [[0, values(5, 300, 30, 0)]],
+  };
+  const api = session({ velocity });
+  const reported = session({ costBasis: "provider-reported", velocity });
+  const unavailable = session({ costBasis: "unavailable", velocity });
+  const missing = session(); delete missing.velocity;
+  const result = buildPayload(snapshot([api, reported, unavailable, missing]), "usage_summary", {}, NOW, 60);
+  assert.ok(result.metrics);
+  assert.equal(result.metrics.velocity.coveredSessions, 3);
+  assert.equal(result.metrics.velocity.selectedSessions, 4);
+  assert.equal(result.metrics.velocity.datedApiEquivalentUsd, 5);
+  assert.equal(result.metrics.velocity.undatedApiEquivalentUsd, 5);
+  assert.equal(result.metrics.velocity.pricedTokens, 330);
+  assert.equal(result.metrics.velocity.eligibleTokens, 660);
+  const empty = buildPayload(snapshot([reported, unavailable, missing]), "usage_summary", {}, NOW, 60);
+  assert.ok(empty.metrics);
+  for (const key of ["datedApiEquivalentUsd", "undatedApiEquivalentUsd", "pricedTokens", "eligibleTokens"] as const) assert.equal(empty.metrics.velocity[key], 0, key);
 });
