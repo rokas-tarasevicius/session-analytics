@@ -233,7 +233,7 @@ test("release: a merge that changes the version publishes only the validated, sm
   assert.ok(major !== undefined && minor !== undefined && patch !== undefined, "npm is pinned to an exact version");
   assert.ok(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))), "trusted publishing needs npm 11.5.1 or newer");
   assert.match(npm!, /registry-url: https:\/\/registry\.npmjs\.org/);
-  assert.match(npm!, /npm publish "release\/session-analytics-\$V\.tgz" --tag "\$DIST_TAG"/);
+  assert.match(npm!, /npm publish "\.\/release\/session-analytics-\$V\.tgz" --tag "\$DIST_TAG"/, "a path npm cannot mistake for a GitHub shorthand");
   const [published, verified, installed] = ["npm publish", "dist.integrity 2>/dev/null || true", "scripts/smoke-installed.ts \"session-analytics@"].map((step) => npm!.indexOf(step));
   assert.ok(published! > 0 && verified! > published! && installed! > verified!, "npm checks the registry integrity, then installs the registry version and runs it");
   assert.deepEqual(needsOf(homebrew!), ["plan", "release", "npm"]);
@@ -391,7 +391,7 @@ test("release: a tag published after a newer release never moves GitHub, npm or 
         cwd: directory, encoding: "utf8", env: { PATH: `${bin}${delimiter}${process.env["PATH"]}`, RELEASE_TAG: tag, MOCK_LOG: log, MOCK_LATEST: latest },
       });
       assert.equal(result.status, 0, result.stderr);
-      assert.equal((await readFile(log, "utf8")).trim().split("\n").at(-1), `publish release/session-analytics-${tag.slice(1)}.tgz --tag ${expected}`, `${tag} after ${latest || "none"}`);
+      assert.equal((await readFile(log, "utf8")).trim().split("\n").at(-1), `publish ./release/session-analytics-${tag.slice(1)}.tgz --tag ${expected}`, `${tag} after ${latest || "none"}`);
     }
 
     // Homebrew: never replace a newer formula, and make no commit for an identical one.

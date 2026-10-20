@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - Antigravity local usage from schema-v1 SQLite conversation stores for the App, IDE and CLI, including cache and reasoning counters, observed tools, dated API-equivalent pricing where model names are known, and full-scan/index parity. `--antigravity-root` replaces discovery. Legacy protobuf conversation files remain unsupported and produce a coverage warning; no usage is inferred from display transcripts or quota percentages.
+- `session-analytics upgrade` upgrades the installation with the package manager that installed it: `brew upgrade` for Homebrew, and `npm install -g session-analytics@latest` in the same prefix for npm and release-tarball installs. `upgrade --check` prints the installed and latest versions without changing anything. A source checkout is left alone. See [upgrade](docs/cli.md#upgrade-roll-back-and-uninstall).
+
+## [0.10.3] - 2026-10-20
+
+### Fixed
+
+- npm receives each release again: 0.10.2's publish failed because npm read the tarball's relative path as a GitHub repository. 0.10.3 has the same code as 0.10.2, and it is the first version published to npm with provenance. 0.10.2 is on GitHub only.
 
 ## [0.10.2] - 2026-10-20
 
@@ -567,7 +574,8 @@ First standalone release.
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
 
-[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.9.0...v0.10.0
