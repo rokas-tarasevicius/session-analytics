@@ -6,7 +6,7 @@ import { renderHistoryCoverage } from "./history-coverage.js";
 import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
   groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
-  providerOrder, providerShortcutTarget, rankPaletteItems, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
+  providerOrder, providerShortcutTarget, rankPaletteItems, repositoryDisplaySnapshot, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
   sortRepositories, sparklineSummary, summarize, tickScale, unknownStartsInRange, validDay, windowStartFor,
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
@@ -270,7 +270,7 @@ function selectRepository(id, { scroll = true } = {}) {
 /** A `?repo=` value names a repository by its opaque ID or, for older links, by its display name. */
 function repositoryFromParameter(value) {
   if (!value || !snapshot?.repositories) return null;
-  return snapshot.repositories.find(({ repository }) => repository.id === value) ?? snapshot.repositories.find(({ repository }) => repository.name === value) ?? null;
+  return snapshot.repositories.find(({ repository }) => repository.id === value) ?? snapshot.repositories.find(({ repository }) => (repository.sourceName ?? repository.name) === value) ?? null;
 }
 
 // --------------------------------------------------------------------- URL state
@@ -342,6 +342,7 @@ function renderBars(container, items, formatter, limit = 9, onSelect = null) {
       row.addEventListener("click", () => onSelect(item));
     }
     const label = node("div", null, "bar-label");
+    if (snapshot?.repositories?.find(({ repository }) => repository.id === item.id)?.repository.duplicateName) label.title = "another checkout with the same name";
     label.append(node("span", item.name), item.coverage ? valueWithCoverage(item.value, item.coverage, formatter, item.what || "evidence") : node("strong", formatter(item.value)));
     const track = node("div", null, "bar-track");
     const fill = node("i");
@@ -604,7 +605,7 @@ function renderActivity(view) {
   }
   const sessions = eligible.filter((s) => s.transcript?.startTimeKnown !== false && s.evidence?.timing !== "file-mtime" && normalizeTimestamp(s.createdAt) !== null);
   const repositories = view.repositories.map(({ repository }) => ({
-    name: repository.name,
+    id: repository.id, name: repository.name,
     value: sessions.filter(({ repositoryId }) => repositoryId === repository.id).length,
   })).filter(({ value }) => value > 0).sort((left, right) => right.value - left.value);
   renderBars(elements.activityRepositories, repositories, (value) => integer(value), 12);
@@ -1014,7 +1015,8 @@ function renderRepositoryTable(repositories) {
     row.setAttribute("aria-label", `${repositoryDetails} · ${summary.sessions} session${summary.sessions === 1 ? "" : "s"} · ${executionBreakdown(summary)}`);
     if (!comparator) row.dataset.rowLink = "true";
     const repositoryButton = node(comparator ? "span" : "button", item.repository.name, comparator ? "" : "row-link"); repositoryButton.type = "button";
-    repositoryButton.title = repositoryDetails; repositoryButton.setAttribute("aria-label", repositoryDetails);
+    repositoryButton.title = repositoryDetails;
+    if (item.repository.duplicateName) repositoryButton.title += " · another checkout with the same name"; repositoryButton.setAttribute("aria-label", repositoryDetails);
     repositoryButton.dataset.focusKey = `table:${item.repository.id}`;
     if (item.repository.id === selectedId) { row.setAttribute("aria-current", "true"); repositoryButton.setAttribute("aria-current", "true"); }
     if (!comparator) {
@@ -1093,7 +1095,7 @@ function showReady(view) {
 function applyMachines() {
   const machines = fullSnapshot.machines ?? [];
   for (const key of [...hiddenMachines]) if (!machines.some((machine) => machine.key === key)) hiddenMachines.delete(key);
-  snapshot = machineView(fullSnapshot, new Set(machines.map(({ key }) => key).filter((key) => !hiddenMachines.has(key))));
+  snapshot = machineView(repositoryDisplaySnapshot(fullSnapshot), new Set(machines.map(({ key }) => key).filter((key) => !hiddenMachines.has(key))));
   sessionsByRepository = groupByRepository(snapshot.sessions); navCache = { key: null };
   for (const input of providerFilters) input.closest(".chip").hidden = !snapshotProviders().includes(input.dataset.providerFilter);
   populateRepositories();
@@ -1255,7 +1257,7 @@ function renderRepositoryNav() {
     const byRepository = new Map(activity.allSeries.map((series) => [series.id, series]));
     const rows = snapshot.repositories.map((item) => {
       const series = byRepository.get(item.repository.id);
-      return { id: item.repository.id, name: item.repository.name, series: series?.values ?? days.map(() => 0), value: series?.total ?? 0 };
+      return { id: item.repository.id, name: item.repository.name, duplicateName: item.repository.duplicateName, series: series?.values ?? days.map(() => 0), value: series?.total ?? 0 };
     }).sort((left, right) => right.value - left.value || left.name.localeCompare(right.name));
     navCache = { days, key, rows, total: activity.totals[0] };
     const scrollTop = elements.repositoryList.scrollTop;
@@ -1268,6 +1270,7 @@ function renderRepositoryNav() {
     elements.repositoryList.append(allRow);
     for (const row of rows) {
       const button = node("button", null, "repo-row"); button.type = "button";
+      if (row.duplicateName) button.title = "another checkout with the same name";
       button.dataset.repository = row.id; button.dataset.focusKey = `repo:${row.id}`;
       const spark = svgNode("svg", { class: "spark" });
       renderSparkline(spark, row.series, days, { format: money, height: 16, label: `${row.name} daily usage value`, listeners: navHoverListeners, width: 44 });
@@ -1710,7 +1713,7 @@ function paletteItems() {
   if (snapshot) {
     items.push({ group: "Repositories", icon: "repo", label: "All repositories", keywords: "repo clear focus everything", state: selectedId === "all", run: () => selectRepository("all") });
     for (const item of snapshot.repositories) {
-      items.push({ group: "Repositories", icon: "repo", label: `Focus ${item.repository.name}`, keywords: `repo repository ${item.repository.name}`, state: selectedId === item.repository.id, run: () => selectRepository(item.repository.id) });
+      items.push({ group: "Repositories", icon: "repo", label: `Focus ${item.repository.name}`, title: item.repository.duplicateName ? "another checkout with the same name" : null, keywords: `repo repository ${item.repository.name}`, state: selectedId === item.repository.id, run: () => selectRepository(item.repository.id) });
     }
     const scope = providerScope();
     if (scope) {
@@ -1754,6 +1757,7 @@ function renderPalette(query) {
   for (const item of paletteItemsShown) {
     if (item.group !== group) { group = item.group; elements.commandList.append(node("div", group, "palette-group")); }
     const option = node("div", null, "palette-option");
+    if (item.title) option.title = item.title;
     option.id = `command-option-${position}`; option.setAttribute("role", "option"); option.setAttribute("aria-selected", "false");
     option.append(icon(item.icon), node("span", item.label, "option-label"));
     if (item.state !== undefined) { const state = node("i", null, "option-state"); state.dataset.on = String(item.state); option.append(state); }
@@ -2071,8 +2075,9 @@ function exportSelection() {
   const { start, end, timeZone } = velocityContext();
   const total = buildVelocity(scope, { start, end, group: "provider", metric: "value" }).totals[0];
   const selected = providers ? providers.filter((provider) => snapshotProviders.has(provider)).length : snapshotProviders.size;
+  const exportSnapshot = fullSnapshot ? machineView(fullSnapshot, new Set((fullSnapshot.machines ?? []).map(({ key }) => key).filter((key) => !hiddenMachines.has(key)))) : snapshot;
   return {
-    snapshot: filterSnapshot(snapshot, { repositoryId, ...selectedWindow(), providers }),
+    snapshot: filterSnapshot(exportSnapshot, { repositoryId, ...selectedWindow(), providers }),
     ledger: { sessions: scope, start, end },
     basis: `Daily value CSV: ${money(total)} usage value by activity date, ${start} to ${end} (${timeZone}), the same ledger as the dashboard. JSON, sessions, models and tools CSVs: whole sessions started in the window. Tools CSV counts only eligible tool evidence, as in the Tools view.${selected < snapshotProviders.size ? ` ${selected} of ${snapshotProviders.size} providers.` : ""}${machines.length > 1 && hiddenMachines.size ? ` ${machines.length - hiddenMachines.size} of ${machines.length} machines.` : ""}`,
   };

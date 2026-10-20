@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Dashboard repositories with the same display name receive stable ordinal suffixes across navigation, charts, tables and the command palette, without revealing paths or changing exported names.
+
 - Focused sidebar repository labels keep the same font weight and width budget as unfocused labels.
 
 - Invalid Gemini cache counts no longer inflate inclusive input totals. Cache reads are bounded by recorded input and accounting is marked partial; affected input/cache totals and any configured API-equivalent estimates decrease.
