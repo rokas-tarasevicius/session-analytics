@@ -1730,6 +1730,7 @@ function renderPalette(query) {
   }
   if (!paletteItemsShown.length) elements.commandList.append(node("div", "No matching command.", "palette-empty"));
   setPaletteActive(0);
+  syncPaletteExpanded();
 }
 
 function runPaletteItem(item) {
@@ -1744,10 +1745,17 @@ function openPalette() {
   elements.commandInput.value = "";
   renderPalette("");
   elements.palette.showModal();
+  setPaletteActive(0);
+  syncPaletteExpanded();
   elements.commandInput.focus();
 }
 
-function closePalette() { if (elements.palette.open) elements.palette.close(); }
+function syncPaletteExpanded() {
+  elements.commandInput.setAttribute("aria-expanded", String(elements.palette.open && paletteOptions.length > 0));
+  if (!elements.palette.open) elements.commandInput.removeAttribute("aria-activedescendant");
+}
+
+function closePalette() { if (elements.palette.open) elements.palette.close(); syncPaletteExpanded(); }
 
 function togglePalette() { if (elements.palette.open) closePalette(); else openPalette(); }
 
@@ -1755,6 +1763,7 @@ function openHelp() { closePalette(); closeCoverage(); closeMachines(); if (!ele
 
 function closeHelp() { if (elements.help.open) elements.help.close(); }
 
+elements.palette.addEventListener("close", syncPaletteExpanded);
 elements.commandInput.addEventListener("input", () => renderPalette(elements.commandInput.value));
 elements.commandInput.addEventListener("keydown", (event) => {
   if (event.key === "ArrowDown") { event.preventDefault(); setPaletteActive(paletteActive + 1); }

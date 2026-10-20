@@ -157,6 +157,8 @@ Every number on the dashboard is a lower bound from local evidence. The **Covera
 
 Provider chips in Summary, Velocity, Tools and Activity use the same provider names, marks and order. Selected dots match the chart colours.
 
+The command search has an accessible name and announces whether matching commands are expanded.
+
 The command palette jumps to any view or repository, toggles provider chips and switches theme or density. The same actions have keyboard shortcuts: `g` then a letter for views, `[` and `]` for the previous and next view, `1` to `4` for the window presets, `e` for coverage and `t` for the theme.
 
 <p align="center">

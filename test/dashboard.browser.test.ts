@@ -333,6 +333,8 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#command-palette').open`, true);
     assert.equal(await browser.evaluate(`document.activeElement.id`), "command-input");
+    assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-label')`), "Search views, repositories and commands");
+    assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-expanded')`), "true");
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-activedescendant')`), "command-option-0");
     // Ranking: the closest match comes first and weak fuzzy matches drop out.
     await browser.send("Input.insertText", { text: "help" });
