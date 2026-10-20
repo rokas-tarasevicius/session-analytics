@@ -177,13 +177,15 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   const status = rateCard.pricing;
   if (!status) { container.append(note("Pricing source details are unavailable for this snapshot.", "empty-line")); return; }
   const mode = status.policy === "reviewed-only" ? "Reviewed card only; public sources bypassed"
-    : status.offline ? "Cached prices only; no public price requests" : "Checked after the dashboard starts";
-  if (status.stale || status.warnings.length) {
+    : status.offline ? "Cached prices only; no public price requests" : "Checked at startup and every 6 hours";
+  const updateAvailable = options.pricingUpdate?.updateAvailable === true && !status.offline && status.policy !== "reviewed-only";
+  if (status.stale || updateAvailable || status.warnings.length) {
     const warning = el("aside", null, "notice pricing-notice");
     warning.setAttribute("role", "status");
     const body = el("div");
-    body.append(el("strong", status.stale ? "Pricing evidence needs a refresh" : "Pricing evidence has warnings"));
-    body.append(el("p", status.stale
+    body.append(el("strong", status.stale || updateAvailable ? "Pricing evidence needs a refresh" : "Pricing evidence has warnings"));
+    body.append(el("p", updateAvailable
+      ? `New prices were cached${options.pricingUpdate.fetchedAt ? ` ${date(options.pricingUpdate.fetchedAt, options.timeZone)}` : ""}. Refresh snapshot to apply them; displayed totals stay unchanged until then.` : status.stale
       ? `A source is missing or older than ${status.refreshAfterDays} days. Cached and reviewed rates remain usable.`
       : "Some fetched rates were rejected or changed substantially. Inspect rates diff for details."));
     const instructions = el("p");
@@ -196,7 +198,7 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
     body.append(instructions);
     if (status.warnings.length) body.append(el("p", status.warnings.map((code) => warningLabels[code] ?? "Pricing evidence is incomplete.").join(" ")));
     warning.append(body);
-    if (status.stale && !status.offline && status.policy !== "reviewed-only" && typeof options.onRefresh === "function") {
+    if ((status.stale || updateAvailable) && !status.offline && status.policy !== "reviewed-only" && typeof options.onRefresh === "function") {
       const refresh = el("button", "Refresh snapshot", "button pricing-notice-action");
       refresh.setAttribute("type", "button"); refresh.dataset.focusKey = "pricing:refresh";
       refresh.addEventListener("click", () => options.onRefresh()); warning.append(refresh);

@@ -100,6 +100,8 @@ let snapshot = null;
 let fullSnapshot = null;
 const hiddenMachines = new Set();
 let machinePoll = null;
+let pricingPoll = null;
+let pricingUpdate = null;
 let sharedSnapshot = null;
 let sessionsByRepository = new Map();
 // Providers present in the snapshot: every provider chip row lists these, and `p 1`… counts through them.
@@ -826,7 +828,7 @@ function renderActiveAnalyticsView(view) {
   if (name === "costs") renderCosts(view);
   if (name === "subscription") renderSubscriptionView();
   scheduleLimits(name === "subscription");
-  if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.scopeSessions, velocityContext(), { onRefresh: () => load(true) });
+  if (name === "pricing") renderPricingPanel($("#pricing-panel"), snapshot.rateCard, view.scopeSessions, velocityContext(), { pricingUpdate, timeZone: snapshotTimeZone(), onRefresh: () => load(true) });
   if (name === "tools") {
     renderViewProviderFilters(elements.toolsProviderFilters, "tools");
     renderTools(view);
@@ -1198,6 +1200,33 @@ function watchMachines(reading = (fullSnapshot?.machines ?? []).filter(({ state 
     clearInterval(machinePoll); machinePoll = null;
     if (!(await quietLoad())) watchMachines(reading);
   })().catch(() => { /* The next poll asks again. */ }), 2000);
+}
+
+/** Poll operational pricing metadata only; the scanned evidence and totals keep their values. */
+async function pollPricingUpdate() {
+  if (document.visibilityState === "hidden") return;
+  const previous = snapshot;
+  try {
+    const response = await fetch("/api/health");
+    if (!response.ok) return;
+    const { pricing } = await response.json();
+    if (snapshot !== previous) return;
+    const next = pricing ? { updateAvailable: pricing.updateAvailable === true, fetchedAt: pricing.fetchedAt ?? null } : null;
+    if (JSON.stringify(pricingUpdate) === JSON.stringify(next)) return;
+    pricingUpdate = next;
+    if (snapshot && currentViewName() === "pricing") renderActiveAnalyticsView(activeView());
+  } catch { /* The snapshot stays usable; the next poll asks again. */ }
+}
+
+function watchPricingUpdates() {
+  const status = snapshot?.rateCard?.pricing;
+  const active = status && !status.offline && status.policy !== "reviewed-only";
+  if (!active) {
+    if (pricingPoll !== null) clearInterval(pricingPoll);
+    pricingPoll = null; pricingUpdate = null; return;
+  }
+  void pollPricingUpdate();
+  if (typeof setInterval === "function") pricingPoll ??= setInterval(() => void pollPricingUpdate(), 60_000);
 }
 
 /** Read the machines that failed again, without scanning this one: after fixing one, this takes seconds, not a full refresh. */
@@ -1994,6 +2023,7 @@ async function loadSnapshot(refresh = false) {
   }
   try {
     render(await fetchAnalytics(refresh && previous));
+    watchPricingUpdates();
     showReady(snapshot ? activeView() : null);
   } catch (error) {
     elements.sync.dataset.state = "error";

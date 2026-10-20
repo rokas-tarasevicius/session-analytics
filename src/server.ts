@@ -11,7 +11,7 @@ import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRem
 import { machinesPath, remoteFor } from "./machines/config.ts";
 import { stopOnSignals } from "./processes.ts";
 import { analyzeMachines, machineOptions, machineReads, type MachineReads } from "./remote.ts";
-import { refreshPricingIfStale } from "./pricing/update.ts";
+import { createDashboardPricing } from "./pricing/dashboard.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
 import type { DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
 import { loadSnapshot } from "./interop/snapshot.ts";
@@ -189,6 +189,7 @@ let optionsHash = optionsHashFor(remote.digest);
 const instanceToken = randomBytes(32).toString("hex");
 
 const shutdown = new AbortController();
+const dashboardPricing = createDashboardPricing(analyzeOptions, { snapshot: !!snapshotFile });
 let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
 let snapshotReady = false;
@@ -289,7 +290,21 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
     analyticsPending = true;
     // A scan without machines uses local IDs, so it cannot be combined with machines added later.
     if (!machines) scanned = null;
-    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal))
+    // Reserve the analytics flight before awaiting pricing, so every concurrent request shares the whole refresh.
+    analyticsPromise = (async () => {
+      if (refresh) await dashboardPricing.check();
+      const pricingRevision = dashboardPricing.revision();
+      // Machines can change while a price request is pending; use the current readers when the scan actually starts.
+      const result = await (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal));
+      dashboardPricing.applied(pricingRevision);
+      if (!("kind" in result) && dashboardPricing.enabled) {
+        const unmatched = new Set(result.sessions.filter(({ costBasis }) => costBasis !== "provider-reported")
+          .flatMap(({ models }) => models.filter((model) => model.inputTokens + model.outputTokens > 0 && !model.priced && !model.pricing?.length)
+            .map(({ model }) => model)));
+        if (unmatched.size) void dashboardPricing.check("unpriced", unmatched);
+      }
+      return result;
+    })()
       .then((result) => {
         snapshotReady = true;
         return result;
@@ -363,6 +378,7 @@ const server = createServer(async (request, response) => {
         scanHash,
         version,
       };
+      if (dashboardPricing.enabled) health.pricing = dashboardPricing.status();
       sendJson(response, 200, health);
       return;
     }
@@ -489,14 +505,13 @@ server.listen(port, "127.0.0.1", () => {
           `${result.summary.repositories} repositories; ` +
         `priced usage value $${result.summary.estimatedSpendUsd.toFixed(2)} (not an invoice).\n`,
       );
-      // Startup-only refresh, after the first local scan. No analysis/API request waits on pricing I/O.
-      if (!snapshotFile) void refreshPricingIfStale(analyzeOptions).then((update) => {
-        if (update) process.stdout.write(`Background pricing update: ${update.status}. Refresh the dashboard snapshot to use new prices.\n`);
-      }).catch(() => process.stderr.write("Background pricing update unavailable; cached rates remain in use.\n"));
+      // Startup remains local-first; later checks only update the cache and a content-free health hint.
+      void dashboardPricing.check();
     })
     .catch((error) => {
       if (!shutdown.signal.aborted) process.stderr.write(`Session analytics warmup failed: ${safeError(error)}\n`);
     });
+  dashboardPricing.start();
   if (process.argv.includes("--open")) {
     void warmup.then(openDashboard, openDashboard);
   }
@@ -504,6 +519,7 @@ server.listen(port, "127.0.0.1", () => {
 
 // In-flight requests are not awaited: remote reads, workers and connections stop at once.
 stopOnSignals(() => {
+  dashboardPricing.stop();
   shutdown.abort();
   server.close();
   server.closeAllConnections();
