@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md) · [Run the demo](cli.md#demo-and-developer-scripts)
 
-All screenshots use synthetic demo data and follow your light or dark theme.
+All screenshots use synthetic demo data from all seven providers, including Antigravity, and follow your light or dark theme. [Capture provenance and regeneration](../assets/SCREENSHOTS.md).
 
 The dashboard runs on `127.0.0.1` and has seven views in three groups: **Overview** (Summary, Velocity), **Economics** (Costs, Pricing, Subscription) and **Usage** (Tools, Activity). A window selector at the top switches between the last 7, 30 or 90 days, all history, or a custom range. The sidebar lists every repository with a sparkline and its value, and clicking one focuses every view on that repository except Subscription, whose limits are account-wide. A command palette (<kbd>⌘K</kbd>), `g`-prefixed shortcuts, light and dark themes, two densities and an address bar that follows the view, window and focus make it quick to move around and to share a link to exactly what you are looking at.
 
@@ -146,7 +146,7 @@ The command palette jumps to any view or repository, toggles provider chips and 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-palette-dark.webp" />
-    <img alt="The command palette: Go to Summary, Velocity, Costs, Pricing, Tools and Activity with their g-shortcuts, then All repositories and Focus entries for each repository" src="../assets/screenshot-palette.webp" width="600" />
+    <img alt="The command palette: Go to Summary, Velocity, Costs, Pricing, Subscription, Tools and Activity with their g-shortcuts, then All repositories and Focus entries for each repository" src="../assets/screenshot-palette.webp" width="600" />
   </picture>
 </p>
 

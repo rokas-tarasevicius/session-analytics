@@ -2,11 +2,13 @@
 
 Dashboard screenshots contain synthetic fixtures only. They do not show developer session history.
 
-All captures were refreshed on 2026-10-13 from `node scripts/demo.ts --no-open --port 4193` through the T3 collaborative preview. Desktop views use 1280 CSS pixels and comfortable density, in light and dark themes. Velocity opens with the default Model grouping. Summary includes the complete totals rail and provider breakdown.
+All 26 captures were refreshed on 2026-10-20 from `node scripts/demo.ts --no-open --port 4193` with `node scripts/screenshots.ts --url http://127.0.0.1:4193`. The source baseline is `ec8fbd0`, including Antigravity support and the seven-view navigation.
 
-`screenshot-subscription.webp` and `screenshot-subscription-dark.webp` were captured on 2026-10-15 with `node scripts/screenshots.ts --only subscription` at 1280 CSS pixels, 2×, comfortable density, from the demo's synthetic limits (two Claude profiles and one Codex account). The capture waits for the meters, then ends below the first row of account cards.
+The captured snapshot was generated at `2026-10-20T18:11:15.267Z`: 481 sessions across six fictional repositories and all seven providers, including 24 Antigravity sessions. Antigravity's token/tool fixtures contribute to provider charts, repository breakdowns, tool-call totals and coverage. These fixtures do not establish live Antigravity calibration or support for legacy `.pb` histories.
 
-`screenshot-mobile.webp` and `screenshot-mobile-dark.webp` use 375 × 812 CSS pixels, compact density and the default 30-day window. A temporary proxy exposed only the synthetic demo to the preview host. The preview's PNG output is 1× for desktop captures and 2× for mobile. ImageMagick converted it to lossless WebP without resizing; detail captures were cropped to their panels with padding. Longer views show their opening viewport.
+Desktop views use 1280 CSS pixels, comfortable density and the default 30-day window in both themes. Velocity opens with the default Model grouping. Summary includes the complete totals rail and provider breakdown. Subscription waits for its synthetic meters (two Claude profiles and one Codex account), then ends below the first row of account cards.
+
+The mobile pair uses 375 × 812 CSS pixels, compact density and the same window. Chrome captures every image at 2× scale; ImageMagick converts the PNGs to lossless WebP without resizing. Detail captures are clipped to their panels with padding; longer views show their opening viewport. No real-history dashboard or proxy is used.
 
 For scripted regeneration, start a synthetic demo and run:
 
@@ -14,4 +16,4 @@ For scripted regeneration, start a synthetic demo and run:
 node scripts/screenshots.ts --url http://127.0.0.1:4193
 ```
 
-The script requires Chrome and `cwebp`, produces 2× images, and accepts `--only mobile` for the phone pair. Never point it at a dashboard containing real session history before copying output into the repository.
+The script requires Chrome and either `cwebp` or ImageMagick (`magick`), produces 2× images, and accepts `--only mobile` for the phone pair. It prefers `cwebp` when available; both conversion paths are lossless. Never point it at a dashboard containing real session history before copying output into the repository.
