@@ -36,7 +36,7 @@ export function velocityEffort(value: unknown): VelocityEffort {
   }
 }
 export function velocityAgent(provider: SessionProvider, identity: AgentIdentity, execution: ExecutionKind): VelocityAgent {
-  if (provider === "cursor" || provider === "copilot" || provider === "opencode" || provider === "gemini") return provider;
+  if (provider === "cursor" || provider === "copilot" || provider === "opencode" || provider === "gemini" || provider === "antigravity") return provider;
   if (provider === "codex") {
     const source = identity.codexSource;
     return `codex-${source && source !== "unknown" ? source : identity.codexOriginator ?? "unknown"}`;

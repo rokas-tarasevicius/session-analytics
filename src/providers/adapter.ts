@@ -23,6 +23,8 @@ export interface ProviderContext {
   rateCard: RateCard;
   resolveRate?: (model: string, at: string | null) => ResolvedRate | undefined;
   price: (rate: ModelRate, usage: TokenUsage, inputForRequest: number) => CostBreakdown;
+  /** Private index reservation; no request IDs or ownership metadata reach public sessions. */
+  claimRequest?: (session: SessionAnalytics, requestId: string) => boolean;
 }
 
 /** Adapters own source discovery and identity; the host owns repository assignment and pricing. */

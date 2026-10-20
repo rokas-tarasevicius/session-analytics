@@ -22,7 +22,7 @@ export const agentLabels = {
   "claude-plan": "Claude · Plan", "claude-subagent": "Claude · other / unknown subagent",
   "codex-cli": "Codex · CLI", "codex-exec": "Codex · exec", "codex-vscode": "Codex · VS Code",
   "codex-desktop": "Codex · desktop", "codex-subagent": "Codex · subagent", "codex-review": "Codex · review", "codex-unknown": "Codex · source unknown",
-  cursor: "Cursor", copilot: "Copilot CLI", opencode: "OpenCode", gemini: "Gemini CLI",
+  cursor: "Cursor", copilot: "Copilot CLI", opencode: "OpenCode", gemini: "Gemini CLI", antigravity: "Antigravity",
 };
 const providers = providerLabels;
 const blank = () => Array(14).fill(0);
@@ -48,7 +48,7 @@ function addEvidence(target, source) {
 // Native Cursor composer evidence (no evidence source) has provider-reported, undated value and no
 // API pricing or cache split. Every other ledger records the evidence columns of its cells.
 const nativeCursor = (session) => session.provider === "cursor" && !session.evidence?.source;
-const cacheWriteSources = new Set(["opencode-db", "cursor-sdk"]);
+const cacheWriteSources = new Set(["opencode-db", "cursor-sdk", "antigravity-db"]);
 const recordsCacheWrites = (session) => session.provider === "claude" || cacheWriteSources.has(session.evidence?.source);
 function metricEvidence(session, values, metric) {
   const index = evidenceMetrics[metric];
@@ -109,7 +109,7 @@ function groupIdentity(session, dimension, group) {
 
 /** Evidence sources whose parsers wrote no activity ledger before session-dated value existed. Their
  * sessions from such older snapshots are disclosed (all time) rather than treated as needing a refresh. */
-export const ledgerlessSources = new Set(["conductor-result", "cursor-sdk", "cursor-transcript", "copilot-events", "opencode-db", "gemini-chat"]);
+export const ledgerlessSources = new Set(["conductor-result", "cursor-sdk", "cursor-transcript", "copilot-events", "opencode-db", "gemini-chat", "antigravity-db"]);
 
 /** Activity-dated cells, then session-dated cells (`[day, hour, dimension, values, sessionDated]`).
  * Session-dated cells carry value whose own request/run time the source does not record; they are

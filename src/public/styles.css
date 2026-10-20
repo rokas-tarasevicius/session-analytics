@@ -27,6 +27,11 @@
   --provider-copilot: #8250df;
   --provider-opencode: #a8820d;
   --provider-gemini: #3a7be0;
+  --provider-antigravity: var(--provider-unknown);
+  --provider-antigravity-0: var(--provider-unknown-0);
+  --provider-antigravity-1: var(--provider-unknown-1);
+  --provider-antigravity-2: var(--provider-unknown-2);
+  --provider-antigravity-3: var(--provider-unknown-3);
   --provider-unknown: #90908a;
   --provider-codex-0: #262624;
   --provider-codex-1: #5c5c59;
@@ -181,6 +186,11 @@
   --provider-copilot: #9672ea;
   --provider-opencode: #b98a14;
   --provider-gemini: #4f8ae8;
+  --provider-antigravity: var(--provider-unknown);
+  --provider-antigravity-0: var(--provider-unknown-0);
+  --provider-antigravity-1: var(--provider-unknown-1);
+  --provider-antigravity-2: var(--provider-unknown-2);
+  --provider-antigravity-3: var(--provider-unknown-3);
   --provider-unknown: #80807a;
   --provider-codex-0: #e6e6e1;
   --provider-codex-1: #9a9a96;

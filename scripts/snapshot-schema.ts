@@ -59,7 +59,7 @@ export function snapshotSchemas(): Record<string, Schema> {
     Summary: object<RepositoryAnalytics["summary"]>(summaryFields),
     Repository: object<RepositoryAnalytics["repository"]>({ id: repositoryKey, name: { type: "string", minLength: 1, maxLength: 256, pattern: "^[^/\\\\\\u0000-\\u001f\\u007f]+$" } }),
     PublicModelRate: object<PublicModelRate>({
-      provider: enumeration<SessionProvider>({ claude: true, codex: true, cursor: true, copilot: true, opencode: true, gemini: true, unsupported: true }),
+      provider: enumeration<SessionProvider>({ claude: true, codex: true, cursor: true, copilot: true, opencode: true, gemini: true, antigravity: true, unsupported: true }),
       inputPerMillion: number, cachedInputPerMillion: number, cacheReadPerMillion: number, cacheWrite5mPerMillion: number,
       cacheWrite1hPerMillion: number, cacheWriteMultiplier: number, cacheWriteObservable: boolean, outputPerMillion: number,
       longContext: object<LongContextRate>({ inputMultiplier: number, outputMultiplier: number, thresholdInputTokens: integer }),
@@ -82,7 +82,7 @@ export function snapshotSchemas(): Record<string, Schema> {
       costByExecution: object<SessionAnalytics["costByExecution"]>({ subagentUsd: number, topLevelUsd: number, unknownUsd: number }),
       costComplete: boolean, createdAt: text, effort: nullable(metadata), executionKind: enumeration<ExecutionKind>({ mixed: true, subagent: true, "top-level": true, unknown: true }),
       firstEventAt: nullable(text), lastEventAt: nullable(text), metrics: ref("SessionMetrics"), models: array(ref("ModelUsage")),
-      pricedTokenCoverage: nullable(number), provider: enumeration<SessionProvider>({ claude: true, codex: true, cursor: true, copilot: true, opencode: true, gemini: true, unsupported: true }), repositoryId: repositoryKey,
+      pricedTokenCoverage: nullable(number), provider: enumeration<SessionProvider>({ claude: true, codex: true, cursor: true, copilot: true, opencode: true, gemini: true, antigravity: true, unsupported: true }), repositoryId: repositoryKey,
       repositoryName: text, sessionKey: { type: "string", pattern: "^[a-f0-9]{12}$" },
       spendByDay: record(number), status: { anyOf: sessionStatuses.map((value) => ({ const: value })) }, tokens: ref("TokenUsage"), tools: { ...record(integer), propertyNames: metadata },
       transcript: ref("TranscriptHealth"), transportTools: { ...record(integer), propertyNames: metadata }, updatedAt: text, machine: machineKey,

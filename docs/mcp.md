@@ -60,14 +60,14 @@ Startup, discovery, listing and pings are immediate and do not scan history. The
 | `repo_profile` | Typical session value, turns and duration; tool mix, cache hits and compactions | Requires one repository; top 20 tools |
 | `tool_stats` | Calls by tool name (`{ name, calls }`) from structured tool-call records | `limit`, `offset` |
 | `recent_sessions` | Hashed session keys, provider, models, duration and value, newest activity first | `limit`, `offset` |
-| `compare_agents` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported` on the same repository | Requires one repository; no provider filter |
+| `compare_agents` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, `antigravity`, and `unsupported` on the same repository | Requires one repository; no provider filter |
 
 Shared arguments are optional and strictly validated:
 
 - `window`: `today`, `week`, `7d`, `30d` (default), `90d`, `all`. Calendar windows use UTC; `week` starts Monday; `7d` includes today and six preceding dates.
 - `scope`: `repository` or `machine`. Default is the launch repository when one is found; otherwise machine. `repo_profile` and `compare_agents` accept repository scope only.
 - `repositoryId`: a `conductor-<20 hex>` or `discovered-<20 hex>` key returned by this server. It cannot be combined with machine scope.
-- `provider`: `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported`, except on `compare_agents`.
+- `provider`: `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, `antigravity`, and `unsupported`, except on `compare_agents`.
 - Where listed, `limit`: 1–50 (default 10); `offset`: 0–100000 (default 0). `nextOffset` is `null` at the end. Pagination uses the current cached snapshot; compare `snapshot.generatedAt` across pages and restart if it changes.
 
 For example, `usage_summary({"window":"7d","groupBy":"provider"})` describes the launch repository. Discover other repository keys with `usage_summary({"scope":"machine","groupBy":"repository","window":"all"})`, then pass a returned key to `repo_profile`. No tool accepts a working directory, filename, command, URL, SQL, glob, or transcript selector. Unknown arguments are rejected rather than ignored.

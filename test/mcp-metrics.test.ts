@@ -138,7 +138,7 @@ test("recent pagination is stable and output projection never spreads unexpected
   assert.ok("totalSessions" in second.data);
   assert.equal(second.data.sessions[0]!.sessionKey, "000000000000"); assert.equal(second.data.nextOffset, null);
   const comparison = buildPayload(data, "compare_agents", {}, NOW, 60);
-  assert.ok("agents" in comparison.data); assert.equal(comparison.data.agents.length, 7);
+  assert.ok("agents" in comparison.data); assert.equal(comparison.data.agents.length, 8);
   assert.equal(comparison.data.agents[1]!.profile.apiEquivalentUsd.median, null);
   assert.doesNotMatch(JSON.stringify([first, second, comparison]), /SECRET_/);
 });

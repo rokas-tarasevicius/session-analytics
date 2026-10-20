@@ -322,6 +322,21 @@ test("provider shortcuts count through the providers present in the snapshot", a
   assert.deepEqual(document.querySelector("#tools-provider-filters")!.querySelectorAll("label").map((label) => label.dataset["provider"]), ["claude", "gemini"]);
 });
 
+test("Antigravity-only daily value is selected, plotted and toggleable", async () => {
+  const session = withLedger(sample(), [["model-synthetic", 10]]);
+  session.provider = "antigravity";
+  const { document, run } = await harness([session]);
+  assert.ok(document.querySelector('[data-provider-filter="antigravity"]')!.checked);
+  assert.ok([...run("activeProviders()")].includes("antigravity"));
+  run("renderLine(dailyProviderSpend(activeView().dailySessions))");
+  const chart = document.querySelector("#daily-spend")!;
+  assert.match(chart.textContent, /Antigravity/);
+  assert.doesNotMatch(chart.textContent, /Nothing to plot|Choose at least one provider/);
+  run("toggleProvider('antigravity')");
+  assert.equal(document.querySelector('[data-provider-filter="antigravity"]')!.checked, false);
+  assert.match(chart.textContent, /No daily priced activity|Choose at least one provider/);
+});
+
 test("Velocity provider chips list present providers and count N of M against them", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });

@@ -1,4 +1,4 @@
 interface:
   display_name: "Session Analytics"
   short_description: "Content-free metrics for local coding-agent sessions across repositories."
-  default_prompt: "Use $session-analytics to immediately run its single launch command, scan all local Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI evidence, and open the read-only localhost dashboard."
+  default_prompt: "Use $session-analytics to immediately run its single launch command, scan all local Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI, and supported Antigravity SQLite evidence, and open the read-only localhost dashboard."

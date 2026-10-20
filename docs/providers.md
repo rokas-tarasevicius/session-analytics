@@ -239,7 +239,7 @@ Project assignment follows the [project registry and ownership markers](https://
 
 ## Source overrides and isolation
 
-Every added store has its own explicit option and `SESSION_ANALYTICS_*` variable, listed in the [command-line reference](cli.md#options). Defaults discover all supported providers independently of Conductor. `--no-additional-providers` (or `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0`) disables the five additional default stores; explicit new-store paths still run. It does not disable the result fallback inside a selected Conductor database. Missing optional stores are normal. New adapters emit fixed warnings for inaccessible/unsupported stores, continue with other sources, never follow child-directory symlinks, and perform no network requests.
+Every added store has its own explicit option and `SESSION_ANALYTICS_*` variable, listed in the [command-line reference](cli.md#options). Defaults discover all supported providers independently of Conductor. `--no-additional-providers` (or `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0`) disables the six additional default stores; explicit new-store paths still run. It does not disable the result fallback inside a selected Conductor database. Missing optional stores are normal. New adapters emit fixed warnings for inaccessible/unsupported stores, continue with other sources, never follow child-directory symlinks, and perform no network requests.
 
 - Deleted Claude transcripts can use Conductor assistant metadata, then result receipts as a fallback. Other provider aggregates need independently verified accounting scopes.
 - Agent types other than Claude Code and Codex in Conductor are reported as unsupported evidence. Unknown agent names use the fixed public provider `unsupported`; raw names are omitted. These rows round-trip through interchange and remain outside sharing eligibility.
@@ -256,7 +256,7 @@ Gemini partial reorder patches preserve the unmentioned prefix before the explic
 
 ## Velocity evidence
 
-All six providers populate compact velocity counters at the same counting points as
+All seven providers populate compact velocity counters at the same counting points as
 existing session totals. Claude entrypoint and fixed subagent attribution enums, and
 Codex source/originator enums, provide finer agent groups without exporting custom names.
 Per-request model, effort and execution stay attached to their activity cells, including
@@ -275,3 +275,29 @@ Provider discovery projects only source status enums and read/missing/unreadable
 Cursor SDK stores merge distinct runs across copies and keep the latest duplicate run snapshot. Recorded run time selects pricing evidence without inventing request-day allocation. Stable stream-event IDs can recover usage when final run counters are absent; such recovery remains partial. Valid canonical run counters take precedence. Native Cursor excludes empty drafts, preserves explicitly reported zero cost, and replaces stale inline bubbles with their current disk snapshots. Missing provider cost is unavailable, with incomplete cost coverage. Explicit transcript subagent ancestry is retained.
 
 Gemini replay retains non-accounting message identities as rewind/order anchors and follows persisted metadata updates. Copilot's optional context is not required for session identity, and malformed starts do not hide later valid starts. OpenCode excludes inherited boundary-time responses and marks skipped malformed messages/parts as partial accounting. A broken or oversized provider file/store cannot erase already found sessions or prevent healthy siblings from being read; fixed warnings record the discovery gap.
+
+
+## Antigravity App, IDE and CLI
+
+**Where:** `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/<UUID>.db`. `--antigravity-root PATH` (or `SESSION_ANALYTICS_ANTIGRAVITY_ROOT`) replaces discovery with one surface's data directory, or a parent containing those three roots. An explicit root still applies with `--no-additional-providers`. Only direct regular `.db` files with UUID names are considered; source symlinks are skipped.
+
+**Format and identity:** read-only SQLite with `PRAGMA user_version = 1`. The single `trajectory_meta.cascade_id` must match the filename. `trajectory_metadata_blob`'s `main` row supplies workspace URI (field `1.1`, else `7`) and created time (`2`). Only a local absolute path or a local `file:` URI establishes repository ownership. Without one, sessions are unassigned. Step and generation timestamps establish activity; file modification times only choose among copies of the same session. The freshest copy across surfaces is analyzed once.
+
+**Fields used:**
+
+| Store | Private metadata fields read |
+| --- | --- |
+| `gen_metadata.data` | `CortexStepGeneratorMetadata`: `1` = chat metadata, `4` = execution ID. Chat `4` = usage, `9.4` = request timestamp, `19` = actual model name. Selector labels and context-window counters are ignored. |
+| `steps.metadata` | `1` = timestamp, `4` = structured tool call (ID and bounded name only), `9` = usage, `12` = execution ID. `step_type` 14/15 counts retained user/assistant steps. `step_payload`, tool arguments/results, errors and render data are never selected. |
+| `ModelUsageStats` | `1` = numeric model enum, `2` = uncached input, `3` = total output, `4` = cache writes, `5` = cache reads, `7` = message ID, `9` = thinking output, `11` = response ID. Correlation IDs never leave the parser. |
+| `parent_references` | Presence marks forked/inherited history. Its contents are not decoded. |
+
+**Accounting:** the nonempty generation ledger is canonical; its step mirror is never added, even if the generation data is malformed. Older stores without generation rows use step usage. Response IDs deduplicate repeated requests across copies and forks; distinct equal-sized requests survive. A conflicting repeat retains the first observed value and marks accounting partial. Fork requests without response IDs are excluded because ownership cannot be proved. The private index reserves hashed response ownership across scans, source deletion, restoration and pruning so inherited fork usage cannot rebill retained or pruned parent history. Tool-call IDs deduplicate within a session; activity counts can include retained inherited fork steps. Execution kind is unknown.
+
+Uncached input, cache reads and cache writes are disjoint. Total input is their sum. Total output already includes thinking; missing thinking counters remain unknown. Cache-write TTL is unavailable and uses the existing labeled pricing assumption. Only actual model names are passed to the dated rate resolver; numeric enums become `antigravity-model-N` and remain unpriced. API-equivalent values are estimates, separate from subscription usage or invoices. Generation timestamps take precedence; a unique message/execution match to step metadata can supply a missing time. Unmatched usage is explicitly session-dated.
+
+**Safety and limits:** each source is read in a read-only SQLite transaction that includes committed WAL writes. Metadata blobs are capped at 1 MiB, each session at 100,000 steps/generations, and a scan at one million request identities or 64 MiB of request-key/signature characters, whichever comes first. Invalid/oversized records keep valid siblings and mark partial accounting. Unsupported, locked or corrupt stores produce fixed coverage warnings without paths or exception details. The private index stores the existing allowlisted session projection and rereads mutable stores each scan; changing the override isolates its index scope without changing the default scope's retained-history key.
+
+**Known gaps:** legacy `.pb` conversation files are not decoded. The generated `brain/<UUID>/.system_generated/logs/transcript*.jsonl` display logs do not establish token usage and are not used as a fallback. Quota percentages, model selectors, context sizes and character counts are never converted to token spend. A new or changed schema requires validation before support. No Antigravity installation or user history was available on the implementation host: verification uses synthetic SQLite/protobuf fixtures, read-only WAL checks, CLI/schema/index parity and the synthetic dashboard. Live totals on a consenting user's installation still need comparison before claiming calibration against Antigravity itself.
+
+**Format evidence:** Google's [hook documentation](https://antigravity.google/docs/hooks) identifies the three surface roots, and its [conversation documentation](https://antigravity.google/docs/cli/conversations) documents inherited fork history. The undocumented binary field map is cross-checked against independently published descriptor research: [Antigravity 2.19.1 generation reader](https://github.com/jazzenchen/agent-hud-open/blob/014524cd0dbed4d3bab4f715a847fcbeb4a7d0f3/Sources/AgentHUDCore/Providers/Antigravity/AntigravityProtoReader.swift), [schema-v1 and older step metadata](https://github.com/skillsynchq/txcript/blob/a77e5535ba7c5eccbf7766e7aad88c23b577ee72/docs/formats/antigravity.md), and [a reported live two-turn CLI counter comparison](https://github.com/volobado/antigravity-gemini-usage-widget/blob/27ffdeb37f2e39ae5e9a1bcab4e859cf0ce28e06/docs/ARCHITECTURE.md#token-counts-are-in-antigravitys-conversation-files-not-in-the-quota-api). These are evidence for the supported layout, not a public Google storage contract or a live verification performed by this project.

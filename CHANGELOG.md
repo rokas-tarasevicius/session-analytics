@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Antigravity local usage from schema-v1 SQLite conversation stores for the App, IDE and CLI, including cache and reasoning counters, observed tools, dated API-equivalent pricing where model names are known, and full-scan/index parity. `--antigravity-root` replaces discovery. Legacy protobuf conversation files remain unsupported and produce a coverage warning; no usage is inferred from display transcripts or quota percentages.
+
 ## [0.10.2] - 2026-10-20
 
 ### Added

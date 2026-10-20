@@ -120,13 +120,13 @@ function main(): void {
   // --bin names the checkout even when SESSION_ANALYTICS_DEMO_BIN points the demo at another build.
   const json = run(process.execPath, ["scripts/demo.ts", "report", "--json", "--bin", join(root, "bin/session-analytics.ts")]);
   const snapshot = validateSnapshot(JSON.parse(json));
-  if (snapshot.sessions.length === 0 || new Set(snapshot.sessions.map((session) => session.provider)).size !== 6) {
-    throw new Error("Synthetic report must include sessions from all six providers.");
+  if (snapshot.sessions.length === 0 || new Set(snapshot.sessions.map((session) => session.provider)).size !== 7) {
+    throw new Error("Synthetic report must include sessions from all seven providers.");
   }
   if (/PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//.test(json)) {
     throw new Error("Synthetic report contains private fixture content.");
   }
-  console.log(`Synthetic report passes the snapshot contract (${snapshot.sessions.length} sessions, six providers).`);
+  console.log(`Synthetic report passes the snapshot contract (${snapshot.sessions.length} sessions, seven providers).`);
   run(process.execPath, ["scripts/build.ts"]);
   const destination = mkdtempSync(join(tmpdir(), "session-analytics-pack-"));
   try {

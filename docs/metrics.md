@@ -22,7 +22,7 @@ The analyzer may read provider transcripts locally, but its returned data is res
 
 The CLI JSON, API, dashboard, and MCP tools must not return prompts, messages, reasoning, session titles, branches, workspace metadata, repository roots/remotes, raw Conductor IDs, provider session IDs, tool arguments, tool results, commands, file paths, transcript paths, process arguments, credentials, raw local errors, or arbitrary environment output.
 
-The default scope is the union of supported local Claude, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI history. It is evidence-led rather than application-led or a blind filesystem crawl: provider working directories, Cursor workspace/file references, optional Conductor workspace mappings, and canonical Git roots determine repository assignment. Provider discovery must work without Conductor. When its database is available, Conductor adds repository/workspace correlations and registered zero-session repositories but does not define the machine boundary. Repository summaries and a single flattened session collection share stable repository IDs; sessions are not duplicated inside public repository objects.
+The default scope is the union of supported local Claude, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI, and supported Antigravity SQLite history. It is evidence-led rather than application-led or a blind filesystem crawl: provider working directories, Cursor workspace/file references, optional Conductor workspace mappings, and canonical Git roots determine repository assignment. Provider discovery must work without Conductor. When its database is available, Conductor adds repository/workspace correlations and registered zero-session repositories but does not define the machine boundary. Repository summaries and a single flattened session collection share stable repository IDs; sessions are not duplicated inside public repository objects.
 
 Every provider profile on the machine is in scope: `~/.claude/projects`, sibling profiles such as `~/.claude-work/projects`, `$CLAUDE_CONFIG_DIR/projects`, `~/.config/claude/projects`, and Claude Desktop local-agent sessions; `~/.codex/{sessions,archived_sessions}`, sibling `~/.codex-*` profiles, and `$CODEX_HOME`. Roots that resolve to the same directory through symbolic links are read once. An explicit root option replaces discovery for that provider, so narrowed and synthetic scans never mix in the machine's own history.
 
@@ -161,6 +161,8 @@ New sources populate the optional `evidence` namespace. `source` identifies the 
 - **OpenCode:** retained step-finish token counters are per request; the assistant snapshot contains the last step and is used only when no step counters survive for that message. Input/cache classes are disjoint, output includes reasoning. Tools deduplicate by call ID; `parent_id` supplies subagent evidence. Provider-calculated `cost` is not added to API estimates. Models use exact rate-card matches, including namespaced IDs. Pre-session messages in forks are matched to compact original-evidence fingerprints and excluded from the fork. Unmatched or undated request ownership is marked partial and excluded from additive tokens/cost; new post-fork requests remain independent. Daily values use owned request evidence only.
 - **Gemini:** saved message counters are deduplicated by message ID, with JSONL checkpoints, rewinds, removals, and reorder operations applied to a content-free projection. Input includes cached input; output is candidate output plus separately recorded thought tokens. Tool-call IDs are deduplicated. Removed history cannot be recovered. Exact known rates are used; the bundled card currently has no Gemini rates, so those observed tokens remain visibly unpriced.
 
+- **Antigravity:** schema-v1 SQLite generation metadata supplies disjoint uncached input, cache reads, cache writes, and total output. Thinking is a subset of output, never added again; an absent thinking counter leaves the reasoning split unknown. A nonempty `gen_metadata` ledger takes precedence over mirrored step usage, including when damaged; older stores without that ledger use step metadata. Native response IDs deduplicate requests across retained copies and forks; counters alone never establish identity. Fork usage without response identity is excluded and accounting is partial. Keyed request-owner reservations persist in the private index and its prune ledger, preventing inherited usage from being counted again after parent-source deletion. Actual model names use the dated pricing resolver; numeric model enums remain visibly unpriced. Provider request timestamps date usage, unique step/message or execution joins recover absent generation times, and otherwise value is session-dated. Structured tool-call IDs deduplicate execution-step copies within a session. Human and assistant step counts describe retained history, including inherited fork history; execution kind and compactions remain unavailable.
+
 New activity-only sessions have `costBasis: unavailable`, `costComplete: false`, and `pricedTokenCoverage: null`. They do not become sessions “with an unpriced model.” Conductor API coverage is likewise N/A; `costComplete` requires supported, non-conflicting accounting boundaries and reported cost for every selected snapshot. It never proves complete historical retention. Numeric summary fields remain backward compatible. Evidence counts describe observations, never work quality, success, or value delivered.
 
 `gpt-5.3-codex-spark` has no verified bundled API tariff and remains visibly unpriced, including when a public feed reports zero rates. A subscription preview does not establish a zero-dollar API-equivalent charge; an explicit custom rate card can supply a tariff.
@@ -281,7 +283,7 @@ The chart header shows the selected metric's period total.
   and counted as unknown starts; all-time totals retain them.
 - Every source now writes a ledger; the dating evidence differs by source (see
   [Session-dated value](#session-dated-value)). A session from `opencode-db`, `gemini-chat`,
-  `copilot-events`, `cursor-sdk`, `cursor-transcript` or `conductor-result` without `velocity`
+  `copilot-events`, `cursor-sdk`, `cursor-transcript`, `antigravity-db` or `conductor-result` without `velocity`
   comes from an older snapshot: it is disclosed with its whole-session value as **older snapshots
   without activity dates** and excluded from dated totals until the next refresh. Any other session
   without `velocity` (a snapshot written before the ledger existed) counts as missing and asks for a refresh.
@@ -320,6 +322,7 @@ Each source's cells use the finest time it records:
 | --- | --- | --- |
 | Claude, Codex, Conductor messages | Per request | Request-dated |
 | OpenCode (`opencode-db`) | Per step-finish part `time_created`, else the message's `time.created`; tool parts use their own `time_created` | Request-dated |
+| Antigravity (`antigravity-db`) | Generation start time, else a unique message/execution match to a step | Request-dated; unmatched usage is session-dated |
 | Gemini CLI (`gemini-chat`) | Per retained message `timestamp` | Request-dated; a message without one is session-dated |
 | Copilot CLI (`copilot-events`) | Per persisted event `timestamp` | Tool calls event-dated; no usage or value is recorded |
 | Cursor SDK (`cursor-sdk`) | Per run `startedAt`/`endedAt`/`createdAt`; per tool event `createdAt` | Run-dated (a run is one turn); a run without a time is session-dated |
@@ -357,8 +360,8 @@ allowlisted: `codex_cli_rs`, `codex_exec`, `codex_vscode`, and `Codex Desktop` m
 `cli`, `exec`, `vscode`, and `desktop`. The source takes precedence for grouping; a known
 originator is the fallback when source is unknown. Session identity describes the first
 metadata record; cells retain segment-specific identity. Parent IDs, nicknames and
-custom attribution strings never leave the parser. Cursor, Copilot CLI, OpenCode and Gemini CLI have provider-level agent
-identities (`cursor`, `copilot`, `opencode`, `gemini`); Conductor result receipts use `claude-sdk`. Velocity effort is restricted to `none`, `minimal`, `low`, `medium`, `high`,
+custom attribution strings never leave the parser. Cursor, Copilot CLI, OpenCode, Gemini CLI and Antigravity have provider-level agent
+identities (`cursor`, `copilot`, `opencode`, `gemini`, `antigravity`); Conductor result receipts use `claude-sdk`. Velocity effort is restricted to `none`, `minimal`, `low`, `medium`, `high`,
 `xhigh`, `max`, `ultra`, or `unknown`, independently of the legacy session effort field.
 
 Public model IDs match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; missing or invalid labels
@@ -394,7 +397,7 @@ The fixed `values` tuple has 14 positions:
 Pricing coverage is index 10 / (1 + 5) for eligible cells: every source except the Cursor
 database. Conductor receipt value covers its reported tokens when a receipt reports a cost.
 Separate-reasoning coverage is 11 / 5 and cache-read coverage is 12 / 1 for the same cells;
-cache-write coverage is 13 / 1 for Claude, OpenCode and Cursor SDK. The Cursor database has no
+cache-write coverage is 13 / 1 for Claude, OpenCode, Cursor SDK and Antigravity. The Cursor database has no
 applicable API-price or split-counter denominator, and Codex and Gemini have no cache-write denominator. The UI names these eligible
 providers and shows numerators and denominators; a missing denominator is N/A. These are evidence-coverage ratios, not
 reasoning shares or cache-hit rates. Missing provider fields remain missing evidence,
@@ -414,7 +417,7 @@ Velocity groups by Provider by default. Every grouping shows its largest six ser
 plus an exact Other (N) remainder when more than six have values. This cap changes only
 presentation, never totals. All chart modes share a two-column text readout, pointer inspection, and
 one keyboard focus stop with Left/Right, Home/End navigation.
-All 19 supported agent categories have fixed identity slots: eight theme-aware colors, each with
+All 20 supported agent categories have fixed identity slots: eight theme-aware colors, each with
 solid/diagonal area fills or solid/dashed lines. Legends reproduce the actual SVG encoding.
 Agent colors and patterns do not change when date/provider filters change spend rankings.
 
@@ -563,7 +566,7 @@ Every `McpRatio` includes `numerator`, `denominator`, `minimumDenominator`, `val
 
 `mcpEvidence.activityState` is an enum derived from recorded lifecycle events. Codex task starts, user-message events/items and tool calls indicate active work; `task_complete`/`turn_aborted` settle the recorded turn. Token broadcasts never establish liveness. Claude user/assistant activity is active until `message.stop_reason: end_turn` or a system `turn_duration` record, tracked independently for main and subagent files by timestamp. Every included file must settle; any active file excludes the composite session. A Conductor `working` flag overrides settled evidence. Missing lifecycle evidence, malformed records, or untimed transitions cannot establish settled state. Cursor currently has unknown lifecycle evidence and its typical-session distributions remain unavailable. Settled describes the last recorded turn, not success, permanent completion, or live process status; a later start makes the next snapshot active again. Standalone discovery's default `idle` is never settlement evidence.
 
-`cacheHitRate` divides cache reads by processed input for Claude/Codex only. `compactionsPerSession` divides their compactions by their valid-transcript session count; Cursor's missing evidence is never a zero compaction rate. `toolMix` is a descending `{name,calls}` counter capped at 20, with `omittedTools`. `compare_agents.agents[]` always contains `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported` totals/profiles under identical repository/window selection. It neither normalizes task mix nor ranks quality. Session length includes idle time and needs a same-repository/task baseline.
+`cacheHitRate` divides cache reads by processed input for Claude/Codex only. `compactionsPerSession` divides their compactions by their valid-transcript session count; Cursor's missing evidence is never a zero compaction rate. `toolMix` is a descending `{name,calls}` counter capped at 20, with `omittedTools`. `compare_agents.agents[]` always contains `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, `antigravity`, and `unsupported` totals/profiles under identical repository/window selection. It neither normalizes task mix nor ranks quality. Session length includes idle time and needs a same-repository/task baseline.
 
 ### Tool statistics
 

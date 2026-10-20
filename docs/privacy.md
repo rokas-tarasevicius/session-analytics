@@ -78,8 +78,8 @@ The following is the complete disk field manifest. Index source keys and integri
 | `conductor_records.session_key`, `.signature` | Keyed Conductor session identity and keyed digest of the session's row-count, rowid and byte-length change evidence | P1 |
 | `conductor_records.payload` | Per Conductor session, the allowlisted result-receipt and assistant-message projection: 128-bit keyed hashes in place of every record, response, provider session, tool-call and query identity; token counters, reported costs, durations, turn and denial counts, normalized timestamps, enum terminal reasons, model IDs and bounded tool names; compressed, no content | P1/P0 |
 | `observations_mac` | Keyed payload integrity digest for `claude_ownership` | P1 |
-| `sessions.owned_counters` | Attributed numeric counter fingerprints, timestamps, and fallback model IDs, for deleted-owner reservations | P0 |
-| `retired_counters.counter_key` | Keyed counter-membership reservations kept after pruning, without usage values or timestamps, solely to prevent rebilling | P1 |
+| `sessions.owned_counters` | Attributed numeric counter fingerprints, timestamps, and fallback model IDs; Antigravity additionally uses namespaced HMAC response keys and HMAC owner keys with empty timestamps for request-owner reservations. No raw request IDs | P0/P1 |
+| `retired_counters.counter_key` | Keyed counter-membership reservations kept after pruning, including Antigravity response-ownership reservations, without usage values or timestamps, solely to prevent rebilling | P1 |
 | `limits-v2.json` | Limit-meter ledger: per reading the provider, account key, meter, window minutes, reset and observation times, used percent, status and source enums; per account the plan and its source, the allowlisted plan enums, Claude extra-usage enum and reason, Codex credit balance and banked reset count with scope, grant and expiry times, and the pseudonymous profile keys logged into it; banked-reset count history per account; profile key → account key and fallback-key → account key maps; per Codex home's fallback key, the account keys seen creating its rollouts or answering the account read; Codex scoped-limit names; read positions keyed by device and inode with a 64-bit hash of the 64 bytes before each position and, for Codex rollouts, the creating account's key; harvest and import times; last Codex account read time; the time of each of this machine's sources' newest reading. Readings, plans and banked-reset counts of real accounts read from other machines are kept the same way, without the machine they came from; another machine's plan only for an account this machine never read a plan for. Account keys are unkeyed SHA-256 of OAuth or ChatGPT account IDs, or of a profile's real path when no login is recorded. No paths, session IDs, raw account IDs, profile names, credit IDs or tokens | P0/P1 |
 | `limits-inbox-v2.jsonl`, `limits-inbox-v2.jsonl.<random>.merging`, `limits-statusline-<account key>.last` | Status-line readings pending the next harvest, in the same row format; an inbox a harvest has claimed and deletes once the ledger is written (a stopped harvest's claim is taken by the next one); each account's last recorded signature | P0/P1 |
 | `limits-gate/writer-ticket-<pid>-<random>` | Short-lived tickets that make ledger writers in different processes take turns; each holds only a queue number and is removed when its write ends | P0 |
@@ -232,7 +232,7 @@ Repository summaries and the machine summary share these fields.
 | `velocity` | Optional compact, content-free local-time activity cells; see [Velocity cells](#velocity-cells-sessionvelocity) | P0 |
 | `machine` | Optional, in snapshots that combine machines: the `key` of the machine whose copy of the session was kept | P1 |
 | `sessionKey` | First 12 hex characters of SHA-256 of `<provider>:<session ID>` (or of the Conductor session ID for Conductor-registered sessions). It is not keyed with a secret, so it is stable across runs; someone who already holds the raw ID can recompute it, but the key does not reveal the ID | P1 |
-| `provider` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, and `unsupported` | P0 |
+| `provider` | `claude`, `codex`, `cursor`, `copilot`, `opencode`, `gemini`, `antigravity`, and `unsupported` | P0 |
 | `repositoryId` | Repository key, as in `repository.id` | P1 |
 | `repositoryName` | Repository display name, as in `repository.name` | P1 |
 | `status` | Fixed label: `idle`, `working`, `completed`, `failed`, `error`, `interrupted`, `cancelled`, `pending`, or `unknown`; unrecognized source text becomes `unknown` | P0 |
@@ -267,7 +267,7 @@ Repository summaries and the machine summary share these fields.
 | `transcript.warnings[]` | Fixed-text parser notes, which may include counts and model IDs | P0 |
 | `evidence` | Optional source fidelity and availability; absent on the original native-provider projections | P0 |
 | `evidence.accounting` | Optional `complete` or `partial` for retained accounting; no promise of complete historical retention | P0 |
-| `evidence.source` | `conductor-result`, `cursor-sdk`, `cursor-transcript`, `copilot-events`, `opencode-db`, or `gemini-chat` | P0 |
+| `evidence.source` | `conductor-result`, `cursor-sdk`, `cursor-transcript`, `copilot-events`, `opencode-db`, `gemini-chat`, or `antigravity-db` | P0 |
 | `evidence.fidelity` | `message`, `summary`, or `activity-only`; describes the retained source, not task quality | P0 |
 | `evidence.tokens` | `reported` or `unavailable`; distinguishes observed counters (including recorded zero) from missing evidence | P0 |
 | `evidence.tools` | `observed` or `unavailable` | P0 |
@@ -432,7 +432,7 @@ the browser's daily, period and group evidence guards.
 | Field | Meaning | Tier |
 | --- | --- | --- |
 | `dimensions[]` | Per-session dictionary of observed dimension combinations | P0 |
-| `dimensions[].agent` | Fixed enum: `claude-cli`, `claude-sdk`, `claude-desktop`, `claude-unknown`, `claude-general-purpose`, `claude-explore`, `claude-plan`, `claude-subagent`, `codex-cli`, `codex-exec`, `codex-vscode`, `codex-desktop`, `codex-subagent`, `codex-review`, `codex-unknown`, `cursor`, `copilot`, `opencode`, `gemini` | P0 |
+| `dimensions[].agent` | Fixed enum: `claude-cli`, `claude-sdk`, `claude-desktop`, `claude-unknown`, `claude-general-purpose`, `claude-explore`, `claude-plan`, `claude-subagent`, `codex-cli`, `codex-exec`, `codex-vscode`, `codex-desktop`, `codex-subagent`, `codex-review`, `codex-unknown`, `cursor`, `copilot`, `opencode`, `gemini`, `antigravity` | P0 |
 | `dimensions[].model` | Bounded model ID matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`, otherwise `<unknown>`; never inferred from text | P0 |
 | `dimensions[].executionKind` | `top-level`, `subagent`, or `unknown`; no mixed cells | P0 |
 | `dimensions[].effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, or `unknown` | P0 |

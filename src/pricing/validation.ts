@@ -54,7 +54,7 @@ function sourceUrl(value: unknown): string {
 /** Build a new object: unknown feed/cache fields must never enter a public projection. */
 export function validateRate(raw: unknown, trustedSource?: string): ModelRate {
   const input = record(raw);
-  if (!input || typeof input.provider !== "string" || !["claude", "codex", "cursor", "copilot", "opencode", "gemini"].includes(String(input.provider))) throw new Error("Invalid rate card.");
+  if (!input || typeof input.provider !== "string" || !["claude", "codex", "cursor", "copilot", "opencode", "gemini", "antigravity"].includes(String(input.provider))) throw new Error("Invalid rate card.");
   const rate: ModelRate = {
     provider: input.provider as ModelRate["provider"],
     inputPerMillion: price(input.inputPerMillion),

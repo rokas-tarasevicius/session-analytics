@@ -30,7 +30,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** The limits snapshot version this checkout serves; a schema change fails the typecheck here instead of the smoke. */
 const limitsSchemaVersion: LimitsSnapshot["schemaVersion"] = 2;
 const commands = ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits", "machines"];
-const providers = ["claude", "codex", "cursor", "copilot", "opencode", "gemini"];
+const providers = ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "antigravity"];
 const forbidden = /PRIVATE_DEMO_CONTENT_SENTINEL|synthetic demo prompt|synthetic demo response|synthetic tool result|synthetic-demo-only|session-analytics-demo-|\/repos\/|\/projects\//;
 const contentTypes: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
       const json = demo(["report", "--json", ...demoArgs], label);
       check(!forbidden.test(json), `${label} contains private fixture content`);
       const snapshot = validateSnapshot(JSON.parse(json));
-      check(providers.every((provider) => snapshot.sessions.some((session) => session.provider === provider)), `${label} lacks one of the six providers`);
+      check(providers.every((provider) => snapshot.sessions.some((session) => session.provider === provider)), `${label} lacks one of the seven providers`);
       // Every synthetic source is readable, so a read warning means this runtime lost sessions that two equal runs would both miss.
       const unread = snapshot.warnings.filter((warning) => /could not be|unsupported schema/.test(warning));
       check(!unread.length, `${label} could not read a synthetic source: ${unread.join(" ")}`);
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     check(cursor > 0, "the Cursor worker returned no sessions");
     const source = report("source demo report", ["--bin", join(root, "bin/session-analytics.ts")]);
     check(JSON.stringify(stableProjection(installed)) === JSON.stringify(stableProjection(source)), "the installed report differs from this checkout's");
-    console.log(`Installed demo report matches this checkout (${installed.sessions.length} sessions, six providers, ${cursor} from the Cursor worker).`);
+    console.log(`Installed demo report matches this checkout (${installed.sessions.length} sessions, seven providers, ${cursor} from the Cursor worker).`);
 
     const mcp = spawn(process.execPath, [join(root, "scripts/demo.ts"), "mcp", "--bin", bin], { cwd: work, env: demoEnvironment, stdio: ["pipe", "pipe", "ignore"] });
     try {

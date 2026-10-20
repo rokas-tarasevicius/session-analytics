@@ -1,4 +1,6 @@
 // @ts-check
+import { antigravityWarnings } from "./provider-warnings.js";
+
 // Public vocabulary shared by ingestion, schema generation, and browser exports.
 export const repositoryKeyPattern = "^(conductor|discovered)-[a-f0-9]{20}$";
 export const metadataPattern = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$";
@@ -13,6 +15,7 @@ export const duplicateMachineWarning = "Some sessions appeared on more than one 
 export const remoteUnavailableWarning = "A remote machine could not be read; its sessions are missing from this snapshot.";
 export const staleMachineWarning = "A remote machine could not be read; its last good snapshot is used instead.";
 export const discoveryWarnings = [
+  antigravityWarnings.unreadable, antigravityWarnings.legacy,
   "A provider evidence store could not be fully read; identified sessions were retained.",
   "A provider evidence directory could not be read; sibling directories were retained.",
   "A Cursor SDK store could not be read; sibling stores were retained.",
@@ -33,6 +36,7 @@ export const discoveryWarnings = [
   staleMachineWarning,
 ];
 export const fixedWarnings = [
+  antigravityWarnings.partial, antigravityWarnings.scope,
   "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters.",
   "Accounting may be incomplete: a repeated numeric token state after a counter decrease was excluded without a proven reset/request identity. The decrease alone cannot distinguish a new request from replay.",
   "Some child transcript evidence could not be read.",
