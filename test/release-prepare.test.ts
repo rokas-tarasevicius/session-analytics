@@ -18,6 +18,7 @@ test("release PR: feat is minor, fix and perf a patch, breaking a major or, befo
     ["feat(cli)!: drop --remote", "", "major"], ["fix: rename a field", "Body.\n\nBREAKING CHANGE: report.json drops `x`.", "major"], ["refactor!: new index", "", "major"],
     ["docs: README", "", null], ["test(browser): wait for Chrome", "", null], ["ci(release): dry run", "", null], ["chore(release): 0.10.1 (#77)", "", null],
     ["Restyle the dashboard and docs with Fluxary (#60)", "", null], ["v0.8.1 chore: prepare", "", null], ["fix:no space", "", null],
+    ['Revert "feat: add an option"', "", null], ["Merge pull request #99 from feature", "", null],
   ] as const) assert.equal(bumpOf(commit(subject, body)), bump, subject);
 
   assert.equal(nextVersion("0.10.3", [commit("docs: a"), commit("ci: b")]), null, "nothing releasable");
@@ -40,6 +41,7 @@ test("release PR: Unreleased notes move under the new version with its compare l
     + `[Unreleased]: ${repository}/compare/v0.11.0...HEAD\n[0.11.0]: ${repository}/compare/v0.10.3...v0.11.0\n[0.10.3]: ${repository}/compare/v0.10.2...v0.10.3\n`);
 
   const generated = releaseChangelog(changelog("\n"), "0.10.3", "0.11.0", "2026-10-21", commits);
+  assert.equal(releaseChangelog(changelog("\n### Added\n\n### Changed\n\n### Fixed\n"), "0.10.3", "0.11.0", "2026-10-21", commits), generated, "empty category headings do not replace generated notes");
   assert.match(generated, /## \[Unreleased\]\n\n## \[0\.11\.0\] - 2026-10-21\n\n### Changed\n\n- Drop a flag\n\n### Added\n\n- Session-analytics upgrade \(#81\)\n\n### Fixed\n\n- Poll a long scan \(#82\)\n\n## \[0\.10\.3\]/);
   assert.equal(generatedNotes([commit("docs: a")]), "");
 
