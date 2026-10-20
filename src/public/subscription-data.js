@@ -361,7 +361,11 @@ export function attributeSessions(sessions, accounts, { read = null } = {}) {
     for (const { key: machine, profileKeys } of places) {
       const place = `${account.provider}|${machine}`;
       only.set(place, only.has(place) ? null : account.key);
-      for (const profile of profileKeys) if (!byProfile.has(`${place}|${profile}`)) byProfile.set(`${place}|${profile}`, account.key);
+      for (const profile of profileKeys) {
+        const key = `${place}|${profile}`;
+        // A profile may retain history from two logins; without account periods its sessions cannot choose either one.
+        byProfile.set(key, byProfile.has(key) && byProfile.get(key) !== account.key ? null : account.key);
+      }
     }
   }
   const counted = read ?? new Set([localMachine]);

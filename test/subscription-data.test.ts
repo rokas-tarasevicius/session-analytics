@@ -346,6 +346,29 @@ test("sessions join accounts by profile key; other machines' sessions never cali
   assert.equal(single.byAccount.get("claude-aaaaaaaaaaaaaaaa")!.length, 2, "the only Claude account takes this machine's sessions without a profile");
 });
 
+test("a profile claimed by two accounts leaves its sessions unattributed regardless of account order", () => {
+  const a = "claude-aaaaaaaaaaaaaaaa", b = "claude-bbbbbbbbbbbbbbbb";
+  const owners = [
+    account("claude", a, { profileKeys: ["profile-shared", "profile-a"], machines: [{ key: "agentbox", profileKeys: ["profile-shared", "profile-a"] }] }),
+    account("claude", b, { profileKeys: ["profile-shared"], machines: [{ key: "agentbox", profileKeys: ["profile-shared"] }] }),
+  ];
+  for (const accounts of [owners, [...owners].reverse()]) {
+    for (const machine of ["local", "agentbox"]) {
+      const ambiguous = { provider: "claude", machine, historyProfile: { profileKey: "profile-shared" } };
+      const certain = { provider: "claude", machine, historyProfile: { profileKey: "profile-a" } };
+      const result = attributeSessions([ambiguous, certain], accounts, { read: machine === "local" ? null : new Set([machine]) });
+      assert.deepEqual(result.unattributed.claude, [ambiguous]);
+      assert.deepEqual(result.byAccount.get(a), [certain]);
+      assert.deepEqual(result.byAccount.get(b), []);
+    }
+  }
+  const joined = attributeSessions([
+    { provider: "claude", historyProfile: { profileKey: "profile-shared" } },
+    { provider: "claude", historyProfile: { profileKey: "profile-a" } },
+  ], [owners[0]!]);
+  assert.equal(joined.byAccount.get(a)!.length, 2, "two profiles on the same account still join one account");
+});
+
 test("hourly value follows the zone: the daylight-saving fall-back hour is counted once and half-hour offsets line up", () => {
   const cell = (day: string, hour: number, value: number) => ({ provider: "claude", velocity: { version: 1, dimensions: [], buckets: [[day, hour, 0, [value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]], undated: [] } });
   const london = hourlyValue([cell("2026-10-25", 1, 10)], "Europe/London");
