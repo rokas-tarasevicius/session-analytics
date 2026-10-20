@@ -94,7 +94,12 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
         rate_limits: { limit_id: "secret-limit-payload", plan_type: "secret-limit-payload", primary: { used_percent: 80, window_minutes: 300, resets_at: 1784548800, payload: "secret-limit-payload" }, credits: { balance: "secret-limit-payload" } } } }) + "\n");
     const port = await availablePort();
     const rejectionModule = join(temporaryDirectory, "rejection.mjs");
-    await writeFile(rejectionModule, 'setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL")); }, 1000);\n');
+    await writeFile(rejectionModule, `import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+childProcess.execFile = (...args) => args.at(-1)(new Error("PRIVATE-BROWSER-SENTINEL"));
+syncBuiltinESMExports();
+setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL")); }, 1000);
+`);
     const childEnvironment = {
       ...process.env,
       SESSION_ANALYTICS_NO_INDEX: "1", SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0",
@@ -110,7 +115,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES: "1",
 
     };
-    child = spawn(process.execPath, ["--import", pathToFileURL(rejectionModule).href, serverPath, "--port", String(port)], {
+    child = spawn(process.execPath, ["--import", pathToFileURL(rejectionModule).href, serverPath, "--port", String(port), "--open"], {
       cwd: repositoryRoot,
       env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
@@ -234,6 +239,10 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);
+    await t.test("a browser launch failure logs only a fixed diagnostic", async () => {
+      await waitFor(() => stderr.includes("Could not open the browser; open the dashboard URL manually."), () => "Browser failure was not reported.");
+      assert.doesNotMatch(`${stdout}${stderr}`, /PRIVATE-BROWSER-SENTINEL/);
+    });
     await t.test("concurrent refresh requests share one scan", async () => {
       const snapshots = await Promise.all(Array.from({ length: 6 }, async () => {
         const response = await fetch(`${origin}/api/analytics?refresh=1`);

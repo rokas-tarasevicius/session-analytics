@@ -27,7 +27,7 @@ for (let index = 2; index < process.argv.length; index += 1) {
   }
   if (flag) given.add(flag);
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
-    process.stderr.write(`Unknown session analytics argument: ${flag ?? "<missing>"}\n`);
+    process.stderr.write("Unknown session analytics argument. Run session-analytics report --help.\n");
     process.exit(2);
   }
   if (valueFlags.has(flag)) {
