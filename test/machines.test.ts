@@ -663,6 +663,37 @@ async function freePort(): Promise<number> {
   });
 }
 
+test("the dashboard notices in-place machine edits with unchanged size and modification time", async () => {
+  const data = dataDir("same-stamp"), file = join(data, "machines.json");
+  await machinesFile("same-stamp", { version: 1, machines: [{ name: "box", ssh: "down", runtime: "installed", enabled: false }] });
+  const time = new Date("2026-10-01T12:00:00Z");
+  await utimes(file, time, time);
+  const initial = await stat(file), original = await readFile(file, "utf8");
+  const port = await freePort();
+  const child = spawn(process.execPath, [server, "--port", String(port), ...localFlags, "--data-dir", data], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    let output = "";
+    child.stdout!.on("data", (chunk) => { output += chunk; });
+    child.stderr!.on("data", (chunk) => { output += chunk; });
+    for (let attempt = 0; attempt < 400 && !/ready:/.test(output); attempt++) await delay(25);
+    const get = async <T>(path: string): Promise<T> => (await (await fetch(`http://127.0.0.1:${port}${path}`)).json()) as T;
+    await get("/api/analytics");
+    assert.deepEqual((await get<{ machines: unknown[] }>("/api/machines")).machines, []);
+    // Editors and synchronizers can restore mtime after replacing a same-length value in place.
+    await writeFile(file, original.replace('"enabled": false', '"enabled": true '));
+    await utimes(file, time, time);
+    const changed = await stat(file);
+    assert.deepEqual([changed.ino, changed.size, changed.mtimeMs], [initial.ino, initial.size, initial.mtimeMs]);
+    let statuses = await get<{ machines: Array<{ key: string; state: string }> }>("/api/machines");
+    for (let attempt = 0; attempt < 120 && (statuses.machines.length < 2 || statuses.machines.some(({ state }) => state === "reading")); attempt++) {
+      await delay(25); statuses = await get("/api/machines");
+    }
+    assert.deepEqual(statuses.machines.map(({ key, state }) => [key, state]), [["local", "ok"], ["box", "failed"]]);
+  } finally {
+    child.kill("SIGTERM"); await once(child, "exit");
+  }
+});
+
 test("a machine that fails is shown from its last good snapshot, marked stale, and --strict exits 3", async () => {
   const data = dataDir("stale");
   const saved = (ssh: string): MachinesConfig => ({ version: 1, local: { label: "laptop" }, machines: [{ name: "server", ssh, user: "agents", runtime: "bundled", enabled: true }] });
