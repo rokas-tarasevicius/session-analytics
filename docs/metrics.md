@@ -672,3 +672,13 @@ Validated Claude copies and children form one composite, and stable response ide
 Codex explicit thread/response receipts establish independent requests, including compaction. Validated continuation files contribute a union with separate per-file cumulative baselines. Exact file copies collapse; foreign metadata cannot relabel a child's execution. Pre-birth ancestor counters and exact four-counter request chains prove replay. Different dates, different tool calls, or a counter decrease alone cannot establish independent billing for otherwise equal legacy states; these cases stay conservatively counted and partial.
 
 All JSONL readers use LF framing, preserving CR whitespace and Unicode separators inside JSON strings. Request times must normalize to valid UTC instants. Undated usage stays in lifetime totals and explicit undated velocity/MCP coverage without an invented daily cell. Unknown starts and file mtimes cannot establish Activity/session-start cohorts. Independently dated usage and compactions still contribute to observed date bounds.
+
+### Dashboard scan progress
+
+The dashboard's pending analytics response includes transient work counters, separate from the snapshot.
+`progress.phase` is `discover` (enumerating provider sessions), `parse` (parsing or serving indexed sessions),
+or `combine` (aggregating the snapshot). `done` counts completed session work units, including skipped/unreadable
+candidates and indexed results; the Cursor database child counts as one unit. `total` is null before enumeration
+and otherwise the work known so far; it can grow as providers finish discovery. These counters describe scan
+work, not the resulting snapshot's session count. `startedAt` is the scan's UTC ISO timestamp; `fullParse` is a
+boolean indicating a cold index or a parser/price revision requiring all history to be parsed again.

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import type { AnalysisHooks } from "./analyzer.ts";
 import { analyzeMachineSessionsIsolated } from "./analysis-process.ts";
 import { brand } from "./brand.ts";
 import { combineSnapshots, historyProfileKeys, profileKeyRemaps } from "./interop/combine.ts";
@@ -526,14 +527,15 @@ export async function analyzeMachines(
   remote: RemoteOptions,
   report: (line: string, failed: boolean) => void = () => {},
   signal?: AbortSignal,
+  hooks: AnalysisHooks = {},
 ): Promise<MachineAnalytics> {
-  if (!remote.machines.length) return await analyzeMachineSessionsIsolated(options);
+  if (!remote.machines.length) return await analyzeMachineSessionsIsolated(options, hooks);
   const local = machineOptions(options);
   const reads = machineReads(local, remote, { report, ...(signal ? { signal } : {}) });
   const settled = reads.start();
   try {
     const started = performance.now();
-    const own = await analyzeMachineSessionsIsolated(local).catch((error: unknown) => { reads.abort(); throw error; });
+    const own = await analyzeMachineSessionsIsolated(local, hooks).catch((error: unknown) => { reads.abort(); throw error; });
     const ms = performance.now() - started;
     await settled;
     // A stopped run never passes for this machine alone.

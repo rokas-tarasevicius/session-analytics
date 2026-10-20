@@ -8,6 +8,25 @@ The dashboard runs on `127.0.0.1` and has seven views in three groups: **Overvie
 
 Each view’s screen-reader region is named “Summary overview”, “Velocity overview”, and so on, distinct from its page heading.
 
+### While a scan runs
+
+A first scan, an index re-parse after a code or price-list update, and **Refresh snapshot** show scan progress:
+the current phase, completed work out of the known total, and elapsed time. A thin progress bar stays out of the
+layout; unknown totals use an indeterminate bar. On phones the compact header says, for example, “Reading 27%”.
+A full re-parse is labeled “Parsing all history”. Counts describe session work (including indexed results), with
+the Cursor database counted as one unit; totals can grow as more provider sessions are discovered.
+
+The dashboard polls `/api/analytics?wait=10`. A scan still running after ten seconds answers HTTP 202:
+
+```json
+{"pending":true,"progress":{"phase":"parse","done":1240,"total":4567,"startedAt":"2026-10-20T10:00:00.000Z","fullParse":true}}
+```
+
+`phase` is `discover`, `parse`, or `combine`; `total` is null before enumeration. `startedAt` and `fullParse` reset
+for each scan. Progress is null when no scan is running. A ready scan answers HTTP 200 with the normal snapshot.
+Only the first request of a manual refresh uses `?refresh=1&wait=10`; subsequent polls join that scan. The client
+updates elapsed time locally every second and limits status announcements to one change per two seconds.
+
 ### Summary: the state of the machine
 
 On narrow screens, repository and time-window selectors share the header, and metrics stack into one column below 400 pixels. Custom ranges keep the native date inputs.

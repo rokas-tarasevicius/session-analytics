@@ -420,3 +420,30 @@ test("never charges an unobserved process-wide counter baseline to a session or 
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
 });
+
+test("scan progress advances through discovered sessions on cold and warm indexes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scan-progress-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    for (const noIndex of [true, false, false]) {
+      const progress: import("../src/types.ts").AnalysisProgress[] = [];
+      await analyzeMachineSessions({ ...fixture, noIndex, additionalProviders: false, offline: true }, {
+        onProgress: (value) => progress.push(value),
+      });
+      assert.equal(progress[0]?.phase, "discover");
+      assert.equal(progress[0]?.total, null);
+      assert.ok(progress.some(({ phase, done, total }) => phase === "parse" && done > 0 && done < total!));
+      assert.equal(progress.at(-1)?.phase, "combine");
+      assert.equal(progress.at(-1)?.done, progress.at(-1)?.total);
+      assert.equal(progress.at(-1)!.done, 4, "three native candidates plus the Cursor database work unit");
+      for (let i = 1; i < progress.length; i++) assert.ok(progress[i]!.done >= progress[i - 1]!.done);
+      for (const value of progress) {
+        assert.deepEqual(Object.keys(value).sort(), ["done", "phase", "total"]);
+        assert.ok(["discover", "parse", "combine"].includes(value.phase));
+        assert.ok(Number.isSafeInteger(value.done));
+        assert.ok(value.total === null || value.total >= value.done);
+      }
+      assert.doesNotMatch(JSON.stringify(progress), /PRIVATE_|secret-command|secret-path|content-is-not-returned/);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

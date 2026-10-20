@@ -206,7 +206,7 @@ test("uppercase labels and loading placeholders share one caps and shimmer rule"
   assert.match(caps[0]!.body, /var\(--fs-caps\)/); assert.match(caps[0]!.body, /var\(--track-caps\)/);
   const shimmer = cssRules.filter(({ body }) => /animation:\s*shimmer/.test(body));
   assert.equal(shimmer.length, 1); assert.ok(shimmer[0]!.selector.startsWith(".shimmer,"));
-  assert.equal((css.match(/linear-gradient\(90deg/g) ?? []).length, 2, "one loading gradient and the existing dashed legend swatch");
+  assert.equal((css.match(/linear-gradient\(90deg/g) ?? []).length, 3, "one loading gradient, the scan bar and the existing dashed legend swatch");
 });
 
 test("base component rules and responsive width blocks are consolidated", async () => {
@@ -294,10 +294,19 @@ test("print expands tables and removes sticky chrome and export actions", async 
   assert.match(print, /\.topbar-actions, \.export-menu\s*\{\s*display:\s*none/);
 });
 
-test("reduced motion stops the spinner and pulse and narrow screens retain loading text", async () => {
+test("scan progress stays outside layout, uses native values, and respects reduced motion and compact phones", async () => {
   const css = await readCss("styles.css");
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\*, \*::before, \*::after\s*\{\s*animation:\s*none !important/);
-  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.status\[data-state="loading"\] #sync-label\s*\{\s*display:\s*inline-block/);
+  const bar = rules(css).find(({ selector }) => selector === ".scan-progress")!;
+  assert.ok(bar); assert.match(bar.body, /position:\s*absolute/); assert.match(bar.body, /height:\s*2px/);
+  assert.match(css, /\.scan-progress:not\(\[value\]\)\s*\{[^}]*animation:/);
+  const fill = rules(css).find(({ selector }) => selector === ".scan-progress::-webkit-progress-value")!;
+  assert.match(fill.body, /background:\s*var\(--accent\)/, "the fill follows the theme's contrasting ink");
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.status \.sync-short\s*\{\s*display:\s*inline/);
+  assert.doesNotMatch(css, /\.status\[data-state="loading"\] #sync-label\s*\{\s*display:\s*inline-block/);
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /<progress[^>]*id="scan-progress"[^>]*role="progressbar"/);
+  assert.doesNotMatch(html, /<progress[^>]*style=/);
 });
 
 test("narrow four-column KPI rows give the fixed-size figure the full card width", async () => {

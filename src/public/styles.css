@@ -398,6 +398,15 @@ select:hover { border-color: var(--line-strong); }
 :root[data-theme="dark"] #theme-switch .icon-moon { display: block; }
 #refresh-button:disabled svg { animation: spin 1s linear infinite; }
 
+/* Native values draw the fill without inline styles; this overlay never takes layout space. */
+.scan-progress { position: absolute; left: 0; bottom: -1px; width: 100%; height: 2px; margin: 0; border: 0; border-radius: 0; appearance: none; background: var(--line); color: var(--accent); pointer-events: none; }
+.scan-progress::-webkit-progress-bar { background: transparent; }
+.scan-progress::-webkit-progress-value { background: var(--accent); }
+.scan-progress::-moz-progress-bar { background: var(--accent); }
+.scan-progress:not([value]) { background: linear-gradient(90deg, var(--line) 15%, var(--accent) 50%, var(--line) 85%); background-size: 200% 100%; animation: scan-progress 1.4s linear infinite; }
+.scan-progress:not([value])::-moz-progress-bar { background: transparent; }
+@keyframes scan-progress { from { background-position: 200% 0; } to { background-position: 0 0; } }
+
 main { flex: 1; width: 100%; max-width: 1520px; margin: 0 auto; padding: 18px 20px 48px; transition: opacity var(--t-base) var(--ease); }
 main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 .scope-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin: 0 0 8px; color: var(--muted); font-size: var(--fs-xs); }
@@ -956,12 +965,10 @@ dialog::backdrop { background: var(--backdrop); }
   .activity-heatmap .heat-hour-minor { visibility: visible; }
   .activity-heatmap .heat-label { padding: 0; text-align: center; font-family: var(--font-sans); }
   .heatmap-key .heatmap-key-label { flex-basis: 100%; margin-bottom: 4px; text-align: right; }
-  .topbar { position: static; }
+  .topbar { position: relative; }
   .snapshot-meta { min-width: 0; max-width: 100%; flex-wrap: wrap; white-space: normal; }
   .status span, #sync-label { display: none; }
   .status .sync-short { display: inline; }
-  .status[data-state="loading"] .sync-short { display: none; }
-  .status[data-state="loading"] #sync-label { display: inline-block; min-width: 0; }
   .span-4, .span-6, .span-8 { grid-column: 1 / -1; }
   .panel { min-height: auto; }
   .panel > header { flex-direction: column; }
@@ -1017,6 +1024,7 @@ dialog::backdrop { background: var(--backdrop); }
   .topbar { position: static; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .table-wrap, .table-wrap:has(> table.data-table), .coverage-body .table-wrap { max-height: none; overflow: visible; }
   .topbar-actions, .export-menu { display: none; }
+  .scan-progress { display: none; }
   main { max-width: none; padding: 0; }
   thead th { position: static; }
   #repository-comparison :is(th, td):first-child { position: static; }

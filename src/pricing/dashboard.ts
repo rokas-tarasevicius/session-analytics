@@ -57,12 +57,13 @@ export function createDashboardPricing(options: AnalyzeOptions, fixtures: {
           : await refreshPricingIfStale(options, fetchOptions);
         if (!result) return null;
         if (result.status === "failed" || result.status === "partial") error(unavailable);
-        log(`Background pricing update: ${result.status}. Refresh the dashboard snapshot to use new prices.`);
         if (result.sources.some(({ status }) => status === "updated")) {
           const after = await loadPricingCatalog(options, now());
           if (tables(before) !== tables(after)) revision++;
           fetchedAt = after.status.newestSnapshotAt;
         }
+        // The hint is in place before the announcement, so a reader of the line can rely on /api/health.
+        log(`Background pricing update: ${result.status}. Refresh the dashboard snapshot to use new prices.`);
         return result;
       } catch { error(unavailable); return null; }
     })().finally(() => { pending = null; });

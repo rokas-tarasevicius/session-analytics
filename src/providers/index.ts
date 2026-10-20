@@ -10,6 +10,9 @@ import { opencodeAdapter } from "./opencode.ts";
 import { hash } from "./common.ts";
 
 interface AdditionalContext extends ProviderEnvironment {
+  // Private work keys stay inside the analyzer; its public hook receives counters only.
+  onDiscover?: (keys: Iterable<string>) => void;
+  onProcessed?: (key: string) => void;
   knownPaths: string[];
   existingSessions: SessionAnalytics[];
   pricing: Pick<ProviderContext, "rateCard" | "price" | "resolveRate">;
@@ -34,6 +37,7 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
   const seen = new Set(context.existingSessions.map((s) => s.sessionKey));
   for (const [adapter, explicit] of adapters) {
     if (context.options.additionalProviders === false && !explicit) continue;
+    context.onDiscover?.([]);
     const roots = await adapter.discoverRoots(context);
     for (const root of roots) {
       try {
@@ -45,10 +49,12 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
           if (!prior || preferredFormat > 0 || (preferredFormat === 0 && (identity.updatedAt > prior.identity.updatedAt || (identity.updatedAt === prior.identity.updatedAt && modified > prior.modified)))) copies.set(identity.id, { identity, modified });
         }
         } catch { warnings.push("A provider evidence store could not be fully read; identified sessions were retained."); }
+        const workKey = (identity: ProviderSession) => `${adapter.id}:${root}:${identity.id}`;
+        context.onDiscover?.([...copies.values()].map(({ identity }) => workKey(identity)));
         for (const { identity } of copies.values()) {
           const key = `${adapter.provider}:${identity.id}`;
-          if (seen.has(hash(key))) { identities.add(key); continue; }
           try {
+            if (seen.has(hash(key))) { identities.add(key); continue; }
             const repository = await context.repositoryForSession(identity, adapter.id);
             const session = await adapter.analyze(identity, { repository, ...context.pricing, claimRequest: context.claimRequest });
             if (!session) continue;
@@ -56,6 +62,7 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
             if (!identity.cwd) session.transcript.warnings.push("The evidence does not establish a unique repository path; this session is grouped as unassigned.");
             seen.add(hash(key)); identities.add(key); sessions.push(session);
           } catch { warnings.push("A provider evidence session could not be read; other sessions were retained."); }
+          finally { context.onProcessed?.(workKey(identity)); }
         }
       } catch { warnings.push("A provider evidence store could not be read or has an unsupported schema."); }
     }

@@ -37,7 +37,7 @@ test("a polling scan stops on failure and preserves the previous exportable snap
   const urls: string[] = [];
   context["fetch"] = async (url: string) => {
     urls.push(url);
-    return urls.length < 3 ? { status: 202 } : { ok: false, status: 503, json: async () => ({ error: "Analysis failed." }) };
+    return urls.length < 3 ? { status: 202, json: async () => ({ pending: true }) } : { ok: false, status: 503, json: async () => ({ error: "Analysis failed." }) };
   };
   const snapshot = run("snapshot");
   await run("load(true)");

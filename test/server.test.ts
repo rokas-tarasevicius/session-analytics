@@ -294,7 +294,14 @@ setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL"));
       // A worker process cannot finish within a millisecond, so the first answer is the pending one.
       const pending = await fetch(`${origin}/api/analytics?refresh=1&wait=0.001`);
       assert.equal(pending.status, 202);
-      assert.deepEqual(await pending.json(), { pending: true });
+      const body = await pending.json() as import("../src/types.ts").PendingAnalytics;
+      assert.equal(body.pending, true);
+      assert.ok(body.progress);
+      assert.equal(body.progress.phase, "discover");
+      assert.equal(body.progress.done, 0);
+      assert.equal(body.progress.total, null);
+      assert.equal(body.progress.fullParse, false);
+      assert.ok(Number.isFinite(Date.parse(body.progress.startedAt)));
       const together = await Promise.all(["wait=10", "refresh=1&wait=20"].map(async (query) => {
         const response = await fetch(`${origin}/api/analytics?${query}`);
         assert.equal(response.status, 200);
@@ -532,4 +539,73 @@ test("dashboard tokens rotate per port and reject links or insecure permissions"
     await chmod(options.dataDir, 0o755);
     assert.throws(() => readDashboardToken(options, 4175));
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("pending analytics exposes only current worker counters through both scan paths", { timeout: 30_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "server-progress-"));
+  try {
+    const fixture = await createSessionAnalyticsFixture(root);
+    const { analyzeMachineSessions } = await import("../src/analyzer.ts");
+    const snapshot = await analyzeMachineSessions({ ...fixture, noIndex: true, additionalProviders: false, offline: true });
+    const snapshotPath = join(root, "snapshot.json");
+    await writeFile(snapshotPath, JSON.stringify(snapshot));
+    for (const savedMachines of [false, true]) await t.test(savedMachines ? "saved machines" : "local only", async () => {
+      const dataDir = join(root, savedMachines ? "machines" : "local");
+      const { writeMachines } = await import("../src/machines/config.ts");
+      writeMachines({ dataDir }, { version: 1, machines: savedMachines ? [{ name: "test", ssh: "test", runtime: "installed", enabled: true }] : [] });
+      const worker = join(dataDir, "slow-worker.mjs"), preload = join(dataDir, "preload.mjs");
+      await writeFile(worker, `import { existsSync, writeFileSync, readFileSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
+for await (const chunk of process.stdin) {}
+const scan = process.argv[2], root = ${JSON.stringify(dataDir)};
+if (scan === "1") process.stderr.write(${JSON.stringify("session-analytics:full-parse\n")});
+process.stderr.write(${JSON.stringify('session-analytics:progress {"phase":"parse","done":27,"total":100}\n')});
+writeFileSync(root + "/ready-" + scan, "");
+while (!existsSync(root + "/release-" + scan)) await delay(10);
+process.stdout.write(readFileSync(${JSON.stringify(snapshotPath)}));
+`);
+      await writeFile(preload, `import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+const spawn = childProcess.spawn;
+let scans = 0;
+childProcess.spawn = (command, args, options) => args.some((arg) => /analysis-worker\.(ts|js)$/.test(arg))
+  ? spawn(process.execPath, [${JSON.stringify(worker)}, String(++scans)], options)
+  : command === "ssh" ? spawn(process.execPath, ["-e", "process.exit(1)"], options) : spawn(command, args, options);
+syncBuiltinESMExports();
+`);
+      const port = await availablePort(), origin = `http://127.0.0.1:${port}`;
+      const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, serverPath, "--no-open", "--offline", "--port", String(port), "--data-dir", dataDir], { env: { ...process.env, HOME: root }, stdio: ["ignore", "pipe", "pipe"] });
+      let output = "", diagnostics = "";
+      child.stdout!.on("data", (chunk) => { output += chunk; }); child.stderr!.on("data", (chunk) => { diagnostics += chunk; });
+      try {
+        const ready = async (scan: number) => await waitFor(async () => !!await stat(join(dataDir, `ready-${scan}`)).catch(() => null), () => `No slow worker: ${output} ${diagnostics}`);
+        await ready(1);
+        const pending = async () => {
+          const response = await fetch(`${origin}/api/analytics?wait=0.001`);
+          assert.equal(response.status, 202);
+          return await response.json() as import("../src/types.ts").PendingAnalytics;
+        };
+        const first = await pending();
+        assert.equal(first.pending, true);
+        assert.ok(first.progress);
+        assert.deepEqual(Object.keys(first).sort(), ["pending", "progress"]);
+        assert.deepEqual(first.progress, { phase: "parse", done: 27, total: 100, startedAt: first.progress.startedAt, fullParse: true });
+        assert.ok(Number.isFinite(Date.parse(first.progress.startedAt)));
+        assert.deepEqual(await pending(), first, "polling shares the scan start and counters");
+        assert.doesNotMatch(JSON.stringify(first), /PRIVATE_|secret|rollout|test|path|sessionKey/);
+        await writeFile(join(dataDir, "release-1"), "");
+        assert.equal((await fetch(`${origin}/api/analytics?wait=10`)).status, 200);
+        const refresh = fetch(`${origin}/api/analytics?refresh=1&wait=10`);
+        await ready(2);
+        const second = await pending();
+        assert.ok(second.progress);
+        assert.equal(second.progress.fullParse, false, "a new scan clears the full-parse flag");
+        assert.notEqual(second.progress.startedAt, first.progress.startedAt);
+        await writeFile(join(dataDir, "release-2"), "");
+        assert.equal((await refresh).status, 200);
+        assert.equal((await fetch(`${origin}/api/analytics?wait=0.001`)).status, 200);
+      } finally { await stopServer(child); }
+    });
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
