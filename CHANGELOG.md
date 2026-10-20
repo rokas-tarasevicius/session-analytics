@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Snapshot serialization stops with a fixed error when its output pipe closes under backpressure instead of waiting indefinitely for the pipe to drain.
 - A failed analysis worker that closes its input before receiving the options no longer crashes its parent with an uncaught pipe error; worker start failures also return a fixed message.
 - Reports piped to a consumer that closes early, such as `head`, stop their workers and exit quietly instead of printing an uncaught pipe error and local stack paths.
 - Invalid dashboard ports and unknown report/dashboard arguments now return fixed diagnostics without echoing private input or exception stacks; browser launch failures also use a fixed message.
