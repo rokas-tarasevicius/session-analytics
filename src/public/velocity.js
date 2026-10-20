@@ -51,6 +51,16 @@ function evidenceText(evidence, metric) {
   const ratio = evidence.eligible > 0 ? `${number(evidence.known)}/${number(evidence.eligible)} ${evidenceLabels[metric]} (${number(100 * evidence.known / evidence.eligible)}%)` : "N/A · no eligible tokens";
   return `${ratio}${evidence.unsupported ? `; ${number(evidence.unsupported)} without an applicable breakdown` : ""}`;
 }
+/** A short table cell retains exact evidence in its accessible name and tooltip. */
+function moverEvidence(previous, current, metric) {
+  const summary = (item) => !evidenceLabels[metric] ? "Recorded counters" : item.eligible > 0
+    ? `${compact(item.known)} ${metric === "value" ? "priced" : evidenceLabels[metric]} (${number(100 * item.known / item.eligible)}%)${item.unsupported ? "; partial breakdown" : ""}`
+    : "N/A · no eligible tokens";
+  const cell = el("span", `${summary(previous)} → ${summary(current)}`);
+  cell.title = `${evidenceText(previous, metric)} → ${evidenceText(current, metric)}`;
+  cell.setAttribute("aria-label", cell.title);
+  return cell;
+}
 // Slots belong to identity within each provider, never spend rank or visible position.
 const agentSlots = new Map(Object.keys(agentLabels).map((id) => [id, Object.keys(agentLabels).filter((key) => key.split("-")[0] === id.split("-")[0]).indexOf(id)]));
 // Fixed vocabularies keep both colour and texture when dates, filters or rank change.
@@ -308,7 +318,7 @@ export function renderVelocity(container, sessions, context) {
       movers.heading.textContent = "Top movers";
       movers.article.append(el("p", "Last 7 completed days vs preceding 7", "chart-note"));
       if (!movement.available || !movement.rows.length) movers.article.append(el("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
-      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]), { className: "velocity-movers" }));
+      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), moverEvidence(item.previousEvidence, item.currentEvidence, options.metric)]), { className: "velocity-movers" }));
       movers.article.append(evidence([`${dateRange(movement.start, movement.end)} vs ${dateRange(movement.previousStart, movement.previousEnd)} · ${metricDefinitions[options.metric].label}.`, movement.excludedGroups ? `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.` : "Groups need complete current and prior metric evidence to appear. A change in telemetry is not a measured change in workload."]));
     };
     controller.update = update;

@@ -328,3 +328,11 @@ test("phone legends keep provider words intact in a single list column", async (
   assert.doesNotMatch(label.body, /break-word|anywhere|break-all/);
   assert.match(css, /@media \(max-width: 440px\)\s*\{\s*#daily-spend \.chart-legend\[data-layout="list"\]\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
+
+
+test("Velocity mover names keep their full identity inside the table scroll area", async () => {
+  const cssRules = rules(await readCss("velocity.css"));
+  const name = cssRules.find(({ selector }) => selector === ".velocity-movers td:nth-child(2)")!;
+  assert.match(name.body, /min-width:\s*20ch/);
+  assert.match(name.body, /white-space:\s*nowrap/);
+});
