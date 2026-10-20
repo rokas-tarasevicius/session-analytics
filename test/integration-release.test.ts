@@ -692,7 +692,8 @@ test("release: complete demo API, all providers and renderers, static modules an
   const realFetch = fetch;
   try {
     let ready = false;
-    for (let i = 0; i < 200; i++) {
+    // Seeding seven providers includes many SQLite commits and can exceed 20 seconds on a busy filesystem.
+    for (let i = 0; i < 600; i++) {
       assert.equal(child.exitCode, null, errors);
       try { ready = (await realFetch(`${base}/api/health`)).ok; } catch { /* Starting. */ }
       if (ready) break; await delay(100);
