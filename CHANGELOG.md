@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Dashboard links retain the active view’s provider chips, including an empty selection, across reload and Back/Forward. Refresh removes vanished repository focus and records any date-range clamping in the address bar.
+
 - Pricing freshness and Coverage source links now accept only HTTP(S), matching the model details dialog and excluding executable or local-file links from imported snapshots.
 
 - Velocity top movers label increases from an observed zero baseline as “New”, matching the calendar comparisons instead of claiming the baseline is too small.

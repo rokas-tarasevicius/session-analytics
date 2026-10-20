@@ -550,6 +550,26 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.equal(await browser.evaluate(`document.querySelector('#window-segment [aria-pressed="true"]').dataset.windowPreset`), "custom");
     assert.deepEqual(await browser.evaluate(`[document.querySelector('#window-start').value, document.querySelector('#window-end').value]`), [spendDay, spendDay]);
     assert.equal(await browser.evaluate(`document.querySelector('[data-view-panel="costs"]').hidden`), false);
+    // Provider URLs survive real history navigation and reload, independently in every filtered view.
+    for (const view of ["summary", "velocity", "tools", "activity"]) {
+      const chip = view === "summary" ? '[data-provider-filter="codex"]' : view === "velocity" ? '#velocity-view .provider-key [data-provider="codex"] input' : `[data-focus-key="filter:${view}:codex"]`;
+      await browser.open(`${origin}/?view=${view}&window=all&repo=${repositoryId}&providers=claude#main`);
+      assert.equal(await browser.evaluate(`document.querySelector(${JSON.stringify(chip)}).checked`), false, view);
+      assert.equal(await browser.evaluate(`document.querySelector('#repository-filter').value`), repositoryId);
+      await browser.evaluate(`document.querySelector(${JSON.stringify(chip)}).click()`);
+      assert.equal(await browser.evaluate(`new URLSearchParams(location.search).get('providers')`), "codex,claude");
+      await browser.evaluate(`history.back()`);
+      await browser.until(`document.querySelector(${JSON.stringify(chip)}).checked`, false);
+      await browser.evaluate(`history.forward()`);
+      await browser.until(`document.querySelector(${JSON.stringify(chip)}).checked`, true);
+      await browser.open(await browser.evaluate<string>("location.href"));
+      assert.equal(await browser.evaluate(`document.querySelector(${JSON.stringify(chip)}).checked`), true);
+      await browser.open(`${origin}/?view=${view}&window=all&providers=none&open=palette`);
+      await browser.until(`document.querySelector('#command-palette').open`, true);
+      assert.match(await browser.evaluate<string>(`document.querySelector('#command-list').textContent`), /Show Codex/);
+      await browser.key("Escape");
+    }
+
     // A one-shot ?open=palette opens the palette once and leaves the URL.
     await browser.open(`${origin}/?open=palette`);
     await browser.until(`document.querySelector('#command-palette').open`, true);

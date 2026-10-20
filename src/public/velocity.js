@@ -321,13 +321,18 @@ export function renderVelocity(container, sessions, context) {
         const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = selectedProviders.has(provider);
         label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider)); input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
         label.append(input, el("span", providerLabels[provider]));
-        input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); }); filters.append(label);
+        input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); controller.context.onProvidersChange?.([...selectedProviders]); }); filters.append(label);
       }
     };
     for (const input of [group.select, metric.select, granularity.select, mode.select, rolling]) input.addEventListener("change", update);
     controllers.set(container, controller);
   }
   controller.sessions = sessions; controller.context = context;
+  if (context.selectedProviders) {
+    controller.selectedProviders.clear();
+    for (const provider of context.selectedProviders) controller.selectedProviders.add(provider);
+    for (const chip of container.querySelectorAll(".provider-key .chip")) chip.querySelector("input").checked = controller.selectedProviders.has(chip.dataset.provider);
+  }
   controller.syncChips(context.providers ?? providerIds);
   controller.update();
 }
