@@ -1,5 +1,6 @@
 import { compact, dateRange, dayLabel, deltaText, decimal as number, money, moneyAxis, monthLabel, percent } from "./format.js";
 import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
+import { axisTickIndexes } from "./chart-scale.js";
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels, providerMark } from "./providers.js";
 import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
@@ -128,8 +129,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     svg.append(svgElement("line", { x1: left, x2: width - right, y1: y(value), y2: y(value), class: "grid-line" }));
     svg.append(svgElement("text", { x: left - 12, y: y(value) + 4, "text-anchor": "end", class: "axis-label" }, yLabels[tick]));
   }
-  const fractions = room >= 5 ? [0, 0.25, 0.5, 0.75, 1] : room >= 3 ? [0, 0.5, 1] : room >= 2 ? [0, 1] : [1];
-  const ticks = [...new Set(fractions.map((fraction) => Math.round(fraction * (data.keys.length - 1))))];
+  const ticks = axisTickIndexes(data.keys.length, room, data.granularity === "hour");
   for (const index of ticks) svg.append(svgElement("text", { x: x(index), y: height - 12, "text-anchor": index === 0 ? "start" : index === data.keys.length - 1 ? "end" : "middle", class: "axis-label" }, tickCaption(data.keys[index])));
   let floor = data.keys.map(() => 0);
   data.series.forEach((series, seriesIndex) => {

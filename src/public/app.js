@@ -1,7 +1,7 @@
 import { compact, dateLabel, dateRange, dateTime, dayLabel, disjunction, fullDate, integer, money, timeLabel } from "./format.js";
 import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
-import { barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
+import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
@@ -863,7 +863,8 @@ function renderLine(items) {
     addSvgText(svg, shortMoney(value), left - 10, y + 4, "end");
   }
   const xAt = (index) => items.length === 1 ? left + plotWidth / 2 : left + (index / (items.length - 1)) * plotWidth;
-  const tickIndexes = [...new Set(width < 560 ? [0, Math.round((items.length - 1) / 2), items.length - 1] : [0, Math.round((items.length - 1) / 4), Math.round((items.length - 1) / 2), Math.round(((items.length - 1) * 3) / 4), items.length - 1])];
+  const tickRoom = Math.floor(plotWidth / (Math.max(...items.map(({ name }) => dayLabel(name).length)) * 7 + 16)) + 1;
+  const tickIndexes = axisTickIndexes(items.length, tickRoom);
   for (const index of tickIndexes) addSvgText(svg, dayLabel(items[index].name), xAt(index), height - 12, index === 0 ? "start" : index === items.length - 1 ? "end" : "middle");
   const xs = items.map((_, index) => xAt(index));
   const baseline = top + plotHeight;

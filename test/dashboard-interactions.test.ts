@@ -475,14 +475,14 @@ test("Summary, Velocity and Tools share axis labels while money totals retain ce
   run("renderSummary(activeView())");
   const daily = document.querySelector("#daily-spend")!;
   const summaryAxis = daily.querySelectorAll("text").map((node) => node.textContent);
-  assert.ok(summaryAxis.includes("13 Sept")); assert.ok(summaryAxis.includes("12 Oct")); assert.ok(summaryAxis.includes("$40"));
+  assert.ok(summaryAxis.includes("18 Sept")); assert.ok(summaryAxis.includes("12 Oct")); assert.ok(summaryAxis.includes("$40"));
   const legend = daily.querySelector(".chart-legend")!;
   assert.equal(legend.dataset["layout"], "list");
   assert.deepEqual(legend.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
   assert.equal(document.querySelector("#metric-spend")!.textContent, "$120.00");
   run("currentViewName = () => 'velocity'; renderActiveAnalyticsView(activeView())");
   const velocityAxis = document.querySelector(".velocity-chart")!.querySelectorAll(".axis-label").map((node) => node.textContent);
-  assert.ok(velocityAxis.includes("13 Sept")); assert.ok(velocityAxis.includes("12 Oct")); assert.ok(velocityAxis.includes("$40"));
+  assert.ok(velocityAxis.includes("18 Sept")); assert.ok(velocityAxis.includes("12 Oct")); assert.ok(velocityAxis.includes("$40"));
   assert.deepEqual(document.querySelector(".velocity-legend")!.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
   run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
   assert.deepEqual(document.querySelector(".tools-trend-axis")!.children.map((node) => node.textContent), ["13 Sept", "12 Oct"]);

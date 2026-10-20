@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Daily and hour-profile chart ticks use even calendar steps; short windows label each day when space permits and hour profiles use six-hour steps.
+
 - Dashboard percentage changes share arrows and one decimal place, with an explicit day count for adjacent-window comparisons.
 
 - Velocity labels its daily usage-value mean “Average per active day” instead of “Average price”.
