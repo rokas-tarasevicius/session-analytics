@@ -69,8 +69,17 @@ const elements = {
   windowEnd: $("#window-end"), windowNote: $("#window-note"), windowSegment: $("#window-segment"), windowSelect: $("#window-select"), windowStart: $("#window-start"),
   wordmark: $(".wordmark"),
 };
+for (const provider of providerOrder) {
+  const label = node("label", null, "chip"); label.dataset.provider = provider;
+  label.style.setProperty("--chip-color", providerColor(provider));
+  const input = node("input"); input.type = "checkbox"; input.checked = true;
+  input.dataset.providerFilter = provider;
+  input.setAttribute("aria-label", `${provider === "unsupported" ? "Unsupported provider" : providerLabels[provider]} daily usage`);
+  if (provider === "unsupported") { label.hidden = true; label.dataset.unsupportedProvider = "true"; }
+  label.append(input, providerMark(provider), node("span", providerLabels[provider]));
+  $("#daily-provider-filters").append(label);
+}
 const providerFilters = [...document.querySelectorAll("[data-provider-filter]")];
-for (const input of providerFilters) input.closest(".chip").style.setProperty("--chip-color", providerColor(input.dataset.providerFilter));
 const viewButtons = [...document.querySelectorAll("[data-view-button]")];
 const viewPanels = [...document.querySelectorAll("[data-view-panel]")];
 const windowButtons = [...elements.windowSegment.querySelectorAll("[data-window-preset]")];

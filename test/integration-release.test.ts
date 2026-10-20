@@ -682,7 +682,8 @@ test("release: complete demo API, all providers and renderers, static modules an
   const address = listener.address(); assert.ok(address && typeof address === "object");
   await new Promise<void>((resolve) => listener.close(() => resolve()));
   const base = `http://127.0.0.1:${address.port}`;
-  const child = spawn(process.execPath, ["scripts/demo.ts", "--no-open", "--port", String(address.port)], { stdio: ["ignore", "pipe", "pipe"] });
+  // Discard unused progress output so an unread pipe cannot block demo startup.
+  const child = spawn(process.execPath, ["scripts/demo.ts", "--no-open", "--port", String(address.port)], { stdio: ["ignore", "ignore", "pipe"] });
   let errors = ""; child.stderr.on("data", (chunk) => { errors += String(chunk); });
   const globals = globalThis as unknown as Record<string, any>;
   const originals = Object.fromEntries(["document", "window", "Option", "HTMLElement", "fetch"].map((key) => [key, globals[key]]));

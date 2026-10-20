@@ -1,7 +1,7 @@
 import { compact, dateRange, dayLabel, decimal as number, money, moneyAxis, monthLabel, percent } from "./format.js";
 import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
-import { providerIds, providerLabels } from "./providers.js";
+import { providerIds, providerLabels, providerMark } from "./providers.js";
 import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
 import { ledgerAvailability } from "./view-model.js";
 import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, shiftDay, topMovers, velocityIndicators } from "./velocity-data.js";
@@ -319,7 +319,7 @@ export function renderVelocity(container, sessions, context) {
       for (const provider of providers) {
         const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = selectedProviders.has(provider);
         label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider)); input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
-        label.append(input, el("span", providerLabels[provider]));
+        label.append(input, providerMark(provider), el("span", providerLabels[provider]));
         input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); }); filters.append(label);
       }
     };

@@ -150,7 +150,7 @@ async function connect(port: number, log: () => string = () => ""): Promise<{ br
   return { browser, close: () => socket.close() };
 }
 
-test("laptop tables fit and daily usage chips stay one row tall in both densities", { skip: browserSkip }, async (t) => {
+test("laptop tables fit and registry provider chips wrap within their header in both densities", { skip: browserSkip }, async (t) => {
   assert.ok(existsSync(chromePath), `Required browser is missing: ${chromePath}`);
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-layout-"));
   let server: ChildProcess | null = null, chrome: ChildProcess | null = null;
@@ -210,14 +210,16 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
           }))`);
         for (const wrap of wraps) assert.ok(wrap.scroll <= wrap.client, `${view}: ${wrap.name} at ${label}: ${wrap.scroll} > ${wrap.client}`);
         if (view === "summary") {
-          const chips = await browser.evaluate<{ row: number; chip: number; count: number; belowTitle: boolean }>(`(() => {
+          const chips = await browser.evaluate<{ row: number; chip: number; count: number; belowTitle: boolean; fits: boolean }>(`(() => {
             const header = document.querySelector('.daily-usage-header'), row = header.querySelector('.provider-key');
             const chips = [...row.querySelectorAll('.chip')].filter((chip) => !chip.hidden);
             return { row: row.getBoundingClientRect().height, chip: chips[0].getBoundingClientRect().height, count: chips.length,
-              belowTitle: row.getBoundingClientRect().top >= header.querySelector('h2').getBoundingClientRect().bottom };
+              belowTitle: row.getBoundingClientRect().top >= header.querySelector('h2').getBoundingClientRect().bottom,
+              fits: chips.every((chip) => chip.getBoundingClientRect().left >= row.getBoundingClientRect().left && chip.getBoundingClientRect().right <= row.getBoundingClientRect().right + 1) };
           })()`);
           assert.equal(chips.count, 7, label);
-          assert.equal(chips.row, chips.chip, `Daily usage chip height at ${label}`);
+          assert.ok(chips.row <= chips.chip * 2 + 6, `Daily usage chips need at most two rows at ${label}`);
+          assert.equal(chips.fits, true, `Provider chips fit at ${label}`);
           assert.equal(chips.belowTitle, true, label);
         }
       }

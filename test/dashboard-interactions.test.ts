@@ -631,3 +631,21 @@ test("an earlier-started contributor keeps the fleet caption for a one-session w
   assert.match(scope, /^2 repositories · 1 with sessions\./);
   assert.equal(document.querySelector("#metric-spend")!.textContent, "$102.00");
 });
+
+
+test("Summary, Velocity, Tools and Activity chips share registry labels, marks and order", async () => {
+  const { providerIds, providerLabels } = await import("../src/public/providers.js");
+  const sessions = providerIds.map((provider) => { const s = withLedger(sample(), [["synthetic", 1]]); s.provider = provider; return s; });
+  const { document, run } = await harness(sessions);
+  run("switchView('velocity'); renderViewProviderFilters(elements.toolsProviderFilters, 'tools'); renderViewProviderFilters(elements.activityProviderFilters, 'activity')");
+  const rows = [document.querySelector("#daily-provider-filters")!, document.querySelector("#tools-provider-filters")!, document.querySelector("#activity-provider-filters")!, document.querySelector("#velocity-view")!.querySelector(".provider-key")!];
+  for (const row of rows) {
+    assert.deepEqual(row.querySelectorAll("label").map((label) => label.dataset["provider"]), providerIds, row.id || "velocity");
+    assert.deepEqual(row.querySelectorAll("label").map((label) => label.children.at(-1)!.textContent), providerIds.map((id) => providerLabels[id]));
+    assert.equal(row.querySelectorAll("label").every((label) => label.children.length === 3), true);
+  }
+  const summary = rows[0]!;
+  assert.deepEqual(summary.querySelectorAll("input").map((input) => input.dataset["providerFilter"]), providerIds);
+  assert.deepEqual(summary.querySelectorAll("input").map((input) => input.getAttribute("aria-label")), providerIds.map((id) => `${id === "unsupported" ? "Unsupported provider" : providerLabels[id]} daily usage`));
+  assert.deepEqual(summary.querySelectorAll(".mark").map((mark) => mark.textContent), ["CP", "OC", "G", "AG", "?"]);
+});

@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Summary and Velocity provider chips share the registry names, marks and order used by Tools and Activity, including Copilot CLI and Gemini CLI.
+
 - Selected provider chips use the chart provider colour in both themes; deselected chips keep a hollow state mark.
 
 - Velocity explains the actual guard blocking a burn ratio or projection, including calendar days, pricing coverage and minimum activity figures.
