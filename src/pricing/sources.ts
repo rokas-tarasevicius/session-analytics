@@ -30,7 +30,7 @@ function allowedModel(model: string, provider: "claude" | "codex" | "cursor"): b
 // Explicit provider feed rates override this reviewed fallback; custom cards do
 // not pass through this normalizer and keep their explicitly supplied policy.
 const paidCacheWriteModels = new Set([
-  "gpt-5-6-sol", "gpt-5-6-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-1-sol",
+  "gpt-5-6-sol", "gpt-5-6-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-1-sol", "gpt-6-luna", "gpt-5-6-luna",
 ]);
 const legacyNoWriteModels = new Set(["gpt-5-3-codex", "gpt-5-4", "gpt-5-4-mini", "gpt-5-5"]);
 /** Re-project old generated assumptions without rewriting immutable source snapshots. */

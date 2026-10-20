@@ -119,6 +119,24 @@ test("selects immutable request-time history, labels oldest and missing-time fal
   assert.equal(resolveRate(introduced, "gpt-fixture", FEB)?.rate.inputPerMillion, 8);
 });
 
+test("a newly listed model uses its first later observation, without rewriting priced requests or resurrecting removals", () => {
+  const before = sourceSnapshot("models.dev", JAN), introduced = sourceSnapshot("models.dev", FEB), removed = sourceSnapshot("models.dev", MAR);
+  introduced.models["gpt-new"] = rate(0.1);
+  const catalog = catalogFromSnapshots(reviewed(), [before, introduced, removed], {}, now);
+  for (const date of ["2026-01-15", "2025-12-01"]) {
+    const selected = resolveRate(catalog, "openai/gpt-new", date)!;
+    assert.equal(selected?.rate.inputPerMillion, 0.1);
+    assert.equal(selected.provenance.snapshotDate, FEB);
+    assert.equal(selected.provenance.temporal, "oldest");
+  }
+  assert.equal(resolveRate(catalog, "gpt-new", "2026-02-15")?.provenance.temporal, "at-or-before");
+  assert.equal(resolveRate(catalog, "gpt-new", MAR), undefined);
+  assert.equal(resolveRate(catalog, "gpt-new"), undefined);
+  assert.equal(resolveRate(catalog, "gpt-fixture", "2026-01-15")?.provenance.snapshotDate, JAN);
+  const other = sourceSnapshot("litellm", JAN); other.models["gpt-new"] = rate(0.2);
+  assert.equal(resolveRate(catalogFromSnapshots(reviewed(), [before, introduced, other], {}, now), "gpt-new", "2026-01-15")?.provenance.source, "litellm");
+});
+
 test("shuffled observations select exact millisecond boundaries and ignore future API evidence", () => {
   const before = "2026-02-01T00:00:00.000Z", boundary = "2026-02-01T00:00:00.001Z";
   const future = sourceSnapshot("models.dev", "2026-03-03T00:00:00.001Z", 99);

@@ -460,6 +460,12 @@ export interface AnalyzeOptions extends PricingOptions {
   repositoryRoot?: string;
 }
 
+/** Live dashboard hint, separate from saved analytics and rates CLI status. */
+export interface PricingUpdateAvailability {
+  updateAvailable: boolean;
+  fetchedAt: string | null;
+}
+
 export interface DashboardHealth {
   service: "session-analytics";
   dataSource: "live" | "snapshot";
@@ -472,6 +478,8 @@ export interface DashboardHealth {
   scanHash: string;
   /** Tool version: a launch reuses only a dashboard running the same version. */
   version: string;
+  /** Present only when this live dashboard can fetch public prices. */
+  pricing?: PricingUpdateAvailability;
 }
 
 export interface ProviderEvidence {

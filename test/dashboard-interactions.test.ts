@@ -16,6 +16,23 @@ import { harness, sample, withLedger } from "./validation/aggregation-ui-harness
 const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const presets = ["7", "30", "90", "all", "custom"];
 
+test("pricing health polling adds the refresh notice without fetching analytics or mutating displayed totals", async () => {
+  const { context, document, run } = await harness([withLedger(sample(), [["synthetic", 2]])]);
+  run(`fixture.rateCard = { effectiveDate: '2026-10-20', models: [], pricing: {
+    offline: false, policy: 'reviewed-first', stale: false, sources: [], warnings: [], refreshAfterDays: 7
+  } }; switchView('pricing')`);
+  const previous = JSON.stringify(run("snapshot"));
+  let requests = 0;
+  context["fetch"] = async (url: string) => {
+    requests++; assert.equal(url, "/api/health");
+    return { ok: true, json: async () => ({ pricing: { updateAvailable: true, fetchedAt: "2026-10-20T12:00:00.000Z" } }) };
+  };
+  await run("pollPricingUpdate()");
+  assert.equal(requests, 1);
+  assert.match(document.querySelector("#pricing-panel")!.textContent, /New prices were cached/);
+  assert.equal(JSON.stringify(run("snapshot")), previous);
+});
+
 test("the harness fires g v through the dashboard keydown handler", async () => {
   const { run, fireKey } = await harness([sample()]);
   fireKey("g"); fireKey("v");
