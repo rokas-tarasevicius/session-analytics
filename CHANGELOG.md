@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Reports piped to a consumer that closes early, such as `head`, stop their workers and exit quietly instead of printing an uncaught pipe error and local stack paths.
 - Invalid dashboard ports and unknown report/dashboard arguments now return fixed diagnostics without echoing private input or exception stacks; browser launch failures also use a fixed message.
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 

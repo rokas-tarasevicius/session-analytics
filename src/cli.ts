@@ -2,7 +2,7 @@ import { historyReport } from "./report/history.ts";
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, OptionError, optionErrorMessage, pricingHelp, sourceHelp, argument, remoteBooleanFlags, remoteHelp, remoteValueFlags, type RemoteOptions } from "./options.ts";
 import { remoteFor } from "./machines/config.ts";
-import { stopOnSignals, stopping } from "./processes.ts";
+import { stopOnOutputError, stopOnSignals, stopping } from "./processes.ts";
 import { analyzeMachines } from "./remote.ts";
 import { localIdentity } from "./machines/identity.ts";
 import { assertSnapshotOptions, reportShare, reportInteropFailure, shareValueFlags } from "./interop/cli.ts";
@@ -17,6 +17,7 @@ import type { MachineAnalytics, MachineStatus } from "./types.ts";
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, ...shareValueFlags]);
 const booleanFlags = new Set([...analysisBooleanFlags, ...remoteBooleanFlags, "--exclude-hidden", "--help", "--include-hidden", "--json", "--share", "--strict", "--identify-machine", "--version", "--no-additional-providers", "--offline"]);
 import { indexErrorCode, indexErrorMessage } from "./store/errors.ts";
+stopOnOutputError();
 // A repeated value would otherwise be silently first-wins; only --remote adds up.
 const given = new Set<string>();
 for (let index = 2; index < process.argv.length; index += 1) {
