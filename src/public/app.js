@@ -759,7 +759,15 @@ async function loadLimitsNow(refresh = false) {
   if (limitsPoll !== null) { clearTimeout(limitsPoll); limitsPoll = null; }
   if (limits.machines?.some(({ state }) => state === "reading") && limitsTimer !== null && typeof setTimeout === "function") limitsPoll = setTimeout(() => void loadLimits(false), 2000);
 }
-const loadLimits = singleFlight(loadLimitsNow);
+let limitsPending = null;
+let limitsRefreshing = false;
+/** Share reads, but queue a forced refresh when a passive read is already in flight. */
+function loadLimits(refresh = false) {
+  if (limitsPending) return refresh && !limitsRefreshing ? limitsPending.then(() => loadLimits(true)) : limitsPending;
+  limitsRefreshing = refresh;
+  limitsPending = loadLimitsNow(refresh).finally(() => { limitsPending = null; });
+  return limitsPending;
+}
 
 function scheduleLimits(active) {
   if (!active) { if (limitsTimer !== null) clearInterval(limitsTimer); limitsTimer = null; if (limitsPoll !== null) clearTimeout(limitsPoll); limitsPoll = null; return; }
