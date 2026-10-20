@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- MCP rejects any request that reuses an in-flight tool request's ID, including pings and catalog requests, so each active ID receives at most one result.
 - Snapshot imports reject impossible ledger dates, hours outside 0–23, missing velocity dimensions, unsupported time zones, and inconsistent daily MCP pricing coverage.
 - Snapshot imports apply the public model-ID privacy checks to rate cards, pricing provenance and velocity dimensions, rejecting credential-shaped identifiers and paths before export.
 - MCP's integrated API-equivalent summary excludes provider-reported value, includes session-dated value, and retains undated tokens in its pricing denominator.
