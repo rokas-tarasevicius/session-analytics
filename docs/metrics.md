@@ -466,11 +466,11 @@ fabricated 0%. An observed prior period with exactly zero value shows **New** wh
 period has activity and **No activity** when both are zero. Unavailable comparisons state their
 specific reason (no observed prior history, partly observed period, insufficient evidence,
 small baseline, or a stale snapshot).
-Top movers rank absolute increases separately for repository, model and agent over the
+Top increases rank positive absolute increases separately for repository, model and agent over the
 last seven completed days versus the preceding seven. Percent guards use each group's
-own prior calls; new groups can have a positive absolute increase with an N/A percentage.
+own prior calls; an observed zero baseline shows New, while a nonzero baseline below the minimum shows a small-baseline dash.
 Groups with incomplete evidence in either period are excluded from mover rankings; their
-count is displayed. Ranked rows show each period's known/eligible counts. This prevents a
+count is displayed. Ranked rows show compact evidence for previous → current (for example, `13.8M priced (100%) → 9.3M priced (100%)`); each cell's tooltip and accessible name retain the exact known/eligible counts and any unsupported-breakdown note. This prevents a
 return of pricing or token telemetry from being described as a workload increase.
 
 Burn is today's partial value divided by the median of the previous 14 full calendar

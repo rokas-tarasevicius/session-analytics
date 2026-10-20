@@ -24,7 +24,7 @@ On narrow screens, repository and time-window selectors share the header, and me
 
 Summary answers "what happened in this window?" Six metrics show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each metric shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. On wide desktops, the metrics form a totals rail beside the daily usage chart and session mix; at 1400 pixels and above the daily chart grows taller to fill the space beside the totals rail. Narrower layouts put totals first. Repository and model breakdowns, top tools, sub-agent value and a sortable fleet table follow below.
 
-Percentage changes share arrow marks and one decimal place. Adjacent equal-length windows say “vs previous Nd”; calendar week/month comparisons retain their named weekday/month periods.
+Changes share arrow marks and one decimal place for percentages; ratios above 10× use a multiple of the prior value, such as `▲ 156×`. Adjacent equal-length windows say “vs previous Nd”; calendar week/month comparisons retain their named weekday/month periods.
 
 <p align="center">
   <picture>
@@ -54,7 +54,7 @@ The dashboard shows this machine's sessions as soon as its own scan is done, rat
 
 ### Velocity: where usage is moving
 
-Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every percentage, and a **Top movers** table ranks the models, agents and other dimensions whose value changed most over the last seven completed days. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
+Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every change, and a **Top increases** table ranks positive absolute increases by repository, model and agent over the last seven completed days versus the preceding seven. Evidence cells use compact counts, such as `13.8M priced (100%) → 9.3M priced (100%)`; exact known/eligible counts stay in the tooltip and accessible name. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
 
 Daily chart ticks use equal calendar steps, labelling every day in windows up to 14 days when the labels fit. Hour profiles use 00:00, 06:00, 12:00 and 18:00, with fewer equally spaced ticks on narrow charts.
 
@@ -70,7 +70,7 @@ Velocity’s “Average per active day” is usage value divided by days with po
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-velocity-movers-dark.webp" />
-    <img alt="Top movers table: models and agents ranked by their change over the last seven completed days, with the priced-token evidence behind each comparison" src="../assets/screenshot-velocity-movers.webp" width="100%" />
+    <img alt="Top increases table: repositories, models and agents ranked by positive absolute increase over the last seven completed days, with compact priced-token evidence and exact counts in tooltips and accessible names" src="../assets/screenshot-velocity-movers.webp" width="100%" />
   </picture>
 </p>
 

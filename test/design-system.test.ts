@@ -421,3 +421,14 @@ test("wide Summary gives the daily chart more height beside the totals rail", as
   const source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   assert.match(source, /height = window\.matchMedia\("\(min-width: 1400px\)"\)\.matches \? 600 : width < 560 \? 220 : 272/);
 });
+
+
+test("Velocity docs describe Top increases and compact evidence with exact accessible counts", async () => {
+  const [dashboard, metrics] = await Promise.all(["dashboard", "metrics"].map((name) => readFile(new URL(`../docs/${name}.md`, import.meta.url), "utf8")));
+  for (const doc of [dashboard!, metrics!]) {
+    assert.doesNotMatch(doc, /Top movers/);
+    assert.match(doc, /Top increases/);
+    assert.match(doc, /13\.8M priced \(100%\) → 9\.3M priced \(100%\)/);
+    assert.match(doc, /tooltip.*accessible name/);
+  }
+});
