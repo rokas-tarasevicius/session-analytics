@@ -415,3 +415,9 @@ test("pricing refresh instructions mark the runnable command as code", async () 
   assert.match(source, /el\("code", "session-analytics rates update"\)/);
   assert.match(await readCss("pricing.css"), /\.pricing-notice code\s*\{[^}]*var\(--font-mono\)/);
 });
+
+
+test("wide Summary gives the daily chart more height beside the totals rail", async () => {
+  const source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
+  assert.match(source, /height = window\.matchMedia\("\(min-width: 1400px\)"\)\.matches \? 600 : width < 560 \? 220 : 272/);
+});

@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Wide Summary daily charts use a taller plot to reduce the empty band before repository breakdowns beside the totals rail.
+
 - Dashboard comparisons above ten times the prior value show a compact multiple across Summary, Tools and Velocity, including Top increases; zero baselines keep the existing new-activity label.
 
 - Dashboard repositories with the same display name receive stable ordinal suffixes across navigation, charts, tables and the command palette, without revealing paths or changing exported names.
