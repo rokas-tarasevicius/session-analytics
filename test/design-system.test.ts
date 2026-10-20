@@ -393,3 +393,12 @@ test("export actions precede the collapsible scope and privacy explanation", asy
   assert.ok(menu.indexOf('data-export="json"') < menu.indexOf('id="export-description"'));
   assert.match(menu, /<details class="export-includes"><summary>What’s included<\/summary><p id="export-description">/);
 });
+
+
+test("wide Summary places provider sessions alongside the daily chart", async () => {
+  const css = await readCss("styles.css");
+  const wide = css.slice(css.indexOf("@media (min-width: 1400px)"), css.indexOf("/* ---------------------------------------------------------------- responsive */"));
+  assert.match(wide, /\.daily-usage-header\s*\{\s*grid-column:\s*1 \/ -1/);
+  assert.match(wide, /#daily-spend\s*\{\s*grid-column:\s*1 \/ span 8/);
+  assert.match(wide, /\.panel:last-child\s*\{\s*grid-column:\s*9 \/ -1;\s*grid-row:\s*2 \/ span 2/);
+});
