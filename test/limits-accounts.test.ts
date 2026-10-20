@@ -355,6 +355,29 @@ test("cursors persist with a fingerprint: rewritten files are re-read, unreadabl
   assert.deepEqual(later.observations.map((row) => row.usedPercent).sort(), [31, 32, 60]);
 });
 
+test("a truncated file saves its shorter cursor, so the next harvest resumes instead of reading it again", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-truncated-cursor-")), logs = join(home, "logs");
+  mkdirSync(logs);
+  const log = join(logs, "events.log"), dataDir = join(home, "data");
+  const options = { dataDir, codexRoot: join(home, "none") };
+  const environment = { ...environmentFor(home), SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: logs };
+  const count = (snapshot: LimitsSnapshot) => snapshot.sources.find((source) => source.source === "claude-sdk-log")!.read;
+  const first = sdkEvent(now - 600, null, { five_hour: [0.31, now + 3600] });
+  const replacement = sdkEvent(now - 300, null, { five_hour: [0.32, now + 3600] });
+  writeFileSync(log, first + first);
+  assert.equal(count(await collectLimits(options, environment, now)), 2);
+  writeFileSync(log, replacement);
+  assert.equal(count(await collectLimits(options, environment, now + 60)), 1);
+  const cursor = Object.values(readLedger(dataDir, now + 60).ledger!.cursors)[0]!;
+  assert.equal(cursor.offset, Buffer.byteLength(replacement), "a newer shorter read replaces the old generation's offset");
+  assert.equal(count(await collectLimits(options, environment, now + 120)), 0);
+  const newer = { ...emptyLedger(), cursors: { "1:2": cursor } };
+  const older = { ...emptyLedger(), cursors: { "1:2": { offset: Buffer.byteLength(first + first), fingerprint: "0123456789abcdef", seen: now } } };
+  for (const [left, right] of [[older, newer], [newer, older]]) {
+    assert.deepEqual(mergeLedgers(left!, right!, now + 120).cursors["1:2"], cursor, "a stale concurrent writer cannot restore the old cursor");
+  }
+});
+
 test("readings kept under a profile's fallback key join its account once the login is known, and stay joined across merges", async () => {
   const home = mkdtempSync(join(tmpdir(), "limits-alias-"));
   const logs = join(home, "logs");

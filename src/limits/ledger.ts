@@ -506,7 +506,7 @@ export function mergeAccount(left: LedgerAccount | undefined, right: LedgerAccou
 }
 
 /**
- * Union two ledgers. Rows max-merge per bucket, so merging is commutative; cursors keep the furthest read; account
+ * Union two ledgers. Rows max-merge per bucket, so merging is commutative; cursors keep the newest read (furthest on ties); account
  * summaries keep the latest observation. Every write merges with the file on disk under the limits gate, so harvests in
  * other processes (cron and the dashboard) never erase each other's readings.
  */
@@ -514,7 +514,9 @@ export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
   const cursors = { ...left.cursors };
   for (const [identity, cursor] of Object.entries(right.cursors)) {
     const current = cursors[identity];
-    if (!current || cursor.offset > current.offset || (cursor.offset === current.offset && (!cursor.retry || cursor.seen >= current.seen))) cursors[identity] = cursor;
+    // A rewritten file can be shorter: an older, larger offset must not replace its newer cursor on every write.
+    if (!current || cursor.seen > current.seen || (cursor.seen === current.seen &&
+      (cursor.offset > current.offset || (cursor.offset === current.offset && !cursor.retry)))) cursors[identity] = cursor;
   }
   const creators: Record<string, string[]> = { ...left.creators };
   for (const [key, accounts] of Object.entries(right.creators)) creators[key] = [...new Set([...creators[key] ?? [], ...accounts])].sort().slice(0, maximumCreators);
