@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Independent Codex verification uses the snapshot's time zone, so verifying a saved snapshot in another time zone no longer reports false hourly discrepancies.
 - Release automation approves CI only for its own release pull request, even when another pull request shares the same commit.
 - Synthetic index benchmarks no longer discover real provider stores or fetch prices, and the test runner always isolates its data directory even when `SESSION_ANALYTICS_DATA_DIR` is exported.
 - The build resolves symlinked output paths before emptying a directory, preserving the checkout and home-directory protections through symlink aliases.
