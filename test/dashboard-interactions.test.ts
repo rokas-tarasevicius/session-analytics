@@ -560,6 +560,7 @@ test("snapshot status shows live counts after load and follows the selected wind
   context["fetch"] = async () => ({ ok: true, json: async () => run("({...fixture, rateCard: {effectiveDate: '2026-10-01', models: []}})") });
   await run("loadSnapshot()");
   assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 1 session in progress");
+  assert.equal(document.querySelector("#rate-card-date")!.textContent, "Rate card effective 1 Oct 2026");
   run("windowPreset = 'custom'; elements.windowStart.value = elements.windowEnd.value = '2026-09-01'; renderView()");
   assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready");
   run("elements.sync.dataset.state = 'loading'; elements.syncLabel.textContent = 'Refreshing…'; renderView()");

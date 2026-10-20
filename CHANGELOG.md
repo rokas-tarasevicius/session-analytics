@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Rate-card effective dates use the dashboard calendar-date format in the header and pricing dialog.
+
 - Snapshot status names sessions in progress and omits the opaque “0 live” suffix.
 
 - Summary and Velocity provider chips share the registry names, marks and order used by Tools and Activity, including Copilot CLI and Gemini CLI.

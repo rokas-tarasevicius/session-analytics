@@ -84,7 +84,7 @@ export function renderModelDetails(target, card, rateCard, timeZone = "UTC") {
     const link = el("a", "Rate source ↗"); link.href = card.source; link.target = "_blank"; link.rel = "noreferrer";
     source.append(link);
   }
-  source.append(note(`Reviewed card effective ${rateCard.effectiveDate}`)); body.append(source);
+  source.append(note(`Reviewed card effective ${humanDate(rateCard.effectiveDate)}`)); body.append(source);
   if (card.used) {
     const usage = card.usage;
     const values = [["Usage value", money(usage.valueUsd)]];

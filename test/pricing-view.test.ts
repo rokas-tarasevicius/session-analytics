@@ -226,7 +226,7 @@ test("Model details show precise current prices, long-context rates and historic
     assert.match(root.text(), /Long-context pricing/); assert.match(root.text(), /Above 200,000 input tokens \$10\.00 \$45\.00/);
     assert.match(root.text(), /Public API price list/); assert.match(root.text(), /Exact match/);
     assert.match(root.text(), /models\.dev \/ api/); assert.match(root.text(), /Oldest available \(later than request\)/);
-    assert.match(root.text(), /None/); assert.match(root.text(), /Reviewed card effective 2026-01-01/);
+    assert.match(root.text(), /None/); assert.match(root.text(), /Reviewed card effective 1 Jan 2026/);
     assert.match(root.text(), /Usage value \$410\.57/); assert.match(root.text(), /Upper estimate \$450\.00/);
     assert.match(root.text(), /300 \/ 300 observed tokens \(100\.0%\)/);
     assert.match(root.text(), /Calls 3/); assert.match(root.text(), /Sessions 1/);

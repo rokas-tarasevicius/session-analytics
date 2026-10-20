@@ -1901,7 +1901,7 @@ function render(data) {
   // The window spans every machine, so switching one off keeps it.
   fullSnapshot = data; snapshot = data; sharedSnapshot = null; loadFailed = false;
   configureWindow(); applyMachines(); renderMachines();
-  markStale(false); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
+  markStale(false); elements.rateCardDate.textContent = `Rate card effective ${dateLabel(data.rateCard.effectiveDate.slice(0, 10))}`;
   if (!urlReady) {
     const match = repositoryFromParameter(initialUrl.repo);
     if (match) elements.repositoryFilter.value = match.repository.id;

@@ -87,6 +87,8 @@ Costs shows **—** for wholly unpriced model, provider and total values and mod
 
 Pricing answers "can I trust that dollar figure?" It shows pricing coverage (the share of eligible tokens with an explicit rate), the age of each public price source, whether updates are offline, and the effective date of the reviewed rate card. Each API-priced model used in the window gets a card with its input and output rates per million tokens, its value, tokens, calls and share, and a badge when part of its tokens could not be priced. A model with no matching rate is shown as unpriced rather than as free, and provider-reported value, such as Cursor's own figure, is kept in the totals line rather than given a rate card. A stale source raises a warning at the top; the demo seeds one deliberately stale source so that warning is visible.
 
+Rate-card effective dates in the header and pricing details use the same calendar-date format as window dates (for example, “2 Oct 2026”).
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-pricing-dark.webp" />
