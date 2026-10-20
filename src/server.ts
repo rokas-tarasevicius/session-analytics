@@ -43,7 +43,7 @@ for (let index = 2; index < process.argv.length; index += 1) {
   }
   if (flag) given.add(flag);
   if (!flag?.startsWith("--") || (!valueFlags.has(flag) && !booleanFlags.has(flag))) {
-    process.stderr.write(`Unknown session analytics server argument: ${flag ?? "<missing>"}\n`);
+    process.stderr.write("Unknown session analytics server argument. Run session-analytics dashboard --help.\n");
     process.exit(2);
   }
   if (valueFlags.has(flag)) {
@@ -416,9 +416,8 @@ const requestedPort =
   "4174";
 const port = Number(requestedPort);
 if (!Number.isInteger(port) || port < 1024 || port > 65_535) {
-  throw new Error(
-    `Session analytics port must be an integer from 1024 through 65535; received ${requestedPort}.`,
-  );
+  process.stderr.write("Session analytics port must be an integer from 1024 through 65535.\n");
+  process.exit(2);
 }
 
 const dashboardUrl = `http://127.0.0.1:${port}`;
@@ -432,7 +431,7 @@ async function openDashboard(): Promise<void> {
           ? ["cmd", "/c", "start", ""]
           : ["xdg-open"];
     execFile(opener ?? "open", [...openerArguments, dashboardUrl], (error) => {
-      if (error) process.stderr.write(`Could not open the browser: ${error.message}\n`);
+      if (error) process.stderr.write("Could not open the browser; open the dashboard URL manually.\n");
       resolve();
     });
   });

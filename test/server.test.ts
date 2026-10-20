@@ -18,6 +18,7 @@ import { plantMalformedModels } from "./model-privacy-fixture.ts";
 import { readDashboardToken, writeDashboardToken } from "../src/store/dashboard.ts";
 import { reuseRefusal } from "../src/dashboard-reuse.ts";
 import { version } from "../src/version.ts";
+import { staticRoutes } from "../src/static-routes.ts";
 
 const testRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = join(testRoot, "..");
@@ -94,7 +95,12 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
         rate_limits: { limit_id: "secret-limit-payload", plan_type: "secret-limit-payload", primary: { used_percent: 80, window_minutes: 300, resets_at: 1784548800, payload: "secret-limit-payload" }, credits: { balance: "secret-limit-payload" } } } }) + "\n");
     const port = await availablePort();
     const rejectionModule = join(temporaryDirectory, "rejection.mjs");
-    await writeFile(rejectionModule, 'setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL")); }, 1000);\n');
+    await writeFile(rejectionModule, `import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+childProcess.execFile = (...args) => args.at(-1)(new Error("PRIVATE-BROWSER-SENTINEL"));
+syncBuiltinESMExports();
+setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL")); }, 1000);
+`);
     const childEnvironment = {
       ...process.env,
       SESSION_ANALYTICS_NO_INDEX: "1", SESSION_ANALYTICS_ADDITIONAL_PROVIDERS: "0",
@@ -110,7 +116,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       SESSION_ANALYTICS_RELIABILITY_CONTENT_RULES: "1",
 
     };
-    child = spawn(process.execPath, ["--import", pathToFileURL(rejectionModule).href, serverPath, "--port", String(port)], {
+    child = spawn(process.execPath, ["--import", pathToFileURL(rejectionModule).href, serverPath, "--port", String(port), "--open"], {
       cwd: repositoryRoot,
       env: childEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
@@ -166,6 +172,8 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       });
       const response = await rawRequest(`127.0.0.1:${port}`);
       assert.match(response, /^HTTP\/1\.1 400 /);
+      assert.match(response, /Content-Security-Policy: default-src 'self'/i);
+      assert.match(response, /X-Content-Type-Options: nosniff/i);
       assert.match(response, /\{"error":"Bad request\."\}\n/);
       assert.match(await rawRequest("evil.example"), /^HTTP\/1\.1 403 /, "loopback check runs first");
       assert.equal((await fetch(`${origin}/api/health`)).status, 200);
@@ -210,6 +218,34 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       assert.equal((await fetch(`${origin}/format.d.ts`)).status, 404);
     });
 
+    await t.test("every static route supports query strings with explicit types and security headers", async () => {
+      const types: Record<string, string> = { html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", svg: "image/svg+xml; charset=utf-8", woff2: "font/woff2" };
+      for (const [route, file] of staticRoutes) {
+        const response = await fetch(`${origin}${route}?v=fixture`);
+        assert.equal(response.status, 200, route);
+        assert.equal(response.headers.get("content-type"), types[file.split(".").at(-1)!], route);
+        assert.equal(response.headers.get("x-content-type-options"), "nosniff", route);
+        assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/, route);
+        assert.equal(response.headers.get("access-control-allow-origin"), null, route);
+        await response.arrayBuffer();
+      }
+    });
+
+    await t.test("method and path rejections retain security headers", async () => {
+      for (const [path, method, status] of [["/api/health", "HEAD", 405], ["/api/analytics", "OPTIONS", 405], ["/missing", "GET", 404], ["/../server.ts", "GET", 404], ["/%2e%2e/server.ts", "GET", 404], ["/%2fapp.js", "GET", 404], ["/api/health", "GET", 403]] as const) {
+        const response = await fetch(`${origin}${path}`, { method, ...(status === 403 ? { headers: { Origin: "null" } } : {}) });
+        assert.equal(response.status, status, `${method} ${path}`);
+        assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+        assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+        assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
+        const body = await response.text();
+        if (method === "HEAD") assert.equal(body, "");
+        else assert.deepEqual(Object.keys(JSON.parse(body)), ["error"]);
+      }
+      assert.equal(await requestWithHost(port, "[::1]"), 403, "the server binds IPv4 loopback only");
+      assert.deepEqual(await (await fetch(`${origin}/api/machines`)).json(), { machines: [] });
+    });
+
     const response = await fetch(`${origin}/api/analytics`);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
@@ -228,15 +264,27 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
     assert.doesNotMatch(serialized, /SYNTHETIC-MODEL-SENTINEL/);
     assert.doesNotMatch(serialized, /"usedPercent"/);
 
+    await t.test("wait values never change a ready cached snapshot", async () => {
+      for (const wait of ["-1", "NaN", "Infinity", "nonnumeric", "999999999999", "0"]) {
+        const response = await fetch(`${origin}/api/analytics?wait=${wait}`);
+        assert.equal(response.status, 200, wait);
+        assert.equal(await response.text(), serialized, wait);
+      }
+    });
+
     for (const path of ["/api/insights", "/api/review", "/workflow-data.js", "/metrics/outcomes-summary.js", "/workflow.js", "/workflow-scope.js", "/workflow-worker.js", "/workflow.css", "/views/insights.js", "/views/insights-state.js", "/views/insights.css", "/views/limits-cache.js", "/views/limits-cache.css", "/outcomes.js", "/outcomes-summary.js", "/outcomes.css", "/reliability-data.js", "/reliability-view.js", "/reliability.css"]) {
       assert.equal((await fetch(`${origin}${path}`)).status, 404, path);
     }
 
     const refreshed = await fetch(`${origin}/api/analytics?refresh=1`);
     assert.equal(refreshed.status, 200);
+    await t.test("a browser launch failure logs only a fixed diagnostic", async () => {
+      await waitFor(() => stderr.includes("Could not open the browser; open the dashboard URL manually."), () => "Browser failure was not reported.");
+      assert.doesNotMatch(`${stdout}${stderr}`, /PRIVATE-BROWSER-SENTINEL/);
+    });
     await t.test("concurrent refresh requests share one scan", async () => {
-      const snapshots = await Promise.all(Array.from({ length: 6 }, async () => {
-        const response = await fetch(`${origin}/api/analytics?refresh=1`);
+      const snapshots = await Promise.all(Array.from({ length: 6 }, async (_, index) => {
+        const response = await fetch(`${origin}/api/analytics?refresh=1&wait=${index % 2 ? 30 : "NaN"}`);
         assert.equal(response.status, 200);
         return await response.json() as { generatedAt: string };
       }));
@@ -247,6 +295,12 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
       const pending = await fetch(`${origin}/api/analytics?refresh=1&wait=0.001`);
       assert.equal(pending.status, 202);
       assert.deepEqual(await pending.json(), { pending: true });
+      const together = await Promise.all(["wait=10", "refresh=1&wait=20"].map(async (query) => {
+        const response = await fetch(`${origin}/api/analytics?${query}`);
+        assert.equal(response.status, 200);
+        return (await response.json() as { generatedAt: string }).generatedAt;
+      }));
+      assert.equal(together[0], together[1], "refresh and cached reads join the scan already in progress");
       let response = await fetch(`${origin}/api/analytics?wait=10`);
       while (response.status === 202) response = await fetch(`${origin}/api/analytics?wait=10`);
       assert.equal(response.status, 200);
@@ -406,7 +460,11 @@ test("a dashboard from another version on the port is named, not reused", { time
   const dataDir = join(directory, "data");
   const token = "d".repeat(64);
   let health: Record<string, unknown> = {};
-  const older = createHttpServer((_request, response) => { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(health)); });
+  let rawBody: string | undefined;
+  const older = createHttpServer((_request, response) => {
+    if (rawBody === "slow") return;
+    response.writeHead(200, { "Content-Type": "application/json" }); response.end(rawBody ?? JSON.stringify(health));
+  });
   try {
     await new Promise<void>((resolve) => older.listen(0, "127.0.0.1", resolve));
     const address = older.address();
@@ -429,7 +487,15 @@ test("a dashboard from another version on the port is named, not reused", { time
     assert.equal(refused.stderr, `An older Session Analytics is running on this port; this is ${version}. Stop it (Ctrl+C where it runs) or choose --port.\n`);
     health = { ...health, version: "999.0.0" };
     assert.match((await launch()).stderr, /^A newer Session Analytics \(999\.0\.0\) is running on this port/);
+    for (const body of ["null", "[]", '"PRIVATE-HEALTH-SENTINEL"', "invalid JSON PRIVATE-HEALTH-SENTINEL", "slow"]) {
+      rawBody = body;
+      const refused = await launch();
+      assert.equal(refused.code, 1, body);
+      assert.equal(refused.stdout, "");
+      assert.equal(refused.stderr, "Session Analytics is already running on this port with different options; stop it or choose --port.\n");
+    }
   } finally {
+    older.closeAllConnections();
     await new Promise<void>((resolve) => older.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   }

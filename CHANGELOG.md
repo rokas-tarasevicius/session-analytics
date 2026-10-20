@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - Index evidence fingerprints now reject transcript-file symlinks, including links to a previously fingerprinted file.
 - Custom cards containing both cache-read fields now preserve `cachedInputPerMillion` precedence when a context tier omits its cache-read price, including explicit zero; `rates show` displays the same preferred price. Affected long-context totals fall when that preferred price is lower, and rise when it is higher.
 - Guarded reads of SQLite sources in read-only directories now reject changes between iterator rows before yielding stale counters. Totals can rise or fall when the changed source is read again.
+- Snapshot serialization stops with a fixed error when its output pipe closes under backpressure instead of waiting indefinitely for the pipe to drain.
+- A failed analysis worker that closes its input before receiving the options no longer crashes its parent with an uncaught pipe error; worker start failures also return a fixed message.
+- Reports piped to a consumer that closes early, such as `head`, stop their workers and exit quietly instead of printing an uncaught pipe error and local stack paths.
+- Invalid dashboard ports and unknown report/dashboard arguments now return fixed diagnostics without echoing private input or exception stacks; browser launch failures also use a fixed message.
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20

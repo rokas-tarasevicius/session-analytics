@@ -1,10 +1,22 @@
 import { once } from "node:events";
 import type { Writable } from "node:stream";
+import { finished } from "node:stream/promises";
 import type { MachineAnalytics } from "./types.ts";
 
 /** Keep the serialized snapshot out of the capped worker's heap; respect pipe backpressure. */
 export async function writeAnalysisSnapshot(snapshot: MachineAnalytics, output: Writable): Promise<void> {
-  const write = async (chunk: string) => { if (!output.write(chunk)) await once(output, "drain"); };
+  const write = async (chunk: string): Promise<void> => {
+    const ready = !output.destroyed && output.write(chunk);
+    if (ready && !output.destroyed) return;
+    const controller = new AbortController();
+    try {
+      await Promise.race([
+        once(output, "drain", { signal: controller.signal }),
+        finished(output, { signal: controller.signal, cleanup: true }).then(() => { throw new Error(); }),
+      ]);
+    } catch { throw new Error("Session analysis output closed before completion."); }
+    finally { controller.abort(); }
+  };
   const object = async (record: object): Promise<void> => {
     await write("{");
     let separator = "";

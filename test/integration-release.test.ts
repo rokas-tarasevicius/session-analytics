@@ -664,7 +664,7 @@ test("release: the compiled package carries workers, served files and notices, a
 });
 
 test("release: every dispatcher command shares help and version without scanning", () => {
-  for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits"]) {
+  for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits", "machines", "upgrade"]) {
     const help = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--help"], { encoding: "utf8" });
     assert.equal(help.status, 0, `${command}: ${help.stderr}`); assert.match(help.stdout, /session-analytics/i);
     const result = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--version"], { encoding: "utf8" });
