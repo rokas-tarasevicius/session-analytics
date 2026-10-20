@@ -73,13 +73,17 @@ const needsOf = (job: string): string[] => {
   return needs ? (needs[1] ?? needs[2]!).split(",").map((name) => name.trim()) : [];
 };
 const permissionsOf = (job: string): string[] => /^    permissions:\n((?: {6}\S.*\n)+)/m.exec(job)?.[1]!.trim().split(/\n\s*/) ?? [];
+/** The plan job's outputs: the release tag, whether to run the checks, and whether to publish. */
+type Plan = { tag: string, check: string, publish: string };
+const releasing: Plan = { tag: "v1.2.3", check: "true", publish: "true" };
 /** Evaluate a job's `if:` as GitHub would for given results; the gates use only ==, &&, ||, !, cancelled(), contains() and startsWith(). */
-type GateContext = { needs: Record<string, string>, vars?: Record<string, string>, event?: string, ref?: string, cancelled?: boolean };
+type GateContext = { needs: Record<string, string>, plan?: Plan, vars?: Record<string, string>, event?: string, ref?: string, cancelled?: boolean };
 function gate(job: string): (context: GateContext) => boolean {
   const expression = /^    if: \$\{\{ (.*) \}\}$/m.exec(job)?.[1];
-  assert.ok(expression, "publishing jobs state their gate");
+  assert.ok(expression, "gated jobs state their gate");
   const evaluate = new Function("needs", "vars", "github", "cancelled", "contains", "startsWith", `return ${expression};`);
-  return ({ needs, vars = {}, event = "push", ref = "refs/tags/v1.2.3", cancelled = false }) => evaluate(Object.fromEntries(Object.entries(needs).map(([name, result]) => [name, { result }])), vars,
+  return ({ needs, plan = releasing, vars = {}, event = "push", ref = "refs/heads/master", cancelled = false }) => evaluate(
+    { ...Object.fromEntries(Object.entries(needs).map(([name, result]) => [name, { result }])), plan: { result: "success", ...needs["plan"] === undefined ? {} : { result: needs["plan"] }, outputs: plan } }, vars,
     { event_name: event, ref, ref_name: ref.replace(/^refs\/(?:heads|tags)\//, "") }, () => cancelled,
     (text: string, part: string) => text.includes(part), (text: string, prefix: string) => text.startsWith(prefix));
 }
@@ -97,8 +101,14 @@ const hostKeyFingerprints = (knownHosts: string): string[] => knownHosts.trim().
   assert.deepEqual(rest, [], line);
   return `${type} SHA256:${createHash("sha256").update(Buffer.from(key!, "base64")).digest("base64").replace(/=+$/, "")}`;
 });
-/** Runs that are not a pushed `v*` tag: a manual dry run on a branch or a tag, and a push to a branch. */
-const untagged = [{ event: "workflow_dispatch", ref: "refs/heads/master" }, { event: "workflow_dispatch", ref: "refs/tags/v1.2.3" }, { event: "push", ref: "refs/heads/master" }];
+/** Runs that never publish: a manual dry run on a branch or a tag, a push elsewhere than master, and a push to master that changed no version. */
+const untagged: Array<Omit<GateContext, "needs">> = [
+  { event: "workflow_dispatch", ref: "refs/heads/master", plan: { tag: "v1.2.3", check: "true", publish: "false" } },
+  { event: "workflow_dispatch", ref: "refs/tags/v1.2.3", plan: { tag: "v1.2.3", check: "true", publish: "false" } },
+  { event: "push", ref: "refs/heads/fix/a-branch", plan: releasing },
+  { event: "push", ref: "refs/tags/v1.2.3", plan: releasing },
+  { event: "push", ref: "refs/heads/master", plan: { tag: "v1.2.3", check: "false", publish: "false" } },
+];
 
 test("release: every workflow action is pinned to a full commit SHA", async () => {
   for (const name of ["ci.yml", "release.yml"]) {
@@ -110,17 +120,17 @@ test("release: every workflow action is pinned to a full commit SHA", async () =
   }
 });
 
-test("release: a tag publishes only the validated, smoke-tested tarball, in order, and a manual run publishes nothing", async () => {
+test("release: a merge that changes the version publishes only the validated, smoke-tested tarball, in order, and nothing else publishes", async () => {
   const workflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
-  // A pushed v* tag releases; a manual run, which takes no inputs, is a dry run.
+  // A push to master releases when its version is untagged; a manual run, which takes no inputs, is a dry run.
   const triggers = /\non:\n((?: {2}.*\n)+)/.exec(workflow)?.[1]!.split("\n").filter((line) => line && !line.trimStart().startsWith("#"));
-  assert.deepEqual(triggers, ["  push:", "    tags: ['v*']", "  workflow_dispatch:"]);
+  assert.deepEqual(triggers, ["  push:", "    branches: [master]", "  workflow_dispatch:"]);
   assert.match(workflow, /\npermissions:\n  contents: read\n/);
-  // A tag's runs never overlap or cancel each other, and a dry run never shares their queue.
+  // A release's runs never overlap or cancel each other, and a dry run never shares their queue.
   assert.match(workflow, /concurrency:\n(?: {2}#.*\n)*  group: release-\$\{\{ github\.event_name \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false/);
   const jobs = workflowJobs(workflow);
-  assert.deepEqual(Object.keys(jobs), ["validate", "browser", "package", "smoke", "release", "npm", "homebrew"]);
-  const { validate, browser, package: pack, smoke, release, npm, homebrew } = jobs as Record<string, string>;
+  assert.deepEqual(Object.keys(jobs), ["plan", "validate", "browser", "package", "smoke", "release", "npm", "homebrew"]);
+  const { plan, validate, browser, package: pack, smoke, release, npm, homebrew } = jobs as Record<string, string>;
 
   // Least privilege: write, OIDC and attestation rights exist only where they are used; every other job inherits read-only.
   for (const [name, job] of Object.entries(jobs)) {
@@ -133,58 +143,56 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   assert.match(npm!, /^    environment: npm$/m);
   assert.match(homebrew!, /^    environment: homebrew$/m);
 
-  // A dry run runs every check up to the installed smoke, with read-only permission, and nothing that publishes.
+  // The plan job always runs; every other job needs it, and the checks run only when it says so.
+  assert.doesNotMatch(plan!, /^    (?:if|needs):/m, "every run plans");
+  assert.deepEqual([...plan!.matchAll(/^      (\w+): \$\{\{ steps\.plan\.outputs\.(\w+) \}\}$/gm)].map((output) => [output[1], output[2]]), [["tag", "tag"], ["check", "check"], ["publish", "publish"]]);
+  for (const name of Object.keys(jobs).filter((name) => name !== "plan")) assert.ok(needsOf(jobs[name]!).includes("plan"), `${name} needs the plan`);
+  for (const job of [validate!, browser!, pack!]) assert.match(job, /^    if: \$\{\{ needs\.plan\.outputs\.check == 'true' \}\}$/m);
+
+  // A release push runs every check up to the installed smoke and then publishes; a dry run runs the checks, read-only, and nothing
+  // that publishes; any other push stops after planning.
   const runs = (job: string, context: Omit<GateContext, "needs">): boolean => !/^    if:/m.test(job)
     || gate(job)({ needs: Object.fromEntries(needsOf(job).map((need) => [need, "success"])), vars: { NPM_PUBLISH: "true", HOMEBREW_TAP: "true" }, ...context });
-  assert.deepEqual(Object.keys(jobs).filter((name) => runs(jobs[name]!, {})), Object.keys(jobs), "a pushed tag can run every job");
+  const reachable = (context: Omit<GateContext, "needs">): string[] => {
+    const ran: string[] = [];
+    for (const name of Object.keys(jobs)) if (needsOf(jobs[name]!).every((need) => ran.includes(need)) && runs(jobs[name]!, context)) ran.push(name);
+    return ran;
+  };
+  assert.deepEqual(reachable({}), Object.keys(jobs), "a release push can run every job");
   for (const context of untagged) {
-    const dispatched = Object.keys(jobs).filter((name) => runs(jobs[name]!, context));
-    assert.deepEqual(dispatched, ["validate", "browser", "package", "smoke"], JSON.stringify(context));
-    for (const name of dispatched) assert.deepEqual(permissionsOf(jobs[name]!), [], `${name} is read-only on ${context.event}`);
+    const dispatched = reachable(context);
+    assert.deepEqual(dispatched, context.plan!.check === "true" ? ["plan", "validate", "browser", "package", "smoke"] : ["plan"], JSON.stringify(context));
+    for (const name of dispatched) assert.deepEqual(permissionsOf(jobs[name]!), [], `${name} is read-only on ${JSON.stringify(context)}`);
   }
   for (const [name, job] of Object.entries(jobs)) {
-    if (permissionsOf(job).length || /^    environment:|secrets\.|github\.token/m.test(job)) for (const context of untagged) assert.equal(runs(job, context), false, `${name} needs a pushed tag`);
+    if (permissionsOf(job).length || /^    environment:|secrets\.|github\.token/m.test(job)) for (const context of untagged) assert.equal(runs(job, context), false, `${name} needs a release push`);
   }
 
-  // Jobs that run on a dry run name the release in one shared step: the pushed tag, or else the tag package.json's version needs.
-  const naming = stepOf(validate!, "Name the release");
-  for (const [name, job] of Object.entries(jobs).filter(([name]) => runs(jobs[name]!, untagged[0]!))) {
-    assert.ok(!job.replace(naming, "").includes("GITHUB_REF_NAME"), `${name} takes the tag only from the naming step`);
-    if (!/RELEASE_TAG/.test(job)) continue;
-    assert.equal(stepOf(job, "Name the release"), naming, name);
-    const [checkout, named] = [job.indexOf("uses: actions/checkout@"), job.indexOf(naming)];
-    assert.ok(checkout > 0 && named > checkout && job.search(/\$\{?RELEASE_TAG/) > named, `${name} names the release after checkout, before using it`);
+  // Every job that names the release takes it from the plan, never from the ref.
+  assert.doesNotMatch(workflow, /GITHUB_REF_NAME|github\.ref_name/);
+  for (const [name, job] of Object.entries(jobs).filter(([, job]) => /RELEASE_TAG/.test(job))) {
+    assert.match(job, /^    env:\n      RELEASE_TAG: \$\{\{ needs\.plan\.outputs\.tag \}\}$/m, name);
+    assert.ok(needsOf(job).includes("plan"), `${name} needs the plan for its tag`);
   }
-  const environment = join(await mkdtemp(join(tmpdir(), "session-analytics-tag-")), "env");
-  try {
-    for (const [event, ref, expected] of [["push", "v1.2.3", "v1.2.3"], ["workflow_dispatch", "master", `v${version}`]] as const) {
-      await rm(environment, { force: true });
-      const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", stepScript(validate!, "Name the release")], {
-        cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8", env: { PATH: process.env["PATH"], GITHUB_EVENT_NAME: event, GITHUB_REF_NAME: ref, GITHUB_ENV: environment },
-      });
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(await readFile(environment, "utf8"), `RELEASE_TAG=${expected}\n`, event);
-    }
-  } finally { await rm(dirname(environment), { recursive: true, force: true }); }
 
   assert.deepEqual(/^        os: \[([^\]]+)\]$/m.exec(validate!)?.[1]!.split(", "), ["ubuntu-latest", "macos-latest"]);
   assert.match(validate!, /name: release validation \(\$\{\{ matrix.os \}\}\)/);
   assert.match(validate!, /run: node scripts\/release-check.ts --notes "\$RELEASE_TAG"/);
   assert.match(validate!, /run: npm run release:check/);
   assert.match(browser!, /name: release browser \(ubuntu-latest\)/);
-  assert.doesNotMatch(browser!, /^    if:/m, "tag browser checks cannot be skipped");
+  assert.deepEqual(browser!.match(/^    if: .*$/gm), ["    if: ${{ needs.plan.outputs.check == 'true' }}"], "a release's browser checks depend on nothing but the plan");
   assert.match(browser!, /SESSION_ANALYTICS_REQUIRE_BROWSER: '1'/);
   assert.match(pack!, /run: npm ci/);
   assert.match(pack!, /run: node scripts\/release-check.ts --notes "\$RELEASE_TAG"/);
   assert.match(pack!, /npm run pack:release\n.*release\/session-analytics\.tgz\n.*sha256sum .* > SHA256SUMS/);
   assert.match(pack!, /uses: actions\/upload-artifact@/);
-  assert.deepEqual(needsOf(smoke!), ["package"]);
+  assert.deepEqual(needsOf(smoke!), ["plan", "package"]);
   assert.deepEqual(/^        os: \[([^\]]+)\]$/m.exec(smoke!)?.[1]!.split(", "), ["ubuntu-latest", "macos-latest"]);
   assert.deepEqual(/^        node: \[([^\]]+)\]$/m.exec(smoke!)?.[1]!.split(", "), ["'24.0.0'", "'24'", "'26'"], "the engines floor, the newest 24.x and Homebrew's Node.js");
   assert.match(smoke!, /run: node scripts\/smoke-installed.ts "release\/session-analytics-\$\{RELEASE_TAG#v\}.tgz"/);
   assert.doesNotMatch(smoke!, /npm ci|npm run/, "the smoke runs the packed tarball, not a fresh build");
   assert.deepEqual([...smoke!.matchAll(/^      - name: (.+)$/gm)].map((step) => step[1]),
-    ["Check out", "Set up Node.js", "Name the release", "Download release files", "Verify checksums", "Install and run the tarball", "Check the Homebrew formula's style"]);
+    ["Check out", "Set up Node.js", "Download release files", "Verify checksums", "Install and run the tarball", "Check the Homebrew formula's style"]);
 
   // Every consumer of the packed files checks them against SHA256SUMS before using them.
   for (const [name, job, use] of [["smoke", smoke, "scripts/smoke-installed.ts"], ["smoke", smoke, "scripts/homebrew-formula.ts"], ["release", release, "attest-build-provenance"], ["npm", npm, "npm publish"], ["homebrew", homebrew, "scripts/homebrew-formula.ts"]] as const) {
@@ -193,7 +201,7 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   }
 
   // Nothing publishes unless validation, the browser check, packaging and every installed smoke succeeded.
-  assert.deepEqual(needsOf(release!), ["validate", "browser", "package", "smoke"]);
+  assert.deepEqual(needsOf(release!), ["plan", "validate", "browser", "package", "smoke"]);
   const canRelease = gate(release!);
   for (const validated of results) for (const browsed of results) for (const packed of results) for (const smoked of results) {
     const needs = { validate: validated, browser: browsed, package: packed, smoke: smoked };
@@ -204,16 +212,16 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   const upstream = (name: string): string[] => needsOf(jobs[name]!).flatMap((need) => [need, ...upstream(need)]);
   for (const name of ["release", "npm", "homebrew"]) for (const required of ["validate", "browser", "package", "smoke"]) assert.ok(upstream(name).includes(required), `${name} needs ${required}`);
 
-  // The release job runs no repository code; files reach a draft before it is published as the latest release.
+  // The release job runs no repository code; the tag exists at this commit, and files reach a draft, before it is published as the latest release.
   assert.doesNotMatch(release!, /actions\/checkout|npm ci|npm run|scripts\//);
-  const order = ["-c SHA256SUMS", "attest-build-provenance", "draft: true", "upload_url", "draft: false"].map((step) => release!.indexOf(step));
+  const order = ["-c SHA256SUMS", "attest-build-provenance", "/git/refs", "draft: true", "upload_url", "draft: false"].map((step) => release!.indexOf(step));
   assert.ok(order.every((index, position) => index > 0 && (position === 0 || index > order[position - 1]!)), `release order ${order}`);
   assert.match(release!, /subject-path: release\/session-analytics-\*\.tgz/);
   assert.match(release!, /make_latest: makeLatest \? 'true' : 'false'/);
   for (const asset of ["`session-analytics-${version}.tgz`", "'session-analytics.tgz'", "'SHA256SUMS'"]) assert.ok(release!.includes(asset), asset);
 
   // npm and Homebrew follow the GitHub Release and stay off until their one-time setup sets a repository variable.
-  assert.deepEqual(needsOf(npm!), ["release"]);
+  assert.deepEqual(needsOf(npm!), ["plan", "release"]);
   const canPublishNpm = gate(npm!);
   for (const released of results) for (const flag of ["true", "false", "", undefined]) {
     const vars: Record<string, string> = flag === undefined ? {} : { NPM_PUBLISH: flag };
@@ -228,11 +236,11 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   assert.match(npm!, /npm publish "release\/session-analytics-\$V\.tgz" --tag "\$DIST_TAG"/);
   const [published, verified, installed] = ["npm publish", "dist.integrity 2>/dev/null || true", "scripts/smoke-installed.ts \"session-analytics@"].map((step) => npm!.indexOf(step));
   assert.ok(published! > 0 && verified! > published! && installed! > verified!, "npm checks the registry integrity, then installs the registry version and runs it");
-  assert.deepEqual(needsOf(homebrew!), ["release", "npm"]);
+  assert.deepEqual(needsOf(homebrew!), ["plan", "release", "npm"]);
   const canUpdateTap = gate(homebrew!);
-  for (const released of results) for (const npmResult of results) for (const flag of ["true", ""]) for (const ref of ["refs/tags/v1.2.3", "refs/tags/v1.3.0-rc.1"]) {
-    const expected = released === "success" && (npmResult === "success" || npmResult === "skipped") && flag === "true" && !ref.includes("-");
-    assert.equal(canUpdateTap({ needs: { release: released, npm: npmResult }, vars: { HOMEBREW_TAP: flag }, ref }), expected, `release=${released}, npm=${npmResult}, HOMEBREW_TAP=${flag}, ${ref}`);
+  for (const released of results) for (const npmResult of results) for (const flag of ["true", ""]) for (const tag of ["v1.2.3", "v1.3.0-rc.1"]) {
+    const expected = released === "success" && (npmResult === "success" || npmResult === "skipped") && flag === "true" && !tag.includes("-");
+    assert.equal(canUpdateTap({ needs: { release: released, npm: npmResult }, plan: { ...releasing, tag }, vars: { HOMEBREW_TAP: flag } }), expected, `release=${released}, npm=${npmResult}, HOMEBREW_TAP=${flag}, ${tag}`);
     for (const context of untagged) assert.equal(canUpdateTap({ needs: { release: released, npm: npmResult }, vars: { HOMEBREW_TAP: flag }, ...context }), false, JSON.stringify(context));
   }
   assert.match(homebrew!, /node scripts\/homebrew-formula.ts --version "\$V" --sha256 /);
@@ -252,13 +260,8 @@ test("release: a tag publishes only the validated, smoke-tested tarball, in orde
   assert.deepEqual(hostKeyFingerprints(/<<'HOSTS'\n([\s\S]*?)\nHOSTS\n/.exec(stepScript(homebrew!, "Commit the formula to the tap"))?.[1] ?? ""), githubHostKeys);
 });
 
-test("release: a dry run fails for a version that is already tagged, before the long checks", async () => {
-  const { validate } = workflowJobs(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as Record<string, string>;
-  const check = stepOf(validate!, "Check the tag is unused");
-  assert.match(check, /^        if: github\.event_name == 'workflow_dispatch'$/m, "a pushed tag always exists, so only a dry run checks");
-  const [named, checked, verified] = [stepOf(validate!, "Name the release"), check, "run: npm run release:check"].map((step) => validate!.indexOf(step));
-  assert.ok(named! > 0 && checked! > named! && verified! > checked!, "the tag is checked once named, before release:check");
-
+test("release: the plan releases an untagged version or resumes its own tag, skips a push that changed no version, and fails a dry run of a released one", async () => {
+  const { plan } = workflowJobs(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as Record<string, string>;
   // The real step against a local repository standing in for GitHub; only an exact tag counts, and an unreadable repository fails.
   const server = await mkdtemp(join(tmpdir(), "session-analytics-tags-"));
   try {
@@ -268,21 +271,36 @@ test("release: a dry run fails for a version that is already tagged, before the 
       assert.equal(result.status, 0, result.stderr);
       return result.stdout.trim();
     };
-    const bare = join(server, "o", "r.git");
+    const bare = join(server, "o", "r.git"), work = join(server, "work");
     git("init", "--quiet", "--bare", bare);
-    const commit = git("-C", bare, "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.com", "commit-tree", git("-C", bare, "mktree"), "-m", "Release");
-    for (const [tags, repository, status, output] of [
-      [["v1.2.2", "v1.2.30", "v1.2.3-rc.1"], "o/r", 0, new RegExp(`^v1\\.2\\.3 is unused; once this run passes, tag ${commit}\\.\\n$`)],
-      [["v1.2.2", "v1.2.3"], "o/r", 1, /^v1\.2\.3 is already tagged; bump the version before a dry run\.\n$/],
-      [[], "o/missing", 1, /Reading the repository's tags failed\.\n$/],
-    ] as const) {
+    await mkdir(work);
+    await writeFile(join(work, "package.json"), JSON.stringify({ version: "1.2.3" }));
+    const commitTree = (message: string) => git("-C", bare, "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.com", "commit-tree", git("-C", bare, "mktree"), "-m", message);
+    const [head, older] = [commitTree("Release"), commitTree("Older")];
+    const annotate = (tag: string, commit: string) => git("-C", bare, "-c", "user.name=Maintainer", "-c", "user.email=maintainer@example.com", "tag", "--annotate", "-m", tag, tag, commit);
+    const cases: Array<[string, Array<[string, string]>, string, "plain" | "annotated", number, Record<string, string> | null, RegExp]> = [
+      ["push", [["v1.2.2", older], ["v1.2.30", older], ["v1.2.3-rc.1", older]], "o/r", "plain", 0, { check: "true", publish: "true" }, new RegExp(`^Releasing v1\\.2\\.3 from ${head}\\.\\n$`)],
+      ["push", [["v1.2.3", head]], "o/r", "plain", 0, { check: "true", publish: "true" }, /^v1\.2\.3 is this commit; resuming its release\.\n$/],
+      ["push", [["v1.2.3", head]], "o/r", "annotated", 0, { check: "true", publish: "true" }, /^v1\.2\.3 is this commit; resuming its release\.\n$/],
+      ["push", [["v1.2.3", older]], "o/r", "plain", 0, { check: "false", publish: "false" }, new RegExp(`^v1\\.2\\.3 is already released from ${older}; this push changes no version, so nothing is released\\.\\n$`)],
+      ["push", [["v1.2.3", older]], "o/r", "annotated", 0, { check: "false", publish: "false" }, /changes no version/],
+      ["workflow_dispatch", [["v1.2.2", older], ["v1.2.30", older]], "o/r", "plain", 0, { check: "true", publish: "false" }, new RegExp(`^v1\\.2\\.3 is unused; this dry run checks ${head}\\.\\n$`)],
+      ["workflow_dispatch", [["v1.2.3", head]], "o/r", "plain", 1, null, /^v1\.2\.3 is already tagged; bump the version before a dry run\.\n$/],
+      ["push", [], "o/missing", "plain", 1, null, /Reading the repository's tags failed\.\n$/],
+    ];
+    for (const [event, tags, repository, kind, status, outputs, message] of cases) {
+      const label = `${event} ${repository} with ${tags.map(([tag]) => tag).join(", ")} (${kind})`;
       for (const tag of git("-C", bare, "tag", "--list").split("\n").filter(Boolean)) git("-C", bare, "tag", "--delete", tag);
-      for (const tag of tags) git("-C", bare, "tag", tag, commit);
-      const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", stepScript(validate!, "Check the tag is unused")], {
-        encoding: "utf8", env: { ...env, GITHUB_SERVER_URL: pathToFileURL(server).href, GITHUB_REPOSITORY: repository, GITHUB_SHA: commit, RELEASE_TAG: "v1.2.3" },
+      for (const [tag, commit] of tags) kind === "annotated" ? annotate(tag, commit) : git("-C", bare, "tag", tag, commit);
+      const output = join(server, "output");
+      await rm(output, { force: true });
+      const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", stepScript(plan!, "Plan the release")], {
+        cwd: work, encoding: "utf8", env: { ...env, GITHUB_EVENT_NAME: event, GITHUB_SERVER_URL: pathToFileURL(server).href, GITHUB_REPOSITORY: repository, GITHUB_SHA: head, GITHUB_OUTPUT: output },
       });
-      assert.equal(result.status, status, `${repository} with ${tags.join(", ")}: ${result.stderr}`);
-      assert.match(status === 0 ? result.stdout : result.stderr, output, `${repository} with ${tags.join(", ")}`);
+      assert.equal(result.status, status, `${label}: ${result.stderr}`);
+      assert.match(status === 0 ? result.stdout : result.stderr, message, label);
+      const written = Object.fromEntries((await readFile(output, "utf8")).trim().split("\n").map((line) => line.split("=") as [string, string]));
+      assert.deepEqual(written, { tag: "v1.2.3", ...outputs }, label);
     }
   } finally { await rm(server, { recursive: true, force: true }); }
 });
@@ -304,7 +322,7 @@ function stepScript(job: string, name: string): string {
 }
 
 /** Run a workflow's inline Node script against canned GitHub API replies; returns the API calls it made. */
-async function runAgainstApi(script: string, directory: string, routes: Record<string, { status: number, json?: unknown }>, env: Record<string, string>): Promise<Array<{ method: string, path: string, body?: any }>> {
+async function runAgainstApi(script: string, directory: string, routes: Record<string, { status: number, json?: unknown }>, env: Record<string, string>, status = 0): Promise<Array<{ method: string, path: string, body?: any }>> {
   const mock = join(directory, "mock-fetch.mjs"), log = join(directory, "calls.jsonl");
   await writeFile(mock, `import { appendFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -322,7 +340,7 @@ globalThis.fetch = async (url, init = {}) => {
   const result = spawnSync(process.execPath, ["--import", pathToFileURL(mock).href, "--input-type=module"], {
     cwd: directory, input: script, encoding: "utf8", env: { PATH: process.env["PATH"], ...env, MOCK_ROUTES: JSON.stringify(routes), MOCK_LOG: log },
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, status, result.stderr);
   return (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 }
 
@@ -333,16 +351,25 @@ test("release: a tag published after a newer release never moves GitHub, npm or 
     await mkdir(join(directory, "release"));
     for (const name of ["session-analytics-1.9.0.tgz", "session-analytics.tgz", "SHA256SUMS"]) await writeFile(join(directory, "release", name), `${name} bytes\n`);
     await writeFile(join(directory, "notes.md"), "- Notes.\n");
-    const publishRelease = stepScript(release!, "Publish GitHub Release");
+    const publishRelease = stepScript(release!, "Publish GitHub Release"), sha = "a".repeat(40), env = { RELEASE_TAG: "v1.9.0", GITHUB_SHA: sha, GITHUB_REPOSITORY: "o/r", GH_TOKEN: "token" };
     for (const [latest, expected] of [["v1.10.0", "false"], ["v1.9.1", "false"], ["v1.8.7", "true"], [null, "true"]] as const) {
       const calls = await runAgainstApi(publishRelease, directory, {
+        "POST /repos/o/r/git/refs": { status: 201, json: { ref: "refs/tags/v1.9.0", object: { sha, type: "commit" } } },
         "GET /repos/o/r/releases?per_page=100&page=1": { status: 200, json: [] },
         "POST /repos/o/r/releases": { status: 201, json: { id: 7, assets: [], upload_url: "https://uploads.github.com/repos/o/r/releases/7/assets{?name,label}" } },
         "PATCH /repos/o/r/releases/7": { status: 200, json: { id: 7 } },
         ...(latest ? { "GET /repos/o/r/releases/latest": { status: 200, json: { tag_name: latest } } } : {}),
-      }, { GITHUB_REF_NAME: "v1.9.0", GITHUB_REPOSITORY: "o/r", GH_TOKEN: "token" });
+      }, env);
+      assert.deepEqual(calls.slice(0, 2), [{ method: "GET", path: "/repos/o/r/git/ref/tags/v1.9.0" }, { method: "POST", path: "/repos/o/r/git/refs", body: { ref: "refs/tags/v1.9.0", sha } }], "the tag is created at this commit first");
       assert.deepEqual(calls.at(-1), { method: "PATCH", path: "/repos/o/r/releases/7", body: { draft: false, make_latest: expected } }, `latest ${latest}`);
     }
+    // A re-run finds its own tag and goes on; a tag at another commit stops before any release exists.
+    const releaseRoutes = { "GET /repos/o/r/releases?per_page=100&page=1": { status: 200, json: [] }, "POST /repos/o/r/releases": { status: 201, json: { id: 7, assets: [], upload_url: "https://uploads.github.com/repos/o/r/releases/7/assets{?name,label}" } }, "PATCH /repos/o/r/releases/7": { status: 200, json: { id: 7 } } };
+    const resumed = await runAgainstApi(publishRelease, directory, { "GET /repos/o/r/git/ref/tags/v1.9.0": { status: 200, json: { object: { sha, type: "commit" } } }, ...releaseRoutes }, env);
+    assert.ok(!resumed.some((call) => call.path === "/repos/o/r/git/refs"), "an existing tag at this commit is kept");
+    assert.equal(resumed.at(-1)!.body.draft, false);
+    const elsewhere = await runAgainstApi(publishRelease, directory, { "GET /repos/o/r/git/ref/tags/v1.9.0": { status: 200, json: { object: { sha: "b".repeat(40), type: "commit" } } }, ...releaseRoutes }, env, 1);
+    assert.deepEqual(elsewhere, [{ method: "GET", path: "/repos/o/r/git/ref/tags/v1.9.0" }], "nothing is published under a tag at another commit");
 
     // npm: the real step with a recording npm on PATH; openssl hashes the tarball as on the runner.
     const bin = join(directory, "bin"), log = join(directory, "npm.log");
@@ -354,7 +381,7 @@ test("release: a tag published after a newer release never moves GitHub, npm or 
       await writeFile(join(directory, "release", `session-analytics-${tag.slice(1)}.tgz`), "bytes\n");
       await rm(log, { force: true });
       const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", publishNpm], {
-        cwd: directory, encoding: "utf8", env: { PATH: `${bin}${delimiter}${process.env["PATH"]}`, GITHUB_REF_NAME: tag, MOCK_LOG: log, MOCK_LATEST: latest },
+        cwd: directory, encoding: "utf8", env: { PATH: `${bin}${delimiter}${process.env["PATH"]}`, RELEASE_TAG: tag, MOCK_LOG: log, MOCK_LATEST: latest },
       });
       assert.equal(result.status, 0, result.stderr);
       assert.equal((await readFile(log, "utf8")).trim().split("\n").at(-1), `publish release/session-analytics-${tag.slice(1)}.tgz --tag ${expected}`, `${tag} after ${latest || "none"}`);
@@ -419,7 +446,7 @@ async function runTapStep(script: string, directory: string, seed: Record<string
   }
   const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", script], {
     cwd: directory, encoding: "utf8",
-    env: { ...gitEnv, RUNNER_TEMP: runnerTemp, GITHUB_REF_NAME: "v1.9.0", TAP_DEPLOY_KEY: tapKey, FAKE_SSH_LOG: log, FAKE_SSH_ROOT: join(root, "server"), ...env },
+    env: { ...gitEnv, RUNNER_TEMP: runnerTemp, RELEASE_TAG: "v1.9.0", TAP_DEPLOY_KEY: tapKey, FAKE_SSH_LOG: log, FAKE_SSH_ROOT: join(root, "server"), ...env },
   });
   const calls: SshCall[] = await readFile(log, "utf8").then((text) => text.trim().split("\n").map((line) => JSON.parse(line)), () => []);
   const hasMain = spawnSync("git", ["-C", bare, "rev-parse", "--verify", "--quiet", "refs/heads/main"], { env: gitEnv }).status === 0;
@@ -511,16 +538,16 @@ test("release: the Homebrew formula installs the release tarball with Homebrew's
   else assert.equal(ruby.status, 0, ruby.stderr);
 });
 
-test("release: while the tap is on, every run checks the style of the formula a tag would commit, on one macOS smoke leg", async (t) => {
+test("release: while the tap is on, every run checks the style of the formula a release would commit, on one macOS smoke leg", async (t) => {
   const { smoke, homebrew } = workflowJobs(await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8")) as Record<string, string>;
   const style = stepOf(smoke!, "Check the Homebrew formula's style");
-  // The macOS leg on the newest Node.js, Homebrew's own, on a pushed tag and on every dry run alike, while the tap is on; with the
+  // The macOS leg on the newest Node.js, Homebrew's own, on a release push and on every dry run alike, while the tap is on; with the
   // tap off, Homebrew never holds back the other channels. It needs no secret or permission.
   const condition = /^        if: (.+)$/m.exec(style)?.[1] ?? "";
   assert.doesNotMatch(condition, /needs\.|secrets\./, "the step depends on the matrix leg, the run and the tap switch alone");
   const [oses, nodes] = ["os", "node"].map((key) => new RegExp(`^        ${key}: \\[([^\\]]+)\\]$`, "m").exec(smoke!)?.[1]!.split(", ").map((value) => value.replace(/^'|'$/g, "")) ?? []);
   const legs = oses!.flatMap((os) => nodes!.map((node) => ({ os, node })));
-  for (const { event, ref } of [{ event: "push", ref: "refs/tags/v1.2.3" }, ...untagged.filter(({ event }) => event === "workflow_dispatch"), { event: "workflow_dispatch", ref: "refs/heads/fix/a-branch" }]) {
+  for (const { event, ref } of [{ event: "push", ref: "refs/heads/master" }, ...untagged.filter(({ event }) => event === "workflow_dispatch").map(({ event, ref }) => ({ event: event!, ref: ref! })), { event: "workflow_dispatch", ref: "refs/heads/fix/a-branch" }]) {
     const github = { event_name: event, ref, ref_name: ref.replace(/^refs\/(?:heads|tags)\//, "") };
     for (const vars of [{ HOMEBREW_TAP: "true" }, { HOMEBREW_TAP: "false" }, {}] as Array<Record<string, string>>) {
       const checks = legs.filter((matrix) => new Function("matrix", "github", "vars", `return ${condition};`)(matrix, github, vars));
@@ -561,9 +588,9 @@ esac
     assert.equal(await readFile(styled, "utf8"), expected);
     assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"),
       ["tap-new --no-git session-analytics/release-check", "--repository session-analytics/release-check", `style --formula ${join(tap, "Formula", "session-analytics.rb")}`]);
-    const rendered = run(homebrew!, "Render the formula", { GITHUB_REF_NAME: "v1.2.3" });
+    const rendered = run(homebrew!, "Render the formula", { RELEASE_TAG: "v1.2.3" });
     assert.equal(rendered.status, 0, rendered.stderr);
-    assert.equal(await readFile(join(work, "session-analytics.rb"), "utf8"), expected, "the homebrew job renders the same bytes from the tag");
+    assert.equal(await readFile(join(work, "session-analytics.rb"), "utf8"), expected, "the homebrew job renders the same bytes for the release");
 
     assert.equal(run(smoke!, "Check the Homebrew formula's style", { RELEASE_TAG: "v1.2.3", BREW_STYLE_STATUS: "1" }).status, 1, "a style offence fails the leg");
 

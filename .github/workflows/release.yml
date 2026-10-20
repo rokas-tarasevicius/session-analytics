@@ -1,28 +1,73 @@
 name: Release
 
 on:
+  # A merge that changes package.json's version releases it; any other push to master stops after the plan job.
   push:
-    tags: ['v*']
-  # A dry run of everything before publication; the publishing jobs run only for a pushed tag.
+    branches: [master]
+  # A dry run of everything before publication; the publishing jobs run only for a push to master.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  # Dry runs publish nothing, so they get their own group and never queue behind, or replace, a tag's run or re-run.
+  # One release run at a time, never cancelled once started. Dry runs publish nothing, so they get their own group and never
+  # queue behind, or replace, a release run or re-run.
   group: release-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  plan:
+    name: plan release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      check: ${{ steps.plan.outputs.check }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Plan the release
+        # The release is `v` and package.json's version. Tags never move, so its tag decides: absent, a push releases this commit
+        # and a dry run checks it; at this commit, a push resumes its release; at another commit, a push changed no version and
+        # stops here, and a dry run fails, because a released version can never be released again.
+        id: plan
+        run: |
+          TAG="v$(node -p 'require("./package.json").version')"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          FOUND=0; REFS="$(git ls-remote --exit-code --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$TAG" "refs/tags/$TAG^{}")" || FOUND=$?
+          case "$FOUND" in
+            0) TAGGED="$(printf '%s\n' "$REFS" | sort -k 2 | tail -n 1 | cut -f 1)" ;;
+            2) TAGGED= ;;
+            *) echo "Reading the repository's tags failed." >&2; exit 1 ;;
+          esac
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            if [ -n "$TAGGED" ]; then echo "$TAG is already tagged; bump the version before a dry run." >&2; exit 1; fi
+            echo "$TAG is unused; this dry run checks $GITHUB_SHA."; echo "check=true" >> "$GITHUB_OUTPUT"; echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$TAGGED" ]; then
+            echo "Releasing $TAG from $GITHUB_SHA."; echo "check=true" >> "$GITHUB_OUTPUT"; echo "publish=true" >> "$GITHUB_OUTPUT"
+          elif [ "$TAGGED" = "$GITHUB_SHA" ]; then
+            echo "$TAG is this commit; resuming its release."; echo "check=true" >> "$GITHUB_OUTPUT"; echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$TAG is already released from $TAGGED; this push changes no version, so nothing is released."; echo "check=false" >> "$GITHUB_OUTPUT"; echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   validate:
     name: release validation (${{ matrix.os }})
+    needs: plan
+    if: ${{ needs.plan.outputs.check == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -38,23 +83,6 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Name the release
-        # A tag names its own release; a manual dry run checks the tag that package.json's version would need.
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then TAG="$GITHUB_REF_NAME"; else TAG="v$(node -p 'require("./package.json").version')"; fi
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
-
-      - name: Check the tag is unused
-        # A dry run vets the next release. A version that is already tagged can never be released again, because tags never move.
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          FOUND=0; git ls-remote --exit-code --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG" > /dev/null || FOUND=$?
-          case "$FOUND" in
-            0) echo "$RELEASE_TAG is already tagged; bump the version before a dry run." >&2; exit 1 ;;
-            2) echo "$RELEASE_TAG is unused; once this run passes, tag $GITHUB_SHA." ;;
-            *) echo "Reading the repository's tags failed." >&2; exit 1 ;;
-          esac
-
       - name: Verify tag and release notes
         run: node scripts/release-check.ts --notes "$RELEASE_TAG"
 
@@ -63,6 +91,8 @@ jobs:
 
   browser:
     name: release browser (ubuntu-latest)
+    needs: plan
+    if: ${{ needs.plan.outputs.check == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -88,8 +118,12 @@ jobs:
 
   package:
     name: release package
+    needs: plan
+    if: ${{ needs.plan.outputs.check == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -104,12 +138,6 @@ jobs:
 
       - name: Install
         run: npm ci
-
-      - name: Name the release
-        # A tag names its own release; a manual dry run checks the tag that package.json's version would need.
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then TAG="$GITHUB_REF_NAME"; else TAG="v$(node -p 'require("./package.json").version')"; fi
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Verify tag and release notes
         run: node scripts/release-check.ts --notes "$RELEASE_TAG"
@@ -133,7 +161,7 @@ jobs:
 
   smoke:
     name: installed smoke (${{ matrix.os }}, Node ${{ matrix.node }})
-    needs: package
+    needs: [plan, package]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -142,6 +170,8 @@ jobs:
         # The oldest Node.js that engines allows, the newest 24.x, and the Node.js that Homebrew's formula uses.
         node: ['24.0.0', '24', '26']
     timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Check out
         # The smoke and formula scripts and demo fixtures only; the code under test is the packed tarball.
@@ -153,12 +183,6 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ matrix.node }}
-
-      - name: Name the release
-        # A tag names its own release; a manual dry run checks the tag that package.json's version would need.
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then TAG="$GITHUB_REF_NAME"; else TAG="v$(node -p 'require("./package.json").version')"; fi
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Download release files
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -174,9 +198,9 @@ jobs:
 
       - name: Check the Homebrew formula's style
         # One leg renders the formula the homebrew job would commit for this tarball and runs Homebrew's style cops on it, so dry
-        # runs and tags fail on style offences that `brew audit --strict` would otherwise find only after publication.
+        # runs and releases fail on style offences that `brew audit --strict` would otherwise find only after publication.
         # Only while the tap is on, so that Homebrew alone never holds back the GitHub Release and npm; a prerelease leaves the
-        # tap alone, so it skips the check. The version, not the ref, decides: a dry run's ref is a branch.
+        # tap alone, so it skips the check. The version decides, not the ref, which is a branch.
         # `brew style --formula` reads formulae only from a tap, so it gets a throwaway local one, as in the homebrew job.
         if: matrix.os == 'macos-latest' && matrix.node == '26' && vars.HOMEBREW_TAP == 'true'
         run: |
@@ -192,15 +216,18 @@ jobs:
 
   release:
     name: publish release
-    needs: [validate, browser, package, smoke]
-    # No tag can bypass platform, browser or installed-package checks, including skipped or cancelled jobs, and a dry run never publishes.
-    if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.validate.result == 'success' && needs.browser.result == 'success' && needs.package.result == 'success' && needs.smoke.result == 'success' }}
+    needs: [plan, validate, browser, package, smoke]
+    # No release can bypass platform, browser or installed-package checks, including skipped or cancelled jobs; only a push to
+    # master that the plan job found unreleased publishes, and a dry run never does.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.plan.outputs.publish == 'true' && needs.validate.result == 'success' && needs.browser.result == 'success' && needs.package.result == 'success' && needs.smoke.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
     timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -222,15 +249,16 @@ jobs:
           subject-path: release/session-analytics-*.tgz
 
       - name: Publish GitHub Release
-        # REST calls with the workflow token: no gh CLI dependency on the runner. Files go to a draft first, so
+        # REST calls with the workflow token: no gh CLI dependency on the runner. The tag is created at this commit first, or
+        # found there on a re-run; a tag at any other commit stops the release. Files go to a draft, so
         # /releases/latest/download/session-analytics.tgz never 404s; a re-run resumes this tag's draft, and a published release is never changed.
         # A tag published after a newer release, such as a backport or a late re-run, never becomes latest.
         run: |
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
           import { readFileSync } from 'node:fs';
-          const tag = process.env.GITHUB_REF_NAME, version = tag.slice(1), prerelease = version.includes('-');
-          const api = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/releases`;
+          const tag = process.env.RELEASE_TAG, sha = process.env.GITHUB_SHA, version = tag.slice(1), prerelease = version.includes('-');
+          const repo = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}`, api = `${repo}/releases`;
           const call = async (url, init = {}, missing = undefined) => {
             const response = await fetch(url, { ...init, headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json', ...init.headers } });
             if (response.status === 404 && missing !== undefined) return missing;
@@ -243,6 +271,9 @@ jobs:
             const bytes = readFileSync(`release/${name}`);
             return { name, bytes, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` };
           });
+          const tagged = await call(`${repo}/git/ref/tags/${tag}`, {}, null);
+          if (!tagged) await call(`${repo}/git/refs`, { method: 'POST', body: JSON.stringify({ ref: `refs/tags/${tag}`, sha }) });
+          else if (tagged.object.sha !== sha) { console.error(`${tag} already tags ${tagged.object.sha}, not ${sha}; nothing was published.`); process.exit(1); }
           let release = null;
           for (let page = 1; !release; page++) {
             const releases = await call(`${api}?per_page=100&page=${page}`);
@@ -273,15 +304,17 @@ jobs:
 
   npm:
     name: publish npm
-    needs: [release]
+    needs: [plan, release]
     # Off until the one-time npm bootstrap in docs/release.md sets the NPM_PUBLISH repository variable.
-    if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.release.result == 'success' && vars.NPM_PUBLISH == 'true' }}
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.plan.outputs.publish == 'true' && needs.release.result == 'success' && vars.NPM_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
     environment: npm
     permissions:
       contents: read
       id-token: write
     timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Check out
         # The smoke script and demo fixtures only; the published bytes are the release tarball.
@@ -313,7 +346,7 @@ jobs:
         # A re-run after a successful publish finds the same bytes and publishes nothing. An explicit --tag turns off npm's own
         # guard against tagging an older version latest, so a version older than the current latest is published as `backport`.
         run: |
-          V="${GITHUB_REF_NAME#v}"
+          V="${RELEASE_TAG#v}"
           INTEGRITY="sha512-$(openssl dgst -sha512 -binary "release/session-analytics-$V.tgz" | openssl base64 -A)"
           if [ "$(npm view "session-analytics@$V" dist.integrity 2>/dev/null)" = "$INTEGRITY" ]; then echo "session-analytics@$V is already on npm with these bytes."; exit 0; fi
           LATEST="$(npm view session-analytics dist-tags.latest)" || { echo "Could not read the latest dist-tag; nothing was published." >&2; exit 1; }
@@ -326,7 +359,7 @@ jobs:
 
       - name: Verify npm serves the release bytes
         run: |
-          V="${GITHUB_REF_NAME#v}"
+          V="${RELEASE_TAG#v}"
           EXPECTED="sha512-$(openssl dgst -sha512 -binary "release/session-analytics-$V.tgz" | openssl base64 -A)"
           for _ in $(seq 30); do
             ACTUAL="$(npm view "session-analytics@$V" dist.integrity 2>/dev/null || true)"
@@ -338,18 +371,20 @@ jobs:
           exit 1
 
       - name: Install from npm and run it
-        run: node scripts/smoke-installed.ts "session-analytics@${GITHUB_REF_NAME#v}"
+        run: node scripts/smoke-installed.ts "session-analytics@${RELEASE_TAG#v}"
 
   homebrew:
     name: update Homebrew tap
-    needs: [release, npm]
+    needs: [plan, release, npm]
     # Off until the tap and its deploy key exist (docs/release.md) and the HOMEBREW_TAP repository variable is set.
     # Waits for npm only when npm publishing ran; prereleases leave the tap alone.
-    if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.release.result == 'success' && (needs.npm.result == 'success' || needs.npm.result == 'skipped') && vars.HOMEBREW_TAP == 'true' && !contains(github.ref_name, '-') }}
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && needs.plan.outputs.publish == 'true' && needs.release.result == 'success' && (needs.npm.result == 'success' || needs.npm.result == 'skipped') && vars.HOMEBREW_TAP == 'true' && !contains(needs.plan.outputs.tag, '-') }}
     # macOS, so the formula is installed, tested and audited with Homebrew before it is committed; the tap's CI runs after the push.
     runs-on: macos-latest
     environment: homebrew
     timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -372,7 +407,7 @@ jobs:
 
       - name: Render the formula
         run: |
-          V="${GITHUB_REF_NAME#v}"
+          V="${RELEASE_TAG#v}"
           node scripts/homebrew-formula.ts --version "$V" --sha256 "$(shasum -a 256 "release/session-analytics-$V.tgz" | cut -d ' ' -f 1)" > session-analytics.rb
           cat session-analytics.rb
 
@@ -404,7 +439,7 @@ jobs:
           github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
           HOSTS
           export GIT_SSH_COMMAND="ssh -F /dev/null -i '$WORK/key' -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='$WORK/known_hosts' -o GlobalKnownHostsFile=/dev/null"
-          TAP=git@github.com:rokas-tarasevicius/homebrew-tap.git FORMULA="$WORK/tap/Formula/session-analytics.rb" V="${GITHUB_REF_NAME#v}"
+          TAP=git@github.com:rokas-tarasevicius/homebrew-tap.git FORMULA="$WORK/tap/Formula/session-analytics.rb" V="${RELEASE_TAG#v}"
           git ls-remote --symref "$TAP" > "$WORK/refs" || { echo "Reading the tap failed; nothing was committed." >&2; exit 1; }
           if grep -q '^ref: refs/heads/main[[:space:]]HEAD$' "$WORK/refs"; then
             git clone --quiet --depth 1 --branch main "$TAP" "$WORK/tap"
@@ -424,6 +459,6 @@ jobs:
           git -C "$WORK/tap" add Formula/session-analytics.rb
           git -C "$WORK/tap" -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit --quiet -m "session-analytics $V"
           git -C "$WORK/tap" push --quiet "$TAP" HEAD:refs/heads/main
-          echo "Updated Formula/session-analytics.rb in rokas-tarasevicius/homebrew-tap to $GITHUB_REF_NAME"
+          echo "Updated Formula/session-analytics.rb in rokas-tarasevicius/homebrew-tap to $RELEASE_TAG"
         env:
           TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
