@@ -303,15 +303,17 @@ export function hourlyValue(sessions, timeZone = "UTC") {
 /** Sessions with activity between two instants, from the local hours of their activity ledger. */
 function activeSessions(sessions, from, to, timeZone) {
   if (!(to > from)) return 0;
-  const hourStart = (day, hour) => {
-    const key = `${timeZone}|${day}`;
-    let start = dayStarts.get(key);
-    if (start === undefined) { start = zonedDayStart(day, timeZone); dayStarts.set(key, start); }
-    return start + hour * HOUR;
-  };
-  return sessions.filter((session) => ledgerCells(session.velocity).some(([day, hour]) => { const t = hourStart(day, hour); return t + HOUR > from && t < to; })).length;
+  let keys = sliceKeys.get(timeZone);
+  if (!keys) { keys = new Map(); sliceKeys.set(timeZone, keys); }
+  const activeHours = new Set();
+  // Calendar hour numbers cannot be added to midnight: an hour may repeat or be skipped when clocks change.
+  for (let slice = Math.floor(from / QUARTER) * QUARTER; slice < to; slice += QUARTER) {
+    let key = keys.get(slice);
+    if (key === undefined) { key = zonedHourKey(slice, timeZone); keys.set(slice, key); }
+    activeHours.add(key);
+  }
+  return sessions.filter((session) => ledgerCells(session.velocity).some(([day, hour]) => activeHours.has(`${day}|${hour}`))).length;
 }
-const dayStarts = new Map();
 
 /** Unix seconds when the local calendar day `day` (`YYYY-MM-DD`) begins in `timeZone`. */
 export function zonedDayStart(day, timeZone = "UTC") {

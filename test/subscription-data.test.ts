@@ -391,6 +391,29 @@ test("readings without an account show levels only: no pace, value or advice", (
   assert.deepEqual(recommendations([item], { now, sources: [{ source: "claude-sdk-log", status: "ok", read: 1, latest: now }] }), []);
 });
 
+test("active session counts follow real local hours across both daylight-saving transitions", () => {
+  const owner = account("claude", "claude-aaaaaaaaaaaaaaaa");
+  const cases: Array<[string, number, string, string, number]> = [
+    ["2026-10-25", 1, "2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z", 5],
+    ["2026-10-25", 1, "2026-10-25T01:00:00Z", "2026-10-25T02:00:00Z", 5],
+    ["2026-10-25", 2, "2026-10-25T02:00:00Z", "2026-10-25T03:00:00Z", 10],
+    ["2026-03-29", 3, "2026-03-29T02:00:00Z", "2026-03-29T03:00:00Z", 10],
+  ];
+  for (const [day, hour, fromIso, toIso, dollars] of cases) {
+    const from = at(fromIso), to = at(toIso);
+    const sessions = [{ provider: "claude", velocity: { version: 1, dimensions: [], buckets: [[day, hour, 0, [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]], undated: [] } }];
+    const item = utilization(owner, [reading("claude", "seven_day", from + WEEK, from - DAY, 10, "allowed", owner.key)], to, sessions, {
+      timeZone: "Europe/London", range: { from, to }, basis: "profiles",
+    });
+    assert.equal(item.economics.extracted, dollars, fromIso);
+    assert.equal(item.value.sessions, 1, fromIso);
+    const outside = utilization(owner, [reading("claude", "seven_day", from + WEEK, from - DAY, 10, "allowed", owner.key)], to + DAY, sessions, {
+      timeZone: "Europe/London", range: { from: to, to: to + HOUR }, basis: "profiles",
+    });
+    if (hour !== 1 || fromIso.includes("01:00:00Z")) assert.equal(outside.value.sessions, 0, "non-overlapping activity stays outside the range");
+  }
+});
+
 test("5-hour windows count lockouts from the first capped reading to the reset; overage is not a lockout", () => {
   const now = start + 2 * DAY;
   const first = start + DAY + 5 * HOUR;
