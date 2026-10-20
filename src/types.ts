@@ -539,3 +539,9 @@ export interface ScanProgress extends AnalysisProgress {
   startedAt: string;
   fullParse: boolean;
 }
+
+/** The HTTP 202 response while a dashboard request waits for analytics. */
+export interface PendingAnalytics {
+  pending: true;
+  progress: ScanProgress | null;
+}

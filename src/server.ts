@@ -14,7 +14,7 @@ import { analyzeMachines, machineOptions, machineReads, type MachineReads } from
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
 import type { AnalysisHooks } from "./analyzer.ts";
-import type { ScanProgress, DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
+import type { PendingAnalytics, ScanProgress, DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
 import { loadSnapshot } from "./interop/snapshot.ts";
 import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
@@ -384,7 +384,7 @@ const server = createServer(async (request, response) => {
         let timer: NodeJS.Timeout | undefined;
         const pending = new Promise<null>((done) => { timer = setTimeout(() => done(null), Math.min(wait, 30) * 1_000); });
         const settled = await Promise.race([result, pending]).finally(() => clearTimeout(timer));
-        if (settled === null) { sendJson(response, 202, { pending: true, progress: scanProgress }); return; }
+        if (settled === null) { sendJson(response, 202, { pending: true, progress: scanProgress } satisfies PendingAnalytics); return; }
         sendJson(response, 200, settled);
         return;
       }
