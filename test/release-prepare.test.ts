@@ -97,7 +97,7 @@ test("release PR: the script prepares a release from a repository's tags and his
   } finally { await rm(scratch, { recursive: true, force: true }); }
 });
 
-test("release PR: the workflow runs on merges to master with write access in its one job, and dispatches CI on the release branch", async () => {
+test("release PR: the workflow runs on merges to master with write access in its one job, and gets CI to run on the release branch", async () => {
   const workflow = await readFile(new URL("../.github/workflows/release-pr.yml", import.meta.url), "utf8");
   assert.match(workflow, /\non:\n(?: {2}#.*\n)*  push:\n    branches: \[master\]\n  workflow_dispatch:\n/);
   assert.match(workflow, /\npermissions:\n  contents: read\n/);
@@ -108,7 +108,8 @@ test("release PR: the workflow runs on merges to master with write access in its
   assert.match(workflow, /node scripts\/release-prepare\.ts --write --output "\$GITHUB_OUTPUT"/);
   assert.match(workflow, /HEAD:refs\/heads\/release\/next/);
   assert.match(workflow, /--title "chore\(release\): \$V"/);
-  assert.match(workflow, /gh workflow run ci\.yml --ref release\/next/);
+  assert.match(workflow, /actions\/runs\/\$RUN\/approve/, "the release pull request's own CI run is approved");
+  assert.match(workflow, /gh workflow run ci\.yml --ref release\/next/, "or, failing that, CI is dispatched on the branch");
   const ci = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.match(ci, /\n  workflow_dispatch:\n/, "CI can be dispatched on the release branch");
 });
