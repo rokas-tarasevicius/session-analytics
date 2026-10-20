@@ -13,7 +13,6 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Subscription shows section headings and a meter-row skeleton while limits load, with a screen-reader loading status.
 - Dashboard and metrics documentation now describe Top increases, positive absolute rankings, and compact evidence cells with exact accessible counts.
-- Wide Summary daily charts use a taller plot to reduce the empty band before repository breakdowns beside the totals rail.
 - Dashboard comparisons above ten times the prior value show a compact multiple across Summary, Tools and Velocity, including Top increases; zero baselines keep the existing new-activity label.
 - Dashboard repositories with the same display name receive stable ordinal suffixes across navigation, charts, tables and the command palette, without revealing paths or changing exported names.
 - Focused sidebar repository labels keep the same font weight and width budget as unfocused labels.

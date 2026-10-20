@@ -874,7 +874,7 @@ function renderLine(items) {
     syncHover(null);
     return;
   }
-  const width = chartWidth(elements.dailySpend, 900), height = window.matchMedia("(min-width: 1400px)").matches ? 600 : width < 560 ? 220 : 272, left = 52, right = 14, top = 14, bottom = 34;
+  const width = chartWidth(elements.dailySpend, 900), height = width < 560 ? 220 : 272, left = 52, right = 14, top = 14, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const maximum = Math.max(0.001, ...items.flatMap((item) => providers.map((provider) => item[provider])));
   const { axisMaximum } = tickScale(maximum);

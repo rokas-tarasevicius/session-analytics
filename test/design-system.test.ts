@@ -417,10 +417,6 @@ test("pricing refresh instructions mark the runnable command as code", async () 
 });
 
 
-test("wide Summary gives the daily chart more height beside the totals rail", async () => {
-  const source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
-  assert.match(source, /height = window\.matchMedia\("\(min-width: 1400px\)"\)\.matches \? 600 : width < 560 \? 220 : 272/);
-});
 
 
 test("Velocity docs describe Top increases and compact evidence with exact accessible counts", async () => {
