@@ -1,4 +1,5 @@
 import type { TranscriptHealth } from "../types.ts";
+import { timestampMilliseconds } from "../public/timestamps.js";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : {};
@@ -23,7 +24,7 @@ export class TranscriptLifecycle {
       if (row["type"] === "assistant") state = ["end_turn", "stop_sequence"].includes(String(message["stop_reason"])) ? "closed" : "open";
       if (row["type"] === "system" && row["subtype"] === "turn_duration") state = "closed";
     }
-    if (state) { this.state = state; this.timestamp = typeof row["timestamp"] === "string" ? Date.parse(row["timestamp"]) : NaN; }
+    if (state) { this.state = state; this.timestamp = timestampMilliseconds(row["timestamp"]); }
   }
   liveness(now = Date.now()): NonNullable<TranscriptHealth["liveness"]> {
     if (this.state === "closed") return "inactive";
