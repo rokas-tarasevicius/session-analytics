@@ -378,3 +378,10 @@ test("tool profile metrics fit readable columns without a fixed three-column orp
   assert.match(rule.body, /grid-template-columns:\s*repeat\(auto-fit, minmax\(100px, 1fr\)\)/);
   assert.equal(rules(css).filter(({ selector }) => selector === "#tools-view .tools-profile-stats").length, 1);
 });
+
+
+test("checkbox controls retain a full control-height label and a visible box", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".check")!.body, /min-height:\s*var\(--control\)/);
+  assert.match(cssRules.find(({ selector }) => selector === ".check input")!.body, /width:\s*18px;\s*height:\s*18px;\s*flex-shrink:\s*0/);
+});

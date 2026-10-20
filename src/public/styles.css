@@ -796,8 +796,8 @@ dialog::backdrop { background: var(--backdrop); }
 .field input[type="search"], .field input[type="text"] { padding-right: 10px; max-width: 320px; }
 .field-inline { flex-direction: row; align-items: center; gap: 8px; }
 .field-inline::after { display: none; }
-.check { display: inline-flex; align-items: center; gap: 7px; height: var(--control); padding: 0 10px 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-2); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; }
-.check input { width: 13px; height: 13px; margin: 0; accent-color: var(--text); }
+.check { display: inline-flex; align-items: center; gap: 7px; min-height: var(--control); padding: 0 10px 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-2); font-size: var(--fs-sm); font-weight: 500; cursor: pointer; }
+.check input { width: 18px; height: 18px; flex-shrink: 0; margin: 0; accent-color: var(--text); }
 .check:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 .check:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 
