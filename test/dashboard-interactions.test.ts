@@ -127,11 +127,27 @@ test("refresh failure composes a sentence with snapshot timezone labels to agree
   assert.equal(document.querySelector("#error-retry")!.hidden, false);
   context["fetch"] = async () => ({ ok: false, status: 500, json: async () => ({ error: "Analysis failed." }) });
   await run("loadSnapshot(true)");
-  assert.match(document.querySelector("#error-message")!.textContent, /^The analysis failed \(HTTP 500\)\. You are looking at the snapshot from /);
-  run("snapshot = null"); await run("loadSnapshot()");
+  assert.match(document.querySelector("#error-message")!.textContent, /^The analysis failed \(HTTP 500\)\. Analysis failed\. You are looking at the snapshot from /);
+  run("snapshot = null");
+  context["fetch"] = async () => ({ ok: false, status: 502, json: async () => ({ error: "Session analysis exceeded its 1024 MB worker heap limit." }) });
+  await run("loadSnapshot()");
   assert.equal(document.querySelector("#error-title")!.textContent, "No snapshot yet");
-  assert.equal(document.querySelector("#error-message")!.textContent, "The local analysis did not finish. Retry, or check the terminal running the dashboard.");
+  assert.equal(document.querySelector("#error-message")!.textContent, "The local analysis did not finish. The analysis failed (HTTP 502). Session analysis exceeded its 1024 MB worker heap limit. Retry, or check the terminal running the dashboard.");
   assert.equal(document.querySelector("#error-retry")!.hidden, false);
+});
+
+test("a scan longer than one request is polled until it answers, and only the first request refreshes", async () => {
+  const { context, document, run } = await harness([sample()]);
+  run("fixture.rateCard = { effectiveDate: '2026-10-01', models: [] }");
+  const fixture = run("fixture"), urls: string[] = [];
+  context["fetch"] = async (url: string) => {
+    urls.push(url);
+    return urls.length < 3 ? { ok: true, status: 202, json: async () => ({ pending: true }) } : { ok: true, status: 200, json: async () => fixture };
+  };
+  await run("loadSnapshot(true)");
+  assert.deepEqual(urls, ["/api/analytics?refresh=1&wait=10", "/api/analytics?wait=10", "/api/analytics?wait=10"]);
+  assert.equal(document.querySelector("#error-banner")!.hidden, true);
+  assert.equal(document.querySelector("#sync-context")!.dataset["state"], "live");
 });
 
 test("Escape cancels an armed g chord and dashboard statuses are live regions", async () => {
