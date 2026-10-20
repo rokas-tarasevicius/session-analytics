@@ -6,8 +6,8 @@
 
 | Version | Supported |
 | --- | --- |
-| 0.11.x | Yes |
-| Earlier than 0.11.0 | No |
+| 0.12.x | Yes |
+| Earlier than 0.12.0 | No |
 
 Fixes are released on the latest minor version.
 

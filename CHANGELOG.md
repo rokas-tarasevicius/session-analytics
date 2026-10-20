@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-20
+
 ### Added
 
 - Dashboard scans show the current phase, completed session work, elapsed time and a progress bar during first scans, full history re-parses and refreshes, with compact phone status and quiet screen-reader updates.
@@ -665,7 +667,8 @@ First standalone release.
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
 
-[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.1...v0.10.2
