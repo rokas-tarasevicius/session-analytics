@@ -87,6 +87,7 @@ export const fixedWarnings = [
   "Transcript ID matched, but its recorded working directory did not.",
   "Transcript filename matched, but provider metadata validation failed.",
   "No cumulative Codex token counter was found.",
+  "Some Codex token breakdowns exceeded their totals and were bounded; accounting is partial.",
   "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes.",
   "Some Claude responses do not expose thinking tokens separately; they remain included in output.",
   "Provider history did not record a stable model ID; those tokens are excluded from API-equivalent spend coverage.",
