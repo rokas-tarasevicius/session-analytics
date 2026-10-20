@@ -57,6 +57,19 @@ All notable changes to this project are documented here. The format follows [Kee
 - MCP's integrated API-equivalent summary excludes provider-reported value, includes session-dated value, and retains undated tokens in its pricing denominator.
 - MCP tool statistics and profile tool mixes exclude invalid sessions and unavailable tool evidence, matching their coverage totals and CSV exports.
 - OTLP exports interpret offset-free snapshot timestamps as UTC, matching snapshot validation regardless of the exporting machine's time zone or daylight saving time.
+- Narrow headers keep a short sync status and expose its full description to assistive technology and in a tooltip.
+- Snapshot metadata wraps without leaving a dangling separator on narrow screens.
+- Velocity labels its increases-only ranking “Top increases”.
+- Pricing refresh notices display the CLI command as code.
+- Wide Summary layouts place sessions by provider beside the daily chart to make better use of the available space.
+- Export downloads appear first; the detailed scope and privacy explanation sits under “What’s included”.
+- Checkbox controls, including Velocity’s 7-day average, use a larger visible box and a full-height clickable label.
+- Tool detail metrics use readable columns and a shorter per-session label.
+- Tools tables wrap structured names at separators and keep “small baseline” together.
+- Velocity increase tables keep names intact and show compact evidence counts, with exact figures available to assistive technology and in tooltips.
+- Phone chart legends keep provider names intact in a single column.
+- The dashboard Activity heatmap scrolls within its panel at tablet widths so every hour remains reachable.
+
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20

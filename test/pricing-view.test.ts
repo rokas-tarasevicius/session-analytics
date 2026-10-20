@@ -388,7 +388,8 @@ test("Stale online pricing offers one refresh action; offline, pinned and warnin
     assert.equal(notice.tag, "aside"); assert.equal(notice.attributes.role, "status");
     assert.equal(root.all((node) => node.attributes.role === "status").length, 1);
     assert.match(notice.text(), /Pricing evidence needs a refresh/);
-    assert.match(notice.text(), /prices fetched in the background since the dashboard started, or run session-analytics rates update/);
+    assert.match(notice.text().replace(/\s+/g, " "), /prices fetched in the background since the dashboard started, or run session-analytics rates update/);
+    assert.equal(notice.all((node) => node.tag === "code")[0]!.textContent, "session-analytics rates update");
     const buttons = notice.all((node) => node.tag === "button");
     assert.equal(buttons.length, 1); assert.equal(buttons[0]!.textContent, "Refresh snapshot");
     assert.ok(buttons[0]!.className.split(" ").includes("button")); assert.equal(buttons[0]!.attributes.type, "button");
@@ -399,7 +400,8 @@ test("Stale online pricing offers one refresh action; offline, pinned and warnin
     assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
     renderPricingPanel(root, rateCard, sessions, window, options);
     assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
-    assert.match(byClass(root, "notice")[0]!.text(), /Offline mode prevents public price requests\. Run session-analytics rates update with offline mode off, then refresh\./);
+    assert.match(byClass(root, "notice")[0]!.text().replace(/\s+/g, " "), /Offline mode prevents public price requests\. Run session-analytics rates update with offline mode off, then refresh\./);
+    assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "code")[0]!.textContent, "session-analytics rates update");
     renderPricingPanel(root, { ...online, pricing: { ...online.pricing, policy: "reviewed-only" } }, sessions, window, options);
     assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
     assert.deepEqual(byClass(root, "kpi-label").map((node) => node.textContent), ["Pricing coverage", "Price updates"]);

@@ -121,19 +121,20 @@
             </div>
           </div>
           <div class="topbar-actions">
-            <span class="status" id="sync-context" role="status" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
+            <span class="status" id="sync-context" role="status" aria-label="Mapping local sessions" title="Mapping local sessions" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span><span class="sync-short" id="sync-short" aria-hidden="true">Reading…</span></span>
             <button class="coverage-button" id="coverage-button" type="button" aria-label="Coverage: 0 notes" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
             <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
               <summary class="icon-button" title="Export view" aria-label="Export view"><svg aria-hidden="true"><use href="#i-export"/></svg></summary>
               <div class="export-options">
-                <p id="export-description">Downloads stay on this machine.</p>
                 <button class="button" type="button" data-export="json">JSON snapshot</button>
                 <button class="button" type="button" data-export="sessions">Sessions CSV</button>
                 <button class="button" type="button" data-export="daily">Daily value CSV</button>
                 <button class="button" type="button" data-export="models">Models CSV</button>
                 <button class="button" type="button" data-export="tools">Tools CSV</button>
                 <button class="button" type="button" data-export="shared" hidden>Shared aggregates CSV</button>
+                <p>Downloads stay on this machine.</p>
+                <details class="export-includes"><summary>What’s included</summary><p id="export-description"></p></details>
               </div>
             </details>
           </div>
@@ -153,7 +154,7 @@
             <span class="machine-strip-meta" id="machine-strip-meta"></span>
             <button class="button machine-details-button" id="machine-details" type="button" aria-haspopup="dialog" aria-controls="machines-dialog">Machine details</button>
           </div>
-          <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></span></p>
+          <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
           <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
@@ -238,7 +239,7 @@
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
             <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <div id="activity-status" class="activity-status" hidden></div>
-            <article class="panel activity-panel" id="activity-heatmap-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key" id="activity-heatmap-key"></div></article>
+            <article class="panel activity-panel" id="activity-heatmap-panel"><div class="activity-heatmap-scroll" role="region" aria-label="Session starts by weekday and hour" tabindex="0"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div></div><div class="heatmap-key" id="activity-heatmap-key"></div></article>
             <article class="panel activity-repositories" id="activity-repositories-panel"><header><div><h2>Sessions by repository</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
           </section>
 

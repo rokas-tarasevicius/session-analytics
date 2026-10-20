@@ -310,3 +310,102 @@ test("Summary defaults to three KPI columns before responsive overrides and Velo
   assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection")!.body, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection > strong")!.body, /grid-column:\s*1\s*\/\s*-1/);
 });
+
+
+test("Activity heatmap scrolls inside its panel without widening the view", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /class="activity-heatmap-scroll"[^>]*role="region"[^>]*tabindex="0"><div class="activity-heatmap/);
+  const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".activity-panel")!.body, /min-width:\s*0/);
+  assert.match(cssRules.find(({ selector }) => selector === ".activity-heatmap-scroll")!.body, /max-width:\s*100%;\s*overflow-x:\s*auto/);
+});
+
+
+test("phone legends keep provider words intact in a single list column", async () => {
+  const css = await readCss("styles.css");
+  const label = rules(css).find(({ selector }) => selector === ".chart-legend-label")!;
+  assert.match(label.body, /overflow-wrap:\s*normal/);
+  assert.doesNotMatch(label.body, /break-word|anywhere|break-all/);
+  assert.match(css, /@media \(max-width: 440px\)\s*\{\s*#daily-spend \.chart-legend\[data-layout="list"\]\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
+
+
+test("Velocity mover names keep their full identity inside the table scroll area", async () => {
+  const cssRules = rules(await readCss("velocity.css"));
+  const name = cssRules.find(({ selector }) => selector === ".velocity-movers td:nth-child(2)")!;
+  assert.match(name.body, /min-width:\s*20ch/);
+  assert.match(name.body, /white-space:\s*nowrap/);
+});
+
+
+test("tool names wrap only at separators and small baseline stays together", async () => {
+  const cssRules = rules(await readCss("tools.css"));
+  const name = cssRules.find(({ selector }) => selector === "#tools-view .tools-select")!;
+  assert.match(name.body, /overflow-wrap:\s*normal/);
+  assert.match(name.body, /word-break:\s*normal/);
+  assert.match(cssRules.find(({ selector }) => selector === "#tools-view .tools-change-detail")!.body, /white-space:\s*nowrap/);
+});
+
+
+test("Costs reserve a separate fixed badge slot so all amounts align", async () => {
+  const css = await readCss("styles.css");
+  const desktop = css.slice(css.indexOf("@media (min-width: 761px)"));
+  assert.match(desktop, /\.cost-stack-row > strong:last-child, \.cost-model-row > strong\s*\{[^}]*grid-template-columns:\s*auto 7rem/);
+  assert.match(desktop, /> \.coverage\s*\{[^}]*justify-self:\s*start;[^}]*margin-left:\s*0/);
+});
+
+
+test("selected sidebar repositories preserve the unselected label width", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  const selected = cssRules.find(({ selector }) => selector === '.repo-row[aria-pressed="true"]')!;
+  assert.match(selected.body, /box-shadow:\s*inset 0 0 0 1px/);
+  assert.doesNotMatch(selected.body, /(?:^|;)\s*(?:border(?:-width)?|padding(?:-inline)?|gap):/);
+});
+
+
+test("snapshot metadata wraps with spacing and no dangling separator", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /id="generated-at">[^<]*<\/span><span id="rate-card-date">/);
+  const rule = rules(await readCss("styles.css")).find(({ selector }) => selector === ".snapshot-meta")!;
+  assert.match(rule.body, /flex-wrap:\s*wrap/);
+  assert.match(rule.body, /gap:\s*6px 12px/);
+});
+
+
+test("tool profile metrics fit readable columns without a fixed three-column orphan", async () => {
+  const css = await readCss("tools.css");
+  const rule = rules(css).find(({ selector }) => selector === "#tools-view .tools-profile-stats")!;
+  assert.match(rule.body, /grid-template-columns:\s*repeat\(auto-fit, minmax\(100px, 1fr\)\)/);
+  assert.equal(rules(css).filter(({ selector }) => selector === "#tools-view .tools-profile-stats").length, 1);
+});
+
+
+test("checkbox controls retain a full control-height label and a visible box", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".check")!.body, /min-height:\s*var\(--control\)/);
+  assert.match(cssRules.find(({ selector }) => selector === ".check input")!.body, /width:\s*18px;\s*height:\s*18px;\s*flex-shrink:\s*0/);
+});
+
+
+test("export actions precede the collapsible scope and privacy explanation", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  const menu = html.slice(html.indexOf('class="export-options"'), html.indexOf('</details>', html.indexOf('class="export-options"')));
+  assert.ok(menu.indexOf('data-export="json"') < menu.indexOf('id="export-description"'));
+  assert.match(menu, /<details class="export-includes"><summary>What’s included<\/summary><p id="export-description">/);
+});
+
+
+test("wide Summary places provider sessions alongside the daily chart", async () => {
+  const css = await readCss("styles.css");
+  const wide = css.slice(css.indexOf("@media (min-width: 1400px)"), css.indexOf("/* ---------------------------------------------------------------- responsive */"));
+  assert.match(wide, /\.daily-usage-header\s*\{\s*grid-column:\s*1 \/ -1/);
+  assert.match(wide, /#daily-spend\s*\{\s*grid-column:\s*1 \/ span 8/);
+  assert.match(wide, /\.panel:last-child\s*\{\s*grid-column:\s*9 \/ -1;\s*grid-row:\s*2 \/ span 2/);
+});
+
+
+test("pricing refresh instructions mark the runnable command as code", async () => {
+  const source = await readFile(new URL("../src/public/pricing.js", import.meta.url), "utf8");
+  assert.match(source, /el\("code", "session-analytics rates update"\)/);
+  assert.match(await readCss("pricing.css"), /\.pricing-notice code\s*\{[^}]*var\(--font-mono\)/);
+});

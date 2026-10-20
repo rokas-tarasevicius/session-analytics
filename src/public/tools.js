@@ -169,7 +169,12 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   const badge = coverageBadge(data.coverage, "tool evidence");
   if (badge) ranking.header.append(badge);
   const rows = (expanded ? data.tools : data.tools.slice(0, 12)).map((tool) => {
-    const button = el("button", tool.name, "tools-select");
+    const button = el("button", null, "tools-select");
+    for (const part of tool.name.split(/(?<=[_.-])/)) {
+      button.append(document.createTextNode(part));
+      if (/[_.-]$/.test(part)) button.append(el("wbr"));
+    }
+    button.title = tool.name;
     button.setAttribute("type", "button"); button.dataset.focusKey = `tools:tool:${tool.name}`;
     button.setAttribute("aria-pressed", String(tool.name === selected.name));
     button.setAttribute("aria-controls", "tools-profile");
@@ -213,7 +218,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
     const stats = el("dl", null, "tools-profile-stats");
     for (const [label, value] of [["Calls", integer(profile.calls)], ["Share of calls", percent(profile.share)],
       ["Sessions using it", integer(profile.sessions)], ["Repositories", integer(profile.repositories)],
-      ["Calls per session using it", decimal(profile.callsPerSession)]]) {
+      ["Per session using it", decimal(profile.callsPerSession)]]) {
       const stat = el("div"); stat.append(el("dt", label), el("dd", value)); stats.append(stat);
     }
     profilePanel.result.append(stats, trend(profile, timeZone));

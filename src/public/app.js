@@ -62,7 +62,7 @@ const elements = {
   sessionNote: $("#metric-session-note"), sessions: $("#metric-sessions"),
   shortcutsToggle: $("#shortcuts-toggle"),
   spend: $("#metric-spend"), spendNote: $("#metric-spend-note"),
-  sync: $("#sync-context"), syncLabel: $("#sync-label"),
+  sync: $("#sync-context"), syncLabel: $("#sync-label"), syncShort: $("#sync-short"),
   theme: $("#theme-switch"), themeLabel: $("#theme-label"), toolCalls: $("#tool-calls"),
   toolsView: $("#tools-view"), toolsProviderFilters: $("#tools-provider-filters"),
   tools: $("#metric-tools"), viewStatus: $("#view-status"), warning: $("#warning-banner"), warningList: $("#warning-list"),
@@ -1052,6 +1052,14 @@ function closeMachines() { if (elements.machinesDialog.open) elements.machinesDi
 
 // --------------------------------------------------------------------- machines
 
+/** Keep the compact status meaningful while preserving the full snapshot description. */
+function describeSyncStatus() {
+  const label = elements.syncLabel.textContent;
+  elements.sync.setAttribute("aria-label", label); elements.sync.title = label;
+  elements.syncShort.textContent = { live: "Ready", reading: "Reading…", loading: "Reading…", warn: "Check", error: "Stale" }[elements.sync.dataset.state] ?? "Check";
+  if (elements.sync.dataset.state === "error" && !snapshot && !sharedSnapshot) elements.syncShort.textContent = "Failed";
+}
+
 /** The sync label once a snapshot is shown: which machines it covers, which are missing, and the live sessions. */
 function showReady(view) {
   const machines = fullSnapshot?.machines ?? [], { ok, total, failed, stale, reading } = machineTally(machines);
@@ -1060,6 +1068,7 @@ function showReady(view) {
   elements.sync.dataset.state = failed || stale ? "warn" : reading ? "reading" : "live";
   elements.syncLabel.textContent = total < 2 ? `Local snapshot ready${live}`
     : `${ok} of ${total} machines ready${reading ? ` · reading ${named("reading")}` : ""}${failed ? ` · ${named("failed")} not read` : ""}${stale ? ` · ${named("stale")} stale` : ""}${live}`;
+  describeSyncStatus();
 }
 
 /** Narrow every view to the machines switched on; history coverage needs them all. */
@@ -1945,6 +1954,7 @@ async function loadSnapshot(refresh = false) {
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
+  describeSyncStatus();
   elements.main.dataset.state = previous ? "refreshing" : "loading";
   if (!previous) {
     loadFailed = false; renderViewStatus(null); showActivePanel();
@@ -1972,6 +1982,7 @@ async function loadSnapshot(refresh = false) {
       showActivePanel(); renderViewStatus(null);
     }
   } finally {
+    describeSyncStatus();
     elements.refresh.disabled = false;
   }
 }

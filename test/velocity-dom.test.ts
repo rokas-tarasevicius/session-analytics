@@ -365,3 +365,31 @@ test("crowded Velocity groupings render a neutral Other series in the chart, leg
     else Reflect.deleteProperty(globalThis, "document");
   }
 });
+
+test("movers compact their evidence while preserving exact token counts", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocity } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const session = categorySessions("repository", ["synthetic"])[0]!;
+    const bucket = session.velocity!.buckets[0]!;
+    session.velocity!.buckets = Array.from({ length: 14 }, (_, i) => {
+      const copy = structuredClone(bucket);
+      copy[0] = `2026-09-${String(i + 1).padStart(2, "0")}`;
+      copy[3][0] = i < 7 ? 1 : 5;
+      copy[3][1] = 1_800_000; copy[3][5] = 200_000; copy[3][10] = 2_000_000;
+      return copy;
+    });
+    const container = new Element();
+    renderVelocity(container, [session], { start: "2026-09-01", end: "2026-09-14", generatedAt: "2026-09-15T12:00:00Z", timeZone: "UTC" });
+    assert.match(container.textContent, /Top increases/);
+    assert.doesNotMatch(container.textContent, /Top movers/);
+    const cell = container.querySelector(".velocity-movers")!.querySelector("tbody")!.children[0]!.children[6]!.children[0]!;
+    assert.match(cell.textContent, /14M priced \(100%\) → 14M priced \(100%\)/);
+    assert.equal(cell.getAttribute("aria-label"), (cell as any).title);
+    assert.match((cell as any).title, /14,000,000\/14,000,000 priced tokens \(100%\) → 14,000,000\/14,000,000 priced tokens \(100%\)/);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
