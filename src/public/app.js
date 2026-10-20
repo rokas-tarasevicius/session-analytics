@@ -600,9 +600,15 @@ function pricedBadge(evidence, tag = "small") {
   return badge;
 }
 
+/** Wholly unpriced usage has no measured value, unlike a priced zero-rate model. */
+function ledgerAmount(value, evidence) {
+  return value === 0 && evidence.eligible > 0 && evidence.known === 0 ? DASH : money(value);
+}
+
 /** A ledger value with its priced-share badge: the dashboard's one usage-value presentation. */
 function ledgerValue(value, evidence, tag = "strong") {
-  const holder = node(tag); holder.append(node("span", money(value)));
+  const holder = node(tag); holder.append(node("span", ledgerAmount(value, evidence)));
+  if (ledgerAmount(value, evidence) === DASH) holder.setAttribute("aria-label", "No usage value: unpriced");
   const badge = pricedBadge(evidence);
   if (badge) holder.append(badge);
   return holder;
@@ -620,7 +626,7 @@ function renderCostRows(container, ledger) {
     const widths = stackPercents(parts.map(({ value }) => value), maximum);
     const detail = parts.map(({ name, value }) => `${name}: ${money(value)} (${percent(group.total ? value / group.total : 0)} of provider)`);
     stack.setAttribute("role", "img");
-    stack.setAttribute("aria-label", `${providerLabels[group.provider] ?? "Unknown provider"}: ${money(group.total)}. ${detail.join(", ")}`);
+    stack.setAttribute("aria-label", `${providerLabels[group.provider] ?? "Unknown provider"}: ${ledgerAmount(group.total, group.evidence)}. ${detail.join(", ")}`);
     stack.title = detail.join("\n");
     for (const [index, part] of parts.entries()) {
       const bar = node("i"); bar.setAttribute("data-series", part.id);
@@ -658,12 +664,13 @@ function renderModelCosts(container, ledger) {
     ].filter(Boolean).join(" · ");
     const basis = model.api > 0 && model.reported > 0 ? `${money(model.api)} API-equivalent + ${money(model.reported)} provider-reported. ` : model.reported > 0 ? "Provider-reported. " : "";
     const detail = model.unattributed ? meta : `${tokenClasses.map(([name, index]) => `${name} ${compact(model.sums[index])}`).join(", ")} tokens`;
-    row.title = `${model.model} · ${providerLabels[model.provider] ?? "Unknown provider"}: ${money(model.value)} (${percent(model.share)} of total). ${basis}${meta}. ${detail}`;
+    const amount = ledgerAmount(model.value, model.evidence), valueShare = amount === DASH ? DASH : percent(model.share);
+    row.title = `${model.model} · ${providerLabels[model.provider] ?? "Unknown provider"}: ${amount} (${valueShare} of total). ${basis}${meta}. ${detail}`;
     const track = node("div", null, "cost-model-track"), fill = node("i");
     track.setAttribute("role", "img"); track.setAttribute("aria-label", row.title);
     fill.style.width = `${barPercent(model.value, maximum)}%`; fill.style.background = model.unattributed ? unattributedColor : modelColor(model.provider, model.model);
     fill.setAttribute("data-series", `${model.provider}:${model.unattributed ? "unattributed" : model.model}`); track.append(fill);
-    row.append(label, track, ledgerValue(model.value, model.evidence), node("span", percent(model.share), "cost-model-share"), node("small", meta, "cost-model-meta muted")); list.append(row);
+    row.append(label, track, ledgerValue(model.value, model.evidence), node("span", valueShare, "cost-model-share"), node("small", meta, "cost-model-meta muted")); list.append(row);
   }
   if (list.childElementCount === 0) emptyState(list, "No priced activity in this view.");
   container.append(list);
@@ -682,8 +689,8 @@ function renderCosts(view) {
   const range = velocityContext(), ledger = ledgerMoney(view.scopeSessions, range);
   const unavailable = ledgerAvailability(view.scopeSessions).eligible === 0;
   const reason = { reason: "No session in this selection has activity dates" };
-  setValue(elements.costTotal, ledger.total, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costTotalCoverage });
-  setValue(elements.costApiTotal, ledger.api, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costApiCoverage });
+  setValue(elements.costTotal, ledger.total, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, (value) => ledgerAmount(value, ledger.evidence), { ...reason, slot: elements.costTotalCoverage });
+  setValue(elements.costApiTotal, ledger.api, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, (value) => ledgerAmount(value, ledger.evidence), { ...reason, slot: elements.costApiCoverage });
   setValue(elements.costProviderTotal, ledger.reported, unavailable ? { eligible: 0, selected: view.scopeSessions.length } : null, money, { ...reason, slot: elements.costProviderCoverage });
   for (const [slot, badge] of [[elements.costTotalCoverage, pricedBadge(ledger.evidence)], [elements.costApiCoverage, null], [elements.costProviderCoverage, null]]) { if (badge && !unavailable) slot.append(badge); }
   elements.costApiNote.textContent = ledger.upper > ledger.api + 0.005 ? `Cache-write upper estimate ${money(ledger.upper)}` : "Rate-card priced usage";
@@ -691,8 +698,8 @@ function renderCosts(view) {
   elements.costCoverageNote.textContent = ledger.evidence.eligible > 0 ? `${compact(ledger.evidence.known)} of ${compact(ledger.evidence.eligible)} eligible tokens priced` : "No eligible tokens in this window";
   const excluded = ledgerExclusions(ledger);
   elements.coverageCostNote.hidden = false;
-  elements.coverageCostNote.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${dateRange(range.start, range.end)} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
-  elements.costReconciliation.textContent = `${money(ledger.total)} usage value = ${money(ledger.api)} API-equivalent + ${money(ledger.reported)} reported`;
+  elements.coverageCostNote.textContent = `${ledgerAmount(ledger.total, ledger.evidence)} usage value = ${ledgerAmount(ledger.api, ledger.evidence)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${dateRange(range.start, range.end)} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
+  elements.costReconciliation.textContent = `${ledgerAmount(ledger.total, ledger.evidence)} usage value = ${ledgerAmount(ledger.api, ledger.evidence)} API-equivalent + ${money(ledger.reported)} reported`;
   renderCostRows(elements.providerCostModels, ledger);
   renderModelCosts(elements.costModels, ledger);
 }

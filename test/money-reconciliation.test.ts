@@ -56,6 +56,12 @@ const sessions = [
 
 const cents = (text: string | null | undefined) => { const match = String(text ?? "").replace(/,/g, "").match(/\$(\d+(?:\.\d+)?)/); assert.ok(match, `no money in ${text}`); return Math.round(Number(match[1]) * 100); };
 const round = (value: number) => Math.round(value * 100);
+/** Unpriced rows contribute no measured dollars to reconciliation, while displaying unavailable. */
+const ledgerCents = (value: Element, row: Element) => {
+  if (value.textContent.trim() !== "—") return cents(value.textContent);
+  assert.match(row.textContent, /0% priced/);
+  return 0;
+};
 /** The value text of a ledger value holder (its badge, when present, is a sibling). */
 const firstSpan = (cell: Element): Element => { const holder = cell.tagName === "span" || cell.tagName === "strong" ? cell : cell.children[0]!; return holder.children[0] ?? holder; };
 /** Descendants of `#id` matching a simple selector (the test DOM matches only a selector's last compound). */
@@ -103,12 +109,12 @@ for (const window of windows) for (const focus of ["all", "beta"]) {
     assert.equal(api + reported, kpi, "API-equivalent + provider-reported = usage value");
     assert.match(document.querySelector("#cost-reconciliation")!.textContent, new RegExp(`\\$${(kpi / 100).toFixed(2)} usage value =`));
     const providerRows = within(document, "#provider-cost-models", ".cost-stack-row").filter((row) => !row.classList.contains("cost-stack-total"));
-    const providerValues = providerRows.map((row) => cents(firstSpan(row.children.at(-1)!)!.textContent));
+    const providerValues = providerRows.map((row) => ledgerCents(firstSpan(row.children.at(-1)!)!, row));
     assert.deepEqual(providerValues, [...providerValues].sort((a, b) => b - a), "provider bars run high to low");
     assert.equal(providerValues.reduce((sum, value) => sum + value, 0), kpi, "provider rows add up to the total");
     if (providerRows.length) assert.equal(cents(within(document, "#provider-cost-models", ".cost-stack-total")[0]!.textContent), kpi, "the total line is the KPI");
     const costModels = new Map(within(document, "#cost-models", ".cost-model-row").map((row) => [
-      `${row.querySelector(".cost-model-label")!.children[0]!.textContent.trim()} · ${row.querySelector(".cost-model-label")!.children[1]!.textContent.trim()}`, cents(firstSpan(row.children[2]!)!.textContent)]));
+      `${row.querySelector(".cost-model-label")!.children[0]!.textContent.trim()} · ${row.querySelector(".cost-model-label")!.children[1]!.textContent.trim()}`, ledgerCents(firstSpan(row.children[2]!)!, row)]));
     assert.equal([...costModels.values()].reduce((sum, value) => sum + value, 0), kpi, "Costs model rows add up to the total");
 
     // Per-model values: Summary's mix, Costs' rows and Velocity's model series are the same figures.

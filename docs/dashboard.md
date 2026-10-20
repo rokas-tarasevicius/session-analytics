@@ -70,6 +70,8 @@ Every panel has an **Evidence & limits** note that states what the number includ
 
 Costs answers "where does the value go?" The usage value is the sum of an API-equivalent part, priced from observed tokens, and a provider-reported part for sources such as Cursor that record their own figure and have no rate card. Cost by provider shows each provider's bar segmented by model with its priced share; cost by model lists every model with its provider, sessions, calls, input and output tokens, value and share. Summary, Velocity and Costs read the same activity-dated ledger, so their totals agree for any window.
 
+Costs shows **—** for wholly unpriced model, provider and total values and model shares; a reviewed zero-rate model can still show $0.00. Pricing coverage and unpriced metadata stay visible.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-costs-dark.webp" />
@@ -149,4 +151,3 @@ The command palette jumps to any view or repository, toggles provider chips and 
     <img alt="The command palette: Go to Summary, Velocity, Costs, Pricing, Tools and Activity with their g-shortcuts, then All repositories and Focus entries for each repository" src="../assets/screenshot-palette.webp" width="600" />
   </picture>
 </p>
-
