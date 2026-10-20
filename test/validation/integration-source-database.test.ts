@@ -54,6 +54,21 @@ test("immutable source fallback checks generation after an interrupted iterator"
   assert.throws(() => reader.close(), { message: "Local database changed during a guarded read." });
 }));
 
+test("immutable source fallback checks each iterator read before yielding counters", { skip: permissionSkip }, () => fixture((path, directory) => {
+  const reader = openSourceDatabase(path), iterator = reader.prepare("SELECT n FROM evidence ORDER BY n").iterate();
+  assert.equal(iterator.next().value?.["n"], 7);
+  chmodSync(directory, 0o755);
+  const writer = new DatabaseSync(path);
+  try {
+    writer.exec("INSERT INTO evidence VALUES(11)");
+    assert.throws(() => iterator.next(), { message: "Local database changed during a guarded read." });
+  } finally {
+    try { iterator.return?.(); } catch { /* A changed source also invalidates early iterator cleanup. */ }
+    assert.throws(() => reader.close(), { message: "Local database changed during a guarded read." });
+    writer.close();
+  }
+}));
+
 test("ordinary live WAL sources keep committed WAL counters visible", () => {
   const directory = mkdtempSync(join(tmpdir(), "source-live-db-")), path = join(directory, "source.sqlite");
   const writer = new DatabaseSync(path);

@@ -50,6 +50,24 @@ test("explicit context cache tiers replace base assumptions; missing tiers retai
   assert.deepEqual(result.assumptions, ["context-cache-read-at-base", "context-cache-write-5m-at-base", "context-cache-write-1h-at-base"]);
 });
 
+test("missing context cache reads preserve the base cached-input field precedence, including zero", () => {
+  const read = usage({ inputTokens: 1e6, cachedInputTokens: 1e6 });
+  for (const cachedInputPerMillion of [0, 0.2, 1]) {
+    const rate = validateRate({ ...base, cachedInputPerMillion, cacheReadPerMillion: 0.5,
+      contextTiers: [{ aboveInputTokens: 200000, inputPerMillion: 6, outputPerMillion: 22.5 }] });
+    assert.equal(priceUsage(rate, read, 200000).cost.cachedInputUsd, cachedInputPerMillion);
+    const long = priceUsage(rate, read, 200001);
+    assert.equal(long.cost.cachedInputUsd, cachedInputPerMillion);
+    assert.equal(long.pricedTokens, 0);
+    assert.deepEqual(long.assumptions, ["context-cache-read-at-base"]);
+    rate.contextTiers![0]!.cacheReadPerMillion = 0.1;
+    const explicit = priceUsage(rate, read, 200001);
+    assert.equal(explicit.cost.cachedInputUsd, 0.1);
+    assert.equal(explicit.pricedTokens, 1e6);
+    assert.deepEqual(explicit.assumptions, []);
+  }
+});
+
 test("upper-estimate assumptions describe the actual rule and do not penalize explicit base coverage", () => {
   for (const multiplier of [1, 1.25, 2]) {
     const rate = validateRate({ ...base, provider: "codex", cacheWriteObservable: false, cacheWriteMultiplier: multiplier });

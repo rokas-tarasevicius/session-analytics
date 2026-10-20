@@ -119,6 +119,27 @@ test("selects immutable request-time history, labels oldest and missing-time fal
   assert.equal(resolveRate(introduced, "gpt-fixture", FEB)?.rate.inputPerMillion, 8);
 });
 
+test("shuffled observations select exact millisecond boundaries and ignore future API evidence", () => {
+  const before = "2026-02-01T00:00:00.000Z", boundary = "2026-02-01T00:00:00.001Z";
+  const future = sourceSnapshot("models.dev", "2026-03-03T00:00:00.001Z", 99);
+  const history = [future, sourceSnapshot("models.dev", boundary, 3), sourceSnapshot("litellm", JAN, 7),
+    sourceSnapshot("models.dev", before, 2)];
+  for (const snapshots of [history, [...history].reverse()]) {
+    const catalog = catalogFromSnapshots(reviewed(), snapshots, { pricingPolicy: "api-first", offline: true }, now);
+    for (const [timestamp, input, source] of [["2026-01-31T23:59:59.999Z", 7, "litellm"],
+      [before, 2, "models.dev"], [boundary, 3, "models.dev"], ["2026-02-01T01:00:00.001+01:00", 3, "models.dev"],
+      [null, 3, "models.dev"]] as const) {
+      const result = resolveRate(catalog, "OPENAI/GPT-FIXTURE", timestamp)!;
+      assert.equal(result.rate.inputPerMillion, input);
+      assert.equal(result.provenance.source, source);
+    }
+    assert.equal(catalog.status.sources[0]?.fetchedAt, boundary);
+    assert.equal(catalog.status.snapshots, 3);
+    assert.equal(catalog.history.includes(future), false);
+    assert.equal(resolveRate(catalog, "gpt-fixture", now.toISOString())?.rate.inputPerMillion, 3);
+  }
+});
+
 test("snapshot store is atomic, immutable, checksummed and tolerant of damaged files", async () => temporary(async (directory) => {
   const snapshot = sourceSnapshot("models.dev", JAN);
   await Promise.all([saveSnapshot(directory, snapshot), saveSnapshot(directory, snapshot)]);
@@ -307,4 +328,10 @@ test("rates CLI supports JSON, offline updates, aliases, diff and fixed errors",
   assert.equal(run(["update", "--bad-secret"]).status, 2);
   const invalid = run(["show", "--rate-card", "/secret-path/not-present"]);
   assert.equal(invalid.status, 1); assert.doesNotMatch(invalid.stderr, /secret-path|Error:|file:/);
+  const card = reviewed().card, path = join(directory, "custom.json");
+  card.models["gpt-fixture"] = { ...rate(2), cachedInputPerMillion: 0, cacheReadPerMillion: 0.5 };
+  await writeFile(path, JSON.stringify(card));
+  const text = run(["show", "gpt-fixture", "--rate-card", path]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /cache read 0;/);
 }));

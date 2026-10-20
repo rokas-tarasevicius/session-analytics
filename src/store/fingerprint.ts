@@ -1,6 +1,6 @@
 import { createHmac, createSecretKey, type KeyObject } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
-import { open, stat } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 
 /** No path or source bytes are persisted. Nanosecond times avoid float rounding. */
 export interface FileFingerprint {
@@ -25,7 +25,7 @@ export function keyedHash(secret: Uint8Array, value: string | Uint8Array): strin
 }
 
 export async function fingerprint(path: string, secret: Uint8Array): Promise<FileFingerprint> {
-  const file = await open(path, constants.O_RDONLY);
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const before = await file.stat({ bigint: true });
     if (!before.isFile() || before.size > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -52,8 +52,8 @@ export async function fingerprint(path: string, secret: Uint8Array): Promise<Fil
 
 export async function stillMatches(path: string, previous: FileFingerprint): Promise<boolean> {
   try {
-    const current = await stat(path, { bigint: true });
-    return current.dev.toString() === previous.device && current.ino.toString() === previous.inode &&
+    const current = await lstat(path, { bigint: true });
+    return current.isFile() && current.dev.toString() === previous.device && current.ino.toString() === previous.inode &&
       Number(current.size) === previous.size && current.mtimeNs.toString() === previous.mtime &&
       current.ctimeNs.toString() === previous.ctime;
   } catch { return false; }

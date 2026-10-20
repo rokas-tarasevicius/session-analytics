@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows [Kee
 - Empty or entirely invalid OpenCode step counters no longer suppress valid assistant snapshot usage; affected token and API-equivalent cost totals increase, with partial accounting flagged.
 - Invalid Codex cache and reasoning breakdowns are bounded by input and output totals and marked partial, reducing overstated subset counts and per-request cache costs. Cumulative breakdown revisions no longer produce negative uncached tokens or costs; affected cumulative estimates can increase.
 - Claude tool-use blocks without IDs no longer collapse into one call when several occur in one record; affected tool totals increase.
+- Index evidence fingerprints now reject transcript-file symlinks, including links to a previously fingerprinted file.
+- Custom cards containing both cache-read fields now preserve `cachedInputPerMillion` precedence when a context tier omits its cache-read price, including explicit zero; `rates show` displays the same preferred price. Affected long-context totals fall when that preferred price is lower, and rise when it is higher.
+- Guarded reads of SQLite sources in read-only directories now reject changes between iterator rows before yielding stale counters. Totals can rise or fall when the changed source is read again.
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20
