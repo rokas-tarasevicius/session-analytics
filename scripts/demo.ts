@@ -53,7 +53,10 @@ const known = new Set(["--json", "--keep", "--no-open", "--port", "--bin", "--he
 for (let index = 0; index < options.length; index += 1) {
   const flag = options[index] ?? "";
   if (!known.has(flag)) fail(`Unknown demo argument: ${flag}`);
-  if (flag === "--port" || flag === "--bin") index += 1;
+  if (flag === "--port" || flag === "--bin") {
+    if (!options[index + 1] || options[index + 1]!.startsWith("--")) fail(`${flag} requires ${flag === "--port" ? "a port" : "a path"}.`);
+    index += 1;
+  }
 }
 if (has("--json") && !reportMode) fail("--json is only valid with report.");
 if (has("--help")) {
