@@ -66,7 +66,16 @@ test("a cold or re-revisioned index says once, and only on a terminal, that this
     const fixture = await createSessionAnalyticsFixture(root);
     const options = { ...fixture, noIndex: false, offline: true };
     let notices = 0;
-    const scan = () => analyzeMachineSessionsIsolated(options, { onFullParse: () => { notices += 1; } });
+    const scan = async () => {
+      const progress: import("../src/types.ts").AnalysisProgress[] = [];
+      const result = await analyzeMachineSessionsIsolated(options, { onFullParse: () => { notices += 1; }, onProgress: (value) => progress.push(value) });
+      assert.equal(progress[0]?.phase, "discover");
+      assert.equal(progress.at(-1)?.phase, "combine");
+      assert.ok(progress.at(-1)!.done > 0);
+      assert.equal(progress.at(-1)?.done, progress.at(-1)?.total);
+      assert.doesNotMatch(JSON.stringify(progress), /PRIVATE_|secret-command|secret-path|content-is-not-returned/);
+      return result;
+    };
     await scan();
     assert.equal(notices, 1, "a cold index parses every session");
     await scan();

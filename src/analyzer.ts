@@ -2201,9 +2201,26 @@ export interface AnalysisHooks {
   onFullParse?: () => void;
 }
 
+/** Private keys deduplicate work across Conductor aliases and an index-parity retry. */
+function analysisWork(hooks: AnalysisHooks) {
+  const known = new Set<string>(), completed = new Set<string>();
+  let enumerated = false;
+  const report = (phase: import("./types.ts").AnalysisProgress["phase"]) => hooks.onProgress?.({
+    phase, done: completed.size, total: enumerated ? known.size : null,
+  });
+  report("discover");
+  return {
+    discover(keys: Iterable<string>) { for (const key of keys) known.add(key); enumerated = true; report("discover"); },
+    parsing() { report("parse"); },
+    complete(key: string) { known.add(key); completed.add(key); report("parse"); },
+    combine() { report("combine"); },
+  };
+}
+
 async function analyzeSelectedRepositories(
   options: AnalyzeOptions,
   hooks: AnalysisHooks = {},
+  progress = analysisWork(hooks),
 ): Promise<{ historyCoverage?: MachineAnalytics["historyCoverage"]; rateCard: PricingCatalog; repositories: RepositoryAnalytics[]; providerWarnings: string[]; mcpContext?: MachineAnalytics["mcpContext"]; mcpSourceHealth: MachineAnalytics["mcpSourceHealth"] }> {
   const databasePath =
     options.databasePath ?? join(homedir(), "Library/Application Support/com.conductor.app/conductor.db");
@@ -2284,11 +2301,14 @@ async function analyzeSelectedRepositories(
     // Codex and Claude transcript pass has finished. Retaining both object
     // graphs at once needlessly pushes machine-wide scans over V8's heap limit.
     const cursorDatabasePath = options.cursorDatabasePath ?? join(homedir(), "Library/Application Support/Cursor/User/globalStorage/state.vscdb");
+    progress.discover(["cursor-database"]);
+    progress.parsing();
     const cursorSerialized = await cursorSessionsSerialized(
       cursorDatabasePath,
       availableRepositories,
       workspaceRepositories,
     );
+    progress.complete("cursor-database");
     // Explicit roots replace discovery for that provider, so a narrowed or
     // synthetic scan never mixes in the machine's own history.
     const discoveredRoots = await discoverProviderRoots({
@@ -2308,9 +2328,10 @@ async function analyzeSelectedRepositories(
     const codexIndex = mergeTranscriptIndexes(codexIndexes);
     const claudeIndex = mergeTranscriptIndexes(claudeIndexes);
     const [codexCandidates, claudeCandidates] = await Promise.all([
-      transcriptCandidates(codexIndex.paths, "codex"),
-      transcriptCandidates(claudeIndex.paths, "claude"),
+      transcriptCandidates(codexIndex.paths, "codex").then((sessions) => { progress.discover(sessions.map(({ id }) => `codex:${id}`)); return sessions; }),
+      transcriptCandidates(claudeIndex.paths, "claude").then((sessions) => { progress.discover(sessions.map(({ id }) => `claude:${id}`)); return sessions; }),
     ]);
+    progress.parsing();
     const claudeUsageOwners = await buildClaudeUsageOwners(claudeCandidates, claudeEvidencePaths, visitJsonLines, index?.ownership);
     const codexCounterLedger = await buildCodexCounterLedger(
       codexCandidates.flatMap(({ path, paths }) => paths ?? [path]), index,
@@ -2336,6 +2357,8 @@ async function analyzeSelectedRepositories(
       }
       registeredRows.push(row);
     }
+    progress.discover(registeredRows.filter((row) => row.agent_type === "codex" || row.agent_type === "claude").map((row) => `${row.agent_type}:${row.provider_session_id}`));
+    progress.parsing();
     await index?.prefetch([...codexIndex.paths.values(), ...claudeIndex.paths.values()].flat());
     const analyzedRows = await mapConcurrent(registeredRows, 1, async (row) => {
       if (row.agent_type !== "codex" && row.agent_type !== "claude") {
@@ -2354,7 +2377,7 @@ async function analyzeSelectedRepositories(
         return unavailableSession(row, "invalid", [
           "Transcript parsing failed without exposing local error details.",
         ]);
-      }
+      } finally { progress.complete(`${provider}:${row.provider_session_id}`); }
     });
     const legacyRows = rows.filter(({ provider_session_id, agent_type }) =>
       !provider_session_id && (agent_type === "codex" || agent_type === "claude"));
@@ -2380,14 +2403,16 @@ async function analyzeSelectedRepositories(
           ? await analyzeCodex(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], codexCounterLedger, claimedCodexCounters, index, null, () => false, candidate.paths)
           : await analyzeClaude(row, candidate.path, rateCard, ["Recovered from a unique working-directory and start-time match in the provider transcript store."], index, claudeUsageOwners, candidate.paths, claudeProfileOf);
       } catch (error) { if (error instanceof IndexParityError) throw error; return null; }
+      finally { progress.complete(`${candidate.provider}:${candidate.id}`); }
     });
     const discoveredSessions = await mapConcurrent(candidates.filter((candidate) =>
       !claimed.has(`${candidate.provider}:${candidate.id}`)), 1, async (candidate) => {
-      const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered, candidate.repositoryRemote);
       try {
+        const repository = await repositoryForPath(candidate.cwd, availableRepositories, workspaceRepositories, discovered, candidate.repositoryRemote);
         return await analyzeTranscriptCandidate(candidate, repository, rateCard, undefined, codexCounterLedger, claimedCodexCounters, index, claudeUsageOwners, claudeProfileOf);
       }
       catch (error) { if (error instanceof IndexParityError) throw error; return null; }
+      finally { progress.complete(`${candidate.provider}:${candidate.id}`); }
     });
     let cursorResult: { sessions: SessionAnalytics[]; warning: string | null };
     try {
@@ -2418,6 +2443,7 @@ async function analyzeSelectedRepositories(
     const pricing = { rateCard, resolveRate: (model: string, at: string | null) => resolveRate(rateCard, model, at), price: (rate: ModelRate, usage: TokenUsage, input: number) => priceUsage(rate, usage, input).cost };
     const additional = await additionalProviderSessions({
       home: homedir(), options, environment: process.env, pricing, existingSessions: allSessions,
+      onDiscover: (keys) => progress.discover(keys), onProcessed: (key) => progress.complete(key),
       claimRequest: index ? index.claimProviderRequest.bind(index) : undefined,
       completeRequests: index ? index.completeProviderRequests.bind(index) : undefined,
       reconcileAntigravityRequests: index ? index.reconcileProviderRequests.bind(index, "antigravity") : undefined,
@@ -2434,6 +2460,7 @@ async function analyzeSelectedRepositories(
         return repository;
       },
     });
+    progress.combine();
     const knownSessionKeys = new Set(allSessions.map((session) => session.sessionKey));
     for (const session of additional.sessions) {
       const owners = rows.filter((row) => row.agent_type === session.provider && row.provider_session_id &&
@@ -2600,7 +2627,7 @@ async function analyzeSelectedRepositories(
     // Discard every partial claim and close the writer before a fresh, unindexed scan.
     const failedIndex = index; index = null; failedIndex?.close();
     const failedDatabase = database; database = null; failedDatabase?.close();
-    const result = await analyzeSelectedRepositories({ ...options, noIndex: true });
+    const result = await analyzeSelectedRepositories({ ...options, noIndex: true }, hooks, progress);
     result.providerWarnings.push(indexParityWarning);
     for (const repository of result.repositories) repository.warnings.push(indexParityWarning);
     return result;

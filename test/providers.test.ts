@@ -244,6 +244,18 @@ test("OpenCode reads the verified SQLite layout read-only without double-countin
   });
 });
 
+test("additional provider progress includes parsed and duplicate session work without private keys", async () => {
+  await fixture(async (root, f) => {
+    const store = await sdkFixture(root, f.repositoryRoot);
+    const progress: import("../src/types.ts").AnalysisProgress[] = [];
+    await analyzeMachineSessionsRaw({ ...legacyOptions(f), cursorSdkRoot: store }, { onProgress: (value) => progress.push(value) });
+    assert.ok(progress.at(-1)!.done > 4);
+    assert.equal(progress.at(-1)!.done, progress.at(-1)!.total);
+    assert.ok(progress.some((value, i) => i > 0 && value.total! > progress[i - 1]!.total! && value.done >= 4));
+    privateOutput(progress, root);
+  });
+});
+
 test("OpenCode retains every request when one assistant message has multiple steps", async () => {
   await fixture(async (root, f) => {
     const path = join(root, "opencode.db"); await openCodeFixture(path, f.repositoryRoot);
