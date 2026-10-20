@@ -116,7 +116,7 @@ Public pricing fetches belong only in `src/pricing/`; analysis stays network-fre
 
 ## Commits and pull requests
 
-- Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `perf:`, `chore:`, `ci:`. Use a scope when it helps, such as `fix(codex): ...` or `feat(dashboard): ...`. Mark breaking changes to the CLI or the JSON shape with `!` and explain them in the body.
+- Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `perf:`, `chore:`, `ci:`. Use a scope when it helps, such as `fix(codex): ...` or `feat(dashboard): ...`. Mark breaking changes to the CLI or the JSON shape with `!` and explain them in the body. The pull request title becomes the squash commit, and its type chooses the next release's version: `feat` a minor version, `fix` and `perf` a patch, `!` a major one (see [releases](docs/release.md#cut-a-release)).
 - Keep pull requests focused, and fill in the pull request template, including the privacy checklist.
 - `npm run check` must pass.
 
