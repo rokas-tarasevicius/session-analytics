@@ -49,6 +49,17 @@ test("rejection below the calibration floor never divides value by a zero or tin
   }
 });
 
+test("simultaneous readings have one level and cannot provide reset or projection evidence", () => {
+  const samples = [80, 20, 30].map((used) => reading("codex", "seven_day", start + WEEK, start + 2 * DAY, used));
+  for (const order of [samples, [...samples].reverse()]) {
+    const live = liveMeter(buildMeters(order, start + 2 * DAY)[0]!, start + 2 * DAY);
+    assert.equal(live.used, 80);
+    assert.equal(live.cycle!.segments.length, 1);
+    assert.equal(live.cycle!.samples.length, 1);
+    assert.equal(live.projected, null, "several reports of one instant are not several readings over time");
+  }
+});
+
 test("cycles end at the next cycle's first reading; an early provider reset is not counted as waste", () => {
   const firstReset = start + WEEK, secondReset = start + DAY + WEEK;
   const meters = buildMeters([

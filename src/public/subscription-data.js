@@ -30,6 +30,7 @@ const outlierShare = 0.25;
 const resetDrift = 180;
 /** A fall of this many points inside one cycle, confirmed by the next reading, is an in-place reset. */
 const resetDrop = 5;
+const statusRank = { unknown: 0, idle: 0, allowed: 1, warning: 2, overage: 3, rejected: 4 };
 
 const sessionMeter = "five_hour";
 const weeklyMeter = "seven_day";
@@ -108,7 +109,15 @@ function cyclesOf(readings, window, now) {
     const counts = new Map();
     for (const reading of members) counts.set(reading.resetsAt, (counts.get(reading.resetsAt) ?? 0) + 1);
     const [[resetsAt]] = [...counts].sort((left, right) => right[1] - left[1] || right[0] - left[0]);
-    const samples = members.map((reading) => ({ t: reading.observedAt, used: reading.usedPercent, status: reading.status })).sort((left, right) => left.t - right.t);
+    const instants = new Map();
+    for (const reading of members) {
+      const previous = instants.get(reading.observedAt);
+      instants.set(reading.observedAt, {
+        t: reading.observedAt, used: Math.max(previous?.used ?? 0, reading.usedPercent),
+        status: previous && statusRank[previous.status] > statusRank[reading.status] ? previous.status : reading.status,
+      });
+    }
+    const samples = [...instants.values()].sort((left, right) => left.t - right.t);
     return { resetsAt, samples };
   });
   return ordered.map((cycle, index) => {

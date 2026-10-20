@@ -346,6 +346,18 @@ const laterReading = (left: LimitObservation, right: LimitObservation): boolean 
   (left.observedAt - right.observedAt || left.usedPercent - right.usedPercent || statusRank[left.status] - statusRank[right.status] ||
     (left.source > right.source ? 1 : left.source < right.source ? -1 : 0)) > 0;
 
+/** Several sources can report one instant; their order is not evidence of an in-place reset. */
+function simultaneousReadings(series: LimitObservation[]): LimitObservation[] {
+  const readings = new Map<string, LimitObservation>();
+  for (const item of series) {
+    const key = `${seriesKey(item)}|${item.resetsAt}|${item.observedAt}`, current = readings.get(key);
+    if (!current) { readings.set(key, item); continue; }
+    const kept = laterReading(item, current) ? item : current;
+    readings.set(key, { ...kept, status: statusRank[item.status] > statusRank[current.status] ? item.status : current.status });
+  }
+  return [...readings.values()];
+}
+
 /**
  * Normalize readings into one row per account, meter, reset cycle, segment and time bucket. Each bucket keeps its highest
  * reading (earliest on ties) with the most severe status among them; a rejected reading keeps its own row and time, so
@@ -366,8 +378,9 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
     const kept = markIdle(series);
     clusterResets(kept);
     quarantineInterleaved(kept);
-    segmentOrdinals(kept, ordinals);
-    normalized.push(...kept);
+    const distinct = simultaneousReadings(kept);
+    segmentOrdinals(distinct, ordinals);
+    normalized.push(...distinct);
   }
   const latest = new Map<string, LimitObservation>();
   for (const observation of normalized) {

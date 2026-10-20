@@ -434,6 +434,26 @@ test("an in-place reset inside one 15-minute bucket is kept apart, and each mete
   assert.deepEqual(compactObservations([claude(60, 30), claude(300, 32), claude(600, 31)], now).map((row) => row.usedPercent), [32, 31], "the latest reading is never an earlier, higher one");
 });
 
+test("simultaneous readings never create an in-place reset and compact independently of input order", () => {
+  const samples = [80, 20, 30].map((used) => codexReading(now - 60, now + 86_400, used));
+  const expected = [samples[0]!];
+  for (const order of [samples, [...samples].reverse(), [samples[1]!, samples[0]!, samples[2]!]]) {
+    const compacted = compactObservations(order, now);
+    assert.deepEqual(compacted, expected);
+    assert.deepEqual(compactObservations([...compacted, ...order], now), expected, "repeated ledger merges stay idempotent");
+    const live = liveMeter(buildMeters(compacted, now)[0]!, now);
+    assert.equal(live.used, 80);
+    assert.equal(live.cycle!.segments.length, 1);
+  }
+  const warning = { ...samples[1]!, status: "warning" as const, source: "codex-account" as const };
+  for (const order of [[samples[0]!, warning], [warning, samples[0]!]]) {
+    const compacted = compactObservations(order, now);
+    assert.equal(compacted.length, 1);
+    assert.equal(compacted[0]!.usedPercent, 80);
+    assert.equal(compacted[0]!.status, "warning", "simultaneous status evidence is retained");
+  }
+});
+
 test("the newest plan evidence wins, including a tier this version does not recognise; Codex's 'unknown' plan type is no evidence", async () => {
   const record = (plan: LedgerAccount["plan"], planType: string | null, planObservedAt: number | null): LedgerAccount => ({
     provider: "codex", plan, planSource: plan ? "codex-session" : null, planObservedAt, extraUsage: null, codex: null, profileKeys: [],
