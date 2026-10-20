@@ -92,7 +92,8 @@ const identityPattern = /^(?:host-)?[0-9a-f]{16}$/;
  * (`--identify-machine`). An installed remote that fails as if it ran another version is asked which.
  */
 export async function fetchRemoteLimits(machine: RemoteMachine, args: string[], { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal }): Promise<{ snapshot: LimitsSnapshot; identity: string | null }> {
-  const result = await runRemote(machine, args, { deadline: Date.now() + timeoutMs, signal, limit: maximumLimitsBytes });
+  const deadline = Date.now() + timeoutMs;
+  const result = await runRemote(machine, args, { deadline, signal, limit: maximumLimitsBytes });
   let failure = classifyRemote(machine, result, timeoutMs);
   // A limits read's time-out and size limit are its own, and so are their fixes.
   if (failure?.reason === "timeout" || failure?.reason === "too-large") failure = new RemoteError(failure.reason, machine, result.stderr, "limits", timeoutMs);
@@ -106,7 +107,7 @@ export async function fetchRemoteLimits(machine: RemoteMachine, args: string[], 
     } catch { failure = new RemoteError("invalid", machine, "", "limits --json"); }
   }
   if (failure && machine.runtime === "installed" && ["rejected", "invalid", "analysis"].includes(failure.reason)) {
-    const found = await remoteVersion(machine, signal);
+    const found = await remoteVersion(machine, signal, deadline);
     if (found && found !== version) throw new RemoteError("version-skew", machine, result.stderr, found);
   }
   if (failure) throw failure;

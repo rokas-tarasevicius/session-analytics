@@ -34,6 +34,11 @@ const args = process.argv.slice(2), at = args.indexOf("--");
 const [destination, ...command] = args.slice(at + 1);
 appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ options: args.slice(0, at), destination, command }) + "\\n");
 const report = command.indexOf("report");
+if (destination === "probe-hangs") {
+  if (command.includes("--version")) setTimeout(() => process.exit(0), 3000);
+  else { process.stdout.write("{}"); process.exit(0); }
+  return;
+}
 if (destination === "down") { process.stderr.write("ssh: connect to host down port 22: Connection refused\\n"); process.exit(255); }
 if (destination === "old") { process.stderr.write("Unknown session analytics argument: --no-remote\\n"); process.exit(2); }
 if (destination === "missing") { process.stderr.write("bash: line 1: session-analytics: command not found\\n"); process.exit(127); }
@@ -121,6 +126,22 @@ test("--remote combines this machine with others read over the user's ssh", asyn
     assert.doesNotMatch(JSON.stringify(call), new RegExp(directory.replaceAll("/", "\\/")));
   }
   assert.deepEqual(recorded[0]!.command.slice(1, 7), ["report", "--json", "--no-remote", "--portable-ids", "--time-zone", "UTC"]);
+});
+
+test("snapshot and limits version probes stay within the machine read's deadline", async () => {
+  const remoteModule = new URL("../src/remote.ts", import.meta.url).href;
+  const limitsModule = new URL("../src/limits/machines.ts", import.meta.url).href;
+  for (const name of ["fetchRemoteSnapshot", "fetchRemoteLimits"]) {
+    const module = name === "fetchRemoteSnapshot" ? remoteModule : limitsModule;
+    const script = `import { ${name} } from ${JSON.stringify(module)};
+      const machine = { name: "probe-hangs", ssh: "probe-hangs", runtime: "installed", command: ["session-analytics"], node: "node", saved: false };
+      try { await ${name}(machine, ["report"], { timeoutMs: 300 }); }
+      catch (error) { process.stdout.write(error.reason); }`;
+    const started = performance.now();
+    const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: environment, timeout: 5000 });
+    assert.equal(read.stdout, "invalid");
+    assert.ok(performance.now() - started < 2000, `${name} exceeded the deadline: ${performance.now() - started} ms`);
+  }
 });
 
 test("--no-remote ignores remote environment settings and conflicts with explicit --remote", () => {

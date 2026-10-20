@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- A failed installed machine's diagnostic version probe shares its original read deadline, so a hanging probe cannot extend `--remote-timeout` by another 30 seconds.
+
 - Machine failure hints in snapshots and subscription limits keep SSH destinations, account names and configured paths private; the terminal still prints the exact diagnostic and fix.
 
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.

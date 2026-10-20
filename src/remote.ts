@@ -291,15 +291,17 @@ export function classifyRemote(machine: RemoteMachine, result: SshResult, timeou
 }
 
 /** An installed remote's version, or null when it does not answer with one. */
-export async function remoteVersion(machine: RemoteMachine, signal?: AbortSignal): Promise<string | null> {
-  const result = await runRemote(machine, ["--version"], { deadline: Date.now() + 30_000, signal, limit: 4096 });
+export async function remoteVersion(machine: RemoteMachine, signal?: AbortSignal, deadline = Date.now() + 30_000): Promise<string | null> {
+  if (Date.now() >= deadline) return null;
+  const result = await runRemote(machine, ["--version"], { deadline: Math.min(deadline, Date.now() + 30_000), signal, limit: 4096 });
   const answer = result.stdout.toString("utf8").trim();
   return result.code === 0 && versionPattern.test(answer) ? answer : null;
 }
 
 /** One machine's validated snapshot. An installed remote that fails as if it ran another version is asked which. */
 export async function fetchRemoteSnapshot(machine: RemoteMachine, args: string[], { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal }): Promise<MachineAnalytics> {
-  const result = await runRemote(machine, args, { deadline: Date.now() + timeoutMs, signal });
+  const deadline = Date.now() + timeoutMs;
+  const result = await runRemote(machine, args, { deadline, signal });
   let failure = classifyRemote(machine, result, timeoutMs);
   let snapshot: MachineAnalytics | null = null;
   if (!failure) {
@@ -310,7 +312,7 @@ export async function fetchRemoteSnapshot(machine: RemoteMachine, args: string[]
     } catch { failure = new RemoteError("invalid", machine); }
   }
   if (failure && machine.runtime === "installed" && ["rejected", "invalid", "analysis", "index-newer"].includes(failure.reason)) {
-    const found = await remoteVersion(machine, signal);
+    const found = await remoteVersion(machine, signal, deadline);
     if (found && found !== version) throw new RemoteError("version-skew", machine, result.stderr, found);
   }
   if (failure) throw failure;
