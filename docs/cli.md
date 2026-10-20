@@ -37,7 +37,7 @@ npm install -g https://github.com/rokas-tarasevicius/session-analytics/releases/
 
 The release workflow installed and ran this `session-analytics-X.Y.Z.tgz` on Linux and macOS before publishing it; `session-analytics.tgz` is the same file under a name that always points to the latest release. The package has no dependencies and runs no install scripts. 0.9.0 and earlier run only [from source](#from-source).
 
-With Homebrew on macOS or Linux, `brew install rokas-tarasevicius/tap/session-analytics` installs the same tarball and runs it with Homebrew's Node.js. The release workflow updates the [tap](https://github.com/rokas-tarasevicius/homebrew-tap) after Homebrew installs, tests and audits the formula. The release workflow publishes the same tarball to npm, with provenance, from 0.10.2; 0.10.1 was published by hand, without provenance.
+With Homebrew on macOS or Linux, `brew install rokas-tarasevicius/tap/session-analytics` installs the same tarball and runs it with Homebrew's Node.js. The release workflow updates the [tap](https://github.com/rokas-tarasevicius/homebrew-tap) after Homebrew installs, tests and audits the formula. The release workflow publishes the same tarball to npm, with provenance, from 0.10.3; 0.10.1 was published by hand, without provenance, and 0.10.2 is on GitHub only.
 
 - **Pin a version:** `npm install -g session-analytics@X.Y.Z`, or install the versioned asset, `https://github.com/rokas-tarasevicius/session-analytics/releases/download/vX.Y.Z/session-analytics-X.Y.Z.tgz`.
 - **Try once without installing:** `npx session-analytics`, or `npx --package <tarball URL> session-analytics`. npx resolves the package again on every start, so configure MCP clients and the Claude Code status line with an installed command.

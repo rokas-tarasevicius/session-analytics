@@ -357,7 +357,8 @@ jobs:
             *) if [ "$(printf '%s\n%s\n' "$LATEST" "$V" | sort -V | tail -n 1)" = "$V" ]; then DIST_TAG=latest; else DIST_TAG=backport; fi ;;
           esac
           echo "Publishing session-analytics@$V with dist-tag $DIST_TAG; latest is ${LATEST:-unset}."
-          npm publish "release/session-analytics-$V.tgz" --tag "$DIST_TAG"
+          # `./`: npm reads a bare `release/…` as the GitHub repository shorthand `user/repo` and tries to clone it.
+          npm publish "./release/session-analytics-$V.tgz" --tag "$DIST_TAG"
 
       - name: Verify npm serves the release bytes
         run: |
