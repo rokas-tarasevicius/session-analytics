@@ -1,0 +1,80 @@
+name: Release PR
+
+on:
+  # Every merge to master updates the release pull request; merging that pull request releases it (release.yml).
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Only the newest master matters: a newer push replaces a waiting or running update.
+  group: release-pr
+  cancel-in-progress: true
+
+jobs:
+  release-pr:
+    name: release pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The whole history and its tags: the next version comes from the commits since the last release tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      - name: Prepare the next release
+        # Conventional Commit titles since the last tag choose the version; nothing releasable, or a version that is still being
+        # released, leaves the version output empty.
+        id: prepare
+        run: node scripts/release-prepare.ts --write --output "$GITHUB_OUTPUT"
+
+      - name: Update the release pull request
+        # One branch, release/next, rebuilt from master on every run, and one pull request from it. A branch pushed with the
+        # workflow token starts no workflows, so CI is dispatched on it explicitly to report the required checks.
+        if: steps.prepare.outputs.version != ''
+        run: |
+          git switch --quiet -C release/next
+          git add package.json package-lock.json src/version.ts CHANGELOG.md SECURITY.md
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit --quiet -m "chore(release): $V"
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)" push --quiet --force "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" HEAD:refs/heads/release/next
+          node -e 'const n=require("fs").readFileSync("CHANGELOG.md","utf8").split(/^## \[/m)[2];process.stdout.write(n.slice(n.indexOf("\n")+1).trim())' > notes.md
+          {
+            echo "Merging this pull request releases **v$V** ($BUMP, from v$PREVIOUS) to the GitHub Release, npm and the Homebrew tap."
+            echo
+            echo "The version follows the Conventional Commit titles merged since v$PREVIOUS: \`feat\` is a minor version, \`fix\` and \`perf\` a patch, a breaking change a major version (a minor one before 1.0.0). This pull request is rebuilt on every merge to \`master\`; edit the notes in \`CHANGELOG.md\`'s Unreleased section on \`master\`, not here."
+            echo
+            echo "## Release notes"
+            echo
+            cat notes.md
+          } > body.md
+          PR="$(gh pr list --head release/next --base master --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$PR" ]; then gh pr edit "$PR" --title "chore(release): $V" --body-file body.md; else gh pr create --head release/next --base master --title "chore(release): $V" --body-file body.md; fi
+          gh workflow run ci.yml --ref release/next
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.prepare.outputs.version }}
+          BUMP: ${{ steps.prepare.outputs.bump }}
+          PREVIOUS: ${{ steps.prepare.outputs.previous }}
+
+      - name: Close a stale release pull request
+        # A version that is being released has no release pull request of its own.
+        if: steps.prepare.outputs.version == ''
+        run: |
+          PR="$(gh pr list --head release/next --base master --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$PR" ]; then gh pr close "$PR" --comment "Nothing to release from master right now; this pull request returns with the next feature or fix."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}

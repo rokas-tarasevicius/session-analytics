@@ -111,7 +111,7 @@ const untagged: Array<Omit<GateContext, "needs">> = [
 ];
 
 test("release: every workflow action is pinned to a full commit SHA", async () => {
-  for (const name of ["ci.yml", "release.yml"]) {
+  for (const name of ["ci.yml", "release.yml", "release-pr.yml"]) {
     const workflow = await readFile(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
     const uses = [...workflow.matchAll(/^\s+(?:- )?uses: (.+)$/gm)].map((match) => match[1]!);
     assert.ok(uses.length > 0, name);
