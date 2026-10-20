@@ -648,7 +648,9 @@ test("Summary, Velocity, Tools and Activity chips share registry labels, marks a
   const summary = rows[0]!;
   assert.deepEqual(summary.querySelectorAll("input").map((input) => input.dataset["providerFilter"]), providerIds);
   assert.deepEqual(summary.querySelectorAll("input").map((input) => input.getAttribute("aria-label")), providerIds.map((id) => `${id === "unsupported" ? "Unsupported provider" : providerLabels[id]} daily usage`));
-  assert.deepEqual(summary.querySelectorAll(".mark").map((mark) => mark.textContent), ["CP", "OC", "G", "AG", "?"]);
+  // Every supported provider shows its brand mark; only the unsupported bucket keeps a neutral badge.
+  assert.deepEqual(summary.querySelectorAll("label img").map((image) => [image.src, image.alt]), providerIds.filter((id) => id !== "unsupported").map((id) => [`/brands/${id}.svg`, ""]));
+  assert.deepEqual(summary.querySelectorAll(".mark").map((mark) => mark.textContent), ["?"]);
 });
 
 

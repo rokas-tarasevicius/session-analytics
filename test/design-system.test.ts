@@ -3,6 +3,9 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
+import { providerIds } from "../src/public/providers.js";
+import { staticRoutes } from "../src/static-routes.ts";
+
 const styles = ["styles.css", "velocity.css", "pricing.css", "tools.css", "interop.css"];
 const readCss = (file: string) => readFile(new URL(`../src/public/${file}`, import.meta.url), "utf8");
 
@@ -415,5 +418,28 @@ test("Velocity docs describe Top increases and compact evidence with exact acces
     assert.match(doc, /Top increases/);
     assert.match(doc, /13\.8M priced \(100%\) → 9\.3M priced \(100%\)/);
     assert.match(doc, /tooltip.*accessible name/);
+  }
+});
+
+
+test("every supported provider ships a bundled brand mark that is served, listed in the notice and legible in both themes", async () => {
+  const supported = providerIds.filter((id) => id !== "unsupported");
+  const notice = await readFile(new URL("../src/public/brands/NOTICE.md", import.meta.url), "utf8");
+  const files = (await readdir(new URL("../src/public/brands/", import.meta.url))).filter((file) => file.endsWith(".svg")).sort();
+  assert.deepEqual(files, supported.map((id) => `${id}.svg`).sort(), "one mark per supported provider and no strays");
+  for (const id of supported) {
+    const svg = await readFile(new URL(`../src/public/brands/${id}.svg`, import.meta.url), "utf8");
+    assert.match(svg, /^<svg [^>]*viewBox="[^"]+"[^>]*>/, id);
+    assert.match(svg, /<title>[^<]+<\/title>/, `${id} names its mark`);
+    assert.doesNotMatch(svg, /<script|<foreignObject|<image|href=|url\(|<style/, `${id} is plain geometry`);
+    assert.ok(staticRoutes.some(([route, file]) => route === `/brands/${id}.svg` && file === `brands/${id}.svg`), `${id} has a static route`);
+  }
+  for (const name of ["OpenAI", "Claude", "Cursor", "GitHub Copilot", "OpenCode", "Google Gemini", "Google Antigravity"]) assert.ok(notice.includes(name), `NOTICE names the ${name} mark`);
+  // Ink-only marks are inverted on dark surfaces; Claude carries its own brand colour and is left alone.
+  const css = await readCss("styles.css");
+  assert.match(css, /:root\[data-theme="dark"\] img\[src\^="\/brands\/"\]:not\(\[src\$="claude\.svg"\]\) \{ filter: invert\(1\)/);
+  for (const id of supported) {
+    const svg = await readFile(new URL(`../src/public/brands/${id}.svg`, import.meta.url), "utf8");
+    assert.equal(/fill="#/.test(svg), id === "claude", `${id} is ink-only unless it is Claude`);
   }
 });

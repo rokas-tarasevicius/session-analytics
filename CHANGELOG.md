@@ -78,6 +78,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Velocity explains the actual guard blocking a burn ratio or projection, including calendar days, pricing coverage and minimum activity figures.
 - Costs shows wholly unpriced model, provider and total values and shares as unavailable rather than free; accounting totals are unchanged.
 - `node scripts/build.ts` invoked through a symlinked path, such as a macOS temporary directory under `/var/folders`, now builds instead of exiting silently with status 0.
+- Copilot CLI, OpenCode, Gemini CLI and Antigravity show their brand marks wherever provider marks appear (chips, legends, Tools, Pricing and Subscription) instead of two-letter badges; the marks follow the theme like the Codex and Cursor marks.
 
 ## [0.11.0] - 2026-10-20
 

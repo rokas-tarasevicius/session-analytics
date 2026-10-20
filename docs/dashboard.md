@@ -161,7 +161,7 @@ Every number on the dashboard is a lower bound from local evidence. The **Covera
 
 The address bar also records provider chips for the active view (`providers=codex,claude`, or `providers=none` when all are off). Reload and Back/Forward restore them; switching views keeps each view’s own selection.
 
-Provider chips in Summary, Velocity, Tools and Activity use the same provider names, marks and order. Selected dots match the chart colours.
+Provider chips in Summary, Velocity, Tools and Activity use the same provider names, marks and order. Every supported provider has a brand mark (see `src/public/brands/NOTICE.md`); sessions from an unsupported provider get a neutral badge. Selected dots match the chart colours.
 
 The command search has an accessible name and announces whether matching commands are expanded.
 
