@@ -7,6 +7,7 @@ import { addUsage, count, emptySession, files, finish, increment, jsonLines, mod
 
 interface Message {
   id: string; type: string; at: string | null; model: string;
+  boundedCache: boolean;
   usage: ReturnType<typeof tokens> | null; tools: Array<{ id: string; name: string }>;
 }
 
@@ -19,6 +20,7 @@ function projectMessage(raw: unknown): Message | null {
   const calls = Array.isArray(message["toolCalls"]) ? message["toolCalls"] : [];
   if (calls.length > 1_000 || id.length > 512) throw new Error("Gemini message projection exceeds the memory budget.");
   return { id, type: String(message["type"]), at: timestamp(message["timestamp"]), model: modelName(message["model"]),
+    boundedCache: count(usage?.["cached"]) > count(usage?.["input"]),
     // Gemini candidatesTokenCount excludes thoughtsTokenCount; output pricing includes both.
     usage: usage ? tokens(usage["input"], usage["cached"], 0, count(usage["output"]) + count(usage["thoughts"]), usage["thoughts"], true) : null,
     tools: calls.flatMap((raw) => { const c = record(raw), tool = name(c?.["name"]), id = text(c?.["id"]); return tool && id && id.length <= 512 ? [{ name: tool, id }] : []; }) };
@@ -160,6 +162,10 @@ export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
         if (message.type === "user") { session.metrics.userTurns++; continue; }
         if (message.type !== "gemini") continue;
         session.metrics.assistantMessages++;
+        if (message.boundedCache) {
+          session.evidence!.accounting = "partial";
+          session.transcript.warnings.push("Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial.");
+        }
         // Input includes cache reads; thoughts are a recorded reasoning split; cache writes are not recorded.
         if (message.usage) { session.evidence!.tokens = "reported"; addUsage(session, context, message.model, message.usage, message.at, "request", 1, { velocity, dimension: dimension(message.model), coverage: { reasoning: true, cacheRead: true, cacheWrite: false } }); }
         for (const tool of message.tools) if (!seenTools.has(tool.id)) { seenTools.add(tool.id); increment(session.tools, tool.name); velocity.tool(message.at, dimension(message.model), 1, "session"); }

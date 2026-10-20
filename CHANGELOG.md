@@ -11,6 +11,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Invalid Gemini cache counts no longer inflate inclusive input totals. Cache reads are bounded by recorded input and accounting is marked partial; affected input/cache totals and any configured API-equivalent estimates decrease.
+- Claude and Codex liveness checks now interpret timestamps without a zone as UTC and reject impossible calendar dates, matching accounting timestamps across host timezones.
+- Empty or entirely invalid OpenCode step counters no longer suppress valid assistant snapshot usage; affected token and API-equivalent cost totals increase, with partial accounting flagged.
+- Invalid Codex cache and reasoning breakdowns are bounded by input and output totals and marked partial, reducing overstated subset counts and per-request cache costs. Cumulative breakdown revisions no longer produce negative uncached tokens or costs; affected cumulative estimates can increase.
+- Claude tool-use blocks without IDs no longer collapse into one call when several occur in one record; affected tool totals increase.
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20

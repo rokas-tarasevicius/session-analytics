@@ -4,7 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { openSourceDatabase } from "../source-database.ts";
 import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
-import { addUsage, emptySession, finish, increment, hash, modelName, name, observeTime, parse, record, text, timestamp, tokens } from "./common.ts";
+import { addUsage, emptySession, finish, hasCounters, increment, hash, modelName, name, observeTime, parse, record, text, timestamp, tokens } from "./common.ts";
 
 // Forks get fresh message/part IDs but retain original message times and usage.
 // Only compact fingerprints from messages owned by their creation session are indexed.
@@ -93,6 +93,9 @@ export const opencodeAdapter: ProviderAdapter = {
         if (part?.["type"] === "step-finish") {
           const messageId = String(row["message_id"]), message = messages.get(messageId), usage = record(part["tokens"]), cache = record(usage?.["cache"]);
           if (message && usage) {
+            if (!hasCounters(usage, ["input", "output"]) && !hasCounters(cache, ["read", "write"])) {
+              malformed = true; session.transcript.warnings.push("Malformed OpenCode part records were skipped."); continue;
+            }
             stepped.add(messageId); session.evidence!.tokens = "reported";
             addUsage(session, context, message.model, tokens(usage["input"], cache?.["read"], cache?.["write"], usage["output"], usage["reasoning"]), timestamp(row["time_created"]) ?? message.at, "request", 1, ledger(message.model));
           }
