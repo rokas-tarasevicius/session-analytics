@@ -361,3 +361,12 @@ test("selected sidebar repositories preserve the unselected label width", async 
   assert.match(selected.body, /box-shadow:\s*inset 0 0 0 1px/);
   assert.doesNotMatch(selected.body, /(?:^|;)\s*(?:border(?:-width)?|padding(?:-inline)?|gap):/);
 });
+
+
+test("snapshot metadata wraps with spacing and no dangling separator", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /id="generated-at">[^<]*<\/span><span id="rate-card-date">/);
+  const rule = rules(await readCss("styles.css")).find(({ selector }) => selector === ".snapshot-meta")!;
+  assert.match(rule.body, /flex-wrap:\s*wrap/);
+  assert.match(rule.body, /gap:\s*6px 12px/);
+});

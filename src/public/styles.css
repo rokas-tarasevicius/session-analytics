@@ -399,7 +399,7 @@ select:hover { border-color: var(--line-strong); }
 main { flex: 1; width: 100%; max-width: 1520px; margin: 0 auto; padding: 18px 20px 48px; transition: opacity var(--t-base) var(--ease); }
 main[data-state="refreshing"] { opacity: .55; pointer-events: none; }
 .scope-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; margin: 0 0 8px; color: var(--muted); font-size: var(--fs-xs); }
-.snapshot-meta { display: inline-flex; gap: 6px; margin-left: auto; white-space: nowrap; font: 500 var(--fs-xs) var(--font-sans); font-variant-numeric: tabular-nums; }
+.snapshot-meta { display: inline-flex; flex-wrap: wrap; gap: 6px 12px; margin-left: auto; white-space: nowrap; font: 500 var(--fs-xs) var(--font-sans); font-variant-numeric: tabular-nums; }
 /* Machines strip: one chip per machine behind a combined snapshot; a chip filters every view, a button opens the reason and fix. */
 .machine-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; color: var(--muted); font-size: var(--fs-xs); }
 .machine-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
