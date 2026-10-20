@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Antigravity local usage from schema-v1 SQLite conversation stores for the App, IDE and CLI, including cache and reasoning counters, observed tools, dated API-equivalent pricing where model names are known, and full-scan/index parity. `--antigravity-root` replaces discovery. Legacy protobuf conversation files remain unsupported and produce a coverage warning; no usage is inferred from display transcripts or quota percentages.
 - `session-analytics upgrade` upgrades the installation with the package manager that installed it: `brew upgrade` for Homebrew, and `npm install -g session-analytics@latest` in the same prefix for npm and release-tarball installs. `upgrade --check` prints the installed and latest versions without changing anything. A source checkout is left alone. See [upgrade](docs/cli.md#upgrade-roll-back-and-uninstall).
 
 ### Fixed

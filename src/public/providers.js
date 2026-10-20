@@ -1,6 +1,6 @@
 import { providerColor } from "./chart-colors.js";
 
-export const providerLabels = { codex: "Codex", claude: "Claude", cursor: "Cursor", copilot: "Copilot CLI", opencode: "OpenCode", gemini: "Gemini CLI", unsupported: "Unsupported" };
+export const providerLabels = { codex: "Codex", claude: "Claude", cursor: "Cursor", copilot: "Copilot CLI", opencode: "OpenCode", gemini: "Gemini CLI", antigravity: "Antigravity", unsupported: "Unsupported" };
 export const providerIds = Object.keys(providerLabels);
 export const providerColors = Object.fromEntries(providerIds.map((provider) => [provider, providerColor(provider)]));
 
@@ -22,10 +22,10 @@ export function providerMark(provider) {
   if (["codex", "claude", "cursor"].includes(provider)) {
     const image = document.createElement("img"); image.src = `/brands/${provider}.svg`; image.alt = ""; return image;
   }
-  const badge = document.createElement("span"); badge.className = "pill mark"; badge.textContent = { copilot: "CP", opencode: "OC", gemini: "G", unsupported: "?" }[provider] ?? "?"; badge.setAttribute("aria-hidden", "true"); return badge;
+  const badge = document.createElement("span"); badge.className = "pill mark"; badge.textContent = { copilot: "CP", opencode: "OC", gemini: "G", antigravity: "AG", unsupported: "?" }[provider] ?? "?"; badge.setAttribute("aria-hidden", "true"); return badge;
 }
 
-const sourceLabels = { "conductor-messages": "Conductor messages", "conductor-result": "Conductor results", "cursor-sdk": "Cursor SDK runs", "cursor-transcript": "Cursor transcripts", "copilot-events": "Copilot events", "opencode-db": "OpenCode database", "gemini-chat": "Gemini chats" };
+const sourceLabels = { "conductor-messages": "Conductor messages", "conductor-result": "Conductor results", "cursor-sdk": "Cursor SDK runs", "cursor-transcript": "Cursor transcripts", "copilot-events": "Copilot events", "opencode-db": "OpenCode database", "gemini-chat": "Gemini chats", "antigravity-db": "Antigravity conversations" };
 
 /** Coverage uses eligible sessions, not invented zero-valued observations. */
 export function providerEvidenceRows(sessions) {

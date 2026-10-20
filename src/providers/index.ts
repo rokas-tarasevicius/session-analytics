@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import type { SessionAnalytics } from "../types.ts";
 import type { ProviderAdapter, ProviderContext, ProviderEnvironment, ProviderSession } from "./adapter.ts";
+import { antigravityAdapter } from "./antigravity.ts";
 import { copilotAdapter } from "./copilot.ts";
 import { cursorSdkAdapter } from "./cursor-sdk.ts";
 import { cursorTranscriptAdapter } from "./cursor-transcript.ts";
@@ -12,6 +13,9 @@ interface AdditionalContext extends ProviderEnvironment {
   knownPaths: string[];
   existingSessions: SessionAnalytics[];
   pricing: Pick<ProviderContext, "rateCard" | "price" | "resolveRate">;
+  claimRequest?: ProviderContext["claimRequest"];
+  completeRequests?: (session: SessionAnalytics) => void;
+  reconcileAntigravityRequests?: Parameters<typeof antigravityAdapter>[0];
   repositoryForSession(identity: ProviderSession, source: string): Promise<ProviderContext["repository"]>;
 }
 
@@ -22,6 +26,7 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
     [opencodeAdapter, context.options.opencodeDatabasePath],
     [copilotAdapter, context.options.copilotRoot],
     [geminiAdapter(context.knownPaths), context.options.geminiRoot],
+    [antigravityAdapter(context.reconcileAntigravityRequests), context.options.antigravityRoot],
     [cursorTranscriptAdapter(context.knownPaths), context.options.cursorTranscriptRoot],
   ];
   const sessions: SessionAnalytics[] = [], warnings: string[] = [];
@@ -45,8 +50,9 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
           if (seen.has(hash(key))) { identities.add(key); continue; }
           try {
             const repository = await context.repositoryForSession(identity, adapter.id);
-            const session = await adapter.analyze(identity, { repository, ...context.pricing });
+            const session = await adapter.analyze(identity, { repository, ...context.pricing, claimRequest: context.claimRequest });
             if (!session) continue;
+            context.completeRequests?.(session);
             if (!identity.cwd) session.transcript.warnings.push("The evidence does not establish a unique repository path; this session is grouped as unassigned.");
             seen.add(hash(key)); identities.add(key); sessions.push(session);
           } catch { warnings.push("A provider evidence session could not be read; other sessions were retained."); }

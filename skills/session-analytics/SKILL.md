@@ -1,13 +1,13 @@
 ---
 name: session-analytics
-description: Open a privacy-safe localhost dashboard, or print a terminal or JSON report, of machine-wide Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, cost, tools, models, compactions, pricing coverage, or API-equivalent usage across repositories.
+description: Open a privacy-safe localhost dashboard, or print a terminal or JSON report, of machine-wide Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI, and supported Antigravity SQLite session metrics grouped by repository. Use when asked to show, open, restart, compare, or analyze local coding-agent sessions, tokens, cost, tools, models, compactions, pricing coverage, or API-equivalent usage across repositories.
 ---
 
 # Session analytics
 
 ## Contract
 
-Show content-free session analytics for every locally evidenced Claude Code, Codex, Cursor, Copilot CLI, OpenCode, and Gemini CLI session. Group sessions by repository, preserve pricing provenance, and never return transcript content, prompts, reasoning, tool arguments or results, commands, paths, credentials, or raw identifiers.
+Show content-free session analytics for every locally evidenced Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI, and supported Antigravity SQLite session. Group sessions by repository, preserve pricing provenance, and never return transcript content, prompts, reasoning, tool arguments or results, commands, paths, credentials, or raw identifiers.
 
 ## Phase 1: launch it
 
@@ -43,6 +43,7 @@ The command reads standard local stores automatically:
 - Copilot CLI: `~/.copilot/session-state/*/events.jsonl`.
 - OpenCode: `$XDG_DATA_HOME/opencode/opencode.db`, or `~/.local/share/opencode/opencode.db`.
 - Gemini CLI: `~/.gemini/tmp/*/chats/session-*.json` and `.jsonl`.
+- Antigravity App, IDE and CLI: schema-v1 `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/<UUID>.db`; legacy `.pb` files are unsupported.
 - Optional Conductor enrichment: `~/Library/Application Support/com.conductor.app/conductor.db`.
 - Reproducible prices: `data/rate-cards.json` in the project.
 

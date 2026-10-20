@@ -359,7 +359,7 @@ test("unassigned Gemini projects remain pseudonymous and unknown models remain u
 
 test("dashboard covers every provider and keeps unavailable evidence out of coverage numerators", async () => {
   const client = await import(new URL("../src/public/providers.js", import.meta.url).href);
-  assert.deepEqual(client.providerIds, ["codex", "claude", "cursor", "copilot", "opencode", "gemini", "unsupported"]);
+  assert.deepEqual(client.providerIds, ["codex", "claude", "cursor", "copilot", "opencode", "gemini", "antigravity", "unsupported"]);
   const sample = (provider: string, evidence: object, spendByDay = {}) => ({ provider, evidence, tokens: { inputTokens: 0, outputTokens: 0 }, spendByDay });
   const sessions = [
     sample("claude", { source: "conductor-result", fidelity: "summary", tokens: "reported", tools: "unavailable", timing: "provider" }),
@@ -371,7 +371,7 @@ test("dashboard covers every provider and keeps unavailable evidence out of cove
   assert.equal(rows.find((r: { provider: string }) => r.provider === "claude").toolSessions, 0);
   assert.equal(rows.find((r: { provider: string }) => r.provider === "cursor").tokenSessions, 0);
   assert.equal(rows.find((r: { provider: string }) => r.provider === "cursor").fileTimes, 1);
-  assert.deepEqual(client.dailySpendByProvider(sessions, "2026-07-20", "2026-07-20"), [{ name: "2026-07-20", codex: 0, claude: 0, cursor: 0, copilot: 0, opencode: 1, gemini: 2, unsupported: 0 }]);
+  assert.deepEqual(client.dailySpendByProvider(sessions, "2026-07-20", "2026-07-20"), [{ name: "2026-07-20", codex: 0, claude: 0, cursor: 0, copilot: 0, opencode: 1, gemini: 2, antigravity: 0, unsupported: 0 }]);
 });
 
 test("bad stores are isolated and symbolic-link children are not traversed", async () => {

@@ -67,6 +67,9 @@ export class IndexScan {
   private components = new Map<string, string>();
   private unobservedClaims = new Map<string, string>();
   private retiredCounters: Set<string>;
+  private providerOwners = new Map<string, string>();
+  private priorProviderClaims = new Map<string, Set<string>>();
+  private providerClaims = new WeakMap<SessionAnalytics, Array<[string, string, string | null]>>();
   private ledgerPaths = new Set<string>();
   private sourceKeys = new Map<string, string>();
   private prefetched = new Map<string, FileFingerprint>();
@@ -111,6 +114,13 @@ export class IndexScan {
       const session = projectSession(JSON.parse(row.payload) as SessionAnalytics);
       // Rollback needs the prior generation, not a second full JSON graph in V8's heap.
       this.sessions.set(row.identity_key, { ...row, payload: deflateRawSync(row.payload) });
+      if (session.provider === "antigravity") for (const [key, , owner] of JSON.parse(row.owned_counters) as Array<[string, string, string | null]>) {
+        if (key.startsWith("provider-request:") && owner) {
+          this.providerOwners.set(key, owner);
+          const claims = this.priorProviderClaims.get(owner) ?? new Set<string>();
+          claims.add(key); this.priorProviderClaims.set(owner, claims);
+        }
+      }
       if (!row.retention_verified) this.unverifiedRetention.add(session.sessionKey);
       this.repositories.set(session.repositoryId, { root: row.root_key, remote: row.remote_key });
       if (session.provider === "codex" || session.provider === "claude") nativeIdentities.push(row.identity_key);
@@ -158,6 +168,7 @@ export class IndexScan {
         options.additionalProviders !== false, false, false,
         [options.cursorSdkRoot, options.cursorTranscriptRoot, options.copilotRoot, options.opencodeDatabasePath, options.geminiRoot]
           .map((root) => root ? resolve(root) : "default"),
+        ...(options.antigravityRoot ? [resolve(options.antigravityRoot)] : []),
       ]);
       return new IndexScan(connection, scope, hash(["parser-v061-native-accounting", source, ledgerSource, storeSource, projectionSource, parserSources, pricing]));
     } catch (error) { connection.close(); throw error; }
@@ -506,7 +517,51 @@ export class IndexScan {
   recordFresh(session: SessionAnalytics, root: string, remote: string): void {
     const identity = this.identity(session.provider, session.sessionKey);
     this.seen.add(identity);
-    this.save(identity, "", session, [], root, remote, []);
+    this.save(identity, "", session, [], root, remote, this.providerClaims.get(session) ?? []);
+  }
+
+  /** Reserve native response identities across source loss, fork replay and prune.
+   * Reuse the existing retirement ledger; only namespaced keyed hashes go on disk.
+   * The object key survives a later Conductor public-session-key remapping. */
+  claimProviderRequest(session: SessionAnalytics, requestId: string): boolean {
+    const key = `provider-request:${this.privateKey(session.provider, requestId)}`;
+    if (this.isPrunedCounter(key)) return false;
+    const owner = this.privateKey("provider-owner", `${session.provider}:${session.sessionKey}`);
+    const previous = this.providerOwners.get(key);
+    if (previous && previous !== owner) return false;
+    this.providerOwners.set(key, owner);
+    const owned = this.providerClaims.get(session) ?? [];
+    owned.push([key, "", owner]);
+    this.providerClaims.set(session, owned);
+    return true;
+  }
+
+  /** A successful complete reparse replaces its old reservations before forks
+   * are read. Partial reads keep unseen reservations until evidence is repaired. */
+  reconcileProviderRequests(provider: string, sessionKey: string, responses: string[], complete: boolean): void {
+    if (!complete) return;
+    const owner = this.privateKey("provider-owner", `${provider}:${sessionKey}`);
+    const prior = this.priorProviderClaims.get(owner);
+    if (!prior) return;
+    const present = new Set(responses.map((id) => `provider-request:${this.privateKey(provider, id)}`));
+    for (const key of prior) if (!present.has(key) && this.providerOwners.get(key) === owner) this.providerOwners.delete(key);
+    this.priorProviderClaims.delete(owner);
+  }
+
+  /** Preserve unresolved prior ownership when a source only supplied partial evidence. */
+  completeProviderRequests(session: SessionAnalytics): void {
+    if (session.provider !== "antigravity") return;
+    const owner = this.privateKey("provider-owner", `${session.provider}:${session.sessionKey}`);
+    const prior = this.priorProviderClaims.get(owner);
+    if (!prior) return;
+    const owned = this.providerClaims.get(session) ?? [], seen = new Set(owned.map(([key]) => key));
+    for (const key of prior) {
+      if (seen.has(key) || this.providerOwners.get(key) !== owner) continue;
+      if (session.evidence?.accounting === "partial") owned.push([key, "", owner]);
+      else this.providerOwners.delete(key);
+    }
+    this.providerClaims.set(session, owned);
+    this.priorProviderClaims.delete(owner);
   }
 
   supersedeFallback(provider: string, sessionKey: string): void {

@@ -160,14 +160,14 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
     const fixture = await createSessionAnalyticsFixture(join(temporaryDirectory, "fixture"));
     const home = join(temporaryDirectory, "home"), demoTemp = join(temporaryDirectory, "demo-temp");
     await mkdir(home); await mkdir(demoTemp);
-    // The full demo includes all six providers, History coverage, and enough repositories for the fleet table.
+    // The full demo includes all seven providers, History coverage, and enough repositories for the fleet table.
     const demo = spawnSync(process.execPath, [join(repositoryRoot, "scripts/demo.ts"), "report", "--json"], {
       cwd: repositoryRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 60_000,
       env: { ...hermeticEnvironment(fixture, home), TMPDIR: demoTemp, TMP: demoTemp, TEMP: demoTemp },
     });
     assert.equal(demo.status, 0, demo.stderr);
     const snapshot = JSON.parse(demo.stdout);
-    assert.equal(new Set(snapshot.sessions.map((session: { provider: string }) => session.provider)).size, 6);
+    assert.equal(new Set(snapshot.sessions.map((session: { provider: string }) => session.provider)).size, 7);
     assert.ok(snapshot.historyCoverage);
     // Long bounded display names must not force the Repository column wider.
     const renamedRepository = snapshot.repositories[0].repository;
@@ -216,7 +216,7 @@ test("laptop tables fit and daily usage chips stay one row tall in both densitie
             return { row: row.getBoundingClientRect().height, chip: chips[0].getBoundingClientRect().height, count: chips.length,
               belowTitle: row.getBoundingClientRect().top >= header.querySelector('h2').getBoundingClientRect().bottom };
           })()`);
-          assert.equal(chips.count, 6, label);
+          assert.equal(chips.count, 7, label);
           assert.equal(chips.row, chips.chip, `Daily usage chip height at ${label}`);
           assert.equal(chips.belowTitle, true, label);
         }

@@ -708,6 +708,9 @@
               "const": "gemini"
             },
             {
+              "const": "antigravity"
+            },
+            {
               "const": "unsupported"
             }
           ]
@@ -1161,6 +1164,9 @@
             },
             {
               "const": "gemini-chat"
+            },
+            {
+              "const": "antigravity-db"
             }
           ]
         },
@@ -1542,6 +1548,9 @@
             },
             {
               "const": "gemini"
+            },
+            {
+              "const": "antigravity"
             }
           ]
         },
@@ -2185,6 +2194,9 @@
               "const": "gemini"
             },
             {
+              "const": "antigravity"
+            },
+            {
               "const": "unsupported"
             }
           ]
@@ -2511,6 +2523,12 @@
           "items": {
             "anyOf": [
               {
+                "const": "Some Antigravity metadata was malformed, conflicting, oversized, or lacked request ownership; accounting is partial."
+              },
+              {
+                "const": "Antigravity usage comes from local conversation metadata. Display transcripts, context-window counters, quota percentages, and model selectors are not billing evidence. Unknown model IDs remain unpriced."
+              },
+              {
                 "const": "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters."
               },
               {
@@ -2536,6 +2554,12 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
+              },
+              {
+                "const": "Legacy Antigravity protobuf conversation files are unsupported; their usage is unavailable."
               },
               {
                 "const": "A provider evidence store could not be fully read; identified sessions were retained."
@@ -2992,6 +3016,9 @@
               "const": "gemini"
             },
             {
+              "const": "antigravity"
+            },
+            {
               "const": "unsupported"
             }
           ]
@@ -3282,6 +3309,12 @@
           "items": {
             "anyOf": [
               {
+                "const": "Some Antigravity metadata was malformed, conflicting, oversized, or lacked request ownership; accounting is partial."
+              },
+              {
+                "const": "Antigravity usage comes from local conversation metadata. Display transcripts, context-window counters, quota percentages, and model selectors are not billing evidence. Unknown model IDs remain unpriced."
+              },
+              {
                 "const": "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters."
               },
               {
@@ -3307,6 +3340,12 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
+              },
+              {
+                "const": "Legacy Antigravity protobuf conversation files are unsupported; their usage is unavailable."
               },
               {
                 "const": "A provider evidence store could not be fully read; identified sessions were retained."
@@ -3639,6 +3678,12 @@
           "items": {
             "anyOf": [
               {
+                "const": "Some Antigravity metadata was malformed, conflicting, oversized, or lacked request ownership; accounting is partial."
+              },
+              {
+                "const": "Antigravity usage comes from local conversation metadata. Display transcripts, context-window counters, quota percentages, and model selectors are not billing evidence. Unknown model IDs remain unpriced."
+              },
+              {
                 "const": "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters."
               },
               {
@@ -3664,6 +3709,12 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
+              },
+              {
+                "const": "Legacy Antigravity protobuf conversation files are unsupported; their usage is unavailable."
               },
               {
                 "const": "A provider evidence store could not be fully read; identified sessions were retained."
@@ -4012,6 +4063,12 @@
           "items": {
             "anyOf": [
               {
+                "const": "Some Antigravity metadata was malformed, conflicting, oversized, or lacked request ownership; accounting is partial."
+              },
+              {
+                "const": "Antigravity usage comes from local conversation metadata. Display transcripts, context-window counters, quota percentages, and model selectors are not billing evidence. Unknown model IDs remain unpriced."
+              },
+              {
                 "const": "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters."
               },
               {
@@ -4037,6 +4094,12 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
+              },
+              {
+                "const": "Legacy Antigravity protobuf conversation files are unsupported; their usage is unavailable."
               },
               {
                 "const": "A provider evidence store could not be fully read; identified sessions were retained."
@@ -4548,6 +4611,12 @@
           "items": {
             "anyOf": [
               {
+                "const": "Some Antigravity metadata was malformed, conflicting, oversized, or lacked request ownership; accounting is partial."
+              },
+              {
+                "const": "Antigravity usage comes from local conversation metadata. Display transcripts, context-window counters, quota percentages, and model selectors are not billing evidence. Unknown model IDs remain unpriced."
+              },
+              {
                 "const": "Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters."
               },
               {
@@ -4573,6 +4642,12 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
+              },
+              {
+                "const": "Legacy Antigravity protobuf conversation files are unsupported; their usage is unavailable."
               },
               {
                 "const": "A provider evidence store could not be fully read; identified sessions were retained."

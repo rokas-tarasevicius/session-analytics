@@ -1,4 +1,4 @@
-export type ProviderKey = "codex" | "claude" | "cursor" | "copilot" | "opencode" | "gemini" | "unknown";
+export type ProviderKey = "codex" | "claude" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "unknown";
 export const brandPalette: { light: Record<string, string>; dark: Record<string, string> };
 export const categorySlotCount: 4;
 export function categoryColor(slot: number): string;

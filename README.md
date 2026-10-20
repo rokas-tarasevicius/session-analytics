@@ -7,7 +7,7 @@
 
 <h3>Content-free analytics for your coding-agent sessions.</h3>
 
-<p>See usage value, models, tools and activity by repository across Claude Code, Codex, Cursor, Copilot CLI, OpenCode and Gemini CLI.<br />
+<p>See usage value, models, tools and activity by repository across Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI and Antigravity.<br />
 Local and read-only. No prompts, messages or file paths in its outputs.</p>
 
 <p><a href="LICENSE">MIT</a> · <a href="https://nodejs.org/">Node.js 24+</a> · <a href="package.json">Zero runtime dependencies</a> · <a href="docs/roadmap.md">Public preview</a> · <a href="https://github.com/rokas-tarasevicius/session-analytics/actions/workflows/ci.yml">CI</a></p>
@@ -89,6 +89,7 @@ See [combine machines](docs/interop.md#combine-machines).
 | GitHub Copilot CLI | Tools and turns; tokens unavailable |
 | OpenCode | Request tokens and tools |
 | Gemini CLI | Message tokens and tools |
+| Antigravity App / IDE / CLI | Reported tokens and tools from schema-v1 SQLite conversations; legacy protobuf files unsupported |
 
 Profiles and archives are discovered automatically. Conductor is optional. [Source locations, fidelity and known gaps](docs/providers.md).
 

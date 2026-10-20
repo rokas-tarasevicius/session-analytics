@@ -8,7 +8,7 @@ export class InputError extends Error {
 const scope = { type: "string", enum: ["repository", "machine"], description: "Defaults to the launch repository when known, otherwise machine. Machine stays within startup repository filters." };
 const repositoryId = { type: "string", pattern: "^(discovered|conductor)-[a-f0-9]{20}$", description: "A pseudonymous repository key returned by this server. Never a path or raw ID." };
 const window = { type: "string", enum: ["today", "week", "7d", "30d", "90d", "all"], default: "30d", description: "UTC calendar days; week starts Monday. Whole-session metrics use the session-start cohort." };
-const provider = { type: "string", enum: ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "unsupported"] };
+const provider = { type: "string", enum: ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "antigravity", "unsupported"] };
 const limit = { type: "integer", minimum: 1, maximum: 50, default: 10 };
 const offset = { type: "integer", minimum: 0, maximum: 100000, default: 0 };
 const common = { scope, repositoryId, window, provider };

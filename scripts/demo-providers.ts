@@ -1,3 +1,4 @@
+import { createAntigravityDemoDatabase } from "./demo-antigravity.ts";
 import { createHash } from "node:crypto";
 import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -28,6 +29,8 @@ export function generateProviderDemo(root: string, repositories: Array<{ root: s
         db.prepare("INSERT INTO message VALUES (?,?,?)").run(`${id}-response-${turn}`, id, JSON.stringify({ role: "assistant", modelID: "claude-sonnet-5", time: { created: start + turn * 30000 }, tokens: { input: 4000 * (i + 1), output: 1800, reasoning: 500, cache: { read: 6000, write: 1200 } } }));
         db.prepare("INSERT INTO part (id, session_id, data) VALUES (?,?,?)").run(`${id}-tool-${turn}`, id, JSON.stringify({ type: "tool", tool: ["read", "edit", "bash"][turn % 3], callID: `${id}-call-${turn}`, state: { input: {}, output: "Synthetic output" } }));
       }
+      const antigravityId = `e0000000-0000-4000-8000-${String(i * 10 + n).padStart(12, "0")}`;
+      createAntigravityDemoDatabase(join(root, "antigravity", "conversations", `${antigravityId}.db`), antigravityId, repo.root, at, later);
       const events = [{ id: `${id}-start`, type: "session.start", timestamp: at, data: { sessionId: id, startTime: at, context: { cwd: repo.root } } }];
       const persisted: unknown[] = [...events];
       for (let turn = 0; turn < 4 + n; turn++) {
@@ -54,5 +57,5 @@ export function generateProviderDemo(root: string, repositories: Array<{ root: s
   }
   write(join(dirname(gemini), "projects.json"), JSON.stringify({ projects }));
   db.close(); metadata.close();
-  return ["--no-additional-providers", "--copilot-root", copilot, "--opencode-database", opencode, "--gemini-root", gemini, "--cursor-sdk-root", sdk, "--cursor-transcript-root", transcripts, "--database", conductor];
+  return ["--no-additional-providers", "--antigravity-root", join(root, "antigravity"), "--copilot-root", copilot, "--opencode-database", opencode, "--gemini-root", gemini, "--cursor-sdk-root", sdk, "--cursor-transcript-root", transcripts, "--database", conductor];
 }

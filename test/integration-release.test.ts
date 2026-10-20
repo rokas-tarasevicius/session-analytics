@@ -677,7 +677,7 @@ test("release: every dispatcher command shares help and version without scanning
   }
 });
 
-test("release: complete demo API, all six renderers, static modules and privacy work together", { timeout: 120_000 }, async (t) => {
+test("release: complete demo API, all providers and renderers, static modules and privacy work together", { timeout: 120_000 }, async (t) => {
   const listener = createServer(); await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
   const address = listener.address(); assert.ok(address && typeof address === "object");
   await new Promise<void>((resolve) => listener.close(() => resolve()));
@@ -699,7 +699,7 @@ test("release: complete demo API, all six renderers, static modules and privacy 
     const raw = await response.text(); assert.doesNotMatch(raw, forbidden);
     const snapshot = validateSnapshot(JSON.parse(raw));
     assert.ok(snapshot.sessions.length > 100); assert.ok(snapshot.repositories.length >= 6);
-    for (const provider of ["claude", "codex", "cursor", "copilot", "opencode", "gemini"]) assert.ok(snapshot.sessions.some((s) => s.provider === provider), provider);
+    for (const provider of ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "antigravity"]) assert.ok(snapshot.sessions.some((s) => s.provider === provider), provider);
     for (const key of ["velocity", "historyProfile", "mcpEvidence"] as const) assert.ok(snapshot.sessions.some((s) => s[key]), key);
     assert.ok(snapshot.spendByModel.some((m) => m.pricing?.length));
     const refreshed = await realFetch(`${base}/api/analytics?refresh=1`);

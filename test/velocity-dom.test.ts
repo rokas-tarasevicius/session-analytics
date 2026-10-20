@@ -189,7 +189,7 @@ test("Velocity leads with value cards before filters and keeps them independent 
     change(container.querySelector("#velocity-mode")!, "cumulative"); assertLead(total);
     const codex = container.querySelector('[data-provider="codex"]')!.querySelector("input")!;
     codex.checked = false; codex.listeners.get("change")!(); assertLead(4);
-    assert.match(container.querySelector(".evidence")!.textContent, /6 of 7 providers/); assert.doesNotMatch(container.querySelector(".evidence")!.textContent, /partially observed/);
+    assert.match(container.querySelector(".evidence")!.textContent, /7 of 8 providers/); assert.doesNotMatch(container.querySelector(".evidence")!.textContent, /partially observed/);
     renderVelocity(container, sessions, { ...context, end: "2026-09-02" }); assertLead(2);
     assert.match(container.querySelector(".evidence")!.textContent, /1 active day; \$1.00 per calendar day/);
     const claude = container.querySelector('[data-provider="claude"]')!.querySelector("input")!;
@@ -241,7 +241,7 @@ test("agent SVG encodings are unique, stable under filtering and reproduced in t
             const reference = path.getAttribute("fill")!;
             if (reference.startsWith("url(#")) assert.ok(nodes.some((node) => node.tagName === "pattern" && reference === `url(#${node.getAttribute("id")})`));
           } else assert.equal(path.getAttribute("stroke-dasharray"), swatch.dataset["pattern"] === "dashed" ? "6 3" : "none");
-          assert.match(path.getAttribute("stroke")!, /^var\(--provider-(claude|codex|cursor|copilot|opencode|gemini)-[0-3]\)$/);
+          assert.match(path.getAttribute("stroke")!, /^var\(--provider-(claude|codex|cursor|copilot|opencode|gemini|antigravity)-[0-3]\)$/);
 
         }
         return new Map(paths.map((path, i) => [data.series[i]!.id, signature(path)]));

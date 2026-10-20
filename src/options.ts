@@ -16,6 +16,7 @@ const analysisSettings: Array<[keyof AnalyzeOptions, string, string]> = [
   ["copilotRoot", "--copilot-root", "COPILOT_ROOT"],
   ["opencodeDatabasePath", "--opencode-database", "OPENCODE_DATABASE"],
   ["geminiRoot", "--gemini-root", "GEMINI_ROOT"],
+  ["antigravityRoot", "--antigravity-root", "ANTIGRAVITY_ROOT"],
   ["databasePath", "--database", "CONDUCTOR_DATABASE"],
   ["rateCardPath", "--rate-card", "RATE_CARD"],
   ["repositoryId", "--repo-id", "REPO_ID"],
@@ -37,6 +38,7 @@ export const sourceHelp = `  --database PATH        Override the optional Conduc
   --copilot-root PATH    Override Copilot's session-state directory
   --opencode-database PATH Override the OpenCode SQLite database
   --gemini-root PATH     Override Gemini's tmp directory
+  --antigravity-root PATH Override Antigravity's data root (or parent .gemini)
   --no-additional-providers Disable new-source discovery (explicit paths still apply)
   --rate-card PATH       Override the reviewed rate card
 `;

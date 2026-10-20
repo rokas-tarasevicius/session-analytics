@@ -1,4 +1,4 @@
-export type SessionProvider = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "unsupported";
+export type SessionProvider = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "unsupported";
 
 import type { SessionHistory, HistoryStatistics, HistoryReconciliation, HistoryCoverage, HistoryProfileEvidence } from "./metrics/history-types.ts";
 
@@ -19,7 +19,7 @@ export type VelocityAgent =
   | "claude-cli" | "claude-sdk" | "claude-desktop" | "claude-unknown"
   | "claude-general-purpose" | "claude-explore" | "claude-plan" | "claude-subagent"
   | "codex-cli" | "codex-exec" | "codex-vscode" | "codex-desktop" | "codex-subagent" | "codex-review" | "codex-unknown"
-  | "cursor" | "copilot" | "opencode" | "gemini";
+  | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity";
 export type VelocityEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "unknown";
 export interface AgentIdentity {
   claudeEntrypoint?: ClaudeEntrypoint;
@@ -437,6 +437,7 @@ export interface AnalyzeOptions extends PricingOptions {
   copilotRoot?: string;
   opencodeDatabasePath?: string;
   geminiRoot?: string;
+  antigravityRoot?: string;
   /** Disable discovery of additional stores; explicit store options still apply. */
   additionalProviders?: boolean;
   /** Internal launch context, never accepted as an MCP tool argument or returned as a path. */
@@ -476,7 +477,7 @@ export interface DashboardHealth {
 export interface ProviderEvidence {
   /** Partial means retained usage does not prove a complete, disjoint accounting interval. */
   accounting?: "complete" | "partial";
-  source: "conductor-result" | "conductor-messages" | "cursor-sdk" | "cursor-transcript" | "copilot-events" | "opencode-db" | "gemini-chat";
+  source: "conductor-result" | "conductor-messages" | "cursor-sdk" | "cursor-transcript" | "copilot-events" | "opencode-db" | "gemini-chat" | "antigravity-db";
   fidelity: "message" | "summary" | "activity-only";
   tokens: "reported" | "unavailable";
   tools: "observed" | "unavailable";

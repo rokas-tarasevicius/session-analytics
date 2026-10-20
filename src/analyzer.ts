@@ -2323,7 +2323,7 @@ async function analyzeSelectedRepositories(
     await index?.prefetch([...codexIndex.paths.values(), ...claudeIndex.paths.values()].flat());
     const analyzedRows = await mapConcurrent(registeredRows, 1, async (row) => {
       if (row.agent_type !== "codex" && row.agent_type !== "claude") {
-        return ["cursor", "copilot", "opencode", "gemini"].includes(row.agent_type) ? null : unavailableSession(row, "unsupported", ["Unsupported Conductor agent type."]);
+        return ["cursor", "copilot", "opencode", "gemini", "antigravity"].includes(row.agent_type) ? null : unavailableSession(row, "unsupported", ["Unsupported Conductor agent type."]);
       }
       const provider = row.agent_type as SessionProvider;
       const selected = registeredSelections.get(row.conductor_session_id)!;
@@ -2402,6 +2402,9 @@ async function analyzeSelectedRepositories(
     const pricing = { rateCard, resolveRate: (model: string, at: string | null) => resolveRate(rateCard, model, at), price: (rate: ModelRate, usage: TokenUsage, input: number) => priceUsage(rate, usage, input).cost };
     const additional = await additionalProviderSessions({
       home: homedir(), options, environment: process.env, pricing, existingSessions: allSessions,
+      claimRequest: index ? index.claimProviderRequest.bind(index) : undefined,
+      completeRequests: index ? index.completeProviderRequests.bind(index) : undefined,
+      reconcileAntigravityRequests: index ? index.reconcileProviderRequests.bind(index, "antigravity") : undefined,
       knownPaths: [...new Set([...availableRepositories.map((r) => r.root_path), ...workspaceRepositories.keys(), ...discovered.keys(), ...noRepositoryPathsOf(discovered), ...candidates.map((c) => c.cwd)])],
       async repositoryForSession(identity, source) {
         if (identity.cwd) return repositoryForPath(identity.cwd, availableRepositories, workspaceRepositories, discovered);
@@ -2409,7 +2412,7 @@ async function analyzeSelectedRepositories(
         const root = `unassigned:${key}`;
         let repository = discovered.get(root);
         if (!repository) {
-          repository = { id: `discovered-${key}`, name: `${source === "gemini-chat" ? "Gemini" : source === "copilot-events" ? "Copilot" : source === "opencode-db" ? "OpenCode" : "Cursor"} · unassigned ${key.slice(0, 4)}`, root_path: root, remote_url: null, default_branch: "" };
+          repository = { id: `discovered-${key}`, name: `${source === "antigravity-db" ? "Antigravity" : source === "gemini-chat" ? "Gemini" : source === "copilot-events" ? "Copilot" : source === "opencode-db" ? "OpenCode" : "Cursor"} · unassigned ${key.slice(0, 4)}`, root_path: root, remote_url: null, default_branch: "" };
           discovered.set(root, repository);
         }
         return repository;

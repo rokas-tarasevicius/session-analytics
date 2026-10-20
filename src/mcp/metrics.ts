@@ -9,7 +9,7 @@ import { metricEligible } from "../public/providers.js";
 import { safeName, timestamp } from "./names.ts";
 
 const DAY = 86_400_000;
-const PROVIDERS: SessionProvider[] = ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "unsupported"];
+const PROVIDERS: SessionProvider[] = ["claude", "codex", "cursor", "copilot", "opencode", "gemini", "antigravity", "unsupported"];
 const MIN_SESSIONS = 5;
 const MAX_MIX = 20;
 const validRepository = (id: string): boolean => /^(conductor|discovered)-[a-f0-9]{20}$/.test(id);

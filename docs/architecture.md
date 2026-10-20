@@ -23,7 +23,7 @@
 | `src/analyzer.ts` | Discovery, identity validation, repository assignment, provider parsers, pricing, deduplication, and aggregation. |
 | `src/providers/adapter.ts` | Private adapter contract: discover roots, identify sessions, analyze into the public allowlist. |
 | `src/providers/claude.ts` | Existing Claude parser behind the adapter; shared state and pricing are injected by the analyzer. |
-| `src/providers/` | Additional-source registry, bounded readers and projection, Cursor SDK/transcripts, Copilot, OpenCode, Gemini, and Conductor result fallback. |
+| `src/providers/` | Additional-source registry, bounded readers and projection, Cursor SDK/transcripts, Copilot, OpenCode, Gemini, Antigravity, and Conductor result fallback. |
 | `src/public/providers.js` | Provider labels, daily series, and source-specific evidence coverage. |
 | `src/pricing/` | Fixed public-feed fetchers, normalization, validation, content-addressed rate tables with immutable observations, indexed request-time history, token-class pricing/coverage, provenance and rates CLI. |
 | `src/limits/` | Limit-meter harvesters (Codex `rate_limits`, Claude Agent SDK `rate_limit_event` logs, status line), account attribution (`accounts.ts`: session → profile → hashed login), persisted fingerprinted byte cursors, the private `limits-v2.json` ledger with merge-on-write, other machines' limits read through the bundled runtime and merged by account (`machines.ts`), and the `limits` command. Served by `/api/limits`, outside the analysis worker. |

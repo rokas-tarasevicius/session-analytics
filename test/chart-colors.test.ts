@@ -78,7 +78,7 @@ test("CSS chart tokens mirror the complete shared palette in both themes", async
     const selector = theme === "light" ? ":root {" : ':root[data-theme="dark"] {';
     const body = css.slice(css.indexOf(selector) + selector.length).split("}")[0]!;
     const properties = Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((match) => [match[1], match[2]!.trim()]));
-    assert.equal(Object.keys(palette).length, 40);
+    assert.equal(Object.keys(palette).length, 45);
     for (const [name, value] of Object.entries(palette)) assert.equal(properties[name], value, `${theme}: ${name}`);
     assert.deepEqual(Object.keys(properties).filter((name) => /^--(?:provider-|category-|chart-neutral$)/.test(name)).sort(), Object.keys(palette).sort());
   }
