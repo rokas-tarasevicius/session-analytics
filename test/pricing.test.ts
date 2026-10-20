@@ -328,4 +328,10 @@ test("rates CLI supports JSON, offline updates, aliases, diff and fixed errors",
   assert.equal(run(["update", "--bad-secret"]).status, 2);
   const invalid = run(["show", "--rate-card", "/secret-path/not-present"]);
   assert.equal(invalid.status, 1); assert.doesNotMatch(invalid.stderr, /secret-path|Error:|file:/);
+  const card = reviewed().card, path = join(directory, "custom.json");
+  card.models["gpt-fixture"] = { ...rate(2), cachedInputPerMillion: 0, cacheReadPerMillion: 0.5 };
+  await writeFile(path, JSON.stringify(card));
+  const text = run(["show", "gpt-fixture", "--rate-card", path]);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /cache read 0;/);
 }));
