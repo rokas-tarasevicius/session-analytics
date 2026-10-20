@@ -6,14 +6,15 @@ import { createServer, type ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated } from "./analysis-process.ts";
+import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated, noticeFullParse } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, sourceHelp, argument, type RemoteOptions } from "./options.ts";
 import { machinesPath, remoteFor } from "./machines/config.ts";
 import { stopOnSignals } from "./processes.ts";
 import { analyzeMachines, machineOptions, machineReads, type MachineReads } from "./remote.ts";
 import { refreshPricingIfStale } from "./pricing/update.ts";
 import { pricingConfiguration } from "./pricing/catalog.ts";
-import type { DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
+import type { AnalysisHooks } from "./analyzer.ts";
+import type { ScanProgress, DashboardHealth, MachineAnalytics, MachineStatus, SharedSnapshot } from "./types.ts";
 import { loadSnapshot } from "./interop/snapshot.ts";
 import { assertSnapshotOptions } from "./interop/cli.ts";
 import { brand, serviceId } from "./brand.ts";
@@ -191,6 +192,7 @@ const instanceToken = randomBytes(32).toString("hex");
 const shutdown = new AbortController();
 let analyticsPromise: Promise<MachineAnalytics | SharedSnapshot> | null = null;
 let analyticsPending = false;
+let scanProgress: ScanProgress | null = null;
 let snapshotReady = false;
 const machineLine = (line: string, failed: boolean): void => { (failed ? process.stderr : process.stdout).write(`${line}\n`); };
 const machineScan = machineOptions(analyzeOptions);
@@ -226,10 +228,10 @@ function limitReadsFor(options: RemoteOptions): LimitsReads | null {
 let limitMachines = limitReadsFor(remote);
 
 // A local failure fails this refresh only: reads of other machines carry on, and their last good snapshots stay.
-async function scanWithMachines(reads: MachineReads): Promise<MachineAnalytics> {
+async function scanWithMachines(reads: MachineReads, hooks: AnalysisHooks): Promise<MachineAnalytics> {
   void reads.start();
   const started = performance.now();
-  const [snapshot] = await Promise.all([analyzeMachineSessionsIsolated(machineScan).catch((error: unknown) => { scanFailed = true; throw error; }), reads.loaded]);
+  const [snapshot] = await Promise.all([analyzeMachineSessionsIsolated(machineScan, hooks).catch((error: unknown) => { scanFailed = true; throw error; }), reads.loaded]);
   scanned = { snapshot, ms: performance.now() - started };
   scanFailed = false;
   return reads.combine(snapshot, scanned.ms);
@@ -287,15 +289,22 @@ function analytics(refresh = false): Promise<MachineAnalytics | SharedSnapshot> 
   if (analyticsPending && analyticsPromise) return analyticsPromise;
   if (refresh || !analyticsPromise) {
     analyticsPending = true;
+    const current: ScanProgress = { phase: "discover", done: 0, total: null, startedAt: new Date().toISOString(), fullParse: false };
+    scanProgress = current;
+    const hooks: AnalysisHooks = {
+      onFullParse() { current.fullParse = true; noticeFullParse(); },
+      onProgress(progress) { current.phase = progress.phase; current.done = progress.done; current.total = progress.total; },
+    };
     // A scan without machines uses local IDs, so it cannot be combined with machines added later.
     if (!machines) scanned = null;
-    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal))
+    analyticsPromise = (snapshotFile ? loadSnapshot(snapshotFile) : machines ? scanWithMachines(machines, hooks) : analyzeMachines(analyzeOptions, remote, machineLine, shutdown.signal, hooks))
       .then((result) => {
         snapshotReady = true;
         return result;
       })
       .finally(() => {
         analyticsPending = false;
+        scanProgress = null;
         if (machinesChanged) { machinesChanged = false; rebuild(); }
       });
   }
@@ -375,7 +384,7 @@ const server = createServer(async (request, response) => {
         let timer: NodeJS.Timeout | undefined;
         const pending = new Promise<null>((done) => { timer = setTimeout(() => done(null), Math.min(wait, 30) * 1_000); });
         const settled = await Promise.race([result, pending]).finally(() => clearTimeout(timer));
-        if (settled === null) { sendJson(response, 202, { pending: true }); return; }
+        if (settled === null) { sendJson(response, 202, { pending: true, progress: scanProgress }); return; }
         sendJson(response, 200, settled);
         return;
       }
