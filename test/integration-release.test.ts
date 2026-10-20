@@ -632,6 +632,9 @@ test("release: the compiled package carries workers, served files and notices, a
   const out = await mkdtemp(join(tmpdir(), "session-analytics-build-"));
   try {
     build(out);
+    await writeFile(join(out, "src/stale-private.json"), "PRIVATE_OLD_BUILD_SENTINEL");
+    build(out);
+    assert.equal((await readdir(join(out, "src"))).includes("stale-private.json"), false, "rebuilding removes files from the previous output");
     // Every non-TypeScript file under src ships verbatim, including ones a module reads at run time without importing.
     const sourceRoot = fileURLToPath(new URL("../src/", import.meta.url));
     for (const entry of await readdir(sourceRoot, { recursive: true, withFileTypes: true })) {

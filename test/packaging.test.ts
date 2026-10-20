@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,8 +11,29 @@ import { build, checkEmitted, checkOutput, packageManifest, typeScriptReferences
 import { loadSnapshot } from "../src/mcp/snapshot.ts";
 import { moduleUrl } from "../src/module-url.ts";
 import { indexErrorCode, workerExitMessage } from "../src/store/errors.ts";
+import { staticRoutes } from "../src/static-routes.ts";
 
 const sourceRoot = fileURLToPath(new URL("../src/", import.meta.url));
+
+test("packaging: every executable TypeScript file can run with Node's type stripper", async () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  for (const directory of ["bin", "src", "scripts", "test", "verify"]) {
+    for (const file of await readdir(join(root, directory), { recursive: true })) {
+      if (!file.endsWith(".ts") || file.endsWith(".d.ts")) continue;
+      const source = await readFile(join(root, directory, file), "utf8");
+      assert.doesNotThrow(() => stripTypeScriptTypes(source, { mode: "strip" }), `${directory}/${file}`);
+    }
+  }
+});
+
+test("packaging: every dashboard asset has one route and every route has a file", async () => {
+  const publicRoot = join(sourceRoot, "public");
+  const files = (await readdir(publicRoot, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name).slice(publicRoot.length + 1))
+    .filter((file) => !file.endsWith(".d.ts") && file !== "fonts/OFL-1.1.txt" && file !== "brands/NOTICE.md").sort();
+  assert.equal(new Set(staticRoutes.map(([route]) => route)).size, staticRoutes.length, "routes are unique");
+  assert.deepEqual(staticRoutes.map(([, file]) => file).sort(), files, "a new dashboard asset needs a static route");
+});
 
 test("packaging: moduleUrl names .ts siblings from source and .js siblings from the compiled package", () => {
   assert.equal(moduleUrl("./analysis-worker.ts", "file:///repo/src/analysis-process.ts").href, "file:///repo/src/analysis-worker.ts");
