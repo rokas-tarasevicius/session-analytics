@@ -475,14 +475,14 @@ test("Summary, Velocity and Tools share axis labels while money totals retain ce
   run("renderSummary(activeView())");
   const daily = document.querySelector("#daily-spend")!;
   const summaryAxis = daily.querySelectorAll("text").map((node) => node.textContent);
-  assert.ok(summaryAxis.includes("13 Sept")); assert.ok(summaryAxis.includes("12 Oct")); assert.ok(summaryAxis.includes("$40"));
+  assert.ok(summaryAxis.includes("18 Sept")); assert.ok(summaryAxis.includes("12 Oct")); assert.ok(summaryAxis.includes("$40"));
   const legend = daily.querySelector(".chart-legend")!;
   assert.equal(legend.dataset["layout"], "list");
   assert.deepEqual(legend.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
   assert.equal(document.querySelector("#metric-spend")!.textContent, "$120.00");
   run("currentViewName = () => 'velocity'; renderActiveAnalyticsView(activeView())");
   const velocityAxis = document.querySelector(".velocity-chart")!.querySelectorAll(".axis-label").map((node) => node.textContent);
-  assert.ok(velocityAxis.includes("13 Sept")); assert.ok(velocityAxis.includes("12 Oct")); assert.ok(velocityAxis.includes("$40"));
+  assert.ok(velocityAxis.includes("18 Sept")); assert.ok(velocityAxis.includes("12 Oct")); assert.ok(velocityAxis.includes("$40"));
   assert.deepEqual(document.querySelector(".velocity-legend")!.querySelectorAll(".chart-legend-value").map((node) => node.textContent), ["$120.00"]);
   run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
   assert.deepEqual(document.querySelector(".tools-trend-axis")!.children.map((node) => node.textContent), ["13 Sept", "12 Oct"]);
@@ -559,9 +559,10 @@ test("snapshot status shows live counts after load and follows the selected wind
   const { context, document, run } = await harness([live]);
   context["fetch"] = async () => ({ ok: true, json: async () => run("({...fixture, rateCard: {effectiveDate: '2026-10-01', models: []}})") });
   await run("loadSnapshot()");
-  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 1 live");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 1 session in progress");
+  assert.equal(document.querySelector("#rate-card-date")!.textContent, "Rate card effective 1 Oct 2026");
   run("windowPreset = 'custom'; elements.windowStart.value = elements.windowEnd.value = '2026-09-01'; renderView()");
-  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 0 live");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready");
   run("elements.sync.dataset.state = 'loading'; elements.syncLabel.textContent = 'Refreshing…'; renderView()");
   assert.equal(document.querySelector("#sync-label")!.textContent, "Refreshing…");
   context["fetch"] = async () => ({ ok: true, json: async () => ({ kind: "shared", sources: [], minimumSessions: 5, summary: { sessions: 0 }, repositories: [] }) });
@@ -630,4 +631,31 @@ test("an earlier-started contributor keeps the fleet caption for a one-session w
   assert.doesNotMatch(scope, /^1 session ·/, "the $102 of activity is not one session's");
   assert.match(scope, /^2 repositories · 1 with sessions\./);
   assert.equal(document.querySelector("#metric-spend")!.textContent, "$102.00");
+});
+
+
+test("Summary, Velocity, Tools and Activity chips share registry labels, marks and order", async () => {
+  const { providerIds, providerLabels } = await import("../src/public/providers.js");
+  const sessions = providerIds.map((provider) => { const s = withLedger(sample(), [["synthetic", 1]]); s.provider = provider; return s; });
+  const { document, run } = await harness(sessions);
+  run("switchView('velocity'); renderViewProviderFilters(elements.toolsProviderFilters, 'tools'); renderViewProviderFilters(elements.activityProviderFilters, 'activity')");
+  const rows = [document.querySelector("#daily-provider-filters")!, document.querySelector("#tools-provider-filters")!, document.querySelector("#activity-provider-filters")!, document.querySelector("#velocity-view")!.querySelector(".provider-key")!];
+  for (const row of rows) {
+    assert.deepEqual(row.querySelectorAll("label").map((label) => label.dataset["provider"]), providerIds, row.id || "velocity");
+    assert.deepEqual(row.querySelectorAll("label").map((label) => label.children.at(-1)!.textContent), providerIds.map((id) => providerLabels[id]));
+    assert.equal(row.querySelectorAll("label").every((label) => label.children.length === 3), true);
+  }
+  const summary = rows[0]!;
+  assert.deepEqual(summary.querySelectorAll("input").map((input) => input.dataset["providerFilter"]), providerIds);
+  assert.deepEqual(summary.querySelectorAll("input").map((input) => input.getAttribute("aria-label")), providerIds.map((id) => `${id === "unsupported" ? "Unsupported provider" : providerLabels[id]} daily usage`));
+  assert.deepEqual(summary.querySelectorAll(".mark").map((mark) => mark.textContent), ["CP", "OC", "G", "AG", "?"]);
+});
+
+
+test("multi-machine ready status names sessions in progress and omits zero", async () => {
+  const { document, run } = await harness([sample()]);
+  run("fullSnapshot = {machines: [{state: 'ok'}, {state: 'ok'}]}; showReady({summary: {workingSnapshots: 3}})");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "2 of 2 machines ready · 3 sessions in progress");
+  run("showReady({summary: {workingSnapshots: 0}})");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "2 of 2 machines ready");
 });

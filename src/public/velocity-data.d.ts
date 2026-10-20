@@ -38,8 +38,9 @@ export function comparePeriods(current: Period, previous: Period, metric: Metric
 export function quantile(values: number[], fraction: number): number | null;
 export function velocityIndicators(data: VelocityData, today: string): {
   week: PeriodComparison; month: PeriodComparison;
-  burn: { today: number | null; median: number | null; days: number; activeDays: number; ratio: number | null; todayEvidence: Evidence; baselineEvidence: Evidence };
+  burn: { today: number | null; median: number | null; days: number; activeDays: number; ratio: number | null; todayEvidence: Evidence; baselineEvidence: Evidence; reason: string | null };
   projection: { value: number; low: number; high: number; observed: number; sampleDays: number; activeDays: number; remainingDays: number; monthEnd: string } | null;
+  projectionReason: string | null;
   projectionEvidence: { sample: Evidence; observed: Evidence };
   completeThrough: string; end: string; trailing: Period;
 };

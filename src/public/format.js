@@ -89,3 +89,13 @@ export function zonedHourKey(seconds, timeZone = "UTC") {
   const parts = Object.fromEntries(dateFormatter(`hourKey:${timeZone}`, { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }, "en-CA").formatToParts(instant(seconds)).map((part) => [part.type, part.value]));
   return `${parts.year}-${parts.month}-${parts.day}|${Number(parts.hour)}`;
 }
+
+/** Shared change text; only adjacent equal-length windows receive a period suffix.
+ * @param {number | "new"} change @param {number} [length]
+ */
+export function deltaText(change, length) {
+  const suffix = length ? `vs previous ${length}d` : "";
+  if (change === "new") return ["new", suffix].filter(Boolean).join(" · ");
+  const flat = Math.abs(change) < 0.0005;
+  return `${flat ? "▬" : change > 0 ? "▲" : "▼"} ${percent(flat ? 0 : Math.abs(change))}${suffix ? ` ${suffix}` : ""}`;
+}

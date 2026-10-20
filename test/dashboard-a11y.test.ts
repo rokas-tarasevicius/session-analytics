@@ -97,3 +97,35 @@ test("coverage and repository scope names retain their visible labels as state c
   assert.equal(scope.getAttribute("aria-label"), "Clear repository focus");
   assert.equal(scope.hidden, true);
 });
+
+
+test("command search has a name and follows the list's expanded state", async () => {
+  const { document, run } = await harness([sample()]);
+  const input = document.querySelector("#command-input")!, dialog = document.querySelector("#command-palette")!;
+  assert.equal(input.getAttribute("aria-label"), "Search views, repositories and commands");
+  assert.equal(input.getAttribute("aria-expanded"), "false");
+  run("openPalette()");
+  assert.equal(input.getAttribute("aria-expanded"), "true");
+  assert.equal(input.getAttribute("aria-activedescendant"), "command-option-0");
+  run("renderPalette('zzzzzzzzzzzzzzzzzzzz')");
+  assert.equal(input.getAttribute("aria-expanded"), "false");
+  assert.equal(input.getAttribute("aria-activedescendant"), null);
+  run("renderPalette('summary')");
+  assert.equal(input.getAttribute("aria-expanded"), "true");
+  run("closePalette()");
+  assert.equal(input.getAttribute("aria-expanded"), "false");
+  run("openPalette()");
+  dialog.close(); dialog.listeners.get("close")!();
+  assert.equal(input.getAttribute("aria-expanded"), "false");
+  assert.equal(input.getAttribute("aria-activedescendant"), null);
+});
+
+
+test("view regions retain distinct overview names instead of repeating the page heading", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  for (const view of ["Summary", "Velocity", "Costs", "Tools", "Activity", "Pricing", "Subscription"]) {
+    assert.ok(html.includes(`id="${view.toLowerCase()}-title">${view} overview</h2>`));
+    assert.ok(html.includes(`aria-labelledby="${view.toLowerCase()}-title"`));
+  }
+});

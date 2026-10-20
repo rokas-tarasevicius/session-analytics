@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { barPercent, scaleMaximum, stackPercents } from "../src/public/chart-scale.js";
+import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "../src/public/chart-scale.js";
 
 test("bar widths are proportional with no minimum, invalid or negative widths", () => {
   assert.equal(barPercent(50, 200), 25);
@@ -27,4 +27,20 @@ test("stacks share a maximum: 191 and 576 remain in the ratio 191:576", () => {
   assert.equal(lengths[1], 100);
   assert.ok(Math.abs(lengths[0]! / lengths[1]! - 191 / 576) < 1e-12);
   assert.deepEqual(stackPercents([0, -1, NaN, Infinity], maximum), [0, 0, 0, 0]);
+});
+
+
+test("calendar ticks use a constant integer stride without rounded fractional jumps", () => {
+  assert.deepEqual(axisTickIndexes(7, 7), [0, 1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(axisTickIndexes(14, 14), Array.from({ length: 14 }, (_, i) => i));
+  assert.deepEqual(axisTickIndexes(24, 5, true), [0, 6, 12, 18]);
+  assert.deepEqual(axisTickIndexes(24, 3, true), [0, 12]);
+  assert.deepEqual(axisTickIndexes(0, 5), []);
+  for (const count of [7, 14, 18, 30, 90]) for (const room of [1, 2, 3, 5]) {
+    const ticks = axisTickIndexes(count, room);
+    assert.ok(ticks.length <= room);
+    const gaps = ticks.slice(1).map((value, i) => value - ticks[i]!);
+    assert.ok(new Set(gaps).size <= 1);
+    assert.equal(ticks.at(-1), count - 1);
+  }
 });

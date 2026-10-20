@@ -55,3 +55,13 @@ test("shared date-times and stale clock labels use the snapshot timezone across 
   assert.equal(dateTime("2026-09-13T23:30:00", "Europe/London"), "14 Sept 2026, 00:30", "offset-free provider timestamps retain their UTC meaning");
   assert.equal(dateTime(null), "Unknown time");
 });
+
+
+test("delta text uses shared arrows, precision and optional adjacent-period context", async () => {
+  const { deltaText } = await import("../src/public/format.js");
+  assert.equal(deltaText(0.132, 30), "▲ 13.2% vs previous 30d");
+  assert.equal(deltaText(-0.12, 7), "▼ 12.0% vs previous 7d");
+  assert.equal(deltaText(-0.0001, 7), "▬ 0.0% vs previous 7d");
+  assert.equal(deltaText("new", 7), "new · vs previous 7d");
+  assert.equal(deltaText(0.2), "▲ 20.0%");
+});

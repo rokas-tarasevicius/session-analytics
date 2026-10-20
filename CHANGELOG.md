@@ -79,6 +79,28 @@ All notable changes to this project are documented here. The format follows [Kee
 - Release automation approves CI only for its own release pull request, even when another pull request shares the same commit.
 - Synthetic index benchmarks no longer discover real provider stores or fetch prices, and the test runner always isolates its data directory even when `SESSION_ANALYTICS_DATA_DIR` is exported.
 - The build resolves symlinked output paths before emptying a directory, preserving the checkout and home-directory protections through symlink aliases.
+- View regions have distinct overview headings so screen readers do not hear duplicate page headings.
+
+- Command search has an accessible name and updates its expanded state as results open, empty or close.
+
+- Daily and hour-profile chart ticks use even calendar steps; short windows label each day when space permits and hour profiles use six-hour steps.
+
+- Dashboard percentage changes share arrows and one decimal place, with an explicit day count for adjacent-window comparisons.
+
+- Velocity labels its daily usage-value mean “Average per active day” instead of “Average price”.
+
+- Rate-card effective dates use the dashboard calendar-date format in the header and pricing dialog.
+
+- Snapshot status names sessions in progress and omits the opaque “0 live” suffix.
+
+- Summary and Velocity provider chips share the registry names, marks and order used by Tools and Activity, including Copilot CLI and Gemini CLI.
+
+- Selected provider chips use the chart provider colour in both themes; deselected chips keep a hollow state mark.
+
+- Velocity explains the actual guard blocking a burn ratio or projection, including calendar days, pricing coverage and minimum activity figures.
+
+- Costs shows wholly unpriced model, provider and total values and shares as unavailable rather than free; accounting totals are unchanged.
+
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20
