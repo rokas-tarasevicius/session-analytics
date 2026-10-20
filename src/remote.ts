@@ -248,11 +248,15 @@ export class RemoteError extends Error {
   readonly reason: RemoteFailure;
   readonly detail: string;
   readonly fix: string;
+  /** Snapshot hints use only the public label; the terminal keeps the exact configuration. */
+  readonly snapshotFix: string;
   constructor(reason: RemoteFailure, machine: RemoteMachine | null = null, stderr = "", found = "", timeoutMs = 0) {
     super(failureText(reason, machine, found, timeoutMs));
     this.reason = reason;
     this.detail = stderrDetail(stderr);
     this.fix = fixText(reason, machine, found);
+    this.snapshotFix = this.fix && machine?.saved && ["unknown-host", "connection", "login-refused", "sudo"].includes(reason)
+      ? `run ${brand.command} machines check ${machine.name} for the exact diagnostic and fix` : this.fix;
   }
 }
 
@@ -287,15 +291,17 @@ export function classifyRemote(machine: RemoteMachine, result: SshResult, timeou
 }
 
 /** An installed remote's version, or null when it does not answer with one. */
-export async function remoteVersion(machine: RemoteMachine, signal?: AbortSignal): Promise<string | null> {
-  const result = await runRemote(machine, ["--version"], { deadline: Date.now() + 30_000, signal, limit: 4096 });
+export async function remoteVersion(machine: RemoteMachine, signal?: AbortSignal, deadline = Date.now() + 30_000): Promise<string | null> {
+  if (Date.now() >= deadline) return null;
+  const result = await runRemote(machine, ["--version"], { deadline: Math.min(deadline, Date.now() + 30_000), signal, limit: 4096 });
   const answer = result.stdout.toString("utf8").trim();
   return result.code === 0 && versionPattern.test(answer) ? answer : null;
 }
 
 /** One machine's validated snapshot. An installed remote that fails as if it ran another version is asked which. */
 export async function fetchRemoteSnapshot(machine: RemoteMachine, args: string[], { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal }): Promise<MachineAnalytics> {
-  const result = await runRemote(machine, args, { deadline: Date.now() + timeoutMs, signal });
+  const deadline = Date.now() + timeoutMs;
+  const result = await runRemote(machine, args, { deadline, signal });
   let failure = classifyRemote(machine, result, timeoutMs);
   let snapshot: MachineAnalytics | null = null;
   if (!failure) {
@@ -306,7 +312,7 @@ export async function fetchRemoteSnapshot(machine: RemoteMachine, args: string[]
     } catch { failure = new RemoteError("invalid", machine); }
   }
   if (failure && machine.runtime === "installed" && ["rejected", "invalid", "analysis", "index-newer"].includes(failure.reason)) {
-    const found = await remoteVersion(machine, signal);
+    const found = await remoteVersion(machine, signal, deadline);
     if (found && found !== version) throw new RemoteError("version-skew", machine, result.stderr, found);
   }
   if (failure) throw failure;
@@ -461,7 +467,7 @@ export function machineReads(
       const kept = error.reason === "same-machine" ? null
         : reading.snapshot && age <= lastGoodMaxAgeMs ? { snapshot: reading.snapshot, status: reading.status, ...(reading.identity ? { identity: reading.identity } : {}) }
         : stopped ? null : await lastGood(reading);
-      const reason = error.reason, fix = error.fix ? { fix: error.fix } : {};
+      const reason = error.reason, fix = error.snapshotFix ? { fix: error.snapshotFix } : {};
       if (kept) Object.assign(reading, kept, { status: { ...kept.status, state: "stale", reason, ...fix } });
       else Object.assign(reading, { snapshot: null, identity: undefined, status: { key, label, state: "failed", reason, ...fix, sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null } });
       if (stopped) return;
@@ -470,7 +476,7 @@ export function machineReads(
   };
 
   const start = (): Promise<void> => {
-    const stop = controller.signal;
+    const stop = signal?.aborted ? signal : controller.signal;
     for (const reading of readings) {
       if (reading.pending) continue;
       const { key, label, sessions, repositories, readAt, durationMs, version: producer } = reading.status;
@@ -496,7 +502,7 @@ export function machineReads(
       const error = new RemoteError("same-machine", reading.machine, "", twin);
       if (reading.twin !== twin) { reading.twin = twin; report(`Not counting ${reading.machine.name}: ${error.message}.${error.fix ? `\n  Fix: ${error.fix}` : ""}`, true); }
       const { key, label } = reading.status;
-      statuses.push({ key, label, state: "failed", reason: "same-machine", ...(error.fix ? { fix: error.fix } : {}), sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null });
+      statuses.push({ key, label, state: "failed", reason: "same-machine", ...(error.snapshotFix ? { fix: error.snapshotFix } : {}), sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null });
       inputs.push(null);
     }
     const warnings = [...(statuses.some(({ state }) => state === "failed") ? [remoteUnavailableWarning] : []), ...(statuses.some(({ state }) => state === "stale") ? [staleMachineWarning] : [])];

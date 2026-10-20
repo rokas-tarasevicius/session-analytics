@@ -253,7 +253,7 @@ function rebuild(): void {
 const followsSaved = !snapshotFile && !process.argv.includes("--remote") && !process.argv.includes("--no-remote")
   && (process.argv.includes("--machines") || !process.env["SESSION_ANALYTICS_REMOTE"]);
 const machinesStamp = (): string => {
-  try { const info = statSync(machinesPath(analyzeOptions)); return `${info.ino}:${info.size}:${info.mtimeMs}`; } catch { return "none"; }
+  try { const info = statSync(machinesPath(analyzeOptions)); return `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`; } catch { return "none"; }
 };
 let followedStamp = followsSaved ? machinesStamp() : "";
 function followMachines(): void {
