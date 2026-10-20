@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
+import { hash } from "../src/providers/common.ts";
 import type { AnalyzeOptions } from "../src/types.ts";
 
 const at = "2026-07-20T09:00:00.000Z";
@@ -52,6 +54,38 @@ test("Claude counts each anonymous tool block while deduplicating explicit tool 
     assert.equal(session.metrics.assistantMessages, 1);
     assert.equal(session.tokens.inputTokens, 100);
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE-PARSER-CONTENT|private-record|private-tool|99999999-9999/);
+  });
+});
+
+test("OpenCode ignores unusable step counters without hiding valid assistant snapshots", async () => {
+  await fixture(async (root, options) => {
+    const path = join(root, "opencode.db"), database = new DatabaseSync(path);
+    database.exec("CREATE TABLE session (id TEXT PRIMARY KEY,parent_id TEXT,directory TEXT,time_created INTEGER,time_updated INTEGER); CREATE TABLE message (id TEXT PRIMARY KEY,session_id TEXT,data TEXT); CREATE TABLE part (id TEXT PRIMARY KEY,session_id TEXT,message_id TEXT,time_created INTEGER,data TEXT)");
+    const cases = [
+      { id: "empty", steps: [{}], expected: 100, partial: true },
+      { id: "invalid", steps: [{ input: sentinel, output: -10, cache: { read: false, write: [] } }], expected: 100, partial: true },
+      { id: "zero", steps: [{ input: 0, output: 0 }], expected: 0, partial: false },
+      { id: "mixed", steps: [{ input: 40, output: 10 }, {}], expected: 40, partial: true },
+    ];
+    for (const { id, steps } of cases) {
+      database.prepare("INSERT INTO session VALUES (?,NULL,?,?,?)").run(id, root, Date.parse(at), Date.parse(at));
+      database.prepare("INSERT INTO message VALUES (?,?,?)").run(id, id, JSON.stringify({ role: "assistant", modelID: "claude-opus-5", time: { created: Date.parse(at) }, tokens: { input: 100, output: 20 }, content: sentinel }));
+      for (const [index, usage] of steps.entries()) database.prepare("INSERT INTO part VALUES (?,?,?,?,?)").run(`${id}-${index}`, id, id, Date.parse(at), JSON.stringify({ type: "step-finish", tokens: usage, result: sentinel }));
+    }
+    database.close();
+    const result = await analyzeMachineSessions({ ...options, opencodeDatabasePath: path });
+    assert.equal(result.sessions.length, cases.length);
+    // Session keys are the only projected identity; no raw IDs escape the adapter.
+    for (const { id, expected, partial } of cases) {
+      const session = result.sessions.find((session) => session.sessionKey === hash(`opencode:${id}`))!;
+      assert.ok(session);
+      assert.equal(session.tokens.inputTokens, expected, id);
+      assert.equal(session.metrics.modelCalls, Number(expected > 0), id);
+      assert.equal(session.evidence?.accounting === "partial", partial, id);
+      if (partial) assert.equal(session.costComplete, false);
+    }
+    validateSnapshot(result);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE-PARSER-CONTENT|opencode\.db/);
   });
 });
 
