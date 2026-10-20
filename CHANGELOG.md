@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-20
+
 ### Added
 
 - Antigravity local usage from schema-v1 SQLite conversation stores for the App, IDE and CLI, including cache and reasoning counters, observed tools, dated API-equivalent pricing where model names are known, and full-scan/index parity. `--antigravity-root` replaces discovery. Legacy protobuf conversation files remain unsupported and produce a coverage warning; no usage is inferred from display transcripts or quota percentages.
@@ -578,7 +580,8 @@ First standalone release.
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
 
-[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.0...v0.10.1
