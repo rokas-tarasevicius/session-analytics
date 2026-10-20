@@ -2697,6 +2697,9 @@
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
               },
               {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
+              },
+              {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
               },
               {
@@ -3486,6 +3489,9 @@
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
               },
               {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
+              },
+              {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
               },
               {
@@ -3856,6 +3862,9 @@
               },
               {
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
+              },
+              {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
               },
               {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
@@ -4244,6 +4253,9 @@
               },
               {
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
+              },
+              {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
               },
               {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
@@ -4795,6 +4807,9 @@
               },
               {
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
+              },
+              {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
               },
               {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."

@@ -57,6 +57,28 @@ test("Claude counts each anonymous tool block while deduplicating explicit tool 
   });
 });
 
+for (const extension of ["json", "jsonl"]) test(`Gemini cache subsets cannot inflate inclusive input (${extension})`, async () => {
+  await fixture(async (root, options) => {
+    const geminiRoot = join(root, "gemini"), path = join(geminiRoot, "synthetic-project", "chats", `session-private.${extension}`);
+    const metadata = { sessionId: "private-gemini-id", projectHash: "synthetic-project", startTime: at, lastUpdated: at };
+    const message = { id: "private-gemini-message", type: "gemini", timestamp: at, model: "unreviewed-model", tokens: { input: 10, cached: 20, output: 5, thoughts: 2 }, content: sentinel };
+    if (extension === "jsonl") await write(path, [metadata, message]);
+    else { await mkdir(dirname(path), { recursive: true }); await writeFile(path, JSON.stringify({ ...metadata, messages: [message] })); }
+    const result = await analyzeMachineSessions({ ...options, geminiRoot });
+    assert.equal(result.sessions.length, 1);
+    const session = result.sessions[0]!;
+    assert.equal(session.tokens.inputTokens, 10);
+    assert.equal(session.tokens.cachedInputTokens, 10);
+    assert.equal(session.tokens.uncachedInputTokens, 0);
+    assert.equal(session.tokens.outputTokens, 7);
+    assert.equal(session.tokens.reasoningOutputTokens, 2);
+    assert.equal(session.evidence!.accounting, "partial");
+    assert.equal(session.costComplete, false);
+    validateSnapshot(result);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE-PARSER-CONTENT|private-gemini-id|private-gemini-message|session-private/);
+  });
+});
+
 test("OpenCode ignores unusable step counters without hiding valid assistant snapshots", async () => {
   await fixture(async (root, options) => {
     const path = join(root, "opencode.db"), database = new DatabaseSync(path);

@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Invalid Gemini cache counts no longer inflate inclusive input totals. Cache reads are bounded by recorded input and accounting is marked partial; affected input/cache totals and any configured API-equivalent estimates decrease.
 - Claude and Codex liveness checks now interpret timestamps without a zone as UTC and reject impossible calendar dates, matching accounting timestamps across host timezones.
 - Empty or entirely invalid OpenCode step counters no longer suppress valid assistant snapshot usage; affected token and API-equivalent cost totals increase, with partial accounting flagged.
 - Invalid Codex cache and reasoning breakdowns are bounded by input and output totals and marked partial, reducing overstated subset counts and per-request cache costs. Cumulative breakdown revisions no longer produce negative uncached tokens or costs; affected cumulative estimates can increase.

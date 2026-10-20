@@ -75,6 +75,7 @@ export const fixedWarnings = [
   "OpenCode accounting is partial because some records could not be parsed.",
   "OpenCode step counters are priced at reviewed API rates, with assistant snapshots used only where step counters are absent. OpenCode's own cost estimate is not added again.",
   "Malformed or oversized Gemini records were skipped; accounting is partial.",
+  "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial.",
   "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced.",
   "Malformed Copilot events were skipped.",
   "Copilot persisted events provide activity counts. Per-call usage events are ephemeral; tokens and USD value are unavailable. Premium-request multipliers and AI credits are not dollar costs.",
