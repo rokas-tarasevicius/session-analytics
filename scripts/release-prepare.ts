@@ -70,7 +70,8 @@ export function releaseChangelog(changelog: string, previous: string, version: s
   const end = changelog.slice(start).search(/^## \[/m);
   if (end < 0) throw new Error("CHANGELOG.md has no released version after Unreleased.");
   const unreleased = changelog.slice(start, start + end).trim();
-  const notes = unreleased || generatedNotes(commits).trim();
+  const hasNotes = unreleased.split("\n").some((line) => line.trim() && !line.startsWith("#"));
+  const notes = hasNotes ? unreleased : generatedNotes(commits).trim();
   if (!notes) throw new Error("There are no release notes to write.");
   let next = `${changelog.slice(0, start)}\n## [${version}] - ${date}\n\n${notes}\n\n${changelog.slice(start + end)}`;
   const unreleasedLink = `[Unreleased]: ${repositoryUrl}/compare/v${previous}...HEAD\n`;

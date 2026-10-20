@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,8 +11,29 @@ import { build, checkEmitted, checkOutput, packageManifest, typeScriptReferences
 import { loadSnapshot } from "../src/mcp/snapshot.ts";
 import { moduleUrl } from "../src/module-url.ts";
 import { indexErrorCode, workerExitMessage } from "../src/store/errors.ts";
+import { staticRoutes } from "../src/static-routes.ts";
 
 const sourceRoot = fileURLToPath(new URL("../src/", import.meta.url));
+
+test("packaging: every executable TypeScript file can run with Node's type stripper", async () => {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  for (const directory of ["bin", "src", "scripts", "test", "verify"]) {
+    for (const file of await readdir(join(root, directory), { recursive: true })) {
+      if (!file.endsWith(".ts") || file.endsWith(".d.ts")) continue;
+      const source = await readFile(join(root, directory, file), "utf8");
+      assert.doesNotThrow(() => stripTypeScriptTypes(source, { mode: "strip" }), `${directory}/${file}`);
+    }
+  }
+});
+
+test("packaging: every dashboard asset has one route and every route has a file", async () => {
+  const publicRoot = join(sourceRoot, "public");
+  const files = (await readdir(publicRoot, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name).slice(publicRoot.length + 1))
+    .filter((file) => !file.endsWith(".d.ts") && file !== "fonts/OFL-1.1.txt" && file !== "brands/NOTICE.md").sort();
+  assert.equal(new Set(staticRoutes.map(([route]) => route)).size, staticRoutes.length, "routes are unique");
+  assert.deepEqual(staticRoutes.map(([, file]) => file).sort(), files, "a new dashboard asset needs a static route");
+});
 
 test("packaging: moduleUrl names .ts siblings from source and .js siblings from the compiled package", () => {
   assert.equal(moduleUrl("./analysis-worker.ts", "file:///repo/src/analysis-process.ts").href, "file:///repo/src/analysis-worker.ts");
@@ -85,6 +107,40 @@ test("packaging: the build empties only a new, empty or earlier build directory,
     assert.throws(() => checkOutput(earlier, home), /holds no earlier build/, "the source manifest has scripts");
     assert.throws(() => build(work), /holds no earlier build/);
     assert.equal(await readFile(sentinel, "utf8"), "keep me");
+    // A symlinked parent is traversed by recursive deletion. Even a home containing an earlier build must be protected.
+    await writeFile(join(home, "package.json"), JSON.stringify(packageManifest({ name: "session-analytics" })));
+    await symlink(scratch, join(scratch, "alias"), "dir");
+    await symlink(checkout, join(scratch, "checkout-alias"), "dir");
+    for (const out of [join(scratch, "alias", "home"), join(scratch, "checkout-alias"), join(scratch, "alias")]) {
+      assert.throws(() => checkOutput(out, home), /contains this checkout or your home/, out);
+    }
+    assert.throws(() => checkOutput(scratch, join(scratch, "alias", "home")), /contains this checkout or your home/, "canonicalize home as well");
+    assert.doesNotThrow(() => checkOutput(join(scratch, "alias", "new"), home), "a safe new directory below a symlink is allowed");
+  } finally { await rm(scratch, { recursive: true, force: true }); }
+});
+
+test("packaging: an in-checkout private data directory cannot add files to the release", { timeout: 60_000 }, async () => {
+  const checkout = fileURLToPath(new URL("../", import.meta.url));
+  const scratch = await mkdtemp(join(tmpdir(), "session-analytics-private-build-")), root = join(scratch, "checkout"), out = join(scratch, "package");
+  try {
+    await mkdir(join(root, "scripts"), { recursive: true });
+    for (const path of ["bin", "src", "data", "schemas", "skills", "package.json", "tsconfig.json", "tsconfig.build.json", "README.md", "LICENSE", "CHANGELOG.md", "scripts/build.ts"]) {
+      await cp(join(checkout, path), join(root, path), { recursive: true });
+    }
+    await symlink(join(checkout, "node_modules"), join(root, "node_modules"), "dir");
+    await mkdir(join(root, "data/private-cache"));
+    const sentinel = "PRIVATE_BUILD_DATA_SENTINEL";
+    await writeFile(join(root, "data/private-cache/snapshot.json"), sentinel);
+    await writeFile(join(root, "data/index.sqlite"), sentinel);
+    await writeFile(join(root, "data/machines.json"), sentinel);
+    const result = spawnSync(process.execPath, [join(root, "scripts/build.ts"), "--out", out], { encoding: "utf8", timeout: 55_000,
+      env: { ...process.env, SESSION_ANALYTICS_DATA_DIR: join(root, "data") } });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(await readdir(join(out, "data")), ["rate-cards.json"]);
+    assert.equal(await readFile(join(root, "data/private-cache/snapshot.json"), "utf8"), sentinel, "building does not change the private source");
+    const packed = spawnSync("npm", ["pack", out, "--dry-run", "--json", "--ignore-scripts"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    assert.equal(packed.status, 0, packed.stderr);
+    assert.deepEqual(JSON.parse(packed.stdout)[0].files.map((entry: { path: string }) => entry.path).filter((path: string) => path.startsWith("data/")), ["data/rate-cards.json"]);
   } finally { await rm(scratch, { recursive: true, force: true }); }
 });
 
