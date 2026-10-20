@@ -389,7 +389,9 @@ const median = (values) => {
  * at about 102%), so it never counts.
  */
 function calibrationSample({ samples }) {
-  return samples.find((sample) => sample.used >= 100 || sample.status === "rejected") ?? samples.findLast((sample) => sample.used >= calibrationFloor) ?? null;
+  const capped = samples.find((sample) => sample.used >= 100 || sample.status === "rejected");
+  // A refusal can report 0% (or a tiny rounded level); it still marks the cap, but cannot calibrate value per percent.
+  return capped ? capped.used >= calibrationFloor ? capped : null : samples.findLast((sample) => sample.used >= calibrationFloor) ?? null;
 }
 
 /**

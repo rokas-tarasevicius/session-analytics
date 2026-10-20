@@ -37,6 +37,18 @@ function spending(provider: string, from: number, to: number, perHour: number, p
 const utilization = (owner: LimitAccount, observations: LimitObservation[], now: number, sessions: unknown[] = [], extra: Partial<Parameters<typeof accountUtilization>[0]> = {}) =>
   accountUtilization({ account: owner, meters: buildMeters(observations, now), sessions, timeZone: "UTC", now, range: { from: now - 30 * DAY, to: now }, ...extra });
 
+test("rejection below the calibration floor never divides value by a zero or tiny level", () => {
+  for (const used of [0, 0.1, 4.9]) {
+    const meter = buildMeters([
+      reading("codex", "seven_day", start + WEEK, start + DAY, used, "rejected"),
+      reading("codex", "seven_day", start + 2 * WEEK, start + WEEK + DAY, used, "rejected"),
+    ], start + 2 * WEEK)[0]!;
+    const calibration = calibrate(meter, { between: () => 10 });
+    assert.equal(calibration.perPercent, null);
+    assert.deepEqual(calibration.points, [], "a refused request does not establish value per percent");
+  }
+});
+
 test("cycles end at the next cycle's first reading; an early provider reset is not counted as waste", () => {
   const firstReset = start + WEEK, secondReset = start + DAY + WEEK;
   const meters = buildMeters([
