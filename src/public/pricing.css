@@ -10,6 +10,7 @@
 #pricing-panel .pricing-reconciliation { margin: 0; }
 #pricing-panel .pricing-notice { flex-wrap: wrap; align-items: center; margin: 0; }
 #pricing-panel .pricing-notice > div { flex: 1 1 30rem; min-width: 0; }
+#pricing-panel .pricing-notice code { font: 500 var(--fs-xs) var(--font-mono); overflow-wrap: anywhere; }
 #pricing-panel .pricing-notice-action { flex: 0 0 auto; }
 
 /* Cards share row tracks (subgrid), so the value, detail, bar and coverage slot line up across a row of cards. */
