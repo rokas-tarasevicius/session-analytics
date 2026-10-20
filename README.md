@@ -16,7 +16,7 @@ Local and read-only. No prompts, messages or file paths in its outputs.</p>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshot-summary-dark.webp" />
-  <img alt="Summary dashboard with usage value, token and tool counters, daily value by provider, and repository filters" src="assets/screenshot-summary.webp" width="100%" />
+  <img alt="Summary dashboard with usage value, token and tool counters, daily value across seven providers including Antigravity, and repository filters" src="assets/screenshot-summary.webp" width="100%" />
 </picture>
 
 *Synthetic demo data. [Full dashboard tour →](docs/dashboard.md)*
