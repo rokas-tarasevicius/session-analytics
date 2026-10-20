@@ -476,7 +476,7 @@ export function machineReads(
   };
 
   const start = (): Promise<void> => {
-    const stop = controller.signal;
+    const stop = signal?.aborted ? signal : controller.signal;
     for (const reading of readings) {
       if (reading.pending) continue;
       const { key, label, sessions, repositories, readAt, durationMs, version: producer } = reading.status;

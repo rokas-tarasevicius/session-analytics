@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Cancelled machine reads start no SSH work when their signal has already fired, and a limits read waiting for the local harvest cannot later save its cache or fold readings into the ledger.
+
 - A failed installed machine's diagnostic version probe shares its original read deadline, so a hanging probe cannot extend `--remote-timeout` by another 30 seconds.
 
 - Machine failure hints in snapshots and subscription limits keep SSH destinations, account names and configured paths private; the terminal still prints the exact diagnostic and fix.

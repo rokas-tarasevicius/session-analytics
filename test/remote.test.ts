@@ -39,6 +39,7 @@ if (destination === "probe-hangs") {
   else { process.stdout.write("{}"); process.exit(0); }
   return;
 }
+if (destination === "limits-static") { process.stdout.write(process.env.FAKE_SSH_LIMITS); process.exit(0); }
 if (destination === "down") { process.stderr.write("ssh: connect to host down port 22: Connection refused\\n"); process.exit(255); }
 if (destination === "old") { process.stderr.write("Unknown session analytics argument: --no-remote\\n"); process.exit(2); }
 if (destination === "missing") { process.stderr.write("bash: line 1: session-analytics: command not found\\n"); process.exit(127); }
@@ -142,6 +143,57 @@ test("snapshot and limits version probes stay within the machine read's deadline
     assert.equal(read.stdout, "invalid");
     assert.ok(performance.now() - started < 2000, `${name} exceeded the deadline: ${performance.now() - started} ms`);
   }
+});
+
+test("an aborted limits read waiting for the local harvest cannot write its last good cache", async () => {
+  const remoteModule = new URL("../src/limits/machines.ts", import.meta.url).href;
+  const optionsModule = new URL("../src/options.ts", import.meta.url).href;
+  const indexModule = new URL("../src/limits/index.ts", import.meta.url).href;
+  // A fulfilled remote is still in flight until the local harvest decides whether to ask its account.
+  // Signal arrival at that await boundary without changing the production code's timing.
+  const script = `import { limitsReads } from ${JSON.stringify(remoteModule)};
+    import { remoteOptionsFrom } from ${JSON.stringify(optionsModule)};
+    import { emptyLimitsSnapshot } from ${JSON.stringify(indexModule)};
+    import { existsSync } from "node:fs";
+    let arrived;
+    const waiting = new Promise((resolve) => { arrived = resolve; });
+    const local = { then(resolve) { arrived(resolve); } };
+    const options = { dataDir: process.env.FAKE_SSH_DATA, noIndex: true, offline: true };
+    const remote = remoteOptionsFrom([], {}, { version: 1, machines: [{ name: "box", ssh: "limits-static", runtime: "installed", enabled: true }] });
+    const reads = limitsReads(options, remote);
+    const pending = reads.start(local);
+    const release = await waiting;
+    reads.abort();
+    release(emptyLimitsSnapshot("live"));
+    await pending;
+    process.stdout.write(JSON.stringify({ state: reads.readings[0].status.state, cached: existsSync(options.dataDir + "/machines/box.limits.json") }));`;
+  const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: {
+    ...environment, FAKE_SSH_DATA: join(directory, "aborted-limits"), FAKE_SSH_LIMITS: JSON.stringify({
+      schemaVersion: 2, generatedAt: new Date().toISOString(), dataSource: "live", accounts: [], observations: [], meters: [],
+    }),
+  }, timeout: 5000 });
+  assert.deepEqual(JSON.parse(read.stdout), { state: "failed", cached: false });
+});
+
+test("machine readers given an already-aborted signal start no SSH calls", async () => {
+  const remoteModule = new URL("../src/remote.ts", import.meta.url).href;
+  const limitsModule = new URL("../src/limits/machines.ts", import.meta.url).href;
+  const optionsModule = new URL("../src/options.ts", import.meta.url).href;
+  const script = `import { machineReads } from ${JSON.stringify(remoteModule)};
+    import { limitsReads } from ${JSON.stringify(limitsModule)};
+    import { remoteOptionsFrom } from ${JSON.stringify(optionsModule)};
+    const stop = new AbortController(); stop.abort();
+    const remote = remoteOptionsFrom(["--remote", "limits-static"], {});
+    const snapshots = machineReads({ timeZone: "UTC" }, remote, { signal: stop.signal });
+    const limits = limitsReads({ noIndex: true, offline: true }, remote, { signal: stop.signal });
+    await Promise.all([snapshots.start(), limits.start(Promise.resolve(null))]);
+    process.stdout.write(JSON.stringify([snapshots.readings[0].status.reason, limits.readings[0].status.reason]));`;
+  const count = (await calls()).length;
+  const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: {
+    ...environment, FAKE_SSH_LIMITS: JSON.stringify({ schemaVersion: 2, generatedAt: new Date().toISOString(), dataSource: "live", accounts: [], observations: [], meters: [] }),
+  }, timeout: 5000 });
+  assert.deepEqual(JSON.parse(read.stdout), ["cancelled", "cancelled"]);
+  assert.equal((await calls()).length, count);
 });
 
 test("--no-remote ignores remote environment settings and conflicts with explicit --remote", () => {

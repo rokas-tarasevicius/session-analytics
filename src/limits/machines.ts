@@ -324,6 +324,7 @@ export function limitsReads(
       let answer = fetched.snapshot;
       let ms = performance.now() - started;
       const own = await local;
+      if (stop.aborted || stopping()) throw new RemoteError("cancelled", machine);
       // Banked resets are account-wide: a machine asks its own app-server only for an account this machine's read does not know.
       reading.codexAccount = own ? unknownBankedResets(answer, own) : reading.codexAccount;
       if (accountRead && reading.codexAccount && !asked) {
@@ -356,7 +357,7 @@ export function limitsReads(
   };
 
   const start = (local: Promise<LimitsSnapshot | null>): Promise<void> => {
-    const stop = controller.signal;
+    const stop = signal?.aborted ? signal : controller.signal;
     for (const reading of readings) {
       if (reading.pending) continue;
       const { key, label, readAt, durationMs } = reading.status;
