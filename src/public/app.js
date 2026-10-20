@@ -1514,9 +1514,9 @@ function observedRange() {
   const timeZone = snapshotTimeZone();
   const dates = snapshot.sessions.flatMap((session) => [sessionStartDay(session, timeZone),
     ...(session.velocity ? ledgerCells(session.velocity).map(([day]) => day) : Object.keys(session.spendByDay ?? {}))]).filter(Boolean).sort();
-  const minimum = dates[0] || new Date().toISOString().slice(0, 10);
+  const today = localDay(normalizeTimestamp(snapshot.generatedAt), timeZone);
+  const minimum = dates[0] || today || new Date().toISOString().slice(0, 10);
   // Never end a window after the snapshot's local date.
-  const today = localDay(snapshot.generatedAt, timeZone);
   const maximum = dates.at(-1) || minimum;
   return { maximum: today && maximum > today && minimum <= today ? today : maximum, minimum };
 }

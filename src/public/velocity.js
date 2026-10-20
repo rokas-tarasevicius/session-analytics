@@ -3,6 +3,7 @@ import { categoryColor, categorySlotCount, modelColor, providerColor, providerKe
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
+import { normalizeTimestamp } from "./timestamps.js";
 import { ledgerAvailability } from "./view-model.js";
 import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, shiftDay, topMovers, velocityIndicators } from "./velocity-data.js";
 
@@ -240,7 +241,7 @@ export function renderVelocity(container, sessions, context) {
       if (options.granularity === "hour" && options.mode === "cumulative") { options.mode = "lines"; mode.select.value = "lines"; }
       rolling.disabled = options.granularity !== "day" || options.mode === "cumulative";
       rollingLabel.title = rolling.disabled ? "A daily average is shown on non-cumulative daily charts." : "Seven calendar days, including inactive dates.";
-      const today = localDay(current.generatedAt, current.timeZone);
+      const today = localDay(normalizeTimestamp(current.generatedAt), current.timeZone);
       const comparison = comparisonSpan(current.end, today);
       // Long windows also need six dates before their first plotted day.
       const rollingStart = shiftDay(current.start, -6);
