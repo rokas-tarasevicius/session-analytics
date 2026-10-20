@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- The bundled reviewed card now prices Claude Haiku 5.5 (including its >100K tier), GPT-6 Luna and GPT-5.6 Luna offline and as public-feed fallbacks, verified October 20, 2026. Previously unpriced usage now contributes to API-equivalent totals.
+
 - Subscription shows section headings and a meter-row skeleton while limits load, with a screen-reader loading status.
 - Dashboard and metrics documentation now describe Top increases, positive absolute rankings, and compact evidence cells with exact accessible counts.
 - Dashboard comparisons above ten times the prior value show a compact multiple across Summary, Tools and Velocity, including Top increases; zero baselines keep the existing new-activity label.

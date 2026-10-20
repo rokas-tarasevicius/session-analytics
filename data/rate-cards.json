@@ -1,6 +1,6 @@
 {
   "currency": "USD",
-  "effectiveDate": "2026-10-02",
+  "effectiveDate": "2026-10-20",
   "reviewedOverrides": [
     "claude-opus-5-5",
     "claude-fable-5-1",
@@ -209,6 +209,53 @@
         "thresholdInputTokens": 272000
       },
       "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    },
+    "claude-haiku-5-5": {
+      "provider": "claude",
+      "inputPerMillion": 0.1,
+      "cacheReadPerMillion": 0.01,
+      "cacheWrite5mPerMillion": 0.125,
+      "cacheWrite1hPerMillion": 0.2,
+      "outputPerMillion": 0.5,
+      "contextTiers": [
+        {
+          "aboveInputTokens": 100000,
+          "inputPerMillion": 0.5,
+          "cacheReadPerMillion": 0.05,
+          "cacheWrite5mPerMillion": 0.625,
+          "cacheWrite1hPerMillion": 1,
+          "outputPerMillion": 2.5
+        }
+      ],
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "gpt-6-luna": {
+      "provider": "codex",
+      "inputPerMillion": 0.1,
+      "cachedInputPerMillion": 0.01,
+      "outputPerMillion": 0.5,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna"
+    },
+    "gpt-5.6-luna": {
+      "provider": "codex",
+      "inputPerMillion": 0.2,
+      "cachedInputPerMillion": 0.02,
+      "outputPerMillion": 1.2,
+      "cacheWriteMultiplier": 1.25,
+      "cacheWriteObservable": false,
+      "longContext": {
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5,
+        "thresholdInputTokens": 272000
+      },
+      "source": "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
     }
   }
 }
