@@ -368,6 +368,13 @@ test("release: a tag published after a newer release never moves GitHub, npm or 
     const resumed = await runAgainstApi(publishRelease, directory, { "GET /repos/o/r/git/ref/tags/v1.9.0": { status: 200, json: { object: { sha, type: "commit" } } }, ...releaseRoutes }, env);
     assert.ok(!resumed.some((call) => call.path === "/repos/o/r/git/refs"), "an existing tag at this commit is kept");
     assert.equal(resumed.at(-1)!.body.draft, false);
+    const annotated = await runAgainstApi(publishRelease, directory, { "GET /repos/o/r/git/ref/tags/v1.9.0": { status: 200, json: { object: { sha: "c".repeat(40), type: "tag" } } },
+      ["GET /repos/o/r/git/tags/" + "c".repeat(40)]: { status: 200, json: { object: { sha, type: "commit" } } }, ...releaseRoutes }, env);
+    assert.deepEqual(annotated[1], { method: "GET", path: `/repos/o/r/git/tags/${"c".repeat(40)}` }, "an annotated tag is followed to its commit");
+    assert.equal(annotated.at(-1)!.body.draft, false, "an annotated tag at this commit resumes");
+    const annotatedElsewhere = await runAgainstApi(publishRelease, directory, { "GET /repos/o/r/git/ref/tags/v1.9.0": { status: 200, json: { object: { sha: "c".repeat(40), type: "tag" } } },
+      ["GET /repos/o/r/git/tags/" + "c".repeat(40)]: { status: 200, json: { object: { sha: "b".repeat(40), type: "commit" } } }, ...releaseRoutes }, env, 1);
+    assert.equal(annotatedElsewhere.length, 2, "nothing is published under an annotated tag at another commit");
     const elsewhere = await runAgainstApi(publishRelease, directory, { "GET /repos/o/r/git/ref/tags/v1.9.0": { status: 200, json: { object: { sha: "b".repeat(40), type: "commit" } } }, ...releaseRoutes }, env, 1);
     assert.deepEqual(elsewhere, [{ method: "GET", path: "/repos/o/r/git/ref/tags/v1.9.0" }], "nothing is published under a tag at another commit");
 
