@@ -388,6 +388,11 @@ test("movers compact their evidence while preserving exact token counts", async 
     assert.match(cell.textContent, /14M priced \(100%\) → 14M priced \(100%\)/);
     assert.equal(cell.getAttribute("aria-label"), (cell as any).title);
     assert.match((cell as any).title, /14,000,000\/14,000,000 priced tokens \(100%\) → 14,000,000\/14,000,000 priced tokens \(100%\)/);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
 
 test("Velocity daily and hourly ticks use uniform calendar steps", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
