@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Recording a machine identity with `machines check` now refreshes a running dashboard's machine readers, so installed machines use the new duplicate-machine check without restarting the dashboard.
+
 - The dashboard notices in-place saved-machine edits even when file size and modification time are preserved.
 
 - Cancelled machine reads start no SSH work when their signal has already fired, and a limits read waiting for the local harvest cannot later save its cache or fold readings into the ledger.

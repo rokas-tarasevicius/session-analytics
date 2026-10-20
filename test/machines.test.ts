@@ -349,6 +349,8 @@ test("machines.json is strict, private and decides which machines a run reads", 
   assert.match(saved.digest!, /^[0-9a-f]{64}$/);
   assert.equal(remoteOptionsFrom([], {}, structuredClone(valid)).digest, saved.digest);
   assert.notEqual(remoteOptionsFrom([], {}, { ...valid, machines: valid.machines.map((entry) => entry.name === "agentbox" ? { ...entry, user: "agents" } : entry) }).digest, saved.digest);
+  // A newly recorded check changes duplicate-machine handling even when the SSH target stays the same.
+  assert.notEqual(remoteOptionsFrom([], {}, { ...valid, machines: valid.machines.map((entry) => ({ ...entry, identity: "0123456789abcdef" })) }).digest, saved.digest);
   // --machines narrows to saved machines, including a disabled one asked for by name.
   assert.deepEqual(remoteOptionsFrom(["--machines", "OLD,agentbox"], {}, valid).machines.map(({ name }) => name), ["old", "agentbox"]);
   assert.throws(() => remoteOptionsFrom(["--machines", "missing"], {}, valid), OptionError);
