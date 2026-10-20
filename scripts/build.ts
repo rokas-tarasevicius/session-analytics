@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Build the installable package into dist/ (or --out DIR): compiled ESM plus verbatim assets. No network, no runtime dependencies. */
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,12 +55,20 @@ export function packageManifest(source: Record<string, unknown>): Record<string,
  */
 export function checkOutput(out: string, home = homedir()): void {
   const target = resolve(out);
-  if (target === join(root, "dist")) return;
+  // Resolve existing parents too: an output can be missing below a symlink, or a home directory can have a symlink alias.
+  const physical = (path: string): string => {
+    try { return realpathSync(path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return join(physical(dirname(path)), basename(path));
+    }
+  };
   const contains = (parent: string, child: string): boolean => {
     const path = relative(parent, child);
     return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
   };
-  if (contains(target, root) || contains(target, home)) throw new Error(`Refusing to build into ${out}: it contains this checkout or your home directory.`);
+  if (contains(physical(target), physical(root)) || contains(physical(target), physical(resolve(home)))) throw new Error(`Refusing to build into ${out}: it contains this checkout or your home directory.`);
+  if (target === join(root, "dist")) return;
   if (!existsSync(target)) return;
   if (!statSync(target).isDirectory()) throw new Error(`Refusing to build into ${out}: it is not a directory.`);
   if (!readdirSync(target).length) return;

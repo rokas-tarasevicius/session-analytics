@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -85,6 +85,15 @@ test("packaging: the build empties only a new, empty or earlier build directory,
     assert.throws(() => checkOutput(earlier, home), /holds no earlier build/, "the source manifest has scripts");
     assert.throws(() => build(work), /holds no earlier build/);
     assert.equal(await readFile(sentinel, "utf8"), "keep me");
+    // A symlinked parent is traversed by recursive deletion. Even a home containing an earlier build must be protected.
+    await writeFile(join(home, "package.json"), JSON.stringify(packageManifest({ name: "session-analytics" })));
+    await symlink(scratch, join(scratch, "alias"), "dir");
+    await symlink(checkout, join(scratch, "checkout-alias"), "dir");
+    for (const out of [join(scratch, "alias", "home"), join(scratch, "checkout-alias"), join(scratch, "alias")]) {
+      assert.throws(() => checkOutput(out, home), /contains this checkout or your home/, out);
+    }
+    assert.throws(() => checkOutput(scratch, join(scratch, "alias", "home")), /contains this checkout or your home/, "canonicalize home as well");
+    assert.doesNotThrow(() => checkOutput(join(scratch, "alias", "new"), home), "a safe new directory below a symlink is allowed");
   } finally { await rm(scratch, { recursive: true, force: true }); }
 });
 
