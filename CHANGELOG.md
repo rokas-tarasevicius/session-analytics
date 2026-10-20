@@ -10,6 +10,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Refresh snapshot updates public pricing sources that are absent, stale or fetched more than 24 hours ago before scanning, and retains cached/reviewed prices on update failure.
+- Running dashboards check stale pricing every six hours and show a Refresh snapshot notice with the fetch time when new cached rates await a scan; displayed totals never update automatically.
+- Scans that observe unmatched models trigger one extra public pricing check per day when a source is over 24 hours old, making newly listed prices available on the next manual refresh. Offline and pinned dashboards skip public checks.
+- Newly listed public models can price historical requests whose selected source snapshot predates their first listing, labeled as oldest available evidence. Already priced requests and later feed removals keep their existing selection; previously unpriced API-equivalent totals can increase.
+- The bundled reviewed card now prices Claude Haiku 5.5 (including its >100K tier), GPT-6 Luna and GPT-5.6 Luna offline and as public-feed fallbacks, verified October 20, 2026. Previously unpriced usage now contributes to API-equivalent totals.
 - Subscription shows section headings and a meter-row skeleton while limits load, with a screen-reader loading status.
 - Dashboard and metrics documentation now describe Top increases, positive absolute rankings, and compact evidence cells with exact accessible counts.
 - Dashboard comparisons above ten times the prior value show a compact multiple across Summary, Tools and Velocity, including Top increases; zero baselines keep the existing new-activity label.

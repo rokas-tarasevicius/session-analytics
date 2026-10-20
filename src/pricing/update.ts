@@ -7,7 +7,7 @@ import { pricingDirectory, saveSnapshot } from "./store.ts";
 export async function updatePricing(options: AnalyzeOptions = {}, fixtures: {
   urls?: Partial<Record<PricingSource, string>>; now?: Date; timeoutMs?: number;
 } = {}): Promise<PricingUpdateResult> {
-  const catalog = await loadPricingCatalog(options);
+  const catalog = await loadPricingCatalog(options, fixtures.now);
   if (catalog.status.offline || catalog.status.policy === "reviewed-only") {
     return { status: catalog.status.offline ? "offline" : "reviewed-only", sources: [], changes: [] };
   }
@@ -35,7 +35,7 @@ export async function updatePricing(options: AnalyzeOptions = {}, fixtures: {
 }
 
 export async function refreshPricingIfStale(options: AnalyzeOptions = {}, fixtures: Parameters<typeof updatePricing>[1] = {}): Promise<PricingUpdateResult | null> {
-  const catalog = await loadPricingCatalog(options);
+  const catalog = await loadPricingCatalog(options, fixtures.now);
   if (catalog.status.offline || !catalog.status.stale) return null;
   return updatePricing(options, fixtures);
 }

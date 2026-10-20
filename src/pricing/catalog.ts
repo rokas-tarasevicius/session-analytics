@@ -47,6 +47,7 @@ interface HistoryIndex {
   reviewed: Observation<ReviewedSnapshot>[];
   sources: Map<PricingSource, Observation<SourceSnapshot>[]>;
   times: Map<StoredSnapshot, number>;
+  firstMatches: Map<string, { snapshot: SourceSnapshot; match: NonNullable<ReturnType<typeof findModelRate>> } | null>;
 }
 const historyIndexes = new WeakMap<PricingCatalog, HistoryIndex>();
 
@@ -92,8 +93,24 @@ export function resolveRate(catalog: PricingCatalog, model: string, timestamp?: 
   if (catalog.status.policy === "reviewed-first" && pinned) return reviewedMatch();
   const candidates: ResolvedRate[] = [];
   for (const { source } of catalog.status.sources) {
-    const selected = atTime(index.sources.get(source) ?? [], time);
-    const found = selected ? findModelRate(selected.models, model) : undefined;
+    const observations = index.sources.get(source) ?? [];
+    let selected = atTime(observations, time);
+    let found = selected ? findModelRate(selected.models, model) : undefined;
+    if (!found && Number.isFinite(parsed)) {
+      // A catalog fetched before a model's listing cannot price it. Use its first later evidence,
+      // explicitly labeled oldest; never resurrect a model removed after it was already observed.
+      const key = `${source}:${model}`;
+      let first = index.firstMatches.get(key);
+      if (first === undefined) {
+        first = null;
+        for (const { snapshot } of observations) {
+          const match = findModelRate(snapshot.models, model);
+          if (match) { first = { snapshot, match }; break; }
+        }
+        if (index.firstMatches.size < 10000) index.firstMatches.set(key, first);
+      }
+      if (first && index.times.get(first.snapshot)! > time) { selected = first.snapshot; found = first.match; }
+    }
     if (selected && found) candidates.push(resolved(selected, found, "api"));
   }
   // A newly introduced preferred feed must not replace earlier observed prices from another feed.
@@ -133,7 +150,7 @@ export function catalogFromSnapshots(reviewed: ReviewedSnapshot, snapshots: Stor
   };
   const catalog: PricingCatalog = { currency: "USD", effectiveDate: reviewed.card.effectiveDate,
     models: Object.create(null), reviewedOverrides: reviewed.card.reviewedOverrides, history, status, customRateCard: !!options.rateCardPath };
-  const index: HistoryIndex = { reviewed: [], sources: new Map(), times: new Map() };
+  const index: HistoryIndex = { reviewed: [], sources: new Map(), times: new Map(), firstMatches: new Map() };
   for (const snapshot of history) {
     const time = Date.parse(snapshot.fetchedAt);
     index.times.set(snapshot, time);
@@ -160,11 +177,11 @@ export function catalogFromSnapshots(reviewed: ReviewedSnapshot, snapshots: Stor
 }
 
 /** This function only reads local files. Analysis must never invoke the fetch/update module. */
-export async function loadPricingCatalog(options: AnalyzeOptions = {}): Promise<PricingCatalog> {
+export async function loadPricingCatalog(options: AnalyzeOptions = {}, now = new Date()): Promise<PricingCatalog> {
   const reviewed = await loadReviewed(options.rateCardPath);
   const cache = pricingConfiguration(options).policy === "reviewed-only"
     ? { snapshots: [], warnings: [] } : await readSnapshots(pricingDirectory(options));
-  const catalog = catalogFromSnapshots(reviewed, cache.snapshots, options, new Date(), cache.warnings);
+  const catalog = catalogFromSnapshots(reviewed, cache.snapshots, options, now, cache.warnings);
   catalog.bundledReviewedHistory = !options.rateCardPath;
   return catalog;
 }

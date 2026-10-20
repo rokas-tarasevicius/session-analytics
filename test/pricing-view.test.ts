@@ -395,7 +395,7 @@ test("Stale online pricing offers one refresh action; offline, pinned and warnin
     assert.ok(buttons[0]!.className.split(" ").includes("button")); assert.equal(buttons[0]!.attributes.type, "button");
     assert.equal(buttons[0]!.dataset.focusKey, "pricing:refresh");
     buttons[0]!.dispatch("click"); assert.equal(refreshes, 1);
-    assert.match(root.text(), /Automatic/); assert.match(root.text(), /Checked after the dashboard starts · reviewed card effective 1 Jan 2026/);
+    assert.match(root.text(), /Automatic/); assert.match(root.text(), /Checked at startup, every 6 hours and on refresh · reviewed card effective 1 Jan 2026/);
     renderPricingPanel(root, online, sessions, window);
     assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
     renderPricingPanel(root, rateCard, sessions, window, options);
@@ -410,6 +410,21 @@ test("Stale online pricing offers one refresh action; offline, pinned and warnin
     assert.match(byClass(root, "notice")[0]!.text(), /Pricing evidence has warnings/);
     assert.equal(byClass(root, "notice")[0]!.all((node) => node.tag === "button").length, 0);
     assert.equal(refreshes, 1);
+  });
+});
+
+test("new cached prices offer Refresh snapshot even when the scanned sources were fresh", async () => {
+  await withDocument((root) => {
+    let refreshes = 0;
+    const fresh = { ...rateCard, pricing: { ...rateCard.pricing, stale: false, offline: false } };
+    const options = { pricingUpdate: { updateAvailable: true, fetchedAt: "2026-10-20T12:00:00.000Z" }, onRefresh: () => { refreshes++; } };
+    renderPricingPanel(root, fresh, sessions, window, options);
+    const notice = byClass(root, "notice")[0]!;
+    assert.match(notice.text(), /Pricing evidence needs a refresh/);
+    assert.match(notice.text(), /New prices were cached/);
+    notice.all((node) => node.tag === "button")[0]!.dispatch("click"); assert.equal(refreshes, 1);
+    renderPricingPanel(root, fresh, sessions, window, { ...options, pricingUpdate: { updateAvailable: false, fetchedAt: null } });
+    assert.equal(byClass(root, "notice").length, 0);
   });
 });
 

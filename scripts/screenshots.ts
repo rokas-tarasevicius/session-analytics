@@ -48,7 +48,7 @@ const CAPTURES: Capture[] = [
     js: "document.querySelector('[data-view-panel=velocity] details').open = true",
     fitJs: "(() => { const s = [...document.querySelectorAll('[data-view-panel=velocity] summary')].find((e) => e.textContent.includes('How the comparisons')); return s.closest('details').getBoundingClientRect().top - 16; })()",
   },
-  { name: "velocity-movers", view: "velocity", clipJs: "__rect(__p('Top movers'))", pad: 14 },
+  { name: "velocity-movers", view: "velocity", clipJs: "__rect(__p('Top increases'))", pad: 14 },
   { name: "costs", view: "costs", fitJs: panelBottom("Cost by model") },
   { name: "pricing", view: "pricing", fitJs: panelBottom("Model prices") },
   {
