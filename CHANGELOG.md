@@ -70,6 +70,15 @@ All notable changes to this project are documented here. The format follows [Kee
 - Phone chart legends keep provider names intact in a single column.
 - The dashboard Activity heatmap scrolls within its panel at tablet widths so every hour remains reachable.
 
+- Release builds copy only the public reviewed rate card from `data/`; a private index, saved-machine file or cached snapshot stored alongside it can no longer enter the package.
+- Independent Claude and Codex verification skips malformed non-object JSON records while retaining later valid evidence; a `null` record no longer aborts a file or the oracle.
+- Manually running the Release PR workflow from another branch still prepares the release from `master`, so unrelated branch changes cannot enter the release pull request.
+- Release preparation generates notes from commit titles when Unreleased contains only empty category headings, instead of creating an empty release that preflight rejects.
+- The demo rejects `--port` or `--bin` without a value before generating data; a missing port no longer silently uses the default dashboard port.
+- Independent Codex verification uses the snapshot's time zone, so verifying a saved snapshot in another time zone no longer reports false hourly discrepancies.
+- Release automation approves CI only for its own release pull request, even when another pull request shares the same commit.
+- Synthetic index benchmarks no longer discover real provider stores or fetch prices, and the test runner always isolates its data directory even when `SESSION_ANALYTICS_DATA_DIR` is exported.
+- The build resolves symlinked output paths before emptying a directory, preserving the checkout and home-directory protections through symlink aliases.
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20

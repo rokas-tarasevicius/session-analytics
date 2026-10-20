@@ -17,13 +17,14 @@ if (!machine && !demoRoot) {
 }
 const temporary = await mkdtemp(join(tmpdir(), "session-analytics-index-benchmark-"));
 const options: AnalyzeOptions = {
-  dataDir: join(temporary, "index"), includeHidden: true, noIndex: false,
+  dataDir: join(temporary, "index"), includeHidden: true, noIndex: false, offline: true,
   ...(demoRoot ? {
     claudeRoot: join(demoRoot, "claude", "projects"),
     codexRoot: join(demoRoot, "codex", "sessions"),
     codexArchiveRoot: join(demoRoot, "codex", "archived_sessions"),
     cursorDatabasePath: join(demoRoot, "cursor", "User", "globalStorage", "state.vscdb"),
     databasePath: join(demoRoot, "conductor-not-present.db"),
+    additionalProviders: false,
   } : {}),
 };
 async function timed(noIndex: boolean): Promise<{ snapshot: MachineAnalytics; milliseconds: number }> {

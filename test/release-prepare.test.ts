@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { bumpOf, generatedNotes, nextVersion, releaseChangelog, releaseSecurityPolicy, type Commit } from "../scripts/release-prepare.ts";
+import { releaseCiRun } from "../scripts/release-ci.ts";
 
 const commit = (subject: string, body = ""): Commit => ({ subject, body });
 const repository = "https://github.com/rokas-tarasevicius/session-analytics";
@@ -17,6 +18,7 @@ test("release PR: feat is minor, fix and perf a patch, breaking a major or, befo
     ["feat(cli)!: drop --remote", "", "major"], ["fix: rename a field", "Body.\n\nBREAKING CHANGE: report.json drops `x`.", "major"], ["refactor!: new index", "", "major"],
     ["docs: README", "", null], ["test(browser): wait for Chrome", "", null], ["ci(release): dry run", "", null], ["chore(release): 0.10.1 (#77)", "", null],
     ["Restyle the dashboard and docs with Fluxary (#60)", "", null], ["v0.8.1 chore: prepare", "", null], ["fix:no space", "", null],
+    ['Revert "feat: add an option"', "", null], ["Merge pull request #99 from feature", "", null],
   ] as const) assert.equal(bumpOf(commit(subject, body)), bump, subject);
 
   assert.equal(nextVersion("0.10.3", [commit("docs: a"), commit("ci: b")]), null, "nothing releasable");
@@ -39,6 +41,7 @@ test("release PR: Unreleased notes move under the new version with its compare l
     + `[Unreleased]: ${repository}/compare/v0.11.0...HEAD\n[0.11.0]: ${repository}/compare/v0.10.3...v0.11.0\n[0.10.3]: ${repository}/compare/v0.10.2...v0.10.3\n`);
 
   const generated = releaseChangelog(changelog("\n"), "0.10.3", "0.11.0", "2026-10-21", commits);
+  assert.equal(releaseChangelog(changelog("\n### Added\n\n### Changed\n\n### Fixed\n"), "0.10.3", "0.11.0", "2026-10-21", commits), generated, "empty category headings do not replace generated notes");
   assert.match(generated, /## \[Unreleased\]\n\n## \[0\.11\.0\] - 2026-10-21\n\n### Changed\n\n- Drop a flag\n\n### Added\n\n- Session-analytics upgrade \(#81\)\n\n### Fixed\n\n- Poll a long scan \(#82\)\n\n## \[0\.10\.3\]/);
   assert.equal(generatedNotes([commit("docs: a")]), "");
 
@@ -103,13 +106,37 @@ test("release PR: the workflow runs on merges to master with write access in its
   assert.match(workflow, /\npermissions:\n  contents: read\n/);
   assert.match(workflow, /\n    permissions:\n      contents: write\n      pull-requests: write\n      actions: write\n/);
   assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /\n          ref: master\n/, "a manual run on another ref still prepares the release from master");
   assert.doesNotMatch(workflow, /secrets\.|pull_request_target/, "no secret");
   for (const line of workflow.split("\n").filter((line) => line.includes("${{ steps."))) assert.match(line, /^ {8}if: |^ {10}[A-Z_]+: \$\{\{ steps\./, `step outputs reach scripts only through env: ${line}`);
   assert.match(workflow, /node scripts\/release-prepare\.ts --write --output "\$GITHUB_OUTPUT"/);
   assert.match(workflow, /HEAD:refs\/heads\/release\/next/);
   assert.match(workflow, /--title "chore\(release\): \$V"/);
   assert.match(workflow, /actions\/runs\/\$RUN\/approve/, "the release pull request's own CI run is approved");
+  assert.match(workflow, /gh pr view release\/next --json number --jq .number/);
+  assert.match(workflow, /actions\/workflows\/ci.yml\/runs\?event=pull_request&head_sha=\$SHA/);
+  assert.match(workflow, /node scripts\/release-ci.ts "\$GITHUB_REPOSITORY" "\$PR" "\$SHA"/);
   assert.match(workflow, /gh workflow run ci\.yml --ref release\/next/, "or, failing that, CI is dispatched on the branch");
   const ci = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.match(ci, /\n  workflow_dispatch:\n/, "CI can be dispatched on the release branch");
+});
+
+test("release PR: approval selects the exact PR, repository, workflow and head, even when other runs share the commit", () => {
+  const sha = "a".repeat(40), repository = "owner/session-analytics", request = 42;
+  const own = { id: 100, name: "CI", path: ".github/workflows/ci.yml", event: "pull_request", head_sha: sha,
+    head_branch: "release/next", head_repository: { full_name: repository }, pull_requests: [{ number: request }] };
+  const others = [
+    { ...own, id: 101, head_repository: { full_name: "outside/session-analytics" } },
+    { ...own, id: 102, head_branch: "other" }, { ...own, id: 103, pull_requests: [{ number: 99 }] },
+    { ...own, id: 104, path: ".github/workflows/another.yml" }, { ...own, id: 105, head_sha: "b".repeat(40) },
+    { ...own, id: 106, event: "workflow_dispatch" }, { ...own, id: 107, pull_requests: [] },
+    { ...own, id: 108, head_repository: null }, { ...own, id: 109, pull_requests: null }, null,
+  ];
+  assert.equal(releaseCiRun({ workflow_runs: [...others, own] }, repository, request, sha), own.id);
+  assert.equal(releaseCiRun({ workflow_runs: others }, repository, request, sha), null, "dispatch CI if the release PR's own run is absent");
+  assert.throws(() => releaseCiRun({}, repository, request, sha), /workflow run listing/);
+  const script = fileURLToPath(new URL("../scripts/release-ci.ts", import.meta.url));
+  const result = spawnSync(process.execPath, [script, repository, String(request), sha], { input: JSON.stringify({ workflow_runs: [...others, own] }), encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "100\n");
 });
