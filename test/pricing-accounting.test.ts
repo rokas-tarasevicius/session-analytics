@@ -91,14 +91,15 @@ test("Claude cache TTLs and long-context absolute tiers are priced per request",
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("coverage counts priced requests when the same model is missing from an earlier snapshot", async () => {
+test("coverage counts priced requests when the same model is removed from a later snapshot", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pricing-partial-"));
   try {
     const fixture = await createSessionAnalyticsFixture(directory);
     const dataDir = join(directory, "data");
-    await saveSnapshot(pricingDirectory({ dataDir }), sourceSnapshot("models.dev", "2026-01-01T00:00:00.000Z"));
+    const first = sourceSnapshot("models.dev", "2026-01-01T00:00:00.000Z");
+    first.models["claude-late"] = first.models["claude-fixture-4-5"]!;
+    await saveSnapshot(pricingDirectory({ dataDir }), first);
     const second = sourceSnapshot("models.dev", "2026-02-01T00:00:00.000Z");
-    second.models["claude-late"] = second.models["claude-fixture-4-5"]!;
     await saveSnapshot(pricingDirectory({ dataDir }), second);
     const root = join(fixture.claudeRoot, "-pricing-partial"); await mkdir(root);
     const id = "99999999-1111-4111-8111-111111111111";
@@ -111,6 +112,7 @@ test("coverage counts priced requests when the same model is missing from an ear
     assert.equal(session.models[0]?.priced, false);
     assert.deepEqual(session.models[0]?.pricingCoverage, { eligibleTokens: 200, pricedTokens: 100 });
     assert.equal(session.models[0]?.pricing?.length, 1);
+    assert.equal(session.models[0]?.pricing?.[0]?.temporal, "at-or-before");
     assert.equal(session.pricedTokenCoverage, 0.5); assert.equal(session.costComplete, false);
     assert.deepEqual(snapshot.spendByModel.find(({ model }) => model === "claude-late")?.pricingCoverage,
       { eligibleTokens: 200, pricedTokens: 100 });

@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Newly listed public models can price historical requests whose selected source snapshot predates their first listing, labeled as oldest available evidence. Already priced requests and later feed removals keep their existing selection; previously unpriced API-equivalent totals can increase.
+
 - The bundled reviewed card now prices Claude Haiku 5.5 (including its >100K tier), GPT-6 Luna and GPT-5.6 Luna offline and as public-feed fallbacks, verified October 20, 2026. Previously unpriced usage now contributes to API-equivalent totals.
 
 - Subscription shows section headings and a meter-row skeleton while limits load, with a screen-reader loading status.

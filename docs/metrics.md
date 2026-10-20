@@ -139,7 +139,7 @@ These require Git, GitHub, CI, deployment, provider billing, or explicit human e
 
 ## Pricing semantics
 
-`rate-cards.json` and the immutable pricing cache are reproducibility inputs. The default policy uses reviewed exceptions, then matching public API snapshots in source order, then bundled fallback rates. A model with no unambiguous match remains unpriced. [Pricing evidence](pricing.md) documents all selection rules and caveats.
+`rate-cards.json` and the immutable pricing cache are reproducibility inputs. The default policy uses reviewed exceptions, then matching public API snapshots in source order, then bundled fallback rates. When a source observation predates a model’s first listing, its first later observation may price otherwise unmatched historical usage, labeled `temporal: oldest`; already priced requests and subsequent source removals keep their existing selection rules. A model with no unambiguous match remains unpriced. [Pricing evidence](pricing.md) documents all selection rules and caveats.
 
 The Claude Opus 5 entry uses Anthropic's standard global API rates. The analyzer does not apply fast-mode, US-only inference, batch, or partner-platform modifiers because local Claude history does not establish those billing dimensions.
 
