@@ -90,12 +90,13 @@ export function zonedHourKey(seconds, timeZone = "UTC") {
   return `${parts.year}-${parts.month}-${parts.day}|${Number(parts.hour)}`;
 }
 
-/** Shared change text; only adjacent equal-length windows receive a period suffix.
+/** Shared change text; current/prior ratios above 10 use multiples. Only adjacent equal-length windows receive a period suffix.
  * @param {number | "new"} change @param {number} [length]
  */
 export function deltaText(change, length) {
   const suffix = length ? `vs previous ${length}d` : "";
   if (change === "new") return ["new", suffix].filter(Boolean).join(" · ");
   const flat = Math.abs(change) < 0.0005;
-  return `${flat ? "▬" : change > 0 ? "▲" : "▼"} ${percent(flat ? 0 : Math.abs(change))}${suffix ? ` ${suffix}` : ""}`;
+  const magnitude = change > 9 ? `${decimal(change + 1)}×` : percent(flat ? 0 : Math.abs(change));
+  return `${flat ? "▬" : change > 0 ? "▲" : "▼"} ${magnitude}${suffix ? ` ${suffix}` : ""}`;
 }

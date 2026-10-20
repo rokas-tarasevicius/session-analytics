@@ -1,4 +1,4 @@
-import { dayLabel, deltaText, weekdayHourParts } from "./format.js";
+import { dayLabel, decimal, deltaText, weekdayHourParts } from "./format.js";
 // Pure view-model helpers for the dashboard: aggregation, window math, deltas,
 // sparkline downsampling, sorting, and palette matching. No DOM access, so the
 // same module is exercised by test/dashboard-helpers.test.ts under node:test.
@@ -349,7 +349,7 @@ export function deltaDescription(current, previous, length) {
   const magnitude = `${Math.abs(change * 100).toFixed(1)}%`;
   return {
     direction,
-    label: `${direction === "up" ? "Up" : direction === "down" ? "Down" : "Unchanged"} ${magnitude} versus the previous ${length} days`,
+    label: change > 9 ? `Current value is ${decimal(change + 1)} times the previous ${length} days` : `${direction === "up" ? "Up" : direction === "down" ? "Down" : "Unchanged"} ${magnitude} versus the previous ${length} days`,
     text: deltaText(change, length),
   };
 }

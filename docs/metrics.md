@@ -460,6 +460,7 @@ when applicable.
 
 Percent changes require a previous value of at least $0.01, 100 tokens, 3 sessions/model
 calls, or 5 tool calls. Value/token percentages also require at least 3 prior model calls.
+For guarded comparisons, a current/prior ratio strictly above 10× is displayed as a multiple of the prior value (for example, $816.08 versus $5.23 is `▲ 156×`), rounded to at most one decimal, instead of a percentage increase. Exactly 10× still reads `▲ 900.0%`; declines retain percentages. Summary, Tools and Velocity (including Top increases) share this display rule; the underlying delta and baseline guards are unchanged.
 A tiny baseline produces N/A with the minimum stated, never an infinite percentage or a
 fabricated 0%. An observed prior period with exactly zero value shows **New** when the current
 period has activity and **No activity** when both are zero. Unavailable comparisons state their
