@@ -33,6 +33,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Machine failure hints in snapshots and subscription limits keep SSH destinations, account names and configured paths private; the terminal still prints the exact diagnostic and fix.
 
+- Subscription history now drops cycles with no reading before their end. Clock-skewed or post-reset reports could create a cycle ending before it started and falsely count restored or expired allowance; those unsupported reset figures decrease.
+- Simultaneous limit readings now keep one highest level and the strongest status before detecting resets. Input order could invent an in-place reset, lower the live level and inflate restored allowance; those false resets and their value are removed, and repeated reports of one instant no longer qualify a projection.
+- Limit cursors now fingerprint the beginning of a log as well as the bytes before the read position. A rewritten log with the same trailing bytes could hide newer readings; those readings now update the meters instead of leaving stale levels. Existing cursors reread their files once to adopt the stronger fingerprint.
+- Limit harvesting now saves a newer file cursor even when truncation makes its offset smaller. Truncated logs no longer get reread on every refresh; source read counts fall back to zero when nothing was appended.
+- Subscription active-session counts now follow the snapshot's local hours across daylight-saving changes. Sessions in the repeated hour and after a clock change are counted in the correct period; API-equivalent dollar totals are unchanged.
+- Subscription sessions from a profile claimed by two accounts now stay unattributed instead of going to whichever account was listed first. Misassigned account value and capacity decrease; unattributed value increases.
+- Subscription value calibration no longer uses rejected readings below 5%: 0% refusals could produce infinite capacity, and tiny levels overstated value per percent. Those segments now stay uncalibrated.
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20

@@ -355,6 +355,47 @@ test("cursors persist with a fingerprint: rewritten files are re-read, unreadabl
   assert.deepEqual(later.observations.map((row) => row.usedPercent).sort(), [31, 32, 60]);
 });
 
+test("a truncated file saves its shorter cursor, so the next harvest resumes instead of reading it again", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-truncated-cursor-")), logs = join(home, "logs");
+  mkdirSync(logs);
+  const log = join(logs, "events.log"), dataDir = join(home, "data");
+  const options = { dataDir, codexRoot: join(home, "none") };
+  const environment = { ...environmentFor(home), SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: logs };
+  const count = (snapshot: LimitsSnapshot) => snapshot.sources.find((source) => source.source === "claude-sdk-log")!.read;
+  const first = sdkEvent(now - 600, null, { five_hour: [0.31, now + 3600] });
+  const replacement = sdkEvent(now - 300, null, { five_hour: [0.32, now + 3600] });
+  writeFileSync(log, first + first);
+  assert.equal(count(await collectLimits(options, environment, now)), 2);
+  writeFileSync(log, replacement);
+  assert.equal(count(await collectLimits(options, environment, now + 60)), 1);
+  const cursor = Object.values(readLedger(dataDir, now + 60).ledger!.cursors)[0]!;
+  assert.equal(cursor.offset, Buffer.byteLength(replacement), "a newer shorter read replaces the old generation's offset");
+  assert.equal(count(await collectLimits(options, environment, now + 120)), 0);
+  const newer = { ...emptyLedger(), cursors: { "1:2": cursor } };
+  const older = { ...emptyLedger(), cursors: { "1:2": { offset: Buffer.byteLength(first + first), fingerprint: "0123456789abcdef", seen: now } } };
+  for (const [left, right] of [[older, newer], [newer, older]]) {
+    assert.deepEqual(mergeLedgers(left!, right!, now + 120).cursors["1:2"], cursor, "a stale concurrent writer cannot restore the old cursor");
+  }
+});
+
+test("a regrown file with a matching cursor suffix is reread when its beginning changed", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-regrown-cursor-")), logs = join(home, "logs");
+  mkdirSync(logs);
+  const log = join(logs, "events.log"), dataDir = join(home, "data");
+  const options = { dataDir, codexRoot: join(home, "none") };
+  const environment = { ...environmentFor(home), SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: logs };
+  // Repeated trailing records (or whitespace) are common after copy-truncate rotation; a tail hash alone misses this.
+  const line = (level: number) => sdkEvent(now - 300, null, { five_hour: [level, now + 3600] }).trimEnd() + " ".repeat(128) + "\n";
+  writeFileSync(log, line(0.31));
+  await collectLimits(options, environment, now);
+  writeFileSync(log, line(0.92));
+  const replacement = await collectLimits(options, environment, now + 60);
+  assert.equal(replacement.sources.find((source) => source.source === "claude-sdk-log")!.read, 1);
+  assert.equal(replacement.observations.at(-1)!.usedPercent, 92);
+  const unchanged = await collectLimits(options, environment, now + 120);
+  assert.equal(unchanged.sources.find((source) => source.source === "claude-sdk-log")!.read, 0);
+});
+
 test("readings kept under a profile's fallback key join its account once the login is known, and stay joined across merges", async () => {
   const home = mkdtempSync(join(tmpdir(), "limits-alias-"));
   const logs = join(home, "logs");
@@ -391,6 +432,26 @@ test("an in-place reset inside one 15-minute bucket is kept apart, and each mete
   const twice = mergeLedgers(mergeLedgers(ledger, ledger, now), ledger, now);
   assert.deepEqual(twice.rows, ledger.rows, "compaction is idempotent across merges");
   assert.deepEqual(compactObservations([claude(60, 30), claude(300, 32), claude(600, 31)], now).map((row) => row.usedPercent), [32, 31], "the latest reading is never an earlier, higher one");
+});
+
+test("simultaneous readings never create an in-place reset and compact independently of input order", () => {
+  const samples = [80, 20, 30].map((used) => codexReading(now - 60, now + 86_400, used));
+  const expected = [samples[0]!];
+  for (const order of [samples, [...samples].reverse(), [samples[1]!, samples[0]!, samples[2]!]]) {
+    const compacted = compactObservations(order, now);
+    assert.deepEqual(compacted, expected);
+    assert.deepEqual(compactObservations([...compacted, ...order], now), expected, "repeated ledger merges stay idempotent");
+    const live = liveMeter(buildMeters(compacted, now)[0]!, now);
+    assert.equal(live.used, 80);
+    assert.equal(live.cycle!.segments.length, 1);
+  }
+  const warning = { ...samples[1]!, status: "warning" as const, source: "codex-account" as const };
+  for (const order of [[samples[0]!, warning], [warning, samples[0]!]]) {
+    const compacted = compactObservations(order, now);
+    assert.equal(compacted.length, 1);
+    assert.equal(compacted[0]!.usedPercent, 80);
+    assert.equal(compacted[0]!.status, "warning", "simultaneous status evidence is retained");
+  }
 });
 
 test("the newest plan evidence wins, including a tier this version does not recognise; Codex's 'unknown' plan type is no evidence", async () => {

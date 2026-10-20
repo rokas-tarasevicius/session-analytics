@@ -55,6 +55,38 @@ test("Claude SDK events expand every unified window; the triggering window keeps
   assert.deepEqual(claudeSdkLimitRecord({ observedAt: "2026-10-13T12:14:00Z", event: { payload: { type: "user", message: { content: "\"type\":\"rate_limit_event\"" } } } }), []);
 });
 
+test("malformed limit levels and reset units cannot widen the ledger or leak source content", () => {
+  const observedAt = new Date(now * 1000).toISOString();
+  const parse = (used: unknown, reset: unknown) => codexLimitRecord({
+    timestamp: observedAt, type: "event_msg", payload: { type: "token_count", rate_limits: {
+      primary: { used_percent: used, window_minutes: 300, resets_at: reset }, plan_type: "pro", message: "SECRET login@example.com /private/path",
+    } },
+  })!;
+  for (const used of [null, "75", NaN, Infinity, -Infinity]) assert.deepEqual(parse(used, now + 600).observations, []);
+  for (const reset of [null, undefined, "1792000000", (now + 600) * 1000, 5_000_000_000]) {
+    assert.deepEqual(compactObservations(parse(20, reset).observations, now), [], `invalid reset ${reset}`);
+  }
+  for (const [used, expected] of [[-1, 0], [125, 125], [2000, 1000]]) {
+    const kept = compactObservations(parse(used, now + 600).observations, now);
+    assert.equal(kept[0]!.usedPercent, expected);
+    assert.doesNotMatch(JSON.stringify(kept), /SECRET|login@example|private\/path/);
+  }
+  const swapped = codexLimitRecord(JSON.parse(codexLine(observedAt, {
+    primary: { used_percent: 20, window_minutes: 10080, resets_at: now + 86_400 },
+    secondary: { used_percent: 30, window_minutes: 300, resets_at: now + 600 },
+  })))!;
+  assert.deepEqual(swapped.observations.map((row) => row.meter), ["seven_day", "five_hour"]);
+});
+
+test("unknown SDK status stays bounded, and a statusline reading at its reset is already expired", () => {
+  const observations = claudeSdkLimitRecord({ observedAt: new Date(now * 1000).toISOString(), type: "rate_limit_event", rate_limit_info: {
+    status: "SECRET login@example.com /private/path", rateLimitType: "five_hour", utilization: 0.5, resetsAt: now + 600,
+  } });
+  assert.equal(observations[0]!.status, "unknown");
+  assert.doesNotMatch(JSON.stringify(observations), /SECRET|login@example|private\/path/);
+  assert.deepEqual(statuslineObservations({ rate_limits: { five_hour: { used_percentage: 90, resets_at: now } } }, now), []);
+});
+
 test("statusline rate_limits are percentages with Unix reset times; expired windows are skipped", () => {
   const observations = statuslineObservations({ rate_limits: {
     five_hour: { used_percentage: 23.5, resets_at: now + 3600 }, seven_day: { used_percentage: 41.2, resets_at: now + 86_400 },

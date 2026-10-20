@@ -37,6 +37,44 @@ function spending(provider: string, from: number, to: number, perHour: number, p
 const utilization = (owner: LimitAccount, observations: LimitObservation[], now: number, sessions: unknown[] = [], extra: Partial<Parameters<typeof accountUtilization>[0]> = {}) =>
   accountUtilization({ account: owner, meters: buildMeters(observations, now), sessions, timeZone: "UTC", now, range: { from: now - 30 * DAY, to: now }, ...extra });
 
+test("rejection below the calibration floor never divides value by a zero or tiny level", () => {
+  for (const used of [0, 0.1, 4.9]) {
+    const meter = buildMeters([
+      reading("codex", "seven_day", start + WEEK, start + DAY, used, "rejected"),
+      reading("codex", "seven_day", start + 2 * WEEK, start + WEEK + DAY, used, "rejected"),
+    ], start + 2 * WEEK)[0]!;
+    const calibration = calibrate(meter, { between: () => 10 });
+    assert.equal(calibration.perPercent, null);
+    assert.deepEqual(calibration.points, [], "a refused request does not establish value per percent");
+  }
+});
+
+test("simultaneous readings have one level and cannot provide reset or projection evidence", () => {
+  const samples = [80, 20, 30].map((used) => reading("codex", "seven_day", start + WEEK, start + 2 * DAY, used));
+  for (const order of [samples, [...samples].reverse()]) {
+    const live = liveMeter(buildMeters(order, start + 2 * DAY)[0]!, start + 2 * DAY);
+    assert.equal(live.used, 80);
+    assert.equal(live.cycle!.segments.length, 1);
+    assert.equal(live.cycle!.samples.length, 1);
+    assert.equal(live.projected, null, "several reports of one instant are not several readings over time");
+  }
+});
+
+test("zero pace never runs out, and utilization needs an observed close or a supported live projection", () => {
+  const now = start + 2 * DAY;
+  const zero = liveMeter(buildMeters([
+    reading("claude", "seven_day", start + WEEK, start + DAY, 0),
+    reading("claude", "seven_day", start + WEEK, now, 0),
+  ], now)[0]!, now);
+  assert.equal(zero.rate, 0);
+  assert.equal(zero.projected, 0);
+  assert.equal(zero.capAt, null);
+  assert.equal(zero.burnAt, null);
+  assert.equal(resetUtilization([], null), null);
+  const closed = resetHistory(buildMeters([reading("claude", "seven_day", start + WEEK, start + WEEK, 75)], start + WEEK)[0]!);
+  assert.deepEqual(resetUtilization(closed, null), { mean: 75, closed: 1, includesProjection: false });
+});
+
 test("cycles end at the next cycle's first reading; an early provider reset is not counted as waste", () => {
   const firstReset = start + WEEK, secondReset = start + DAY + WEEK;
   const meters = buildMeters([
@@ -51,6 +89,29 @@ test("cycles end at the next cycle's first reading; an early provider reset is n
   assert.equal(cycles[1]!.closed, false);
   const history = resetHistory(meters[0]!, 5);
   assert.deepEqual([history[0]!.peak, history[0]!.expired, history[0]!.expiredUsd, history[0]!.restored], [14, null, null, 14]);
+});
+
+test("late cycle readings cannot invent a close or a cycle ending before its start", () => {
+  const samples = [
+    reading("claude", "five_hour", start + 5 * HOUR, start + HOUR, 20),
+    reading("claude", "five_hour", start + 6 * HOUR, start - 60, 5),
+  ];
+  const meter = buildMeters(samples, start + 2 * HOUR)[0]!;
+  assert.equal(meter.cycles.length, 1, "the first cycle has no reading before the next cycle began");
+  assert.ok(meter.cycles.every((cycle) => cycle.start <= cycle.end));
+  assert.deepEqual(resetHistory(meter), [], "the late reading does not establish restored or expired allowance");
+  const interleaved = buildMeters([
+    reading("claude", "five_hour", start + 5 * HOUR, start + HOUR, 20),
+    reading("claude", "five_hour", start + 6 * HOUR, start + 3 * HOUR, 30),
+    reading("claude", "five_hour", start + 7 * HOUR, start + 2 * HOUR, 5),
+  ], start + 4 * HOUR)[0]!;
+  assert.equal(interleaved.cycles.length, 2);
+  assert.equal(interleaved.cycles[0]!.end, start + 2 * HOUR, "a discarded late cycle cannot hide the next valid cycle's start");
+
+  const after = buildMeters([reading("claude", "seven_day", start + WEEK, start + WEEK + 60, 90)], start + WEEK + HOUR)[0]!;
+  assert.deepEqual(after.cycles, [], "a post-reset report cannot establish the previous cycle's closing level");
+  const exact = buildMeters([reading("claude", "seven_day", start + WEEK, start + WEEK, 90)], start + WEEK)[0]!;
+  assert.equal(resetHistory(exact)[0]!.expired, 10, "a reading exactly at reset remains valid closing evidence");
 });
 
 test("readings of two accounts interleave without forming false early resets, and advice routes work to the account with room", () => {
@@ -334,6 +395,29 @@ test("sessions join accounts by profile key; other machines' sessions never cali
   assert.equal(single.byAccount.get("claude-aaaaaaaaaaaaaaaa")!.length, 2, "the only Claude account takes this machine's sessions without a profile");
 });
 
+test("a profile claimed by two accounts leaves its sessions unattributed regardless of account order", () => {
+  const a = "claude-aaaaaaaaaaaaaaaa", b = "claude-bbbbbbbbbbbbbbbb";
+  const owners = [
+    account("claude", a, { profileKeys: ["profile-shared", "profile-a"], machines: [{ key: "agentbox", profileKeys: ["profile-shared", "profile-a"] }] }),
+    account("claude", b, { profileKeys: ["profile-shared"], machines: [{ key: "agentbox", profileKeys: ["profile-shared"] }] }),
+  ];
+  for (const accounts of [owners, [...owners].reverse()]) {
+    for (const machine of ["local", "agentbox"]) {
+      const ambiguous = { provider: "claude", machine, historyProfile: { profileKey: "profile-shared" } };
+      const certain = { provider: "claude", machine, historyProfile: { profileKey: "profile-a" } };
+      const result = attributeSessions([ambiguous, certain], accounts, { read: machine === "local" ? null : new Set([machine]) });
+      assert.deepEqual(result.unattributed.claude, [ambiguous]);
+      assert.deepEqual(result.byAccount.get(a), [certain]);
+      assert.deepEqual(result.byAccount.get(b), []);
+    }
+  }
+  const joined = attributeSessions([
+    { provider: "claude", historyProfile: { profileKey: "profile-shared" } },
+    { provider: "claude", historyProfile: { profileKey: "profile-a" } },
+  ], [owners[0]!]);
+  assert.equal(joined.byAccount.get(a)!.length, 2, "two profiles on the same account still join one account");
+});
+
 test("hourly value follows the zone: the daylight-saving fall-back hour is counted once and half-hour offsets line up", () => {
   const cell = (day: string, hour: number, value: number) => ({ provider: "claude", velocity: { version: 1, dimensions: [], buckets: [[day, hour, 0, [value, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]], undated: [] } });
   const london = hourlyValue([cell("2026-10-25", 1, 10)], "Europe/London");
@@ -354,6 +438,29 @@ test("readings without an account show levels only: no pace, value or advice", (
   const item = utilization(owner, [reading("claude", "seven_day", start + WEEK, start + HOUR, 5, "allowed", owner.key), reading("claude", "seven_day", start + WEEK, now, 90, "allowed", owner.key)], now, [spending("claude", start, now, 10)]);
   assert.deepEqual([item.identified, item.weekly!.used, item.weekly!.projected, item.calibration.perPercent, item.economics.extracted], [false, 90, null, null, null]);
   assert.deepEqual(recommendations([item], { now, sources: [{ source: "claude-sdk-log", status: "ok", read: 1, latest: now }] }), []);
+});
+
+test("active session counts follow real local hours across both daylight-saving transitions", () => {
+  const owner = account("claude", "claude-aaaaaaaaaaaaaaaa");
+  const cases: Array<[string, number, string, string, number]> = [
+    ["2026-10-25", 1, "2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z", 5],
+    ["2026-10-25", 1, "2026-10-25T01:00:00Z", "2026-10-25T02:00:00Z", 5],
+    ["2026-10-25", 2, "2026-10-25T02:00:00Z", "2026-10-25T03:00:00Z", 10],
+    ["2026-03-29", 3, "2026-03-29T02:00:00Z", "2026-03-29T03:00:00Z", 10],
+  ];
+  for (const [day, hour, fromIso, toIso, dollars] of cases) {
+    const from = at(fromIso), to = at(toIso);
+    const sessions = [{ provider: "claude", velocity: { version: 1, dimensions: [], buckets: [[day, hour, 0, [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]], undated: [] } }];
+    const item = utilization(owner, [reading("claude", "seven_day", from + WEEK, from - DAY, 10, "allowed", owner.key)], to, sessions, {
+      timeZone: "Europe/London", range: { from, to }, basis: "profiles",
+    });
+    assert.equal(item.economics.extracted, dollars, fromIso);
+    assert.equal(item.value.sessions, 1, fromIso);
+    const outside = utilization(owner, [reading("claude", "seven_day", from + WEEK, from - DAY, 10, "allowed", owner.key)], to + DAY, sessions, {
+      timeZone: "Europe/London", range: { from: to, to: to + HOUR }, basis: "profiles",
+    });
+    if (hour !== 1 || fromIso.includes("01:00:00Z")) assert.equal(outside.value.sessions, 0, "non-overlapping activity stays outside the range");
+  }
 });
 
 test("5-hour windows count lockouts from the first capped reading to the reset; overage is not a lockout", () => {
