@@ -3,6 +3,9 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
+import { providerIds } from "../src/public/providers.js";
+import { staticRoutes } from "../src/static-routes.ts";
+
 const styles = ["styles.css", "velocity.css", "pricing.css", "tools.css", "interop.css"];
 const readCss = (file: string) => readFile(new URL(`../src/public/${file}`, import.meta.url), "utf8");
 
@@ -261,6 +264,7 @@ test("chart contrast and theme-scoped grid and area tokens meet their surface ro
 
 test("unchecked chips keep readable text, solid borders and distinct state marks", async () => {
   const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".chip::before")!.body, /background: var\(--chip-color, var\(--text\)\)/);
   const body = cssRules.find(({ selector }) => selector === ".chip:has(input:not(:checked))")!.body;
   assert.match(body, /color:\s*var\(--text-2\)/); assert.match(body, /border-color:\s*var\(--line\)/); assert.doesNotMatch(body, /dashed/);
   assert.match(cssRules.find(({ selector }) => selector === ".chip:has(input:not(:checked))::before")!.body, /background:\s*transparent;.*inset/);
@@ -309,4 +313,133 @@ test("Summary defaults to three KPI columns before responsive overrides and Velo
   assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection")!.body, /display:\s*grid/);
   assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection")!.body, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(rules(velocity).find(({ selector }) => selector === ".velocity-inspection > strong")!.body, /grid-column:\s*1\s*\/\s*-1/);
+});
+
+
+test("Activity heatmap scrolls inside its panel without widening the view", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /class="activity-heatmap-scroll"[^>]*role="region"[^>]*tabindex="0"><div class="activity-heatmap/);
+  const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".activity-panel")!.body, /min-width:\s*0/);
+  assert.match(cssRules.find(({ selector }) => selector === ".activity-heatmap-scroll")!.body, /max-width:\s*100%;\s*overflow-x:\s*auto/);
+});
+
+
+test("phone legends keep provider words intact in a single list column", async () => {
+  const css = await readCss("styles.css");
+  const label = rules(css).find(({ selector }) => selector === ".chart-legend-label")!;
+  assert.match(label.body, /overflow-wrap:\s*normal/);
+  assert.doesNotMatch(label.body, /break-word|anywhere|break-all/);
+  assert.match(css, /@media \(max-width: 440px\)\s*\{\s*#daily-spend \.chart-legend\[data-layout="list"\]\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
+
+
+test("Velocity mover names keep their full identity inside the table scroll area", async () => {
+  const cssRules = rules(await readCss("velocity.css"));
+  const name = cssRules.find(({ selector }) => selector === ".velocity-movers td:nth-child(2)")!;
+  assert.match(name.body, /min-width:\s*20ch/);
+  assert.match(name.body, /white-space:\s*nowrap/);
+});
+
+
+test("tool names wrap only at separators and small baseline stays together", async () => {
+  const cssRules = rules(await readCss("tools.css"));
+  const name = cssRules.find(({ selector }) => selector === "#tools-view .tools-select")!;
+  assert.match(name.body, /overflow-wrap:\s*normal/);
+  assert.match(name.body, /word-break:\s*normal/);
+  assert.match(cssRules.find(({ selector }) => selector === "#tools-view .tools-change-detail")!.body, /white-space:\s*nowrap/);
+});
+
+
+test("Costs reserve a separate fixed badge slot so all amounts align", async () => {
+  const css = await readCss("styles.css");
+  const desktop = css.slice(css.indexOf("@media (min-width: 761px)"));
+  assert.match(desktop, /\.cost-stack-row > strong:last-child, \.cost-model-row > strong\s*\{[^}]*grid-template-columns:\s*auto 7rem/);
+  assert.match(desktop, /> \.coverage\s*\{[^}]*justify-self:\s*start;[^}]*margin-left:\s*0/);
+});
+
+
+test("selected sidebar repositories preserve the unselected label width", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  const selected = cssRules.find(({ selector }) => selector === '.repo-row[aria-pressed="true"]')!;
+  const label = cssRules.find(({ selector }) => selector === ".repo-row .repo-name")!;
+  assert.match(label.body, /flex:\s*1;/);
+  assert.match(label.body, /min-width:\s*0;/);
+  assert.match(label.body, /font-weight:\s*450;/, "the label keeps the same font metrics in active and inactive rows");
+  assert.ok(!cssRules.some(({ selector }) => selector.includes("aria-pressed") && selector.includes("repo-name")), "selection cannot reduce the label's width budget");
+  assert.match(selected.body, /box-shadow:\s*inset 0 0 0 1px/);
+  assert.doesNotMatch(selected.body, /(?:^|;)\s*(?:border(?:-width)?|padding(?:-inline)?|gap):/);
+});
+
+
+test("snapshot metadata wraps with spacing and no dangling separator", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  assert.match(html, /id="generated-at">[^<]*<\/span><span id="rate-card-date">/);
+  const rule = rules(await readCss("styles.css")).find(({ selector }) => selector === ".snapshot-meta")!;
+  assert.match(rule.body, /flex-wrap:\s*wrap/);
+  assert.match(rule.body, /gap:\s*6px 12px/);
+});
+
+
+test("tool profile metrics fit readable columns without a fixed three-column orphan", async () => {
+  const css = await readCss("tools.css");
+  const rule = rules(css).find(({ selector }) => selector === "#tools-view .tools-profile-stats")!;
+  assert.match(rule.body, /grid-template-columns:\s*repeat\(auto-fit, minmax\(100px, 1fr\)\)/);
+  assert.equal(rules(css).filter(({ selector }) => selector === "#tools-view .tools-profile-stats").length, 1);
+});
+
+
+test("checkbox controls retain a full control-height label and a visible box", async () => {
+  const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".check")!.body, /min-height:\s*var\(--control\)/);
+  assert.match(cssRules.find(({ selector }) => selector === ".check input")!.body, /width:\s*18px;\s*height:\s*18px;\s*flex-shrink:\s*0/);
+});
+
+
+test("export actions precede the collapsible scope and privacy explanation", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  const menu = html.slice(html.indexOf('class="export-options"'), html.indexOf('</details>', html.indexOf('class="export-options"')));
+  assert.ok(menu.indexOf('data-export="json"') < menu.indexOf('id="export-description"'));
+  assert.match(menu, /<details class="export-includes"><summary>What’s included<\/summary><p id="export-description">/);
+});
+
+
+test("pricing refresh instructions mark the runnable command as code", async () => {
+  const source = await readFile(new URL("../src/public/pricing.js", import.meta.url), "utf8");
+  assert.match(source, /el\("code", "session-analytics rates update"\)/);
+  assert.match(await readCss("pricing.css"), /\.pricing-notice code\s*\{[^}]*var\(--font-mono\)/);
+});
+
+
+test("Velocity docs describe Top increases and compact evidence with exact accessible counts", async () => {
+  const [dashboard, metrics] = await Promise.all(["dashboard", "metrics"].map((name) => readFile(new URL(`../docs/${name}.md`, import.meta.url), "utf8")));
+  for (const doc of [dashboard!, metrics!]) {
+    assert.doesNotMatch(doc, /Top movers/);
+    assert.match(doc, /Top increases/);
+    assert.match(doc, /13\.8M priced \(100%\) → 9\.3M priced \(100%\)/);
+    assert.match(doc, /tooltip.*accessible name/);
+  }
+});
+
+
+test("every supported provider ships a bundled brand mark that is served, listed in the notice and legible in both themes", async () => {
+  const supported = providerIds.filter((id) => id !== "unsupported");
+  const notice = await readFile(new URL("../src/public/brands/NOTICE.md", import.meta.url), "utf8");
+  const files = (await readdir(new URL("../src/public/brands/", import.meta.url))).filter((file) => file.endsWith(".svg")).sort();
+  assert.deepEqual(files, supported.map((id) => `${id}.svg`).sort(), "one mark per supported provider and no strays");
+  for (const id of supported) {
+    const svg = await readFile(new URL(`../src/public/brands/${id}.svg`, import.meta.url), "utf8");
+    assert.match(svg, /^<svg [^>]*viewBox="[^"]+"[^>]*>/, id);
+    assert.match(svg, /<title>[^<]+<\/title>/, `${id} names its mark`);
+    assert.doesNotMatch(svg, /<script|<foreignObject|<image|href=|url\(|<style/, `${id} is plain geometry`);
+    assert.ok(staticRoutes.some(([route, file]) => route === `/brands/${id}.svg` && file === `brands/${id}.svg`), `${id} has a static route`);
+  }
+  for (const name of ["OpenAI", "Claude", "Cursor", "GitHub Copilot", "OpenCode", "Google Gemini", "Google Antigravity"]) assert.ok(notice.includes(name), `NOTICE names the ${name} mark`);
+  // Ink-only marks are inverted on dark surfaces; Claude carries its own brand colour and is left alone.
+  const css = await readCss("styles.css");
+  assert.match(css, /:root\[data-theme="dark"\] img\[src\^="\/brands\/"\]:not\(\[src\$="claude\.svg"\]\) \{ filter: invert\(1\)/);
+  for (const id of supported) {
+    const svg = await readFile(new URL(`../src/public/brands/${id}.svg`, import.meta.url), "utf8");
+    assert.equal(/fill="#/.test(svg), id === "claude", `${id} is ink-only unless it is Claude`);
+  }
 });

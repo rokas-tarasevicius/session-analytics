@@ -1,4 +1,4 @@
-import { calendarParts } from "./format.js";
+import { calendarParts, integer, percent } from "./format.js";
 import { providerLabels } from "./providers.js";
 import { normalizeTimestamp } from "./timestamps.js";
 // Pure calendar, aggregation and comparison functions shared by the two charts.
@@ -289,6 +289,18 @@ export function velocityIndicators(data, today) {
     return { start, end: finish, days: dates.length, coveredDays: dates.filter((day) => day >= observedStart && days.has(day)).length, covered, value: sum(rows.map((row) => row?.total || 0)), calls: sum(rows.map((row) => row?.values[7] || 0)), evidence: rows.reduce((total, row) => row ? addEvidence(total, row.evidence) : total, blankEvidence()) };
   };
   const supported = (period) => period.covered && period.evidence.complete && !data.missingSessions;
+  const supportReason = (period, label) => {
+    if (data.missingSessions) return `${integer(data.missingSessions)} sessions have no activity ledger; refresh needed`;
+    if (!period.covered) return `${label}: ${period.coveredDays}/${period.days} calendar days observed; needs the full period (${period.start}–${period.end})`;
+    if (period.evidence.unsupported) return `${label}: metric detail unavailable for ${integer(period.evidence.unsupported)} recorded counters; complete evidence needed`;
+    if (!period.evidence.complete) return `${data.metric === "value" ? "Pricing coverage" : "Metric evidence"} ${label}: ${percent(Math.min(0.999, evidenceShare(period.evidence)))}; 100% needed (${integer(period.evidence.known)}/${integer(period.evidence.eligible)})`;
+    return null;
+  };
+  const baselineReason = (value, calls) => {
+    const { index, minimum, unit } = metricDefinitions[data.metric];
+    return value < minimum ? `Baseline is ${value} ${unit}; at least ${minimum} ${unit} needed`
+      : index < 7 && calls < 3 ? `Baseline has ${integer(calls)} model calls; at least 3 needed` : null;
+  };
   const { week, month } = periodComparisons(range, end, completeThrough, data.metric, { missingSessions: data.missingSessions });
   const monthStart = `${end.slice(0, 7)}-01`;
   const trailing = range(shiftDay(end, -14), shiftDay(end, -1));
@@ -296,8 +308,12 @@ export function velocityIndicators(data, today) {
   const median = supported(trailing) ? quantile(baseline, 0.5) : null;
   const todayPeriod = range(today, today);
   const todayValue = end === today ? days.get(today)?.total ?? null : null;
-  const burn = { today: todayValue, median, days: trailing.coveredDays, activeDays: baseline.filter((v) => v > 0).length, ratio: null, todayEvidence: todayPeriod.evidence, baselineEvidence: trailing.evidence };
+  const burn = { today: todayValue, median, days: trailing.coveredDays, activeDays: baseline.filter((v) => v > 0).length, ratio: null, todayEvidence: todayPeriod.evidence, baselineEvidence: trailing.evidence, reason: null };
   if (todayValue !== null && supported(todayPeriod) && median !== null && burn.activeDays >= 3 && guardedDelta(median, median, data.metric, trailing.calls) !== null) burn.ratio = todayValue / median;
+  burn.reason = burn.ratio !== null ? null : todayValue === null ? `Today (${today}) is outside the window ending ${end}`
+    : supportReason(trailing, "14-day baseline") || supportReason(todayPeriod, "today")
+      || (burn.activeDays < 3 ? `14-day baseline has ${burn.activeDays} active days; at least 3 needed` : null)
+      || baselineReason(median, trailing.calls);
   const nextMonth = new Date(`${monthStart}T12:00:00Z`); nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
   const monthEnd = shiftDay(nextMonth.toISOString().slice(0, 10), -1);
   const historyStart = shiftDay(completeThrough, -13);
@@ -311,6 +327,11 @@ export function velocityIndicators(data, today) {
   const remaining = calendarDays(shiftDay(completeThrough, 1), monthEnd).length;
   const active = history.filter((v) => v > 0).length;
   let projection = null;
+  const projectionReason = remaining === 0 ? `Month ended on ${monthEnd}; 0 days left to project`
+    : supportReason(elapsed, "completed month") || supportReason(observedPeriod, "this month") || supportReason(sample, "sample")
+      || (history.length < 7 ? `${history.length} completed sample days; at least 7 needed` : null)
+      || (active < 3 ? `${active} active sample days; at least 3 needed` : null)
+      || baselineReason(sum(history), sample.calls);
   if (remaining > 0 && supported(elapsed) && supported(observedPeriod) && supported(sample) && history.length >= 7 && active >= 3 && guardedDelta(sum(history), sum(history), data.metric, sample.calls) !== null) {
     const project = (fraction) => {
       const rate = quantile(history, fraction);
@@ -320,7 +341,7 @@ export function velocityIndicators(data, today) {
     };
     projection = { value: project(0.5), low: project(0.1), high: project(0.9), observed, sampleDays: history.length, activeDays: active, remainingDays: remaining, monthEnd };
   }
-  return { week, month, burn, projection, projectionEvidence, completeThrough, end, trailing };
+  return { week, month, burn, projection, projectionReason, projectionEvidence, completeThrough, end, trailing };
 }
 
 export function topMovers(sessions, options, today) {

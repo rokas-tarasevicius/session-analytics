@@ -84,7 +84,7 @@ export function renderModelDetails(target, card, rateCard, timeZone = "UTC") {
     const link = el("a", "Rate source ↗"); link.href = card.source; link.target = "_blank"; link.rel = "noreferrer";
     source.append(link);
   }
-  source.append(note(`Reviewed card effective ${rateCard.effectiveDate}`)); body.append(source);
+  source.append(note(`Reviewed card effective ${humanDate(rateCard.effectiveDate)}`)); body.append(source);
   if (card.used) {
     const usage = card.usage;
     const values = [["Usage value", money(usage.valueUsd)]];
@@ -186,9 +186,14 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
     body.append(el("p", status.stale
       ? `A source is missing or older than ${status.refreshAfterDays} days. Cached and reviewed rates remain usable.`
       : "Some fetched rates were rejected or changed substantially. Inspect rates diff for details."));
-    body.append(el("p", status.policy === "reviewed-only" ? "The reviewed card is pinned; public pricing sources are bypassed."
-      : status.offline ? "Offline mode prevents public price requests. Run session-analytics rates update with offline mode off, then refresh."
-      : "Refresh snapshot to apply prices fetched in the background since the dashboard started, or run session-analytics rates update."));
+    const instructions = el("p");
+    if (status.policy === "reviewed-only") instructions.textContent = "The reviewed card is pinned; public pricing sources are bypassed.";
+    else instructions.append(
+      el("span", status.offline ? "Offline mode prevents public price requests. Run " : "Refresh snapshot to apply prices fetched in the background since the dashboard started, or run "),
+      el("code", "session-analytics rates update"),
+      el("span", status.offline ? " with offline mode off, then refresh." : "."),
+    );
+    body.append(instructions);
     if (status.warnings.length) body.append(el("p", status.warnings.map((code) => warningLabels[code] ?? "Pricing evidence is incomplete.").join(" ")));
     warning.append(body);
     if (status.stale && !status.offline && status.policy !== "reviewed-only" && typeof options.onRefresh === "function") {

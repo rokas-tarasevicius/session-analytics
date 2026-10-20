@@ -1,7 +1,8 @@
-import { compact, dateRange, dayLabel, decimal as number, money, moneyAxis, monthLabel, percent } from "./format.js";
+import { compact, dateRange, dayLabel, deltaText, decimal as number, money, moneyAxis, monthLabel, percent } from "./format.js";
 import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
+import { axisTickIndexes } from "./chart-scale.js";
 import { renderLegend } from "./chart-legend.js";
-import { providerIds, providerLabels } from "./providers.js";
+import { providerIds, providerLabels, providerMark } from "./providers.js";
 import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
 import { normalizeTimestamp } from "./timestamps.js";
 import { ledgerAvailability } from "./view-model.js";
@@ -24,9 +25,8 @@ export function formatMetric(value, metric, short = false) {
   if (metric === "value") return short ? moneyAxis(value) : money(value, Math.abs(value) > 0 && Math.abs(value) < 0.01 ? 6 : 2);
   return (short ? compact : number)(value);
 }
-const deltaLabel = (value) => value === null ? "N/A" : `${value > 0 ? "+" : ""}${percent(value, 1, 0)}`;
-/** KPI text for a comparison status; null renders as an em dash with the comparison's reason. */
-export const comparisonValue = (item) => item.status === "change" ? Math.abs(item.delta) < 0.0005 ? "▬ 0%" : `${item.delta > 0 ? "▲" : "▼"} ${percent(Math.abs(item.delta), 1, 0)}` : item.status === "new" ? "New" : item.status === "idle" ? "No activity" : null;
+/** Calendar comparisons retain their named weekday/month periods instead of an adjacent-window suffix. */
+export const comparisonValue = (item) => item.status === "change" ? deltaText(item.delta) : item.status === "new" ? deltaText("new") : item.status === "idle" ? "No activity" : null;
 export const span = ({ start, end }) => dateRange(start, end);
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 /** "Mon–Thu": Monday through the weekday of `day` (a calendar date). */
@@ -51,6 +51,16 @@ function evidenceText(evidence, metric) {
   if (!evidenceLabels[metric]) return "Recorded counters";
   const ratio = evidence.eligible > 0 ? `${number(evidence.known)}/${number(evidence.eligible)} ${evidenceLabels[metric]} (${number(100 * evidence.known / evidence.eligible)}%)` : "N/A · no eligible tokens";
   return `${ratio}${evidence.unsupported ? `; ${number(evidence.unsupported)} without an applicable breakdown` : ""}`;
+}
+/** A short table cell retains exact evidence in its accessible name and tooltip. */
+function moverEvidence(previous, current, metric) {
+  const summary = (item) => !evidenceLabels[metric] ? "Recorded counters" : item.eligible > 0
+    ? `${compact(item.known)} ${metric === "value" ? "priced" : evidenceLabels[metric]} (${number(100 * item.known / item.eligible)}%)${item.unsupported ? "; partial breakdown" : ""}`
+    : "N/A · no eligible tokens";
+  const cell = el("span", `${summary(previous)} → ${summary(current)}`);
+  cell.title = `${evidenceText(previous, metric)} → ${evidenceText(current, metric)}`;
+  cell.setAttribute("aria-label", cell.title);
+  return cell;
 }
 // Slots belong to identity within each provider, never spend rank or visible position.
 const agentSlots = new Map(Object.keys(agentLabels).map((id) => [id, Object.keys(agentLabels).filter((key) => key.split("-")[0] === id.split("-")[0]).indexOf(id)]));
@@ -130,8 +140,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     svg.append(svgElement("line", { x1: left, x2: width - right, y1: y(value), y2: y(value), class: "grid-line" }));
     svg.append(svgElement("text", { x: left - 12, y: y(value) + 4, "text-anchor": "end", class: "axis-label" }, yLabels[tick]));
   }
-  const fractions = room >= 5 ? [0, 0.25, 0.5, 0.75, 1] : room >= 3 ? [0, 0.5, 1] : room >= 2 ? [0, 1] : [1];
-  const ticks = [...new Set(fractions.map((fraction) => Math.round(fraction * (data.keys.length - 1))))];
+  const ticks = axisTickIndexes(data.keys.length, room, data.granularity === "hour");
   for (const index of ticks) svg.append(svgElement("text", { x: x(index), y: height - 12, "text-anchor": index === 0 ? "start" : index === data.keys.length - 1 ? "end" : "middle", class: "axis-label" }, tickCaption(data.keys[index])));
   let floor = data.keys.map(() => 0);
   data.series.forEach((series, seriesIndex) => {
@@ -230,7 +239,7 @@ export function renderVelocity(container, sessions, context) {
     const chart = el("div"), coverage = evidence([], { title: "Evidence & limits" });
     main.article.append(chart, coverage);
     const projection = panelShell("Projection");
-    const movers = panelShell("Top movers");
+    const movers = panelShell("Top increases");
     container.append(lead, controls, main.article, totals, comparisons, projection.article, movers.article);
     controller = { sessions, context, update: null, selectedProviders };
     const update = () => {
@@ -255,7 +264,7 @@ export function renderVelocity(container, sessions, context) {
       const usageCard = kpi({ label: "Usage value", value: availability.eligible ? formatMetric(price.total, "value") : null, reason: "No session in this selection has activity dates", coverage: availability, what: "activity dates", note: "Activity-dated. Not an invoice." });
       if (availability.eligible > 0 && availability.eligible < availability.selected) usageCard.querySelector(".coverage").prepend(el("span", "partial"));
       lead.replaceChildren(
-        kpi({ label: "Average price", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: "Per active day", accent: true }),
+        kpi({ label: "Average per active day", value: price.perActiveDay === null ? null : formatMetric(price.perActiveDay, "value"), reason: "No days with positive usage value", note: "Usage value", accent: true }),
         usageCard,
       );
       const indicators = velocityIndicators(comparisonData, today);
@@ -277,7 +286,7 @@ export function renderVelocity(container, sessions, context) {
       totals.replaceChildren(
         kpi({ label: weekLabel, value: comparisonValue(indicators.week), reason: indicators.week.reason, note: shortNote(indicators.week) }),
         kpi({ label: monthLabel, value: comparisonValue(indicators.month), reason: indicators.month.reason, note: shortNote(indicators.month) }),
-        kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number(indicators.burn.ratio)}×`, reason: "Needs a 14-day baseline with complete evidence", note: `${indicators.burn.days}/14 baseline days covered` }),
+        kpi({ label: "Today / 14-day median", value: indicators.burn.ratio === null ? null : `${number(indicators.burn.ratio)}×`, reason: indicators.burn.reason, note: `${indicators.burn.days}/14 baseline days covered` }),
       );
       comparisons.replaceChildren(el("summary", "How the comparisons are built"), (() => { const body = el("div", null, "evidence-body"); for (const text of [
         `${weekLabel}: ${comparisonNote(indicators.week, "week")}`,
@@ -288,8 +297,8 @@ export function renderVelocity(container, sessions, context) {
       const forecast = indicators.projection;
       projection.article.replaceChildren(projection.header);
       if (!forecast) {
-        projection.heading.textContent = "More complete history needed";
-        projection.article.append(el("p", "Needs at least 7 completed days and 3 active days of observed history this month. Complete metric evidence is required for the month, today and every sampled day.", "empty-line"));
+        projection.heading.textContent = "Projection unavailable";
+        projection.article.append(el("p", indicators.projectionReason, "empty-line"));
       } else {
         projection.heading.textContent = `Projected by ${forecast.monthEnd}`;
         projection.article.append(el("p", formatMetric(forecast.value, options.metric), "projected"));
@@ -306,10 +315,10 @@ export function renderVelocity(container, sessions, context) {
       ]));
       const movement = topMovers(scoped, options, today);
       movers.article.replaceChildren(movers.header);
-      movers.heading.textContent = "Top movers";
+      movers.heading.textContent = "Top increases";
       movers.article.append(el("p", "Last 7 completed days vs preceding 7", "chart-note"));
       if (!movement.available || !movement.rows.length) movers.article.append(el("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
-      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.previous === 0 ? "New" : item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]), { className: "velocity-movers" }));
+      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.previous === 0 ? "New" : item.delta === null ? `${DASH} small baseline` : deltaText(item.delta), moverEvidence(item.previousEvidence, item.currentEvidence, options.metric)]), { className: "velocity-movers" }));
       movers.article.append(evidence([`${dateRange(movement.start, movement.end)} vs ${dateRange(movement.previousStart, movement.previousEnd)} · ${metricDefinitions[options.metric].label}.`, movement.excludedGroups ? `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.` : "Groups need complete current and prior metric evidence to appear. A change in telemetry is not a measured change in workload."]));
     };
     controller.update = update;
@@ -320,7 +329,7 @@ export function renderVelocity(container, sessions, context) {
       for (const provider of providers) {
         const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = selectedProviders.has(provider);
         label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider)); input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
-        label.append(input, el("span", providerLabels[provider]));
+        label.append(input, providerMark(provider), el("span", providerLabels[provider]));
         input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); controller.context.onProvidersChange?.([...selectedProviders]); }); filters.append(label);
       }
     };

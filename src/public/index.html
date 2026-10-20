@@ -121,19 +121,20 @@
             </div>
           </div>
           <div class="topbar-actions">
-            <span class="status" id="sync-context" role="status" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span></span>
+            <span class="status" id="sync-context" role="status" aria-label="Mapping local sessions" title="Mapping local sessions" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span><span class="sync-short" id="sync-short" aria-hidden="true">Reading…</span></span>
             <button class="coverage-button" id="coverage-button" type="button" aria-label="Coverage: 0 notes" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
             <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
               <summary class="icon-button" title="Export view" aria-label="Export view"><svg aria-hidden="true"><use href="#i-export"/></svg></summary>
               <div class="export-options">
-                <p id="export-description">Downloads stay on this machine.</p>
                 <button class="button" type="button" data-export="json">JSON snapshot</button>
                 <button class="button" type="button" data-export="sessions">Sessions CSV</button>
                 <button class="button" type="button" data-export="daily">Daily value CSV</button>
                 <button class="button" type="button" data-export="models">Models CSV</button>
                 <button class="button" type="button" data-export="tools">Tools CSV</button>
                 <button class="button" type="button" data-export="shared" hidden>Shared aggregates CSV</button>
+                <p>Downloads stay on this machine.</p>
+                <details class="export-includes"><summary>What’s included</summary><p id="export-description"></p></details>
               </div>
             </details>
           </div>
@@ -153,11 +154,11 @@
             <span class="machine-strip-meta" id="machine-strip-meta"></span>
             <button class="button machine-details-button" id="machine-details" type="button" aria-haspopup="dialog" aria-controls="machines-dialog">Machine details</button>
           </div>
-          <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><i aria-hidden="true">·</i><span id="rate-card-date">Rate card pending</span></span></p>
+          <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
           <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
-            <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary overview</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
             <section class="kpi-grid summary-metrics" aria-label="Machine totals">
               <h2 class="metrics-heading">Window totals</h2>
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Activity-dated. Not an invoice.</small></article>
@@ -172,16 +173,7 @@
 
             <section class="dashboard-grid summary-overview-charts" aria-label="Machine analytics">
               <article class="panel span-8">
-                <header class="daily-usage-header"><div><h2>Daily usage value</h2></div><div class="provider-key" role="group" aria-label="Filter daily usage by provider">
-                  <label class="chip" data-provider="codex"><input type="checkbox" data-provider-filter="codex" checked aria-label="Codex daily usage" /><img src="/brands/codex.svg" alt="" /><span>Codex</span></label>
-                  <label class="chip" data-provider="claude"><input type="checkbox" data-provider-filter="claude" checked aria-label="Claude daily usage" /><img src="/brands/claude.svg" alt="" /><span>Claude</span></label>
-                  <label class="chip" data-provider="cursor"><input type="checkbox" data-provider-filter="cursor" checked aria-label="Cursor daily usage" /><img src="/brands/cursor.svg" alt="" /><span>Cursor</span></label>
-                  <label class="chip" data-provider="copilot"><input type="checkbox" data-provider-filter="copilot" checked aria-label="Copilot CLI daily usage" /><span>Copilot</span></label>
-                  <label class="chip" data-provider="opencode"><input type="checkbox" data-provider-filter="opencode" checked aria-label="OpenCode daily usage" /><span>OpenCode</span></label>
-                  <label class="chip" data-provider="gemini"><input type="checkbox" data-provider-filter="gemini" checked aria-label="Gemini CLI daily usage" /><span>Gemini</span></label>
-                  <label class="chip" data-provider="antigravity"><input type="checkbox" data-provider-filter="antigravity" checked aria-label="Antigravity daily usage" /><span>Antigravity</span></label>
-                  <label class="chip" data-provider="unsupported" data-unsupported-provider="true" hidden><input type="checkbox" data-provider-filter="unsupported" checked aria-label="Unsupported provider daily usage" /><span>Unsupported</span></label>
-                </div></header>
+                <header class="daily-usage-header"><div><h2>Daily usage value</h2></div><div class="provider-key" id="daily-provider-filters" role="group" aria-label="Filter daily usage by provider"></div></header>
                 <div class="line-chart chart-slot" id="daily-spend"></div>
                 <p class="chart-note">Activity-dated. Not an invoice.</p>
               </article>
@@ -236,14 +228,14 @@
           </section>
 
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
-            <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity overview</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <div id="activity-status" class="activity-status" hidden></div>
-            <article class="panel activity-panel" id="activity-heatmap-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key" id="activity-heatmap-key"></div></article>
+            <article class="panel activity-panel" id="activity-heatmap-panel"><div class="activity-heatmap-scroll" role="region" aria-label="Session starts by weekday and hour" tabindex="0"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div></div><div class="heatmap-key" id="activity-heatmap-key"></div></article>
             <article class="panel activity-repositories" id="activity-repositories-panel"><header><div><h2>Sessions by repository</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
-            <header class="view-header"><div><h2 class="sr-only" id="costs-title">Costs</h2><p>Usage value by provider and model, by activity date: the same ledger as Summary and Velocity.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="costs-title">Costs overview</h2><p>Usage value by provider and model, by activity date: the same ledger as Summary and Velocity.</p></div></header>
             <div class="kpi-grid compact-metrics" aria-label="Cost totals">
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="cost-total">—</strong><small class="kpi-coverage" id="cost-total-coverage"></small><small class="kpi-note">Same total as Summary and Velocity</small></article>
               <article class="kpi"><span class="kpi-label">API-equivalent value</span><strong id="cost-api-total">—</strong><small class="kpi-coverage" id="cost-api-total-coverage"></small><small class="kpi-note" id="cost-api-note">Rate-card priced usage</small></article>
@@ -258,23 +250,23 @@
           </section>
 
           <section class="analytics-view" data-view-panel="tools" hidden aria-labelledby="tools-title">
-            <header class="view-header"><div><h2 class="sr-only" id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="tools-title">Tools overview</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
             <div id="tools-view" class="chart-slot"></div>
           </section>
 
           <section class="analytics-view" data-view-panel="pricing" hidden aria-labelledby="pricing-title">
-            <header class="view-header"><div><h2 class="sr-only" id="pricing-title">Pricing</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="pricing-title">Pricing overview</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
             <div id="pricing-panel"></div>
             <dialog id="pricing-model-dialog" class="help pricing-dialog" aria-labelledby="pricing-model-title"></dialog>
           </section>
 
           <section class="analytics-view" data-view-panel="subscription" hidden aria-labelledby="subscription-title">
-            <header class="view-header"><div><h2 class="sr-only" id="subscription-title">Subscription</h2><p>Which Claude and Codex accounts you can still use and until when, what to do next, and what each allowance is worth. Account-wide: the repository focus does not apply.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="subscription-title">Subscription overview</h2><p>Which Claude and Codex accounts you can still use and until when, what to do next, and what each allowance is worth. Account-wide: the repository focus does not apply.</p></div></header>
             <div id="subscription-view"></div>
           </section>
 
           <section class="analytics-view" data-view-panel="velocity" hidden aria-labelledby="velocity-title">
-            <header class="view-header"><div><h2 class="sr-only" id="velocity-title">Velocity</h2><p>Where usage is moving, by provider, agent, model and every evidenced dimension.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="velocity-title">Velocity overview</h2><p>Where usage is moving, by provider, agent, model and every evidenced dimension.</p></div></header>
             <div id="velocity-view"></div>
           </section>
 
@@ -289,7 +281,7 @@
     <dialog class="palette" id="command-palette" aria-label="Command palette">
       <div class="palette-field">
         <svg aria-hidden="true"><use href="#i-search"/></svg>
-        <input id="command-input" type="text" role="combobox" aria-expanded="true" aria-controls="command-list" aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off" spellcheck="false" placeholder="Jump to a view or repository, toggle a provider, switch theme…" />
+        <input id="command-input" type="text" role="combobox" aria-label="Search views, repositories and commands" aria-expanded="false" aria-controls="command-list" aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off" spellcheck="false" placeholder="Jump to a view or repository, toggle a provider, switch theme…" />
         <kbd>esc</kbd>
       </div>
       <div class="palette-list" id="command-list" role="listbox" aria-label="Commands"></div>

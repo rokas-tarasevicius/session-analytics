@@ -168,12 +168,12 @@ test("Velocity leads with value cards before filters and keeps them independent 
     const lead = container.querySelector(".velocity-lead")!;
     assert.equal(container.children[0], lead); assert.ok(container.children[1]!.classList.contains("filter-bar"));
     assert.ok(container.children[2]!.classList.contains("panel")); assert.equal(container.children[3], container.querySelector(".velocity-totals"));
-    assert.deepEqual(lead.querySelectorAll(".kpi-label").map((node) => node.textContent.trim()), ["Average price", "Usage value"]);
+    assert.deepEqual(lead.querySelectorAll(".kpi-label").map((node) => node.textContent.trim()), ["Average per active day", "Usage value"]);
     assert.ok(lead.children[0]!.classList.contains("accent"));
     const total = buildVelocity(sessions, { ...context, metric: "value" }).totals[0]!;
     const assertLead = (value: number) => assert.equal(lead.querySelectorAll("strong")[1]!.textContent.trim(), formatMetric(value, "value"));
     assertLead(total); assert.equal(lead.querySelector("strong")!.textContent.trim(), "$5.00");
-    assert.match(lead.textContent, /Per active day/);
+    assert.equal(lead.querySelector(".kpi-note")!.textContent, "Usage value");
     assert.match(container.querySelector(".evidence")!.textContent, /2 active days; \$2.50 per calendar day/);
     assert.match(container.querySelector(".evidence")!.textContent, /4 calendar days · API-equivalent and provider-reported · partially observed/);
     assert.equal(container.querySelectorAll(".velocity-totals")[0]!.children.length, 3);
@@ -324,7 +324,7 @@ test("Velocity keeps CSS-pixel chart dimensions and fits shared day labels on na
         assert.ok(ticks.length >= 1 && ticks.length <= 5, label);
         assert.ok(extent(ticks[0]!)[0]! >= left - 1 && extent(ticks.at(-1)!)[1]! <= width, `${label}: ticks stay in the plot`);
         for (let index = 1; index < ticks.length; index += 1) assert.ok(extent(ticks[index - 1]!)[1]! < extent(ticks[index]!)[0]!, `${label}: ticks ${index - 1} and ${index} overlap`);
-        if (width >= (granularity === "week" ? 1040 : 800)) assert.equal(ticks.length, 5, label);
+        if (granularity === "day" && width >= 800) assert.equal(ticks.length, 5, label);
         if (granularity === "day") assert.equal(ticks.at(-1)!.textContent, "5 Sept", label);
       }
     }
@@ -359,6 +359,52 @@ test("crowded Velocity groupings render a neutral Other series in the chart, leg
       assert.equal(legend.querySelector(".chart-legend-swatch")!.style["--series-color"], "var(--provider-unknown)");
       assert.ok(legend.textContent.includes(data.series.at(-1)!.label));
       assert.ok(container.querySelector(".velocity-inspection")!.textContent.includes(data.series.at(-1)!.label));
+    }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("movers compact their evidence while preserving exact token counts", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocity } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const session = categorySessions("repository", ["synthetic"])[0]!;
+    const bucket = session.velocity!.buckets[0]!;
+    session.velocity!.buckets = Array.from({ length: 14 }, (_, i) => {
+      const copy = structuredClone(bucket);
+      copy[0] = `2026-09-${String(i + 1).padStart(2, "0")}`;
+      copy[3][0] = i < 7 ? 1 : 5;
+      copy[3][1] = 1_800_000; copy[3][5] = 200_000; copy[3][10] = 2_000_000;
+      return copy;
+    });
+    const container = new Element();
+    renderVelocity(container, [session], { start: "2026-09-01", end: "2026-09-14", generatedAt: "2026-09-15T12:00:00Z", timeZone: "UTC" });
+    assert.match(container.textContent, /Top increases/);
+    assert.doesNotMatch(container.textContent, /Top movers/);
+    const cell = container.querySelector(".velocity-movers")!.querySelector("tbody")!.children[0]!.children[6]!.children[0]!;
+    assert.match(cell.textContent, /14M priced \(100%\) → 14M priced \(100%\)/);
+    assert.equal(cell.getAttribute("aria-label"), (cell as any).title);
+    assert.match((cell as any).title, /14,000,000\/14,000,000 priced tokens \(100%\) → 14,000,000\/14,000,000 priced tokens \(100%\)/);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("Velocity daily and hourly ticks use uniform calendar steps", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    for (const granularity of ["day", "hour"]) {
+      const data = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-07", group: "repository", granularity });
+      const container = Object.assign(new Element(), { clientWidth: 1040 });
+      renderVelocityChart(container, data);
+      const ticks = container.querySelectorAll(".axis-label").filter((node) => node.getAttribute("y") === "318");
+      assert.deepEqual(ticks.map((tick) => tick.textContent), granularity === "hour" ? ["00:00", "06:00", "12:00", "18:00"] : ["1 Sept", "2 Sept", "3 Sept", "4 Sept", "5 Sept", "6 Sept", "7 Sept"]);
     }
   } finally {
     if (previous) Object.defineProperty(globalThis, "document", previous);

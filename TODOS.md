@@ -16,7 +16,6 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | P3 | Scope unknown-start exclusions to the selected window or omit the count for short windows. | §2 P3, Behavior and copy |
 | P3 | Clarify that last-N-day presets end on the last observed day, or anchor them to today. | §2 P3, Behavior and copy |
 | P3 | Use “new” consistently for movers with a zero prior baseline. Fixed by /qa on `t3/test-dashboard-logic`, 2026-10-20. | §2 P3, Behavior and copy |
-| P3 | Give the burn KPI a reason matching the failed date/activity/baseline guard. | §2 P3, Behavior and copy |
 | P3 | Clear stale repository focus from the URL when a refresh removes that repository. Fixed by /qa on `t3/test-dashboard-logic`, 2026-10-20. | §2 P3, Behavior and copy |
 | P3 | Align Summary exports with visible KPI/table scope or explicitly name the daily-chart chip scope. | §2 P3, Behavior and copy |
 | P3 | Preserve history coverage consistently in full-provider Summary and Costs JSON exports. | §2 P3, Behavior and copy |

@@ -329,7 +329,7 @@ setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL"));
     assert.match(pageText, /<dialog class="palette" id="command-palette"[\s\S]*role="combobox"[\s\S]*role="listbox"/);
     assert.match(pageText, /<dialog class="help" id="help-overlay"/);
     assert.match(pageText, /data-window-preset="30" aria-pressed="true"/);
-    assert.match(pageText, /data-provider-filter="claude"/);
+    assert.match(pageText, /id="daily-provider-filters"/);
     assert.match(pageText, /<th scope="col"[^>]*><button type="button" class="sort" data-sort="value"/);
     assert.doesNotMatch(pageText, /https?:\/\/(?!127\.0\.0\.1)/);
     assert.doesNotMatch(pageText, /PRIVATE OPERATIONS MAP|Machine-wide|Mapping local agent sessions/);
@@ -340,7 +340,7 @@ setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL"));
     assert.equal(providerModule.status, 200);
     assert.match(providerModule.headers.get("content-type") ?? "", /javascript/);
     assert.match(await providerModule.text(), /renderProviderEvidence/);
-    for (const provider of ["copilot", "opencode", "gemini"]) assert.ok(pageText.includes(`data-provider-filter="${provider}"`));
+    assert.match(pageText, /aria-label="Filter daily usage by provider"/);
     assert.match(pageText, /id="provider-evidence-rows"/);
 
     const pricing = await fetch(`${origin}/pricing.js`);

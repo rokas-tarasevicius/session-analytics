@@ -46,5 +46,9 @@ export const staticRoutes: ReadonlyArray<readonly [route: string, file: string]>
   ["/brands/codex.svg", "brands/codex.svg"],
   ["/brands/claude.svg", "brands/claude.svg"],
   ["/brands/cursor.svg", "brands/cursor.svg"],
+  ["/brands/copilot.svg", "brands/copilot.svg"],
+  ["/brands/opencode.svg", "brands/opencode.svg"],
+  ["/brands/gemini.svg", "brands/gemini.svg"],
+  ["/brands/antigravity.svg", "brands/antigravity.svg"],
   ["/favicon.svg", "favicon.svg"],
 ];

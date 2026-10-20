@@ -258,8 +258,8 @@ dated value. It is shown in the API-equivalent card's note, not as a separate to
 `agentIdentity` and `velocity`. Old snapshots without these additions remain readable;
 the velocity view asks for a refresh instead of reconstructing activity from session totals.
 
-Velocity opens with **Average price** and **Usage value**, both from dated usage value for the selected
-window and provider chips, independent of the chart's Metric selector. Average price divides dated
+Velocity opens with **Average per active day** and **Usage value**, both from dated usage value for the selected
+window and provider chips, independent of the chart's Metric selector. Average per active day divides dated
 usage value by the number of calendar days with value greater than zero; it is unavailable when no
 days are active. Its note also shows active days out of all calendar days and value per calendar day.
 The chart header shows the selected metric's period total.
@@ -460,16 +460,17 @@ when applicable.
 
 Percent changes require a previous value of at least $0.01, 100 tokens, 3 sessions/model
 calls, or 5 tool calls. Value/token percentages also require at least 3 prior model calls.
+For guarded comparisons, a current/prior ratio strictly above 10× is displayed as a multiple of the prior value (for example, $816.08 versus $5.23 is `▲ 156×`), rounded to at most one decimal, instead of a percentage increase. Exactly 10× still reads `▲ 900.0%`; declines retain percentages. Summary, Tools and Velocity (including Top increases) share this display rule; the underlying delta and baseline guards are unchanged.
 A tiny baseline produces N/A with the minimum stated, never an infinite percentage or a
 fabricated 0%. An observed prior period with exactly zero value shows **New** when the current
 period has activity and **No activity** when both are zero. Unavailable comparisons state their
 specific reason (no observed prior history, partly observed period, insufficient evidence,
 small baseline, or a stale snapshot).
-Top movers rank absolute increases separately for repository, model and agent over the
+Top increases rank positive absolute increases separately for repository, model and agent over the
 last seven completed days versus the preceding seven. Percent guards use each group's
-own prior calls; new groups can have a positive absolute increase with an N/A percentage.
+own prior calls; an observed zero baseline shows New, while a nonzero baseline below the minimum shows a small-baseline dash.
 Groups with incomplete evidence in either period are excluded from mover rankings; their
-count is displayed. Ranked rows show each period's known/eligible counts. This prevents a
+count is displayed. Ranked rows show compact evidence for previous → current (for example, `13.8M priced (100%) → 9.3M priced (100%)`); each cell's tooltip and accessible name retain the exact known/eligible counts and any unsupported-breakdown note. This prevents a
 return of pricing or token telemetry from being described as a workload increase.
 
 Burn is today's partial value divided by the median of the previous 14 full calendar
@@ -489,6 +490,7 @@ at least 3 active dates, and a minimum-activity guard. Zero dates count. Metric 
 must be complete for the whole observed month
 (including today) and every sampled day. Gaps are not zero samples and are not silently
 dropped. Month/sample evidence counts stay visible even when the projection is unavailable.
+Unavailable burn ratios and projections name the failed guard with observed and required figures: calendar coverage, complete metric evidence, sample/active days, minimum value or model calls, or an ended month/historical window.
 The band is a **rate scenario, not a confidence interval**: no normality, independence or probability
 of future usage is claimed. It assumes the workload continues and cannot anticipate
 project changes. API-equivalent value is not an invoice; activity counters do not prove

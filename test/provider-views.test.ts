@@ -172,7 +172,7 @@ test("Tools compares the same provider selection and combines excess repositorie
   h.context["sessions"] = sessions; h.context["scopeSessions"] = [...sessions, previous, excluded];
   h.run('elements.windowStart.value="2026-07-20"; elements.windowStart.min="2026-07-01"; elements.windowEnd.value="2026-07-20"; viewProviderFilters.tools=new Set(["claude"]); snapshot={sessions:scopeSessions}; view={sessions,scopeSessions,repositories:[]}; renderTools(view)');
   const container = h.elements.get("#tools-view")!;
-  assert.match(container.textContent, /\+10% vs previous window/);
+  assert.match(container.textContent, /▲ 10\.0% vs previous 1d/);
   assert.match(container.textContent, /Other 3/);
   assert.doesNotMatch(container.textContent, /1,000/);
   const repositories = descend(container).find((node) => node.className === "tools-breakdown" && node.textContent.startsWith("By repository"))!;
@@ -309,5 +309,26 @@ test("Tools reveals the replacement profile after selection and respects reduced
     if (previousHeight === undefined) delete browser.innerHeight; else browser.innerHeight = previousHeight;
     if (previousMedia === undefined) delete browser.matchMedia; else browser.matchMedia = previousMedia;
     delete document.getElementById;
+  }
+});
+
+
+test("Tools add break opportunities after name separators without interpreting markup", async () => {
+  const h = await harness(), s = sample(undefined), container = new Element();
+  s.tools = { "mcp__github__get-pull.request": 8 };
+  h.context["sessions"] = [s]; h.context["container"] = container;
+  h.run('renderToolsView(container, { sessions, repositories: [], days: [], timeZone: "UTC" })');
+  const button = descend(container).find(n => n.className === "tools-select")!;
+  assert.equal(button.children.filter(n => n.tag === "wbr").length, 6);
+  assert.equal(button.children.filter(n => n.tag === "text").map(n => n.textContent).join(""), "mcp__github__get-pull.request");
+});
+
+
+test("compact sync status retains a full accessible description for every state", async () => {
+  const h = await harness();
+  for (const [state, short] of [["live", "Ready"], ["reading", "Reading…"], ["warn", "Check"], ["error", "Failed"]]) {
+    h.run(`elements.sync.dataset.state=${JSON.stringify(state)}; elements.syncLabel.textContent="Full synthetic snapshot status"; describeSyncStatus()`);
+    assert.equal(h.elements.get("#sync-context")!.attributes["aria-label"], "Full synthetic snapshot status");
+    assert.equal(h.elements.get("#sync-short")!.textContent, short);
   }
 });

@@ -777,6 +777,28 @@ function emptyState(limits) {
   return box;
 }
 
+/** Keep the limits-first page structure visible while account-wide meters are read. */
+function loadingSubscription(container) {
+  const status = note("Reading limit meters…", "sr-only");
+  status.setAttribute("role", "status");
+  container.append(status);
+  for (const [title, className, id] of [
+    ["Limits now", "limits-now", "limits-now-title"],
+    ["Next", "subscription-next", "subscription-next-title"],
+    ["Accounts", "subscription-cards", "subscription-accounts-title"],
+    ["What it's worth", "subscription-worth", "subscription-worth-title"],
+    ["History", "subscription-history", "subscription-history-title"],
+    ["Sources and method", "subscription-sources", "subscription-sources-title"],
+  ]) {
+    const section = el("section", null, `panel subscription-loading ${className}`);
+    section.setAttribute("aria-labelledby", id);
+    const heading = el("h3", title); heading.id = id;
+    const row = el("div", null, "subscription-loading-row"); row.setAttribute("aria-hidden", "true");
+    for (let index = 0; index < (className === "limits-now" ? 3 : 1); index += 1) row.append(el("span", null, "shimmer"));
+    section.append(heading, row); container.append(section);
+  }
+}
+
 /**
  * Render the Subscription view. Limits are account-wide, so `sessions` must be every session (a repository focus does not
  * apply); `null` while the session scan is still running, when the meters render and value waits. `timeZone` is the
@@ -788,7 +810,7 @@ function emptyState(limits) {
  */
 export function renderSubscription(container, { limits, sessions = null, timeZone = "UTC", displayTimeZone = null, range = null, scope: given = { label: "this machine", others: [], sessions: null }, onPlanChange, now = Date.now() / 1000, wide = null }) {
   container.replaceChildren();
-  if (!limits) { container.append(note("Reading limit meters…")); return; }
+  if (!limits) { loadingSubscription(container); return; }
   if (limits.unavailable) { container.append(note("Limit meters could not be loaded. Check the terminal running the dashboard; the next refresh retries.", "empty-state")); return; }
   if (limits.dataSource === "snapshot") { container.append(note("Limit meters are live-only and are not part of saved snapshots. Run `session-analytics limits` on the machine that recorded this snapshot.", "empty-state")); return; }
   const counted = limitMachines(limits) ?? new Set(), valued = valuedMachines(limits, given.sessions ?? null) ?? new Set();

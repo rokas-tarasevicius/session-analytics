@@ -161,6 +161,13 @@
 .subscription-empty { min-height: 140px; }
 .subscription-empty span { max-width: 70ch; }
 
+/* Unknown account counts reserve one row; real account rows replace these on arrival. */
+#subscription-view .subscription-loading { display: block; }
+.subscription-loading-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); align-items: center; gap: 16px; min-height: 64px; }
+.subscription-loading-row .shimmer { display: block; height: 20px; border-radius: var(--radius-sm); }
+.limits-now .subscription-loading-row { min-height: 112px; }
+.subscription-cards .subscription-loading-row { min-height: 180px; }
+
 /* The meters render before the session scan finishes: the loading skeleton never hides them. */
 main[data-state="loading"] #subscription-view .table-wrap { min-height: 0; animation: none; background: var(--surface); }
 main[data-state="loading"] #subscription-view .table-wrap table { visibility: visible; }

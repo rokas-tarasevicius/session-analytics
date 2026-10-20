@@ -18,11 +18,12 @@ export function dailySpendByProvider(sessions, start, end) {
   return [...days.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Every supported provider has a bundled brand mark (see brands/NOTICE.md); unknown providers get a neutral badge. */
 export function providerMark(provider) {
-  if (["codex", "claude", "cursor"].includes(provider)) {
+  if (provider !== "unsupported" && providerIds.includes(provider)) {
     const image = document.createElement("img"); image.src = `/brands/${provider}.svg`; image.alt = ""; return image;
   }
-  const badge = document.createElement("span"); badge.className = "pill mark"; badge.textContent = { copilot: "CP", opencode: "OC", gemini: "G", antigravity: "AG", unsupported: "?" }[provider] ?? "?"; badge.setAttribute("aria-hidden", "true"); return badge;
+  const badge = document.createElement("span"); badge.className = "pill mark"; badge.textContent = "?"; badge.setAttribute("aria-hidden", "true"); return badge;
 }
 
 const sourceLabels = { "conductor-messages": "Conductor messages", "conductor-result": "Conductor results", "cursor-sdk": "Cursor SDK runs", "cursor-transcript": "Cursor transcripts", "copilot-events": "Copilot events", "opencode-db": "OpenCode database", "gemini-chat": "Gemini chats", "antigravity-db": "Antigravity conversations" };

@@ -211,3 +211,25 @@ test("a focused repository with ledger-less sub-agent sessions shows a dash, not
   assert.equal(document.querySelector("#subagent-note")!.textContent, "Sub-agent value — · 1 sub-agent session · no activity dates");
   assert.equal(document.querySelector("#metric-spend")!.textContent, "$5.00");
 });
+
+
+test("Costs never presents wholly unpriced model, provider or total value as free", async () => {
+  const { harness: dashboard, sample, withLedger } = await import("./validation/aggregation-ui-harness.ts");
+  for (const priced of [false, true]) {
+    const session = withLedger(sample(), [["unpriced-or-zero-rate", 0]], { priced });
+    const { document, run } = await dashboard([session]);
+    run("renderCosts(activeView())");
+    const models = document.querySelector("#cost-models")!;
+    const model = models.querySelector(".cost-model-row")!;
+    const providers = document.querySelector("#provider-cost-models")!;
+    assert.equal(model.querySelector("strong")!.textContent.trim(), priced ? "$0.00" : "— 0% priced");
+    assert.equal(model.querySelector(".cost-model-share")!.textContent, priced ? "0.0%" : "—");
+    assert.equal(document.querySelector("#cost-total")!.textContent, priced ? "$0.00" : "—");
+    if (!priced) {
+      assert.match(model.textContent, /unpriced/);
+      assert.doesNotMatch((model as Element & { title: string }).title, /\$0\.00|0\.0% of total/);
+      assert.doesNotMatch(providers.textContent, /\$0\.00/);
+      assert.doesNotMatch(document.querySelector("#cost-reconciliation")!.textContent, /^\$0\.00/);
+    }
+  }
+});
