@@ -76,6 +76,29 @@ test("cycles end at the next cycle's first reading; an early provider reset is n
   assert.deepEqual([history[0]!.peak, history[0]!.expired, history[0]!.expiredUsd, history[0]!.restored], [14, null, null, 14]);
 });
 
+test("late cycle readings cannot invent a close or a cycle ending before its start", () => {
+  const samples = [
+    reading("claude", "five_hour", start + 5 * HOUR, start + HOUR, 20),
+    reading("claude", "five_hour", start + 6 * HOUR, start - 60, 5),
+  ];
+  const meter = buildMeters(samples, start + 2 * HOUR)[0]!;
+  assert.equal(meter.cycles.length, 1, "the first cycle has no reading before the next cycle began");
+  assert.ok(meter.cycles.every((cycle) => cycle.start <= cycle.end));
+  assert.deepEqual(resetHistory(meter), [], "the late reading does not establish restored or expired allowance");
+  const interleaved = buildMeters([
+    reading("claude", "five_hour", start + 5 * HOUR, start + HOUR, 20),
+    reading("claude", "five_hour", start + 6 * HOUR, start + 3 * HOUR, 30),
+    reading("claude", "five_hour", start + 7 * HOUR, start + 2 * HOUR, 5),
+  ], start + 4 * HOUR)[0]!;
+  assert.equal(interleaved.cycles.length, 2);
+  assert.equal(interleaved.cycles[0]!.end, start + 2 * HOUR, "a discarded late cycle cannot hide the next valid cycle's start");
+
+  const after = buildMeters([reading("claude", "seven_day", start + WEEK, start + WEEK + 60, 90)], start + WEEK + HOUR)[0]!;
+  assert.deepEqual(after.cycles, [], "a post-reset report cannot establish the previous cycle's closing level");
+  const exact = buildMeters([reading("claude", "seven_day", start + WEEK, start + WEEK, 90)], start + WEEK)[0]!;
+  assert.equal(resetHistory(exact)[0]!.expired, 10, "a reading exactly at reset remains valid closing evidence");
+});
+
 test("readings of two accounts interleave without forming false early resets, and advice routes work to the account with room", () => {
   const max = "claude-aaaaaaaaaaaaaaaa", team = "claude-bbbbbbbbbbbbbbbb";
   // Max resets Mondays 10:00 UTC, the Team seat Fridays 03:00 UTC; readings alternate between them.

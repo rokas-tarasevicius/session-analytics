@@ -117,25 +117,31 @@ function cyclesOf(readings, window, now) {
         status: previous && statusRank[previous.status] > statusRank[reading.status] ? previous.status : reading.status,
       });
     }
-    const samples = [...instants.values()].sort((left, right) => left.t - right.t);
+    const samples = [...instants.values()].filter((sample) => sample.t <= resetsAt).sort((left, right) => left.t - right.t);
     return { resetsAt, samples };
-  });
-  return ordered.map((cycle, index) => {
-    const next = ordered[index + 1];
-    const end = Math.min(cycle.resetsAt, next ? next.samples[0].t : Infinity);
+  }).filter((cycle) => cycle.samples.length);
+  const ends = [];
+  let nextStart = Infinity;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    ends[index] = Math.min(ordered[index].resetsAt, nextStart);
+    nextStart = Math.min(nextStart, ordered[index].samples[0].t);
+  }
+  return ordered.flatMap((cycle, index) => {
+    const end = ends[index];
     // A reading of this cycle reported after the next one began is late; it never moves the close.
-    const inside = cycle.samples.filter((sample) => sample.t <= end);
-    const samples = inside.length ? inside : cycle.samples;
+    const samples = cycle.samples.filter((sample) => sample.t <= end);
+    // With clock skew or conflicting contexts every reading can be late; none can prove this cycle's close.
+    if (!samples.length) return [];
     const start = window ? Math.min(cycle.resetsAt - window, samples[0].t) : samples[0].t;
     const segments = segmentsOf(samples, start, end);
     const closing = segments.at(-1);
-    return {
+    return [{
       resetsAt: cycle.resetsAt, start, end, samples, segments, last: closing.last, peak: closing.peak,
       cappedAt: segments.find((segment) => segment.cappedAt !== null)?.cappedAt ?? null,
       // A redeemed reset or a provider-wide reset before the scheduled instant; the unused remainder was not forfeited.
       endedEarly: end < cycle.resetsAt - 15 * 60,
       closed: end <= now,
-    };
+    }];
   });
 }
 

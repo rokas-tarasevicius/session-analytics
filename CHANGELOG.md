@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Subscription history now drops cycles with no reading before their end. Clock-skewed or post-reset reports could create a cycle ending before it started and falsely count restored or expired allowance; those unsupported reset figures decrease.
 - Simultaneous limit readings now keep one highest level and the strongest status before detecting resets. Input order could invent an in-place reset, lower the live level and inflate restored allowance; those false resets and their value are removed, and repeated reports of one instant no longer qualify a projection.
 - Limit cursors now fingerprint the beginning of a log as well as the bytes before the read position. A rewritten log with the same trailing bytes could hide newer readings; those readings now update the meters instead of leaving stale levels. Existing cursors reread their files once to adopt the stronger fingerprint.
 - Limit harvesting now saves a newer file cursor even when truncation makes its offset smaller. Truncated logs no longer get reread on every refresh; source read counts fall back to zero when nothing was appended.
