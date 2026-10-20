@@ -172,10 +172,10 @@ test("a whole window becomes one comparison period, covered only inside observed
 
 test("card text covers every comparison status and uses shared date ranges to agree across views", async () => {
   const { comparisonLabels, comparisonValue, span } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
-  assert.equal(comparisonValue({ status: "change", delta: 1.13 }), "▲ 113%");
+  assert.equal(comparisonValue({ status: "change", delta: 1.13 }), "▲ 113.0%");
   assert.equal(comparisonValue({ status: "change", delta: -0.125 }), "▼ 12.5%");
-  assert.equal(comparisonValue({ status: "change", delta: 0.0001 }), "▬ 0%");
-  assert.equal(comparisonValue({ status: "new", delta: null }), "New");
+  assert.equal(comparisonValue({ status: "change", delta: 0.0001 }), "▬ 0.0%");
+  assert.equal(comparisonValue({ status: "new", delta: null }), "new");
   assert.equal(comparisonValue({ status: "idle", delta: null }), "No activity");
   assert.equal(comparisonValue({ status: "unavailable", delta: null }), null);
   assert.equal(span({ start: "2026-10-05", end: "2026-10-07" }), "5 Oct – 7 Oct 2026");

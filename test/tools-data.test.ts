@@ -113,11 +113,11 @@ test("all-time day range fills calendar gaps and caps at the latest 366 days", (
   assert.equal(profile.calls, 6); assert.equal(profile.outsideDaysCalls, 2);
 });
 
-test("change labels follow the rounded value, never a signed zero", async () => {
+test("change labels share one decimal, arrows and an unsigned flat zero", async () => {
   const { changeLabel } = await import(new URL("../src/public/tools.js", import.meta.url).href);
   assert.equal(changeLabel(null), "—"); assert.equal(changeLabel("new"), "new");
-  assert.equal(changeLabel(0.004), "0%"); assert.equal(changeLabel(-0.004), "0%"); assert.equal(changeLabel(0), "0%");
-  assert.equal(changeLabel(0.005), "+1%"); assert.equal(changeLabel(-0.12), "−12%"); assert.equal(changeLabel(1), "+100%");
+  assert.equal(changeLabel(0.004), "▲ 0.4%"); assert.equal(changeLabel(-0.004), "▼ 0.4%"); assert.equal(changeLabel(0), "▬ 0.0%");
+  assert.equal(changeLabel(0.005), "▲ 0.5%"); assert.equal(changeLabel(-0.12), "▼ 12.0%"); assert.equal(changeLabel(1), "▲ 100.0%");
 });
 
 test("invalid call counts never count, and zero-call names are not distinct tools", () => {

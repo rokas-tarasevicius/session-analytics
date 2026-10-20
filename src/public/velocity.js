@@ -1,4 +1,4 @@
-import { compact, dateRange, dayLabel, decimal as number, money, moneyAxis, monthLabel, percent } from "./format.js";
+import { compact, dateRange, dayLabel, deltaText, decimal as number, money, moneyAxis, monthLabel, percent } from "./format.js";
 import { categoryColor, categorySlotCount, modelColor, providerColor, providerKey } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels, providerMark } from "./providers.js";
@@ -23,9 +23,8 @@ export function formatMetric(value, metric, short = false) {
   if (metric === "value") return short ? moneyAxis(value) : money(value, Math.abs(value) > 0 && Math.abs(value) < 0.01 ? 6 : 2);
   return (short ? compact : number)(value);
 }
-const deltaLabel = (value) => value === null ? "N/A" : `${value > 0 ? "+" : ""}${percent(value, 1, 0)}`;
-/** KPI text for a comparison status; null renders as an em dash with the comparison's reason. */
-export const comparisonValue = (item) => item.status === "change" ? Math.abs(item.delta) < 0.0005 ? "▬ 0%" : `${item.delta > 0 ? "▲" : "▼"} ${percent(Math.abs(item.delta), 1, 0)}` : item.status === "new" ? "New" : item.status === "idle" ? "No activity" : null;
+/** Calendar comparisons retain their named weekday/month periods instead of an adjacent-window suffix. */
+export const comparisonValue = (item) => item.status === "change" ? deltaText(item.delta) : item.status === "new" ? deltaText("new") : item.status === "idle" ? "No activity" : null;
 export const span = ({ start, end }) => dateRange(start, end);
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 /** "Mon–Thu": Monday through the weekday of `day` (a calendar date). */
@@ -308,7 +307,7 @@ export function renderVelocity(container, sessions, context) {
       movers.heading.textContent = "Top movers";
       movers.article.append(el("p", "Last 7 completed days vs preceding 7", "chart-note"));
       if (!movement.available || !movement.rows.length) movers.article.append(el("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
-      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]), { className: "velocity-movers" }));
+      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? `${DASH} small baseline` : deltaText(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]), { className: "velocity-movers" }));
       movers.article.append(evidence([`${dateRange(movement.start, movement.end)} vs ${dateRange(movement.previousStart, movement.previousEnd)} · ${metricDefinitions[options.metric].label}.`, movement.excludedGroups ? `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.` : "Groups need complete current and prior metric evidence to appear. A change in telemetry is not a measured change in workload."]));
     };
     controller.update = update;

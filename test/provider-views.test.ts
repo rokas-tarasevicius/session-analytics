@@ -172,7 +172,7 @@ test("Tools compares the same provider selection and combines excess repositorie
   h.context["sessions"] = sessions; h.context["scopeSessions"] = [...sessions, previous, excluded];
   h.run('elements.windowStart.value="2026-07-20"; elements.windowStart.min="2026-07-01"; elements.windowEnd.value="2026-07-20"; viewProviderFilters.tools=new Set(["claude"]); snapshot={sessions:scopeSessions}; view={sessions,scopeSessions,repositories:[]}; renderTools(view)');
   const container = h.elements.get("#tools-view")!;
-  assert.match(container.textContent, /\+10% vs previous window/);
+  assert.match(container.textContent, /▲ 10\.0% vs previous 1d/);
   assert.match(container.textContent, /Other 3/);
   assert.doesNotMatch(container.textContent, /1,000/);
   const repositories = descend(container).find((node) => node.className === "tools-breakdown" && node.textContent.startsWith("By repository"))!;

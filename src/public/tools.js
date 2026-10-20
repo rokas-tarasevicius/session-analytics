@@ -1,4 +1,4 @@
-import { decimal, dayLabel, integer, percent as formatPercent, toolDayLabel } from "./format.js";
+import { decimal, dayLabel, deltaText, integer, percent as formatPercent, toolDayLabel } from "./format.js";
 import { providerColor } from "./chart-colors.js";
 import { barPercent } from "./chart-scale.js";
 import { buildToolsView, toolProfile } from "./tools-data.js";
@@ -7,12 +7,9 @@ import { DASH, coverageBadge, dataTable, el, evidence, kpi, note } from "./ui.js
 
 const percent = (share) => formatPercent(share, 1, 0);
 const calls = (count) => `${integer(count)} ${count === 1 ? "call" : "calls"}`;
-/** Signs follow the rounded value, so a change that rounds to 0% never reads as "+0%" or "−0%". */
+/** Tables and KPI notes share the same arrow and one-decimal change formatter. */
 export function changeLabel(change) {
-  if (change === null || change === undefined) return DASH;
-  if (change === "new") return "new";
-  const rounded = Math.round(Math.abs(change) * 100);
-  return `${rounded === 0 ? "" : change > 0 ? "+" : "−"}${integer(rounded)}%`;
+  return change === null || change === undefined ? DASH : deltaText(change);
 }
 
 function panel(title, id) {
@@ -157,7 +154,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
   cards.append(
     kpi({ label: "Tool calls", value: available ? integer(data.totalCalls) : null, reason,
       coverage: data.coverage, what: "tool evidence",
-      note: !available ? null : data.smallBaseline ? `Small baseline (${calls(data.previousCalls)})` : data.change === null ? "Effective calls in this selection" : `${changeLabel(data.change)} vs previous window` }),
+      note: !available ? null : data.smallBaseline ? `Small baseline (${calls(data.previousCalls)})` : data.change === null ? "Effective calls in this selection" : deltaText(data.change, days.length) }),
     kpi({ label: "Distinct tools", value: available ? integer(data.distinctTools) : null, reason, note: "Structured tool-call names" }),
     kpi({ label: "Calls per session", value: available ? decimal(data.callsPerSession) : null, reason, note: "Per eligible session" }),
     kpi({ label: "Most used tool", value: top?.name ?? null, reason: available ? "No recorded tool calls" : reason,

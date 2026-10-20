@@ -1,4 +1,4 @@
-import { dayLabel, weekdayHourParts } from "./format.js";
+import { dayLabel, deltaText, weekdayHourParts } from "./format.js";
 // Pure view-model helpers for the dashboard: aggregation, window math, deltas,
 // sparkline downsampling, sorting, and palette matching. No DOM access, so the
 // same module is exercised by test/dashboard-helpers.test.ts under node:test.
@@ -319,15 +319,14 @@ export function previousPeriod({ start, end, min }) {
 export function deltaDescription(current, previous, length) {
   if (previous === null || previous === undefined) return null;
   if (previous === 0 && current === 0) return null;
-  const label = `vs previous ${length}d`;
-  if (previous === 0) return { direction: "up", label: `No activity in the previous ${length} days`, text: `new · ${label}` };
+  if (previous === 0) return { direction: "up", label: `No activity in the previous ${length} days`, text: deltaText("new", length) };
   const change = (current - previous) / previous;
   const direction = Math.abs(change) < 0.0005 ? "flat" : change > 0 ? "up" : "down";
   const magnitude = `${Math.abs(change * 100).toFixed(1)}%`;
   return {
     direction,
     label: `${direction === "up" ? "Up" : direction === "down" ? "Down" : "Unchanged"} ${magnitude} versus the previous ${length} days`,
-    text: `${direction === "up" ? "▲" : direction === "down" ? "▼" : "▬"} ${magnitude} ${label}`,
+    text: deltaText(change, length),
   };
 }
 

@@ -20,3 +20,4 @@ export function weekdayTime(seconds: number, timeZone?: string): string;
 export function dayMonth(seconds: number, timeZone?: string): string;
 export function weekdayDate(seconds: number, timeZone?: string): string;
 export function zonedHourKey(seconds: number, timeZone?: string): string;
+export function deltaText(change: number | "new", length?: number): string;

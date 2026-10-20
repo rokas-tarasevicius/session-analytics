@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Dashboard percentage changes share arrows and one decimal place, with an explicit day count for adjacent-window comparisons.
+
 - Velocity labels its daily usage-value mean “Average per active day” instead of “Average price”.
 
 - Rate-card effective dates use the dashboard calendar-date format in the header and pricing dialog.
