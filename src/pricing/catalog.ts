@@ -234,7 +234,7 @@ export function rateForContext(rate: ModelRate, inputTokens: number): ModelRate 
   const tier = rate.contextTiers?.findLast(({ aboveInputTokens }) => inputTokens > aboveInputTokens);
   if (!tier) return rate;
   return { ...rate, inputPerMillion: tier.inputPerMillion, outputPerMillion: tier.outputPerMillion,
-    cachedInputPerMillion: undefined, cacheReadPerMillion: tier.cacheReadPerMillion ?? rate.cacheReadPerMillion ?? rate.cachedInputPerMillion,
+    cachedInputPerMillion: undefined, cacheReadPerMillion: tier.cacheReadPerMillion ?? rate.cachedInputPerMillion ?? rate.cacheReadPerMillion,
     cacheWrite5mPerMillion: tier.cacheWrite5mPerMillion ?? rate.cacheWrite5mPerMillion,
     cacheWrite1hPerMillion: tier.cacheWrite1hPerMillion ?? rate.cacheWrite1hPerMillion, longContext: undefined,
     assumptions: [...(rate.assumptions ?? []).filter((code) => code !== "anthropic-cache-1h-2x" || tier.cacheWrite1hPerMillion === undefined),

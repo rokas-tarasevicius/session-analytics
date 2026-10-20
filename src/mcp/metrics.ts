@@ -92,7 +92,7 @@ function distribution(values: number[], selectedSessions: number): McpDistributi
 
 function counts(sessions: SessionAnalytics[]): McpNamedCount[] {
   const map = new Map<string, number>();
-  for (const session of sessions) for (const [raw, calls] of Object.entries(session.tools)) {
+  for (const session of sessions.filter((s) => metricEligible(s, "tools"))) for (const [raw, calls] of Object.entries(session.tools)) {
     const name = safeName(raw);
     if (name && Number.isFinite(calls) && calls > 0) map.set(name, (map.get(name) ?? 0) + calls);
   }

@@ -50,7 +50,7 @@ Each account is labelled with its plan and the names of its profile directories,
 
 Value is matched to accounts through sessions, never by provider alone, and only sessions from machines whose limits were read count. A session's machine is its `machine` in a snapshot that combines machines (`local` for this one), and every session is this machine's otherwise. With [other machines](#machines), each account lists the machines logged into it, with their profile keys:
 
-- A Claude session belongs to the account logged into its profile on its machine: its `historyProfile.profileKey` is one of the account's profile keys on the session's machine.
+- A Claude session belongs to the account logged into its profile on its machine: its `historyProfile.profileKey` is one of the account's profile keys on the session's machine. If two accounts claim the same profile, its sessions stay unattributed: the logs do not establish which login each session used.
 - Codex sessions do not record their account yet. On a machine with one Codex account, every Codex session there is that account's; on a machine with two or more, its Codex value is not calibrated.
 - A session without a profile key joins the only account of its provider on its machine, if there is exactly one.
 - Sessions from machines whose limits were not read, because they failed with no last good limits or are still being read, are left out of every account, whatever the Machines strip shows: those machines may be signed in to other accounts, whose meters are not known here. What it's worth reports their value as not counted and names the machines.

@@ -30,6 +30,7 @@ const outlierShare = 0.25;
 const resetDrift = 180;
 /** A fall of this many points inside one cycle, confirmed by the next reading, is an in-place reset. */
 const resetDrop = 5;
+const statusRank = { unknown: 0, idle: 0, allowed: 1, warning: 2, overage: 3, rejected: 4 };
 
 const sessionMeter = "five_hour";
 const weeklyMeter = "seven_day";
@@ -108,25 +109,39 @@ function cyclesOf(readings, window, now) {
     const counts = new Map();
     for (const reading of members) counts.set(reading.resetsAt, (counts.get(reading.resetsAt) ?? 0) + 1);
     const [[resetsAt]] = [...counts].sort((left, right) => right[1] - left[1] || right[0] - left[0]);
-    const samples = members.map((reading) => ({ t: reading.observedAt, used: reading.usedPercent, status: reading.status })).sort((left, right) => left.t - right.t);
+    const instants = new Map();
+    for (const reading of members) {
+      const previous = instants.get(reading.observedAt);
+      instants.set(reading.observedAt, {
+        t: reading.observedAt, used: Math.max(previous?.used ?? 0, reading.usedPercent),
+        status: previous && statusRank[previous.status] > statusRank[reading.status] ? previous.status : reading.status,
+      });
+    }
+    const samples = [...instants.values()].filter((sample) => sample.t <= resetsAt).sort((left, right) => left.t - right.t);
     return { resetsAt, samples };
-  });
-  return ordered.map((cycle, index) => {
-    const next = ordered[index + 1];
-    const end = Math.min(cycle.resetsAt, next ? next.samples[0].t : Infinity);
+  }).filter((cycle) => cycle.samples.length);
+  const ends = [];
+  let nextStart = Infinity;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    ends[index] = Math.min(ordered[index].resetsAt, nextStart);
+    nextStart = Math.min(nextStart, ordered[index].samples[0].t);
+  }
+  return ordered.flatMap((cycle, index) => {
+    const end = ends[index];
     // A reading of this cycle reported after the next one began is late; it never moves the close.
-    const inside = cycle.samples.filter((sample) => sample.t <= end);
-    const samples = inside.length ? inside : cycle.samples;
+    const samples = cycle.samples.filter((sample) => sample.t <= end);
+    // With clock skew or conflicting contexts every reading can be late; none can prove this cycle's close.
+    if (!samples.length) return [];
     const start = window ? Math.min(cycle.resetsAt - window, samples[0].t) : samples[0].t;
     const segments = segmentsOf(samples, start, end);
     const closing = segments.at(-1);
-    return {
+    return [{
       resetsAt: cycle.resetsAt, start, end, samples, segments, last: closing.last, peak: closing.peak,
       cappedAt: segments.find((segment) => segment.cappedAt !== null)?.cappedAt ?? null,
       // A redeemed reset or a provider-wide reset before the scheduled instant; the unused remainder was not forfeited.
       endedEarly: end < cycle.resetsAt - 15 * 60,
       closed: end <= now,
-    };
+    }];
   });
 }
 
@@ -303,15 +318,17 @@ export function hourlyValue(sessions, timeZone = "UTC") {
 /** Sessions with activity between two instants, from the local hours of their activity ledger. */
 function activeSessions(sessions, from, to, timeZone) {
   if (!(to > from)) return 0;
-  const hourStart = (day, hour) => {
-    const key = `${timeZone}|${day}`;
-    let start = dayStarts.get(key);
-    if (start === undefined) { start = zonedDayStart(day, timeZone); dayStarts.set(key, start); }
-    return start + hour * HOUR;
-  };
-  return sessions.filter((session) => ledgerCells(session.velocity).some(([day, hour]) => { const t = hourStart(day, hour); return t + HOUR > from && t < to; })).length;
+  let keys = sliceKeys.get(timeZone);
+  if (!keys) { keys = new Map(); sliceKeys.set(timeZone, keys); }
+  const activeHours = new Set();
+  // Calendar hour numbers cannot be added to midnight: an hour may repeat or be skipped when clocks change.
+  for (let slice = Math.floor(from / QUARTER) * QUARTER; slice < to; slice += QUARTER) {
+    let key = keys.get(slice);
+    if (key === undefined) { key = zonedHourKey(slice, timeZone); keys.set(slice, key); }
+    activeHours.add(key);
+  }
+  return sessions.filter((session) => ledgerCells(session.velocity).some(([day, hour]) => activeHours.has(`${day}|${hour}`))).length;
 }
-const dayStarts = new Map();
 
 /** Unix seconds when the local calendar day `day` (`YYYY-MM-DD`) begins in `timeZone`. */
 export function zonedDayStart(day, timeZone = "UTC") {
@@ -361,7 +378,11 @@ export function attributeSessions(sessions, accounts, { read = null } = {}) {
     for (const { key: machine, profileKeys } of places) {
       const place = `${account.provider}|${machine}`;
       only.set(place, only.has(place) ? null : account.key);
-      for (const profile of profileKeys) if (!byProfile.has(`${place}|${profile}`)) byProfile.set(`${place}|${profile}`, account.key);
+      for (const profile of profileKeys) {
+        const key = `${place}|${profile}`;
+        // A profile may retain history from two logins; without account periods its sessions cannot choose either one.
+        byProfile.set(key, byProfile.has(key) && byProfile.get(key) !== account.key ? null : account.key);
+      }
     }
   }
   const counted = read ?? new Set([localMachine]);
@@ -389,7 +410,9 @@ const median = (values) => {
  * at about 102%), so it never counts.
  */
 function calibrationSample({ samples }) {
-  return samples.find((sample) => sample.used >= 100 || sample.status === "rejected") ?? samples.findLast((sample) => sample.used >= calibrationFloor) ?? null;
+  const capped = samples.find((sample) => sample.used >= 100 || sample.status === "rejected");
+  // A refusal can report 0% (or a tiny rounded level); it still marks the cap, but cannot calibrate value per percent.
+  return capped ? capped.used >= calibrationFloor ? capped : null : samples.findLast((sample) => sample.used >= calibrationFloor) ?? null;
 }
 
 /**

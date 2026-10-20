@@ -333,10 +333,10 @@ export function createClaudeAdapter(runtime: ClaudeRuntime): ProviderAdapter<Cla
               timestamp: previous && tokenCount(previous.usage) > 0 && previous.executionKind === executionKind ? previous.timestamp ?? timestamp : timestamp,
             });
           }
-          for (const rawBlock of contentBlocks(message)) {
+          for (const [index, rawBlock] of contentBlocks(message).entries()) {
             const block = asRecord(rawBlock);
             if (block?.["type"] !== "tool_use") continue;
-            const toolId = stringValue(block["id"]) ?? `${path}:${line}`;
+            const toolId = stringValue(block["id"]) ?? `${path}:${line}:${index}`;
             if (seenToolCalls.has(toolId)) continue;
             seenToolCalls.add(toolId);
             const name = safeName(block["name"]) ?? "unknown_tool";

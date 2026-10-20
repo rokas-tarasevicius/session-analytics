@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Invalid Gemini cache counts no longer inflate inclusive input totals. Cache reads are bounded by recorded input and accounting is marked partial; affected input/cache totals and any configured API-equivalent estimates decrease.
+- Claude and Codex liveness checks now interpret timestamps without a zone as UTC and reject impossible calendar dates, matching accounting timestamps across host timezones.
+- Empty or entirely invalid OpenCode step counters no longer suppress valid assistant snapshot usage; affected token and API-equivalent cost totals increase, with partial accounting flagged.
+- Invalid Codex cache and reasoning breakdowns are bounded by input and output totals and marked partial, reducing overstated subset counts and per-request cache costs. Cumulative breakdown revisions no longer produce negative uncached tokens or costs; affected cumulative estimates can increase.
+- Claude tool-use blocks without IDs no longer collapse into one call when several occur in one record; affected tool totals increase.
+- Custom cards containing both cache-read fields now preserve `cachedInputPerMillion` precedence when a context tier omits its cache-read price, including explicit zero; `rates show` displays the same preferred price. Affected long-context totals fall when that preferred price is lower, and rise when it is higher.
+- Guarded reads of SQLite sources in read-only directories now reject changes between iterator rows before yielding stale counters. Totals can rise or fall when the changed source is read again.
+- Snapshot serialization stops with a fixed error when its output pipe closes under backpressure instead of waiting indefinitely for the pipe to drain.
+- A failed analysis worker that closes its input before receiving the options no longer crashes its parent with an uncaught pipe error; worker start failures also return a fixed message.
+- Reports piped to a consumer that closes early, such as `head`, stop their workers and exit quietly instead of printing an uncaught pipe error and local stack paths.
+- Invalid dashboard ports and unknown report/dashboard arguments now return fixed diagnostics without echoing private input or exception stacks; browser launch failures also use a fixed message.
+- Recording a machine identity with `machines check` now refreshes a running dashboard's machine readers, so installed machines use the new duplicate-machine check without restarting the dashboard.
+- The dashboard notices in-place saved-machine edits even when file size and modification time are preserved.
+- Cancelled machine reads start no SSH work when their signal has already fired, and a limits read waiting for the local harvest cannot later save its cache or fold readings into the ledger.
+- A failed installed machine's diagnostic version probe shares its original read deadline, so a hanging probe cannot extend `--remote-timeout` by another 30 seconds.
+- Machine failure hints in snapshots and subscription limits keep SSH destinations, account names and configured paths private; the terminal still prints the exact diagnostic and fix.
+- Subscription history now drops cycles with no reading before their end. Clock-skewed or post-reset reports could create a cycle ending before it started and falsely count restored or expired allowance; those unsupported reset figures decrease.
+- Simultaneous limit readings now keep one highest level and the strongest status before detecting resets. Input order could invent an in-place reset, lower the live level and inflate restored allowance; those false resets and their value are removed, and repeated reports of one instant no longer qualify a projection.
+- Limit cursors now fingerprint the beginning of a log as well as the bytes before the read position. A rewritten log with the same trailing bytes could hide newer readings; those readings now update the meters instead of leaving stale levels. Existing cursors reread their files once to adopt the stronger fingerprint.
+- Limit harvesting now saves a newer file cursor even when truncation makes its offset smaller. Truncated logs no longer get reread on every refresh; source read counts fall back to zero when nothing was appended.
+- Subscription active-session counts now follow the snapshot's local hours across daylight-saving changes. Sessions in the repeated hour and after a clock change are counted in the correct period; API-equivalent dollar totals are unchanged.
+- Subscription sessions from a profile claimed by two accounts now stay unattributed instead of going to whichever account was listed first. Misassigned account value and capacity decrease; unattributed value increases.
+- Subscription value calibration no longer uses rejected readings below 5%: 0% refusals could produce infinite capacity, and tiny levels overstated value per percent. Those segments now stay uncalibrated.
+- A delayed machine snapshot read can no longer replace a newer manual refresh with older totals or restart polling for the old snapshot.
+- A manual Subscription refresh now waits for an in-flight automatic meter read and then requests fresh meters once; the automatic read previously swallowed the forced refresh.
+- Dashboard links retain the active view’s provider chips, including an empty selection, across reload and Back/Forward. Refresh removes vanished repository focus and records any date-range clamping in the address bar.
+- Pricing freshness and Coverage source links now accept only HTTP(S), matching the model details dialog and excluding executable or local-file links from imported snapshots.
+- Velocity top movers label increases from an observed zero baseline as “New”, matching the calendar comparisons instead of claiming the baseline is too small.
+- Dashboard calendar comparisons normalize timezone-free snapshot timestamps as UTC, preventing Velocity from crashing and keeping window bounds in the snapshot timezone, including empty snapshots.
+- MCP rejects any request that reuses an in-flight tool request's ID, including pings and catalog requests, so each active ID receives at most one result.
+- Snapshot imports reject impossible ledger dates, hours outside 0–23, missing velocity dimensions, unsupported time zones, and inconsistent daily MCP pricing coverage.
+- Snapshot imports apply the public model-ID privacy checks to rate cards, pricing provenance and velocity dimensions, rejecting credential-shaped identifiers and paths before export.
+- MCP's integrated API-equivalent summary excludes provider-reported value, includes session-dated value, and retains undated tokens in its pricing denominator.
+- MCP tool statistics and profile tool mixes exclude invalid sessions and unavailable tool evidence, matching their coverage totals and CSV exports.
+- OTLP exports interpret offset-free snapshot timestamps as UTC, matching snapshot validation regardless of the exporting machine's time zone or daylight saving time.
+- Release builds copy only the public reviewed rate card from `data/`; a private index, saved-machine file or cached snapshot stored alongside it can no longer enter the package.
+- Independent Claude and Codex verification skips malformed non-object JSON records while retaining later valid evidence; a `null` record no longer aborts a file or the oracle.
+- Manually running the Release PR workflow from another branch still prepares the release from `master`, so unrelated branch changes cannot enter the release pull request.
+- Release preparation generates notes from commit titles when Unreleased contains only empty category headings, instead of creating an empty release that preflight rejects.
+- The demo rejects `--port` or `--bin` without a value before generating data; a missing port no longer silently uses the default dashboard port.
+- Independent Codex verification uses the snapshot's time zone, so verifying a saved snapshot in another time zone no longer reports false hourly discrepancies.
+- Release automation approves CI only for its own release pull request, even when another pull request shares the same commit.
+- Synthetic index benchmarks no longer discover real provider stores or fetch prices, and the test runner always isolates its data directory even when `SESSION_ANALYTICS_DATA_DIR` is exported.
+- The build resolves symlinked output paths before emptying a directory, preserving the checkout and home-directory protections through symlink aliases.
+- `node scripts/build.ts` invoked through a symlinked path, such as a macOS temporary directory under `/var/folders`, now builds instead of exiting silently with status 0.
+
 ## [0.11.0] - 2026-10-20
 
 ### Added

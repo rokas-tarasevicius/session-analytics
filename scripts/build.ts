@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Build the installable package into dist/ (or --out DIR): compiled ESM plus verbatim assets. No network, no runtime dependencies. */
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,12 +55,20 @@ export function packageManifest(source: Record<string, unknown>): Record<string,
  */
 export function checkOutput(out: string, home = homedir()): void {
   const target = resolve(out);
-  if (target === join(root, "dist")) return;
+  // Resolve existing parents too: an output can be missing below a symlink, or a home directory can have a symlink alias.
+  const physical = (path: string): string => {
+    try { return realpathSync(path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return join(physical(dirname(path)), basename(path));
+    }
+  };
   const contains = (parent: string, child: string): boolean => {
     const path = relative(parent, child);
     return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
   };
-  if (contains(target, root) || contains(target, home)) throw new Error(`Refusing to build into ${out}: it contains this checkout or your home directory.`);
+  if (contains(physical(target), physical(root)) || contains(physical(target), physical(resolve(home)))) throw new Error(`Refusing to build into ${out}: it contains this checkout or your home directory.`);
+  if (target === join(root, "dist")) return;
   if (!existsSync(target)) return;
   if (!statSync(target).isDirectory()) throw new Error(`Refusing to build into ${out}: it is not a directory.`);
   if (!readdirSync(target).length) return;
@@ -80,7 +88,10 @@ export function build(out: string): void {
   // other non-TypeScript file under src that a module reads at run time without importing it.
   const assets = (path: string): boolean => !basename(path).startsWith(".") && !path.endsWith(".d.ts");
   cpSync(join(root, "src"), join(out, "src"), { recursive: true, filter: (path) => assets(path) && !path.endsWith(".ts") });
-  for (const directory of ["data", "schemas", "skills"]) cpSync(join(root, directory), join(out, directory), { recursive: true, filter: assets });
+  // Only the reviewed public rate card is a release input. An in-checkout data directory can also hold a private index.
+  const data = join(root, "data");
+  cpSync(data, join(out, "data"), { recursive: true, filter: (path) => path === data || path === join(data, "rate-cards.json") });
+  for (const directory of ["schemas", "skills"]) cpSync(join(root, directory), join(out, directory), { recursive: true, filter: assets });
   for (const file of ["README.md", "LICENSE", "CHANGELOG.md"]) cpSync(join(root, file), join(out, file));
   const manifest = packageManifest(JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>);
   writeFileSync(join(out, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -89,7 +100,13 @@ export function build(out: string): void {
   if (problems.length) throw new Error(`The compiled package would fail at run time:\n  ${problems.join("\n  ")}`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Compare canonical paths: Node resolves the main module through symlinks (macOS keeps /var/folders behind one) while argv[1] stays as typed.
+const invokedDirectly = (): boolean => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try { return realpathSync(resolve(entry)) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; }
+};
+if (invokedDirectly()) {
   const args = process.argv.slice(2);
   try {
     if (args.length && (args.length !== 2 || args[0] !== "--out")) throw new Error("Usage: node scripts/build.ts [--out DIR]");

@@ -34,6 +34,22 @@ const args = process.argv.slice(2), at = args.indexOf("--");
 const [destination, ...command] = args.slice(at + 1);
 appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ options: args.slice(0, at), destination, command }) + "\\n");
 const report = command.indexOf("report");
+if (destination === "probe-hangs") {
+  if (command.includes("--version")) setTimeout(() => process.exit(0), 3000);
+  else { process.stdout.write("{}"); process.exit(0); }
+  return;
+}
+if (destination === "limits-static") { process.stdout.write(process.env.FAKE_SSH_LIMITS); process.exit(0); }
+if (destination === "oversize") { process.stdout.write(Buffer.alloc(1024)); process.exit(0); }
+if (destination === "resists-term") { process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); return; }
+if (destination === "newer" && command.includes("--version")) { process.stdout.write("999.0.0"); process.exit(0); }
+if (["bom", "garbage", "schema", "newer"].includes(destination)) {
+  let text = readFileSync(process.env.FAKE_SSH_COPIED, "utf8");
+  if (destination === "bom") text = "\\uFEFF" + text;
+  else if (destination === "garbage") text += "SECRET-TRAILING-GARBAGE";
+  else text = JSON.stringify({ ...JSON.parse(text), schemaVersion: 2 });
+  process.stdout.write(text); process.exit(0);
+}
 if (destination === "down") { process.stderr.write("ssh: connect to host down port 22: Connection refused\\n"); process.exit(255); }
 if (destination === "old") { process.stderr.write("Unknown session analytics argument: --no-remote\\n"); process.exit(2); }
 if (destination === "missing") { process.stderr.write("bash: line 1: session-analytics: command not found\\n"); process.exit(127); }
@@ -121,6 +137,95 @@ test("--remote combines this machine with others read over the user's ssh", asyn
     assert.doesNotMatch(JSON.stringify(call), new RegExp(directory.replaceAll("/", "\\/")));
   }
   assert.deepEqual(recorded[0]!.command.slice(1, 7), ["report", "--json", "--no-remote", "--portable-ids", "--time-zone", "UTC"]);
+});
+
+test("snapshot and limits version probes stay within the machine read's deadline", async () => {
+  const remoteModule = new URL("../src/remote.ts", import.meta.url).href;
+  const limitsModule = new URL("../src/limits/machines.ts", import.meta.url).href;
+  for (const name of ["fetchRemoteSnapshot", "fetchRemoteLimits"]) {
+    const module = name === "fetchRemoteSnapshot" ? remoteModule : limitsModule;
+    const script = `import { ${name} } from ${JSON.stringify(module)};
+      const machine = { name: "probe-hangs", ssh: "probe-hangs", runtime: "installed", command: ["session-analytics"], node: "node", saved: false };
+      try { await ${name}(machine, ["report"], { timeoutMs: 300 }); }
+      catch (error) { process.stdout.write(error.reason); }`;
+    const started = performance.now();
+    const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: environment, timeout: 5000 });
+    assert.equal(read.stdout, "invalid");
+    assert.ok(performance.now() - started < 2000, `${name} exceeded the deadline: ${performance.now() - started} ms`);
+  }
+});
+
+test("an aborted limits read waiting for the local harvest cannot write its last good cache", async () => {
+  const remoteModule = new URL("../src/limits/machines.ts", import.meta.url).href;
+  const optionsModule = new URL("../src/options.ts", import.meta.url).href;
+  const indexModule = new URL("../src/limits/index.ts", import.meta.url).href;
+  // A fulfilled remote is still in flight until the local harvest decides whether to ask its account.
+  // Signal arrival at that await boundary without changing the production code's timing.
+  const script = `import { limitsReads } from ${JSON.stringify(remoteModule)};
+    import { remoteOptionsFrom } from ${JSON.stringify(optionsModule)};
+    import { emptyLimitsSnapshot } from ${JSON.stringify(indexModule)};
+    import { existsSync } from "node:fs";
+    let arrived;
+    const waiting = new Promise((resolve) => { arrived = resolve; });
+    const local = { then(resolve) { arrived(resolve); } };
+    const options = { dataDir: process.env.FAKE_SSH_DATA, noIndex: true, offline: true };
+    const remote = remoteOptionsFrom([], {}, { version: 1, machines: [{ name: "box", ssh: "limits-static", runtime: "installed", enabled: true }] });
+    const reads = limitsReads(options, remote);
+    const pending = reads.start(local);
+    const release = await waiting;
+    reads.abort();
+    release(emptyLimitsSnapshot("live"));
+    await pending;
+    process.stdout.write(JSON.stringify({ state: reads.readings[0].status.state, cached: existsSync(options.dataDir + "/machines/box.limits.json") }));`;
+  const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: {
+    ...environment, FAKE_SSH_DATA: join(directory, "aborted-limits"), FAKE_SSH_LIMITS: JSON.stringify({
+      schemaVersion: 2, generatedAt: new Date().toISOString(), dataSource: "live", accounts: [], observations: [], meters: [],
+    }),
+  }, timeout: 5000 });
+  assert.deepEqual(JSON.parse(read.stdout), { state: "failed", cached: false });
+});
+
+test("machine readers given an already-aborted signal start no SSH calls", async () => {
+  const remoteModule = new URL("../src/remote.ts", import.meta.url).href;
+  const limitsModule = new URL("../src/limits/machines.ts", import.meta.url).href;
+  const optionsModule = new URL("../src/options.ts", import.meta.url).href;
+  const script = `import { machineReads } from ${JSON.stringify(remoteModule)};
+    import { limitsReads } from ${JSON.stringify(limitsModule)};
+    import { remoteOptionsFrom } from ${JSON.stringify(optionsModule)};
+    const stop = new AbortController(); stop.abort();
+    const remote = remoteOptionsFrom(["--remote", "limits-static"], {});
+    const snapshots = machineReads({ timeZone: "UTC" }, remote, { signal: stop.signal });
+    const limits = limitsReads({ noIndex: true, offline: true }, remote, { signal: stop.signal });
+    await Promise.all([snapshots.start(), limits.start(Promise.resolve(null))]);
+    process.stdout.write(JSON.stringify([snapshots.readings[0].status.reason, limits.readings[0].status.reason]));`;
+  const count = (await calls()).length;
+  const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: {
+    ...environment, FAKE_SSH_LIMITS: JSON.stringify({ schemaVersion: 2, generatedAt: new Date().toISOString(), dataSource: "live", accounts: [], observations: [], meters: [] }),
+  }, timeout: 5000 });
+  assert.deepEqual(JSON.parse(read.stdout), ["cancelled", "cancelled"]);
+  assert.equal((await calls()).length, count);
+});
+
+test("SSH bounds stdout and kills a hung client that ignores SIGTERM", async () => {
+  const module = new URL("../src/remote.ts", import.meta.url).href;
+  const script = `import { runSsh } from ${JSON.stringify(module)};
+    const large = await runSsh("oversize", [], { deadline: Date.now() + 3000, limit: 16 });
+    const hung = await runSsh("resists-term", [], { deadline: Date.now() + 500 });
+    process.stdout.write(JSON.stringify({ failure: large.failure, bytes: large.stdout.length, hung: hung.failure, ms: hung.ms }));`;
+  const read = await run(process.execPath, ["--input-type=module", "-e", script], { env: environment, timeout: 6000 });
+  const result = JSON.parse(read.stdout) as { failure: string; bytes: number; hung: string; ms: number };
+  assert.equal(result.failure, "too-large");
+  assert.ok(result.bytes <= 16);
+  assert.equal(result.hung, "timeout");
+  assert.ok(result.ms >= 1400 && result.ms < 3000, `SIGKILL took ${result.ms} ms`);
+});
+
+test("BOMs, trailing output and unsupported schemas fail closed; a newer installed version is identified", async () => {
+  const { snapshot, stderr } = await report("--remote", "bom,garbage,schema,newer,copied");
+  assert.deepEqual(snapshot.machines!.slice(1).map(({ reason }) => reason ?? null), ["invalid", "invalid", "invalid", "version-skew", null]);
+  assert.equal(snapshot.summary.sessions, localSnapshot.summary.sessions + copiedSessions);
+  assert.match(stderr, /the remote runs session-analytics 999\.0\.0/);
+  assert.doesNotMatch(JSON.stringify(snapshot), /SECRET-TRAILING-GARBAGE/);
 });
 
 test("--no-remote ignores remote environment settings and conflicts with explicit --remote", () => {

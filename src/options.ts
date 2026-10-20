@@ -186,7 +186,7 @@ export function remoteTimeout(argv: string[], environment: NodeJS.ProcessEnv): n
 
 export function machinesDigest(machines: RemoteMachine[]): string | null {
   if (!machines.length) return null;
-  return createHash("sha256").update(JSON.stringify(machines.map(({ name, ssh, user, loginShell, runtime, node, command }) => [name, ssh, user ?? null, runtime, node, command, ...(loginShell === false ? [false] : [])]))).digest("hex");
+  return createHash("sha256").update(JSON.stringify(machines.map(({ name, ssh, user, loginShell, runtime, node, command, identity }) => [name, ssh, user ?? null, runtime, node, command, ...(loginShell === false ? [false] : []), identity ?? null]))).digest("hex");
 }
 
 /**

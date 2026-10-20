@@ -48,7 +48,9 @@ export async function analyzeMachineSessionsIsolated(
       errorOutput += chunk;
       if (!noticed && errorOutput.includes(fullParseSignal)) { noticed = true; onFullParse(); }
     });
-    child.once("error", reject);
+    child.once("error", () => reject(new Error("Session analysis process could not be started.")));
+    // A failed worker can close stdin before the options have drained; close below classifies its failure.
+    child.stdin.on("error", () => {});
     child.once("close", (code) => {
       if (code !== 0) {
         const message = workerExitMessage(output, errorOutput);

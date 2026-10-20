@@ -67,7 +67,7 @@ No command sends local model IDs, usage, paths or other local values to a pricin
       if (json) process.stdout.write(`${JSON.stringify({ currency: "USD", status: catalog.status, models }, null, 2)}\n`);
       else {
         process.stdout.write("API-equivalent rates, USD per million tokens; not an invoice.\n");
-        for (const item of models) process.stdout.write(`${item.model}: input ${item.rate.inputPerMillion}, output ${item.rate.outputPerMillion}, cache read ${item.rate.cacheReadPerMillion ?? item.rate.cachedInputPerMillion ?? "unavailable"}; ${item.provenance.source}/${item.provenance.kind} ${item.provenance.snapshotDate}\n`);
+        for (const item of models) process.stdout.write(`${item.model}: input ${item.rate.inputPerMillion}, output ${item.rate.outputPerMillion}, cache read ${item.rate.cachedInputPerMillion ?? item.rate.cacheReadPerMillion ?? "unavailable"}; ${item.provenance.source}/${item.provenance.kind} ${item.provenance.snapshotDate}\n`);
         if (!models.length) process.stdout.write("No matching model rate.\n");
       }
       return model && !models.length ? 1 : 0;

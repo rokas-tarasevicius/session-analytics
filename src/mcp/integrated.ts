@@ -4,8 +4,13 @@ import type { MachineAnalytics, SessionAnalytics } from "../types.ts";
 export function integratedMetrics(snapshot: MachineAnalytics, sessions: SessionAnalytics[]) {
   let datedValue = 0, undatedValue = 0, pricedTokens = 0, eligibleTokens = 0;
   for (const s of sessions) {
-    for (const [, , , v] of s.velocity?.buckets ?? []) { datedValue += v[0]; pricedTokens += v[10]; eligibleTokens += v[1] + v[5]; }
-    for (const [, v] of s.velocity?.undated ?? []) undatedValue += v[0];
+    if (s.costBasis !== "api-list-price-equivalent") continue;
+    for (const [, , , v] of [...s.velocity?.buckets ?? [], ...s.velocity?.sessionDated ?? []]) {
+      datedValue += v[0]; pricedTokens += v[10]; eligibleTokens += v[1] + v[5];
+    }
+    for (const [, v] of s.velocity?.undated ?? []) {
+      undatedValue += v[0]; pricedTokens += v[10]; eligibleTokens += v[1] + v[5];
+    }
   }
   return {
     basis: "whole-sessions-selected-by-start" as const,

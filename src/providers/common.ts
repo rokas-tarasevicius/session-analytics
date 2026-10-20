@@ -59,8 +59,10 @@ export function sum<T extends object>(target: T, source: T): void {
 
 /** Input classes are disjoint; reasoning is a subset of total output. */
 export function tokens(input: unknown, cached: unknown, writes: unknown, output: unknown, reasoning: unknown = 0, inclusiveInput = false): TokenUsage {
-  const read = count(cached), write = count(writes), out = count(output);
-  const uncached = inclusiveInput ? Math.max(0, count(input) - read - write) : count(input);
+  const total = count(input), out = count(output);
+  const read = inclusiveInput ? Math.min(total, count(cached)) : count(cached);
+  const write = inclusiveInput ? Math.min(total - read, count(writes)) : count(writes);
+  const uncached = inclusiveInput ? total - read - write : total;
   const thinking = Math.min(out, count(reasoning));
   return { ...zeroTokens(), inputTokens: uncached + read + write, uncachedInputTokens: uncached, cachedInputTokens: read, cacheWriteInputTokens: write, outputTokens: out, reasoningOutputTokens: thinking, nonReasoningOutputTokens: out - thinking };
 }

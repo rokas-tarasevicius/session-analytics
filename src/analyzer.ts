@@ -474,9 +474,9 @@ async function selectTranscript(
 
 function codexUsage(raw: JsonRecord | null): TokenUsage {
   const inputTokens = nonNegativeNumberValue(raw?.["input_tokens"]);
-  const cachedInputTokens = nonNegativeNumberValue(raw?.["cached_input_tokens"]);
+  const cachedInputTokens = Math.min(inputTokens, nonNegativeNumberValue(raw?.["cached_input_tokens"]));
   const outputTokens = nonNegativeNumberValue(raw?.["output_tokens"]);
-  const reasoningOutputTokens = nonNegativeNumberValue(raw?.["reasoning_output_tokens"]);
+  const reasoningOutputTokens = Math.min(outputTokens, nonNegativeNumberValue(raw?.["reasoning_output_tokens"]));
   return {
     ...zeroTokens(),
     cachedInputTokens,
@@ -489,11 +489,15 @@ function codexUsage(raw: JsonRecord | null): TokenUsage {
 }
 
 function tokenDelta(current: TokenUsage, previous: TokenUsage): TokenUsage {
-  const delta = zeroTokens();
-  for (const key of tokenKeys) {
-    delta[key] = current[key] - previous[key];
-  }
-  return delta;
+  // A cumulative breakdown can be revised independently of its total. Derive
+  // nonnegative physical classes from the interval, rather than subtracting
+  // derived uncached/non-reasoning counters that may have moved backwards.
+  return codexUsage({
+    input_tokens: current.inputTokens - previous.inputTokens,
+    cached_input_tokens: current.cachedInputTokens - previous.cachedInputTokens,
+    output_tokens: current.outputTokens - previous.outputTokens,
+    reasoning_output_tokens: current.reasoningOutputTokens - previous.reasoningOutputTokens,
+  });
 }
 
 function monotonic(current: TokenUsage, previous: TokenUsage): boolean {
@@ -654,6 +658,13 @@ async function analyzeCodex(
   const sourceBefore = await Promise.all(evidencePaths.map((page) => stat(page)));
   const lifecycle = new TranscriptLifecycle();
   let parseErrors = 0;
+  let boundedBreakdowns = false;
+  const readUsage = (raw: JsonRecord | null): TokenUsage => {
+    const usage = codexUsage(raw);
+    boundedBreakdowns ||= usage.cachedInputTokens !== nonNegativeNumberValue(raw?.["cached_input_tokens"]) ||
+      usage.reasoningOutputTokens !== nonNegativeNumberValue(raw?.["reasoning_output_tokens"]);
+    return usage;
+  };
   // Codex has recorded the same lifecycle events in several shapes over time:
   // legacy `event_msg` notifications, `item_completed` items, and top-level
   // `compacted` records. A file can carry more than one shape for the same
@@ -734,10 +745,10 @@ async function analyzeCodex(
       if (!counterExposed(usage["input_tokens"]) || !counterExposed(usage["output_tokens"])) return;
       const key = `receipt:${createHash("sha256").update(JSON.stringify([thread, response])).digest("hex")}`;
       if (receiptEvents.has(key)) return;
-      const tokens = codexUsage(usage);
+      const tokens = readUsage(usage);
       const model = (turnKey ? modelsByTurn.get(turnKey) : null) ?? currentModel;
       receiptEvents.set(key, {
-        nativeCumulative: asRecord(payload?.["thread_token_usage"]) ? codexUsage(asRecord(payload?.["thread_token_usage"])) : null,
+        nativeCumulative: asRecord(payload?.["thread_token_usage"]) ? readUsage(asRecord(payload?.["thread_token_usage"])) : null,
         turnKey, dimension: velocityDimension("codex", currentIdentity, state.executionKind, model, state.effort),
         lastReasoningExposed: counterExposed(usage["reasoning_output_tokens"]),
         lastCacheReadExposed: counterExposed(usage["cached_input_tokens"]),
@@ -802,10 +813,10 @@ async function analyzeCodex(
             executionKind: state.executionKind,
             fingerprint: codexCounterFingerprint(total, last),
             inputForRequest,
-            last: last ? codexUsage(last) : null,
+            last: last ? readUsage(last) : null,
             model: currentModel,
             timestamp,
-            total: codexUsage(total),
+            total: readUsage(total),
           });
         }
       }
@@ -867,7 +878,8 @@ async function analyzeCodex(
     // snapshots this file actually observed is attributable to it; charging a
     // whole counter to one event bills an entire process history to a single
     // session and a single calendar day.
-    const attributableDelta = baselined && !reset
+    const intervalKnown = baselined && !reset;
+    const attributableDelta = intervalKnown
       ? tokenDelta(event.total, previous)
       : zeroTokens();
     // A difference has a known breakdown only if both endpoints expose it.
@@ -898,6 +910,8 @@ async function analyzeCodex(
       observed = event.last;
       exposure = { reasoning: event.lastReasoningExposed, cacheRead: event.lastCacheReadExposed };
     } else {
+      if (intervalKnown && (event.total.cachedInputTokens - intervalStart.cachedInputTokens > attributableDelta.inputTokens ||
+          event.total.reasoningOutputTokens - intervalStart.reasoningOutputTokens > attributableDelta.outputTokens)) boundedBreakdowns = true;
       // Even a present all-zero last record is unusable: this is a cumulative
       // observation, with no evidenced request size for context or pricing.
       event.evidence.requestInputKnown = false;
@@ -1025,8 +1039,9 @@ async function analyzeCodex(
   );
   if (unprovenCrossFileCollisions) state.warnings.push("Accounting may be incomplete: matching numeric token states across evidence files were excluded without a proven process/request identity. Distinct requests can have identical counters.");
   if (repeatedAfterDecrease) state.warnings.push("Accounting may be incomplete: a repeated numeric token state after a counter decrease was excluded without a proven reset/request identity. The decrease alone cannot distinguish a new request from replay.");
+  if (boundedBreakdowns) state.warnings.push("Some Codex token breakdowns exceeded their totals and were bounded; accounting is partial.");
   const sourceAfter = await Promise.all(evidencePaths.map((page) => stat(page)));
-  state.completeness = parseErrors || unprovenCrossFileCollisions || repeatedAfterDecrease || sourceBefore.some((before, i) => !sameVersion(before, sourceAfter[i]!)) ? "partial" : "complete";
+  state.completeness = parseErrors || boundedBreakdowns || unprovenCrossFileCollisions || repeatedAfterDecrease || sourceBefore.some((before, i) => !sameVersion(before, sourceAfter[i]!)) ? "partial" : "complete";
   state.liveness = lifecycle.liveness();
   return finalizeSession(row, state, finalTokens, evidencePaths.length);
 }

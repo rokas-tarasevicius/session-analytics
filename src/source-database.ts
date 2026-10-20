@@ -43,7 +43,13 @@ export function openSourceDatabase(path: string): DatabaseSync {
       const value = Reflect.get(target, property, target);
       if (property === "iterate") return function* (...args: Parameters<StatementSync["iterate"]>) {
         validate();
-        try { yield* target.iterate(...args); } finally { validate(); }
+        try {
+          for (const row of target.iterate(...args)) {
+            validate();
+            yield row;
+            validate();
+          }
+        } finally { validate(); }
       };
       if (["all", "get", "run"].includes(String(property))) return (...args: unknown[]) => {
         validate();

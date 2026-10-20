@@ -22,6 +22,14 @@ export async function stopChildren(graceMs = 2_000): Promise<void> {
   for (const child of new Set([...signalled, ...live])) if (running(child)) child.kill("SIGKILL");
 }
 
+/** A report consumer may stop reading early; stop its workers without an uncaught pipe error. */
+export function stopOnOutputError(): void {
+  process.stdout.once("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EPIPE") process.stderr.write("Session analytics output could not be written.\n");
+    void stopChildren().finally(() => process.exit(error.code === "EPIPE" ? 0 : 1));
+  });
+}
+
 const signalNumbers = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
 let signalled = false, installed = false;
 

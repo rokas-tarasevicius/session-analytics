@@ -255,11 +255,13 @@ test("stdio stays responsive during a coalesced scan, bounds concurrency and sup
     const send = (id: number, method: string, params: object = {}) => input.write(JSON.stringify({ jsonrpc: "2.0", id, method, params: { ...params, _meta: modernMeta } }) + "\n");
     for (let id = 1; id <= 17; id += 1) send(id, "tools/call", { name: "usage_summary", arguments: { window: "all" } });
     input.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 1, reason: "SECRET_REASON" } }) + "\n");
-    send(20, "ping"); send(2, "tools/call", { name: "usage_summary" });
+    send(20, "ping"); send(2, "tools/call", { name: "usage_summary" }); send(3, "ping");
     await tick();
     assert.equal(loads, 1); assert.ok(responses.some((r) => r.id === 20 && r.result));
     assert.equal(responses.find((r) => r.id === 17)?.error?.code, -32000);
     assert.equal(responses.find((r) => r.id === null)?.error?.code, -32600);
+    assert.equal(responses.filter((r) => r.id === null && r.error?.code === -32600).length, 2);
+    assert.ok(!responses.some((r) => r.id === 3), "a ping cannot reuse an in-flight tool request ID");
     finish(snapshot); await tick();
     assert.ok(!responses.some((r) => r.id === 1));
     assert.equal(responses.filter((r) => r.result?.structuredContent).length, 15);

@@ -112,6 +112,7 @@ export function serveMcp(options: McpServerOptions): { close: () => void; closed
       return;
     }
     if (!isId(id)) return;
+    if (pending.has(id)) { error(null, -32600, "Duplicate in-flight request ID."); return; }
     if (!params || (params["_meta"] !== undefined && !record(params["_meta"]))) { error(id, -32602, "Invalid parameters."); return; }
     const meta = record(params["_meta"]);
     const requested = meta?.[VERSION_KEY];
@@ -152,7 +153,6 @@ export function serveMcp(options: McpServerOptions): { close: () => void; closed
     if (!only(params, ["name", "arguments", "_meta"])) { error(id, -32602, "Invalid tools/call parameters."); return; }
     const name = toolName(params["name"]);
     if (!name) { error(id, -32602, "Unknown tool."); return; }
-    if (pending.has(id)) { error(null, -32600, "Duplicate in-flight request ID."); return; }
     if (pending.size >= MAX_PENDING) { error(id, -32000, "Too many pending requests. Retry after a response."); return; }
     let args;
     try { args = validateArguments(name, params["arguments"]); }

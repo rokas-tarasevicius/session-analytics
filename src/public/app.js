@@ -121,6 +121,7 @@ let navDirty = false;
 const viewProviderFilters = {
   activity: new Set(providerOrder),
   tools: new Set(providerOrder),
+  velocity: new Set(providerOrder),
 };
 const hoverListeners = new Set();
 const navHoverListeners = new Set();
@@ -267,7 +268,17 @@ function repositoryFromParameter(value) {
 
 function currentUrlState() {
   const repo = elements.repositoryFilter.value;
-  return { view: currentViewName(), window: windowPreset, start: elements.windowStart.value, end: elements.windowEnd.value, repo: repo && repo !== "all" ? repo : null };
+  const scope = providerScope(), present = snapshotProviders();
+  const selected = scope ? present.filter((provider) => providerShown(scope, provider)) : present;
+  return { view: currentViewName(), window: windowPreset, start: elements.windowStart.value, end: elements.windowEnd.value, repo: repo && repo !== "all" ? repo : null,
+    providers: selected.length < present.length ? selected : null };
+}
+
+/** URL provider filters apply to the recorded view; other views keep their independent selections. */
+function restoreUrlProviders(state) {
+  const view = state.view ?? currentViewName(), selected = new Set(state.providers ?? providerOrder);
+  if (view === "summary") for (const input of providerFilters) input.checked = selected.has(input.dataset.providerFilter);
+  else if (viewProviderFilters[view]) viewProviderFilters[view] = selected;
 }
 
 /** Records the current view, window and repository in the address bar: a new history entry, or `replace`. */
@@ -286,6 +297,7 @@ function restoreUrlState() {
   const state = parseUrlState(window.location.search, { views: viewOrder, presets: windowPresets, aliases: viewAliases });
   restoringUrl = true;
   try {
+    restoreUrlProviders({ ...state, view: state.view ?? "summary" });
     elements.repositoryFilter.value = repositoryFromParameter(state.repo)?.repository.id ?? "all";
     if (state.window === "custom") applyCustomRange(state.start, state.end, { render: false });
     else applyWindowPreset(state.window ?? "30", { render: false });
@@ -480,6 +492,7 @@ function renderViewProviderFilters(container, scope) {
       if (input.checked) viewProviderFilters[scope].add(provider);
       else viewProviderFilters[scope].delete(provider);
       renderActiveAnalyticsView(activeView());
+      syncUrl();
     });
     label.append(input, logo, node("span", providerLabels[provider])); container.append(label);
   }
@@ -746,7 +759,15 @@ async function loadLimitsNow(refresh = false) {
   if (limitsPoll !== null) { clearTimeout(limitsPoll); limitsPoll = null; }
   if (limits.machines?.some(({ state }) => state === "reading") && limitsTimer !== null && typeof setTimeout === "function") limitsPoll = setTimeout(() => void loadLimits(false), 2000);
 }
-const loadLimits = singleFlight(loadLimitsNow);
+let limitsPending = null;
+let limitsRefreshing = false;
+/** Share reads, but queue a forced refresh when a passive read is already in flight. */
+function loadLimits(refresh = false) {
+  if (limitsPending) return refresh && !limitsRefreshing ? limitsPending.then(() => loadLimits(true)) : limitsPending;
+  limitsRefreshing = refresh;
+  limitsPending = loadLimitsNow(refresh).finally(() => { limitsPending = null; });
+  return limitsPending;
+}
 
 function scheduleLimits(active) {
   if (!active) { if (limitsTimer !== null) clearInterval(limitsTimer); limitsTimer = null; if (limitsPoll !== null) clearTimeout(limitsPoll); limitsPoll = null; return; }
@@ -783,7 +804,8 @@ function renderActiveAnalyticsView(view) {
   resetExportMenu();
   const name = currentViewName(); clearInactiveAnalyticsViews(name);
   if (name === "activity") renderActivity(view);
-  if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, { ...velocityContext(), providers: snapshotProviders() });
+  if (name === "velocity") renderVelocity($("#velocity-view"), view.dailySessions, { ...velocityContext(), providers: snapshotProviders(), selectedProviders: [...viewProviderFilters.velocity],
+    onProvidersChange: (providers) => { viewProviderFilters.velocity = new Set(providers); syncUrl(); } });
   if (name === "costs") renderCosts(view);
   if (name === "subscription") renderSubscriptionView();
   scheduleLimits(name === "subscription");
@@ -1053,6 +1075,7 @@ function applyMachines() {
 function setMachine(key, on) {
   if (on) hiddenMachines.delete(key); else hiddenMachines.add(key);
   applyMachines(); renderMachines(); renderView();
+  syncUrl("replace");
 }
 
 /** The strip's note: the snapshot's time, or on Subscription, which machines it counts whatever the strip shows. */
@@ -1167,6 +1190,7 @@ function renderRateCards(rateCard) {
   clear(elements.rateCardLinks);
   const groups = new Map();
   for (const item of rateCard.models) {
+    if (!/^https?:\/\//i.test(item.source ?? "")) continue;
     const source = item.provenance?.source ?? "reviewed";
     const urls = groups.get(source) ?? new Map();
     urls.set(item.source, item.model); groups.set(source, urls);
@@ -1186,7 +1210,7 @@ function populateRepositories() {
   const previous = elements.repositoryFilter.value;
   clear(elements.repositoryFilter); elements.repositoryFilter.append(new Option("All repositories", "all"));
   for (const item of snapshot.repositories) elements.repositoryFilter.append(new Option(item.repository.name, item.repository.id));
-  if ([...elements.repositoryFilter.options].some((option) => option.value === previous)) elements.repositoryFilter.value = previous;
+  elements.repositoryFilter.value = [...elements.repositoryFilter.options].some((option) => option.value === previous) ? previous : "all";
 }
 
 /**
@@ -1419,6 +1443,7 @@ function renderProviderEmptyState(container, scope, eligibleCount, windowCount) 
     const button = statusAction("Select all providers", () => {
       viewProviderFilters[scope] = new Set(snapshotProviders());
       renderActiveAnalyticsView(activeView());
+      syncUrl();
       // The button is gone after the re-render: keep keyboard focus in the view, on its first provider chip.
       document.querySelector?.(`[data-focus-key="filter:${scope}:${snapshotProviders()[0]}"]`)?.focus?.({ preventScroll: true });
     });
@@ -1514,9 +1539,9 @@ function observedRange() {
   const timeZone = snapshotTimeZone();
   const dates = snapshot.sessions.flatMap((session) => [sessionStartDay(session, timeZone),
     ...(session.velocity ? ledgerCells(session.velocity).map(([day]) => day) : Object.keys(session.spendByDay ?? {}))]).filter(Boolean).sort();
-  const minimum = dates[0] || new Date().toISOString().slice(0, 10);
+  const today = localDay(normalizeTimestamp(snapshot.generatedAt), timeZone);
+  const minimum = dates[0] || today || new Date().toISOString().slice(0, 10);
   // Never end a window after the snapshot's local date.
-  const today = localDay(snapshot.generatedAt, timeZone);
   const maximum = dates.at(-1) || minimum;
   return { maximum: today && maximum > today && minimum <= today ? today : maximum, minimum };
 }
@@ -1618,7 +1643,7 @@ function velocityChip(provider) {
 
 function providerShown(scope, provider) {
   if (scope === "chart") return Boolean(providerFilters.find(({ dataset }) => dataset.providerFilter === provider)?.checked);
-  if (scope === "velocity") return Boolean(velocityChip(provider)?.checked);
+  if (scope === "velocity") return viewProviderFilters.velocity.has(provider);
   return viewProviderFilters[scope].has(provider);
 }
 
@@ -1639,6 +1664,7 @@ function toggleProvider(provider) {
     else viewProviderFilters[scope].add(provider);
     renderActiveAnalyticsView(activeView());
   }
+  syncUrl();
 }
 
 // --------------------------------------------------------------------- command palette
@@ -1886,6 +1912,7 @@ function render(data) {
   configureWindow(); applyMachines(); renderMachines();
   markStale(false); elements.rateCardDate.textContent = `Rate card effective ${data.rateCard.effectiveDate}`;
   if (!urlReady) {
+    restoreUrlProviders(initialUrl);
     const match = repositoryFromParameter(initialUrl.repo);
     if (match) elements.repositoryFilter.value = match.repository.id;
   }
@@ -1893,6 +1920,7 @@ function render(data) {
   delete elements.main.dataset.state;
   renderView();
   finishUrlStartup();
+  syncUrl("replace");
   watchMachines();
   // Limits name other machines' profiles as this snapshot does, so a new snapshot gets them again.
   if (limits?.machines && currentViewName() === "subscription") void loadLimits(false);
@@ -1900,8 +1928,12 @@ function render(data) {
 
 /** Fetch the snapshot a machine just completed, without the loading state or an error banner; false when it failed. */
 async function loadQuietly() {
+  const previous = fullSnapshot ?? snapshot ?? sharedSnapshot;
   try {
-    render(await fetchAnalytics(false)); showReady(snapshot ? activeView() : null);
+    const data = await fetchAnalytics(false);
+    // A newer render owns the snapshot and its machine polling. A delayed read must not roll either back.
+    if ((fullSnapshot ?? snapshot ?? sharedSnapshot) !== previous) return true;
+    render(data); showReady(snapshot ? activeView() : null);
     return true;
   } catch { return false; /* The snapshot on screen stays. */ }
 }
@@ -1963,7 +1995,7 @@ for (const input of [elements.windowStart, elements.windowEnd]) {
   input.addEventListener("change", applyCustomWindow);
   input.addEventListener("blur", restoreWindowInputs);
 }
-for (const filter of providerFilters) filter.addEventListener("change", () => { if (snapshot) renderLine(dailyProviderSpend(activeView().dailySessions)); });
+for (const filter of providerFilters) filter.addEventListener("change", () => { if (snapshot) { renderLine(dailyProviderSpend(activeView().dailySessions)); syncUrl(); } });
 for (const button of viewButtons) button.addEventListener("click", () => switchView(button.dataset.viewButton));
 for (const button of sortButtons) button.addEventListener("click", () => {
   const key = button.dataset.sort;

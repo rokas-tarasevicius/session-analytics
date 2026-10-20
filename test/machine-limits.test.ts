@@ -207,6 +207,16 @@ test("limits reads every saved machine: one account across machines is one accou
   assert.match(text.stdout, /Source codex-session on this machine: ok/);
 });
 
+test("failed machine limits keep SSH destinations and account names out of the snapshot", () => {
+  const dir = saved("private-failures", [{ name: "box", ssh: "SECRET-HOST", user: "secret-account", runtime: "bundled", enabled: true }]);
+  const read = cli(["limits", "--json", "--data-dir", dir, "--offline"], { FAKE_SSH_DOWN: "SECRET-HOST" });
+  const snapshot = json(read);
+  assert.equal(snapshot.machines![1]!.reason, "connection");
+  assert.ok(snapshot.machines![1]!.fix);
+  assert.doesNotMatch(read.stdout, /SECRET-HOST|secret-account|Connection refused/);
+  assert.match(read.stderr, /SECRET-HOST.*Connection refused/);
+});
+
 test("a machine that cannot be read shows its last good limits, marked stale; without them its sessions do not count", () => {
   const dir = data("merge");
   const down = { FAKE_SSH_DOWN: "agentbox" };
@@ -214,7 +224,7 @@ test("a machine that cannot be read shows its last good limits, marked stale; wi
   assert.deepEqual(stale.machines!.map(({ key, state, reason }) => [key, state, reason ?? null]), [["local", "ok", null], ["agentbox", "stale", "connection"], ["box2", "ok", null]]);
   assert.deepEqual(machinesOf(stale, keys.max), ["local", "agentbox"]);
   const text = cli(["limits", "--data-dir", dir], down);
-  assert.match(text.stdout, /^Session Analytics · subscription limits · this machine, agentbox \(stale\) and box2\n\nMachines: 2 of 3 read now, 1 from its last good limits\n(?:.*\n)? {2}agentbox {6}unreachable; its last good limits from (?:just now|\d+ min ago) \(2 accounts\)\n {4}Fix: check that agentbox is up/);
+  assert.match(text.stdout, /^Session Analytics · subscription limits · this machine, agentbox \(stale\) and box2\n\nMachines: 2 of 3 read now, 1 from its last good limits\n(?:.*\n)? {2}agentbox {6}unreachable; its last good limits from (?:just now|\d+ min ago) \(2 accounts\)\n {4}Fix: run session-analytics machines check agentbox/);
   assert.match(text.stderr, /^Could not read limits from agentbox: SSH could not connect\..*\n {2}Fix: .*\n {2}Using its last good limits from (?:just now|\d+ min ago)\.\n$/);
 
   rmSync(join(dir, "machines", "agentbox.limits.json"));

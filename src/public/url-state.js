@@ -1,13 +1,15 @@
-// Dashboard state carried in the address bar: view, time window and repository focus. Pure functions only, so
+// Dashboard state carried in the address bar: view, time window, repository focus and active-view providers. Pure functions only, so
 // test/dashboard-url-state.test.ts can round-trip them under node:test.
 //
 // `view`, `window`, `start`, `end` and `repo` describe what is on screen and are rewritten as it changes.
+// `providers` contains only registered provider names; `none` means every chip is off. Missing means all.
 // `open`, `theme` and `density` are one-shot instructions: they are applied once on load and then removed.
 // `repo` carries the opaque repository ID, never a path; a repository name is still accepted when reading.
 
 import { validDay } from "./view-model.js";
+import { providerIds } from "./providers.js";
 
-export const stateKeys = ["view", "window", "start", "end", "repo"];
+export const stateKeys = ["view", "window", "start", "end", "repo", "providers"];
 export const oneShotKeys = ["open", "theme", "density"];
 /** The window a URL without `window=` means. It is not stored anywhere else, so it is left out of the URL. */
 export const defaultWindow = "30";
@@ -24,12 +26,15 @@ export function parseUrlState(search, { views = [], presets = [], aliases = {} }
   const rawWindow = parameters.get("window");
   const window = presets.includes(rawWindow) ? rawWindow : rawWindow === null && start && end ? "custom" : null;
   const oneOf = (value, allowed) => (allowed.includes(value) ? value : null);
+  const rawProviders = parameters.get("providers");
+  const providers = providerIds.filter((provider) => rawProviders?.split(",").includes(provider));
   return {
     view: views.includes(view) ? view : null,
     window,
     start: window === "custom" ? start : null,
     end: window === "custom" ? end : null,
     repo: parameters.get("repo") || null,
+    providers: rawProviders === "none" ? [] : providers.length ? providers : null,
     open: oneOf(parameters.get("open"), ["palette", "help"]),
     theme: oneOf(parameters.get("theme"), ["dark", "light"]),
     density: oneOf(parameters.get("density"), ["compact", "comfortable"]),
@@ -41,12 +46,13 @@ export function parseUrlState(search, { views = [], presets = [], aliases = {} }
  * one-shot parameters are dropped. The default window is omitted; the view is always written because a stored
  * view preference would otherwise decide what a bare URL opens.
  */
-export function serializeUrlState({ view = null, window = null, start = null, end = null, repo = null }, search = "") {
+export function serializeUrlState({ view = null, window = null, start = null, end = null, repo = null, providers = null }, search = "") {
   const next = new URLSearchParams();
   if (view) next.set("view", view);
   if (window && window !== defaultWindow) next.set("window", window);
   if (window === "custom" && validDay(start) && validDay(end)) { next.set("start", start); next.set("end", end); }
   if (repo) next.set("repo", repo);
+  if (providers !== null) next.set("providers", providerIds.filter((provider) => providers.includes(provider)).join(",") || "none");
   for (const [key, value] of new URLSearchParams(search)) {
     if (!stateKeys.includes(key) && !oneShotKeys.includes(key)) next.append(key, value);
   }

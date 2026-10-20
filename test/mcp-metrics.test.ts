@@ -7,7 +7,7 @@ import { analyzeMachineSessions } from "../src/analyzer.ts";
 import { SnapshotCache } from "../src/mcp/cache.ts";
 import { McpEvidenceCollector } from "../src/mcp/evidence.ts";
 import { buildPayload, profile, ratio, windowStart } from "../src/mcp/metrics.ts";
-import type { MachineAnalytics, McpSnapshot, SessionAnalytics } from "../src/types.ts";
+import type { MachineAnalytics, McpSnapshot, SessionAnalytics, SessionVelocity, VelocityValues } from "../src/types.ts";
 import { createSessionAnalyticsFixture } from "./fixtures.ts";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
@@ -100,6 +100,28 @@ test("tool stats count calls by name and never emit result or error fields", () 
   assert.deepEqual(response.data.tools, [{ name: "Bash", calls: 30 }, { name: "Read", calls: 5 }]);
 });
 
+test("tool breakdowns use the same evidence eligibility as MCP coverage totals", () => {
+  const observed = session({ tools: { Read: 3 } }); observed.metrics.toolCalls = 3;
+  const invalid = session({ tools: { Read: 100, Invalid: 100 } });
+  invalid.metrics.toolCalls = 200; invalid.transcript.status = "invalid";
+  const unavailable = session({ tools: { Read: 1000, Unavailable: 1000 }, evidence: {
+    source: "cursor-sdk", fidelity: "summary", tokens: "reported", tools: "unavailable", turns: "observed", timing: "provider", usageUnit: "run",
+  } });
+  unavailable.metrics.toolCalls = 2000;
+  const data = snapshot([observed, invalid, unavailable]);
+  const expected = [{ name: "Read", calls: 3 }];
+  const stats = buildPayload(data, "tool_stats", {}, NOW, 60);
+  assert.equal(stats.totals.coverage?.toolSessions, 1);
+  assert.equal(stats.totals.toolCalls, 3);
+  assert.ok("tools" in stats.data);
+  assert.deepEqual(stats.data.tools, expected);
+  assert.equal(stats.data.totalTools, 1);
+  assert.deepEqual(profile(data.analytics.sessions).toolMix, expected);
+  const comparison = buildPayload(data, "compare_agents", {}, NOW, 60);
+  assert.ok("agents" in comparison.data);
+  assert.deepEqual(comparison.data.agents.find((row) => row.provider === "claude")!.profile.toolMix, expected);
+});
+
 test("budget status reports dated value without quota headroom", () => {
   const response = buildPayload(snapshot([session()]), "budget_status", {}, NOW, 60);
   assert.ok("today" in response.data);
@@ -188,4 +210,30 @@ test("integration: MCP exposes the shared metric families and partial pricing co
   assert.equal(unavailable.totals.sessions, 1);
   assert.equal(unavailable.totals.inputTokens, null);
   assert.equal(unavailable.totals.coverage?.tokenSessions, 0);
+});
+
+test("integrated MCP API value excludes other cost bases and conserves all ledger cells", () => {
+  const values = (usd: number, input: number, output: number, priced: number): VelocityValues =>
+    [usd, input, input, 0, 0, output, 0, 1, 0, 0, priced, 0, input, 0];
+  const velocity: SessionVelocity = {
+    dimensions: [{ agent: "claude-cli", model: "claude-opus-5", executionKind: "top-level", effort: "unknown" }],
+    buckets: [["2026-10-02", 10, 0, values(2, 100, 10, 110)]],
+    sessionDated: [["2026-10-02", 11, 0, values(3, 200, 20, 220)]],
+    undated: [[0, values(5, 300, 30, 0)]],
+  };
+  const api = session({ velocity });
+  const reported = session({ costBasis: "provider-reported", velocity });
+  const unavailable = session({ costBasis: "unavailable", velocity });
+  const missing = session(); delete missing.velocity;
+  const result = buildPayload(snapshot([api, reported, unavailable, missing]), "usage_summary", {}, NOW, 60);
+  assert.ok(result.metrics);
+  assert.equal(result.metrics.velocity.coveredSessions, 3);
+  assert.equal(result.metrics.velocity.selectedSessions, 4);
+  assert.equal(result.metrics.velocity.datedApiEquivalentUsd, 5);
+  assert.equal(result.metrics.velocity.undatedApiEquivalentUsd, 5);
+  assert.equal(result.metrics.velocity.pricedTokens, 330);
+  assert.equal(result.metrics.velocity.eligibleTokens, 660);
+  const empty = buildPayload(snapshot([reported, unavailable, missing]), "usage_summary", {}, NOW, 60);
+  assert.ok(empty.metrics);
+  for (const key of ["datedApiEquivalentUsd", "undatedApiEquivalentUsd", "pricedTokens", "eligibleTokens"] as const) assert.equal(empty.metrics.velocity[key], 0, key);
 });

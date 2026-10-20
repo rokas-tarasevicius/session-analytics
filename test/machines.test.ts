@@ -283,6 +283,23 @@ test("exit codes and stderr map to fixed reasons with the exact fix", () => {
   assert.equal(classifyRemote(saved, result(127))!.message, "node was not found on agents's login PATH");
 });
 
+test("failed machine snapshots keep destinations, accounts, paths and stderr in this terminal only", async () => {
+  const data = dataDir("private-failures");
+  await machinesFile("private-failures", { version: 1, machines: [
+    { name: "box", ssh: "SECRET-HOST", user: "secret-account", runtime: "bundled", enabled: true },
+    { name: "lockbox", ssh: "server", user: "locked", runtime: "bundled", enabled: true },
+    { name: "nodebox", ssh: "SECRET-NODE-HOST", node: "/SECRET/PATH/node", runtime: "bundled", enabled: true },
+  ] });
+  const read = cli(["report", "--json", ...localFlags, "--data-dir", data], { FAKE_SSH_DOWN: "SECRET-HOST" });
+  assert.equal(read.status, 0, read.stderr);
+  const snapshot = validateSnapshot(JSON.parse(read.stdout));
+  assert.deepEqual(snapshot.machines!.slice(1).map(({ reason }) => reason), ["connection", "sudo", "no-node"]);
+  assert.ok(snapshot.machines!.slice(1).every(({ fix }) => fix));
+  assert.doesNotMatch(read.stdout, /SECRET|secret-account|locked|Connection refused/);
+  assert.match(read.stderr, /SECRET-HOST.*Connection refused/);
+  assert.match(read.stderr, /SECRET\/PATH/);
+});
+
 test("machines.json is strict, private and decides which machines a run reads", async () => {
   const valid: MachinesConfig = { version: 1, local: { label: "laptop" }, machines: [
     { name: "agentbox", ssh: "agentbox", user: "agent-t3", runtime: "bundled", enabled: true, addedAt: "2026-10-14T11:00:00Z" },
@@ -332,6 +349,8 @@ test("machines.json is strict, private and decides which machines a run reads", 
   assert.match(saved.digest!, /^[0-9a-f]{64}$/);
   assert.equal(remoteOptionsFrom([], {}, structuredClone(valid)).digest, saved.digest);
   assert.notEqual(remoteOptionsFrom([], {}, { ...valid, machines: valid.machines.map((entry) => entry.name === "agentbox" ? { ...entry, user: "agents" } : entry) }).digest, saved.digest);
+  // A newly recorded check changes duplicate-machine handling even when the SSH target stays the same.
+  assert.notEqual(remoteOptionsFrom([], {}, { ...valid, machines: valid.machines.map((entry) => ({ ...entry, identity: "0123456789abcdef" })) }).digest, saved.digest);
   // --machines narrows to saved machines, including a disabled one asked for by name.
   assert.deepEqual(remoteOptionsFrom(["--machines", "OLD,agentbox"], {}, valid).machines.map(({ name }) => name), ["old", "agentbox"]);
   assert.throws(() => remoteOptionsFrom(["--machines", "missing"], {}, valid), OptionError);
@@ -483,7 +502,7 @@ test("a plain report reads saved machines with the bundled runtime: install once
   assert.match(first.stderr, /empty: no agent history for this account \(0 sessions read\)\.\n {2}Fix: if agents run as another account there: session-analytics machines set empty --user NAME/);
   assert.match(first.stderr, /Could not read down: SSH could not connect/);
   // The header lists what was read, with counts and timing, and each machine not read with its reason and fix.
-  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: check that down is up/);
+  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: run session-analytics machines check down/);
   assert.deepEqual((await calls()).filter(({ destination }) => destination === "server").map(({ words }) => words[7]), ["run", "install"]);
   assert.deepEqual((await calls()).find(({ destination }) => destination === "server")!.words.slice(0, 6), ["sudo", "-n", "-iu", "agents", "node", "-"]);
   await rm(sshLog, { force: true });
@@ -646,6 +665,37 @@ async function freePort(): Promise<number> {
   });
 }
 
+test("the dashboard notices in-place machine edits with unchanged size and modification time", async () => {
+  const data = dataDir("same-stamp"), file = join(data, "machines.json");
+  await machinesFile("same-stamp", { version: 1, machines: [{ name: "box", ssh: "down", runtime: "installed", enabled: false }] });
+  const time = new Date("2026-10-01T12:00:00Z");
+  await utimes(file, time, time);
+  const initial = await stat(file), original = await readFile(file, "utf8");
+  const port = await freePort();
+  const child = spawn(process.execPath, [server, "--port", String(port), ...localFlags, "--data-dir", data], { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    let output = "";
+    child.stdout!.on("data", (chunk) => { output += chunk; });
+    child.stderr!.on("data", (chunk) => { output += chunk; });
+    for (let attempt = 0; attempt < 400 && !/ready:/.test(output); attempt++) await delay(25);
+    const get = async <T>(path: string): Promise<T> => (await (await fetch(`http://127.0.0.1:${port}${path}`)).json()) as T;
+    await get("/api/analytics");
+    assert.deepEqual((await get<{ machines: unknown[] }>("/api/machines")).machines, []);
+    // Editors and synchronizers can restore mtime after replacing a same-length value in place.
+    await writeFile(file, original.replace('"enabled": false', '"enabled": true '));
+    await utimes(file, time, time);
+    const changed = await stat(file);
+    assert.deepEqual([changed.ino, changed.size, changed.mtimeMs], [initial.ino, initial.size, initial.mtimeMs]);
+    let statuses = await get<{ machines: Array<{ key: string; state: string }> }>("/api/machines");
+    for (let attempt = 0; attempt < 120 && (statuses.machines.length < 2 || statuses.machines.some(({ state }) => state === "reading")); attempt++) {
+      await delay(25); statuses = await get("/api/machines");
+    }
+    assert.deepEqual(statuses.machines.map(({ key, state }) => [key, state]), [["local", "ok"], ["box", "failed"]]);
+  } finally {
+    child.kill("SIGTERM"); await once(child, "exit");
+  }
+});
+
 test("a machine that fails is shown from its last good snapshot, marked stale, and --strict exits 3", async () => {
   const data = dataDir("stale");
   const saved = (ssh: string): MachinesConfig => ({ version: 1, local: { label: "laptop" }, machines: [{ name: "server", ssh, user: "agents", runtime: "bundled", enabled: true }] });
@@ -663,7 +713,7 @@ test("a machine that fails is shown from its last good snapshot, marked stale, a
   const text = cli(["report", ...localFlags, "--data-dir", data, "--strict"], down);
   assert.equal(text.status, 3, text.stderr);
   assert.match(text.stdout, /^Session Analytics · laptop and server \(stale\)\n/);
-  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 from a last good snapshot\n.*\n {2}server {2}unreachable; its last good snapshot from (?:just now|\d+ min ago) \(5 sessions, 3 repositories\)\n {4}Fix: check that server is up/);
+  assert.match(text.stdout, /\nMachines: 1 of 2 read now, 1 from a last good snapshot\n.*\n {2}server {2}unreachable; its last good snapshot from (?:just now|\d+ min ago) \(5 sessions, 3 repositories\)\n {4}Fix: run session-analytics machines check server/);
   assert.match(text.stderr, /Could not read server: SSH could not connect.*\n {2}Fix: .*\n {2}Using its last good snapshot from (?:just now|\d+ min ago) \(5 sessions\)\./);
   assert.match(text.stderr, /--strict: server was not read now; exiting with 3\.\n$/);
   const stale = validateSnapshot(JSON.parse(cli(["report", "--json", ...localFlags, "--data-dir", data], down).stdout));

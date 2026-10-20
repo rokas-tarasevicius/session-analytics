@@ -2697,6 +2697,9 @@
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
               },
               {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
+              },
+              {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
               },
               {
@@ -2728,6 +2731,9 @@
               },
               {
                 "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Some Codex token breakdowns exceeded their totals and were bounded; accounting is partial."
               },
               {
                 "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
@@ -3483,6 +3489,9 @@
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
               },
               {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
+              },
+              {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
               },
               {
@@ -3514,6 +3523,9 @@
               },
               {
                 "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Some Codex token breakdowns exceeded their totals and were bounded; accounting is partial."
               },
               {
                 "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
@@ -3852,6 +3864,9 @@
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
               },
               {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
+              },
+              {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
               },
               {
@@ -3883,6 +3898,9 @@
               },
               {
                 "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Some Codex token breakdowns exceeded their totals and were bounded; accounting is partial."
               },
               {
                 "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
@@ -4237,6 +4255,9 @@
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
               },
               {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
+              },
+              {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
               },
               {
@@ -4268,6 +4289,9 @@
               },
               {
                 "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Some Codex token breakdowns exceeded their totals and were bounded; accounting is partial."
               },
               {
                 "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."
@@ -4785,6 +4809,9 @@
                 "const": "Malformed or oversized Gemini records were skipped; accounting is partial."
               },
               {
+                "const": "Some Gemini cache breakdowns exceeded input totals and were bounded; accounting is partial."
+              },
+              {
                 "const": "Gemini metrics describe retained chat history; rewound or removed messages are excluded. Models without reviewed rates remain unpriced."
               },
               {
@@ -4816,6 +4843,9 @@
               },
               {
                 "const": "No cumulative Codex token counter was found."
+              },
+              {
+                "const": "Some Codex token breakdowns exceeded their totals and were bounded; accounting is partial."
               },
               {
                 "const": "Codex does not expose cache-write tokens separately; the upper estimate treats all uncached input as cache writes."

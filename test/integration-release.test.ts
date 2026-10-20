@@ -632,6 +632,9 @@ test("release: the compiled package carries workers, served files and notices, a
   const out = await mkdtemp(join(tmpdir(), "session-analytics-build-"));
   try {
     build(out);
+    await writeFile(join(out, "src/stale-private.json"), "PRIVATE_OLD_BUILD_SENTINEL");
+    build(out);
+    assert.equal((await readdir(join(out, "src"))).includes("stale-private.json"), false, "rebuilding removes files from the previous output");
     // Every non-TypeScript file under src ships verbatim, including ones a module reads at run time without importing.
     const sourceRoot = fileURLToPath(new URL("../src/", import.meta.url));
     for (const entry of await readdir(sourceRoot, { recursive: true, withFileTypes: true })) {
@@ -664,7 +667,7 @@ test("release: the compiled package carries workers, served files and notices, a
 });
 
 test("release: every dispatcher command shares help and version without scanning", () => {
-  for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits"]) {
+  for (const command of ["dashboard", "report", "rates", "export", "merge", "index", "mcp", "limits", "machines", "upgrade"]) {
     const help = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--help"], { encoding: "utf8" });
     assert.equal(help.status, 0, `${command}: ${help.stderr}`); assert.match(help.stdout, /session-analytics/i);
     const result = spawnSync(process.execPath, ["bin/session-analytics.ts", command, "--version"], { encoding: "utf8" });
@@ -689,7 +692,8 @@ test("release: complete demo API, all providers and renderers, static modules an
   const realFetch = fetch;
   try {
     let ready = false;
-    for (let i = 0; i < 200; i++) {
+    // Seeding seven providers includes many SQLite commits and can exceed 20 seconds on a busy filesystem.
+    for (let i = 0; i < 600; i++) {
       assert.equal(child.exitCode, null, errors);
       try { ready = (await realFetch(`${base}/api/health`)).ok; } catch { /* Starting. */ }
       if (ready) break; await delay(100);

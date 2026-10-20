@@ -82,6 +82,7 @@ export async function run() {
     for await(const line of lines) {
       if(!line.trim())continue;
       let r; try{r=JSON.parse(line);}catch{observations.malformed++;continue;}
+      if(!r||typeof r!=='object'||Array.isArray(r)){observations.malformed++;continue;}
       observations.records++;
       if(!file.subagent&&r.sessionId===file.groupId)g.validIdentity=true;
       const ts=instant(r.timestamp);if(!file.subagent&&ts&&!g.metadataTimestamp)g.metadataTimestamp=ts;

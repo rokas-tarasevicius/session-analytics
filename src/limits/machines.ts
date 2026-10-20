@@ -92,7 +92,8 @@ const identityPattern = /^(?:host-)?[0-9a-f]{16}$/;
  * (`--identify-machine`). An installed remote that fails as if it ran another version is asked which.
  */
 export async function fetchRemoteLimits(machine: RemoteMachine, args: string[], { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal }): Promise<{ snapshot: LimitsSnapshot; identity: string | null }> {
-  const result = await runRemote(machine, args, { deadline: Date.now() + timeoutMs, signal, limit: maximumLimitsBytes });
+  const deadline = Date.now() + timeoutMs;
+  const result = await runRemote(machine, args, { deadline, signal, limit: maximumLimitsBytes });
   let failure = classifyRemote(machine, result, timeoutMs);
   // A limits read's time-out and size limit are its own, and so are their fixes.
   if (failure?.reason === "timeout" || failure?.reason === "too-large") failure = new RemoteError(failure.reason, machine, result.stderr, "limits", timeoutMs);
@@ -106,7 +107,7 @@ export async function fetchRemoteLimits(machine: RemoteMachine, args: string[], 
     } catch { failure = new RemoteError("invalid", machine, "", "limits --json"); }
   }
   if (failure && machine.runtime === "installed" && ["rejected", "invalid", "analysis"].includes(failure.reason)) {
-    const found = await remoteVersion(machine, signal);
+    const found = await remoteVersion(machine, signal, deadline);
     if (found && found !== version) throw new RemoteError("version-skew", machine, result.stderr, found);
   }
   if (failure) throw failure;
@@ -323,6 +324,7 @@ export function limitsReads(
       let answer = fetched.snapshot;
       let ms = performance.now() - started;
       const own = await local;
+      if (stop.aborted || stopping()) throw new RemoteError("cancelled", machine);
       // Banked resets are account-wide: a machine asks its own app-server only for an account this machine's read does not know.
       reading.codexAccount = own ? unknownBankedResets(answer, own) : reading.codexAccount;
       if (accountRead && reading.codexAccount && !asked) {
@@ -347,7 +349,7 @@ export function limitsReads(
       const kept = error.reason === "same-machine" ? null
         : reading.snapshot && age <= lastGoodMaxAgeMs ? { snapshot: reading.snapshot, status: reading.status }
         : stopped ? null : await lastGood(reading);
-      const fix = error.fix ? { fix: error.fix } : {};
+      const fix = error.snapshotFix ? { fix: error.snapshotFix } : {};
       if (kept) Object.assign(reading, kept, { status: { ...kept.status, state: "stale", reason: error.reason, ...fix } });
       else Object.assign(reading, { snapshot: null, identity: undefined, status: { key, label, state: "failed", reason: error.reason, ...fix, readAt: null, durationMs: null } });
       if (!stopped && reported.get(reading) !== error.reason) { reported.set(reading, error.reason); report(limitsReadLines(machine, reading.status, error)); }
@@ -355,7 +357,7 @@ export function limitsReads(
   };
 
   const start = (local: Promise<LimitsSnapshot | null>): Promise<void> => {
-    const stop = controller.signal;
+    const stop = signal?.aborted ? signal : controller.signal;
     for (const reading of readings) {
       if (reading.pending) continue;
       const { key, label, readAt, durationMs } = reading.status;
@@ -379,7 +381,7 @@ export function limitsReads(
       if (!twin) { reading.twin = undefined; return reading; }
       const error = new RemoteError("same-machine", reading.machine, "", twin), { key, label } = reading.status;
       if (reading.twin !== twin) { reading.twin = twin; report(`Not counting limits from ${reading.machine.name}: ${error.message}.${error.fix ? `\n  Fix: ${error.fix}` : ""}`); }
-      return { snapshot: null, status: { key, label, state: "failed", reason: "same-machine", ...(error.fix ? { fix: error.fix } : {}), readAt: null, durationMs: null } };
+      return { snapshot: null, status: { key, label, state: "failed", reason: "same-machine", ...(error.snapshotFix ? { fix: error.snapshotFix } : {}), readAt: null, durationMs: null } };
     });
   };
 

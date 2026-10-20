@@ -39,6 +39,7 @@ for(const file of files){
  try{
  for await(const line of lfLines(createReadStream(file,{encoding:'utf8'}))){
   lineNo++;let r;try{r=JSON.parse(line)}catch{if(line.trim())stats.malformed++;continue}
+  if(!r||typeof r!=='object'||Array.isArray(r)){stats.malformed++;continue;}
   const p=r.payload??{},t=Date.parse(r.timestamp);if(Number.isFinite(t))maxAt=Math.max(maxAt,t);
   if(r.type==='session_meta'){
    const raw=p.id??p.session_id;if(typeof raw==='string'){id=sha('codex:'+raw);active=id;}metaAt=p.timestamp??r.timestamp;metaCount++;
