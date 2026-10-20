@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- View regions have distinct overview headings so screen readers do not hear duplicate page headings.
+
 - Command search has an accessible name and updates its expanded state as results open, empty or close.
 
 - Daily and hour-profile chart ticks use even calendar steps; short windows label each day when space permits and hour profiles use six-hour steps.

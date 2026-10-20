@@ -119,3 +119,13 @@ test("command search has a name and follows the list's expanded state", async ()
   assert.equal(input.getAttribute("aria-expanded"), "false");
   assert.equal(input.getAttribute("aria-activedescendant"), null);
 });
+
+
+test("view regions retain distinct overview names instead of repeating the page heading", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  for (const view of ["Summary", "Velocity", "Costs", "Tools", "Activity", "Pricing", "Subscription"]) {
+    assert.ok(html.includes(`id="${view.toLowerCase()}-title">${view} overview</h2>`));
+    assert.ok(html.includes(`aria-labelledby="${view.toLowerCase()}-title"`));
+  }
+});

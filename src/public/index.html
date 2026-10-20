@@ -157,7 +157,7 @@
           <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
-            <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary overview</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
             <section class="kpi-grid summary-metrics" aria-label="Machine totals">
               <h2 class="metrics-heading">Window totals</h2>
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="metric-spend">—</strong><small class="kpi-coverage" id="metric-spend-coverage"></small><span class="kpi-delta" id="metric-spend-delta" hidden></span><svg class="spark" id="metric-spend-spark"></svg><small class="kpi-note" id="metric-spend-note">Activity-dated. Not an invoice.</small></article>
@@ -227,14 +227,14 @@
           </section>
 
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
-            <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity overview</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <div id="activity-status" class="activity-status" hidden></div>
             <article class="panel activity-panel" id="activity-heatmap-panel"><div class="activity-heatmap chart-slot" id="activity-heatmap"></div><div class="heatmap-key" id="activity-heatmap-key"></div></article>
             <article class="panel activity-repositories" id="activity-repositories-panel"><header><div><h2>Sessions by repository</h2></div></header><div class="bar-list chart-slot" id="activity-repositories"></div></article>
           </section>
 
           <section class="analytics-view" data-view-panel="costs" hidden aria-labelledby="costs-title">
-            <header class="view-header"><div><h2 class="sr-only" id="costs-title">Costs</h2><p>Usage value by provider and model, by activity date: the same ledger as Summary and Velocity.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="costs-title">Costs overview</h2><p>Usage value by provider and model, by activity date: the same ledger as Summary and Velocity.</p></div></header>
             <div class="kpi-grid compact-metrics" aria-label="Cost totals">
               <article class="kpi accent"><span class="kpi-label" title="API list-price equivalent of recorded usage; provider-reported values included; not an invoice">Usage value</span><strong id="cost-total">—</strong><small class="kpi-coverage" id="cost-total-coverage"></small><small class="kpi-note">Same total as Summary and Velocity</small></article>
               <article class="kpi"><span class="kpi-label">API-equivalent value</span><strong id="cost-api-total">—</strong><small class="kpi-coverage" id="cost-api-total-coverage"></small><small class="kpi-note" id="cost-api-note">Rate-card priced usage</small></article>
@@ -249,23 +249,23 @@
           </section>
 
           <section class="analytics-view" data-view-panel="tools" hidden aria-labelledby="tools-title">
-            <header class="view-header"><div><h2 class="sr-only" id="tools-title">Tools</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="tools-title">Tools overview</h2><p>Effective tool-call names only; arguments and results remain excluded.</p></div><div class="provider-key" id="tools-provider-filters" role="group" aria-label="Filter tool calls by provider"></div></header>
             <div id="tools-view" class="chart-slot"></div>
           </section>
 
           <section class="analytics-view" data-view-panel="pricing" hidden aria-labelledby="pricing-title">
-            <header class="view-header"><div><h2 class="sr-only" id="pricing-title">Pricing</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="pricing-title">Pricing overview</h2><p>Source freshness, coverage, and the snapshots behind your usage value.</p></div></header>
             <div id="pricing-panel"></div>
             <dialog id="pricing-model-dialog" class="help pricing-dialog" aria-labelledby="pricing-model-title"></dialog>
           </section>
 
           <section class="analytics-view" data-view-panel="subscription" hidden aria-labelledby="subscription-title">
-            <header class="view-header"><div><h2 class="sr-only" id="subscription-title">Subscription</h2><p>Which Claude and Codex accounts you can still use and until when, what to do next, and what each allowance is worth. Account-wide: the repository focus does not apply.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="subscription-title">Subscription overview</h2><p>Which Claude and Codex accounts you can still use and until when, what to do next, and what each allowance is worth. Account-wide: the repository focus does not apply.</p></div></header>
             <div id="subscription-view"></div>
           </section>
 
           <section class="analytics-view" data-view-panel="velocity" hidden aria-labelledby="velocity-title">
-            <header class="view-header"><div><h2 class="sr-only" id="velocity-title">Velocity</h2><p>Where usage is moving, by provider, agent, model and every evidenced dimension.</p></div></header>
+            <header class="view-header"><div><h2 class="sr-only" id="velocity-title">Velocity overview</h2><p>Where usage is moving, by provider, agent, model and every evidenced dimension.</p></div></header>
             <div id="velocity-view"></div>
           </section>
 
