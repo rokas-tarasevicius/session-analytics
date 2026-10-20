@@ -2196,6 +2196,7 @@ function aggregate(
 
 /** Callbacks the analysis process passes; they never travel with the serialized options. */
 export interface AnalysisHooks {
+  onProgress?: (progress: import("./types.ts").AnalysisProgress) => void;
   /** The index parses every present session again: it was cold, or its code or prices changed. */
   onFullParse?: () => void;
 }

@@ -760,3 +760,18 @@ Calibration uses the same locally projected SDK metadata and already analyzed na
 New fixed warnings disclose partial reported model allocations, retained main-loop token lower bounds and unallocated unknown-model balances. They are P0 enumerated explanations, with no raw text. Version-qualified Conductor marginal values and result identity correlations remain internal. Per-model historical tariff provenance uses existing P0/P1 price metadata; no new content tier or network request at analysis time is introduced.
 
 External SQLite readers remain read-only when a checkpointed WAL database has no sidecars in a non-writable source directory. The guarded immutable fallback reads the original file without creating sidecars; it rejects a newly appeared WAL/journal or any main-file generation change. Its fixed error contains no path, schema value or source text. Generation metadata stays inside the reader and adds no public field.
+
+### Dashboard pending analytics fields
+
+`/api/analytics?wait=10` may return HTTP 202 with only `pending: true` and `progress`.
+Progress is transient and content-free; it never includes provider names, paths, session IDs or errors.
+
+| Field | Meaning | Privacy tier |
+| --- | --- | --- |
+| `pending` | Fixed boolean `true` while the scan runs | P0 |
+| `progress` | Current scan counters, or null when no scan is running | P0 |
+| `progress.phase` | Fixed vocabulary: `discover`, `parse`, `combine` | P0 |
+| `progress.done` | Nonnegative integer completed work units | P0 |
+| `progress.total` | Nonnegative integer known work units, or null | P0 |
+| `progress.startedAt` | Server-generated UTC scan start timestamp | P0 |
+| `progress.fullParse` | Boolean: this index is parsing all history again | P0 |

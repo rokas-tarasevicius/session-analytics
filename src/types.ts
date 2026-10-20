@@ -526,3 +526,16 @@ export interface SharedSnapshot {
   repositories: SharedRepository[];
   summary: SharedCounters;
 }
+
+/** Content-free work counters, independent of snapshot fields and serialized scan options. */
+export interface AnalysisProgress {
+  phase: "discover" | "parse" | "combine";
+  done: number;
+  total: number | null;
+}
+
+/** Only present while a dashboard scan is running. */
+export interface ScanProgress extends AnalysisProgress {
+  startedAt: string;
+  fullParse: boolean;
+}
