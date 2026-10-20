@@ -1,4 +1,4 @@
-import { dayLabel, deltaText, weekdayHourParts } from "./format.js";
+import { dayLabel, decimal, deltaText, weekdayHourParts } from "./format.js";
 // Pure view-model helpers for the dashboard: aggregation, window math, deltas,
 // sparkline downsampling, sorting, and palette matching. No DOM access, so the
 // same module is exercised by test/dashboard-helpers.test.ts under node:test.
@@ -10,6 +10,30 @@ export const providerOrder = providerIds;
 export { providerLabels };
 
 export { moneyAxis as shortMoney, percent } from "./format.js";
+
+/** Dashboard-only labels, assigned before filtering so ordinals follow hashed IDs, not usage or machine selection.
+ * The source snapshot is never changed; exports keep its original repository names.
+ */
+export function repositoryDisplaySnapshot(snapshot) {
+  const groups = new Map();
+  for (const { repository } of snapshot.repositories) {
+    const ids = groups.get(repository.name) ?? [];
+    ids.push(repository.id); groups.set(repository.name, ids);
+  }
+  const labels = new Map();
+  for (const [name, ids] of groups) if (ids.length > 1) {
+    ids.sort();
+    ids.forEach((id, index) => labels.set(id, index ? `${name} · ${index + 1}` : name));
+  }
+  if (!labels.size) return snapshot;
+  return {
+    ...snapshot,
+    repositories: snapshot.repositories.map((item) => labels.has(item.repository.id) ? {
+      ...item, repository: { id: item.repository.id, name: labels.get(item.repository.id), sourceName: item.repository.name, duplicateName: true },
+    } : item),
+    sessions: snapshot.sessions.map((session) => labels.has(session.repositoryId) ? { ...session, repositoryName: labels.get(session.repositoryId) } : session),
+  };
+}
 
 export function summarize(sessions) {
   const totals = { inputTokens: 0, outputTokens: 0, uncachedInputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0 };
@@ -325,7 +349,7 @@ export function deltaDescription(current, previous, length) {
   const magnitude = `${Math.abs(change * 100).toFixed(1)}%`;
   return {
     direction,
-    label: `${direction === "up" ? "Up" : direction === "down" ? "Down" : "Unchanged"} ${magnitude} versus the previous ${length} days`,
+    label: change > 9 ? `Current value is ${decimal(change + 1)} times the previous ${length} days` : `${direction === "up" ? "Up" : direction === "down" ? "Down" : "Unchanged"} ${magnitude} versus the previous ${length} days`,
     text: deltaText(change, length),
   };
 }

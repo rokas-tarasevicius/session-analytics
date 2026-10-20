@@ -216,3 +216,18 @@ test("burn and projection explanations name the failed guard with its figures", 
   assert.equal(indicators([full], "2026-10-20").projectionReason, null);
   assert.equal(indicators([full], "2026-10-20").burn.reason, null);
 });
+
+
+test("guarded comparisons and Top increases keep measured deltas while rendering large ratios as multiples", async () => {
+  const { comparisonValue } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+  const { deltaText } = await import("../src/public/format.js");
+  const comparison = comparePeriods(period(816.08), period(5.23), "value");
+  assert.equal(comparison.status, "change");
+  assert.equal(comparisonValue(comparison), "▲ 156×");
+  assert.equal(comparisonValue(comparePeriods(period(816.08), period(0), "value")), "new");
+  assert.equal(comparisonValue(comparePeriods(period(816.08), period(0.001), "value")), null);
+  const session = ledger(every("2026-10-01", "2026-10-14", (day) => day < "2026-10-08" ? 5.23 : 816.08));
+  const movers = topMovers([session], { start: "2026-10-01", end: "2026-10-14", metric: "value" }, "2026-10-15");
+  assert.ok(movers.rows.length > 0);
+  for (const row of movers.rows) assert.equal(deltaText(row.delta!), "▲ 156×");
+});

@@ -22,9 +22,9 @@ On narrow screens, repository and time-window selectors share the header, and me
 </p>
 </details>
 
-Summary answers "what happened in this window?" Six metrics show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each metric shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. On wide desktops, the metrics form a totals rail beside the daily usage chart and session mix; narrower layouts put totals first. Repository and model breakdowns, top tools, sub-agent value and a sortable fleet table follow below.
+Summary answers "what happened in this window?" Six metrics show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each metric shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. On wide desktops, the metrics form a totals rail beside the daily usage chart and session mix; at 1400 pixels and above the daily chart grows taller to fill the space beside the totals rail. Narrower layouts put totals first. Repository and model breakdowns, top tools, sub-agent value and a sortable fleet table follow below.
 
-Percentage changes share arrow marks and one decimal place. Adjacent equal-length windows say “vs previous Nd”; calendar week/month comparisons retain their named weekday/month periods.
+Changes share arrow marks and one decimal place for percentages; ratios above 10× use a multiple of the prior value, such as `▲ 156×`. Adjacent equal-length windows say “vs previous Nd”; calendar week/month comparisons retain their named weekday/month periods.
 
 <p align="center">
   <picture>
@@ -54,7 +54,7 @@ The dashboard shows this machine's sessions as soon as its own scan is done, rat
 
 ### Velocity: where usage is moving
 
-Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every percentage, and a **Top movers** table ranks the models, agents and other dimensions whose value changed most over the last seven completed days. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
+Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every change, and a **Top increases** table ranks positive absolute increases by repository, model and agent over the last seven completed days versus the preceding seven. Evidence cells use compact counts, such as `13.8M priced (100%) → 9.3M priced (100%)`; exact known/eligible counts stay in the tooltip and accessible name. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
 
 Daily chart ticks use equal calendar steps, labelling every day in windows up to 14 days when the labels fit. Hour profiles use 00:00, 06:00, 12:00 and 18:00, with fewer equally spaced ticks on narrow charts.
 
@@ -70,7 +70,7 @@ Velocity’s “Average per active day” is usage value divided by days with po
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-velocity-movers-dark.webp" />
-    <img alt="Top movers table: models and agents ranked by their change over the last seven completed days, with the priced-token evidence behind each comparison" src="../assets/screenshot-velocity-movers.webp" width="100%" />
+    <img alt="Top increases table: repositories, models and agents ranked by positive absolute increase over the last seven completed days, with compact priced-token evidence and exact counts in tooltips and accessible names" src="../assets/screenshot-velocity-movers.webp" width="100%" />
   </picture>
 </p>
 
@@ -114,6 +114,8 @@ Subscription answers "which of my accounts can I still use, and until when?" fir
 4. **What it's worth**: value used (with the dates each account is counted from, the value before the first readings that is not counted, the value on machines whose limits were not read, which is not counted, and the share of a full week every week), the value multiple over plans you pay for, a month of full use of those same plans against their price (employer-paid and unpriced seats beside it) and the typical weekly close, then each account's value per 1% of the week, weekly capacity, value used with the sessions active in those dates, and multiple. A listed price can be marked as paid by you or by an employer. It starts collapsed on narrow screens.
 5. **History**: each account's weekly closes on one time axis (hatched when a reset came early, outlined when the close was not observed) and the last week's 5-hour windows, one lane per account with a 5-hour limit.
 6. **Sources and method**: the accounts found, each source's last reading, and what the readings cover.
+
+While limit meters are loading, Subscription keeps its section headings and a shimmer placeholder for an account row; a screen-reader status says “Reading limit meters…”. Live meters replace the skeleton as soon as they arrive, even if session analysis is still running.
 
 Charts take Left, Right, Home and End to inspect readings. The two-minute refresh keeps keyboard focus, the inspected reading and open sections. See [Subscription limits and value](subscription.md).
 
@@ -171,3 +173,5 @@ The command palette jumps to any view or repository, toggles provider chips and 
     <img alt="The command palette: Go to Summary, Velocity, Costs, Pricing, Tools and Activity with their g-shortcuts, then All repositories and Focus entries for each repository" src="../assets/screenshot-palette.webp" width="600" />
   </picture>
 </p>
+
+Repositories with the same display name keep that name for the first hashed repository ID and use ` · 2`, ` · 3`, and so on for later IDs. These dashboard-only labels stay stable across usage sorting and machine filters; their tooltips explain “another checkout with the same name”. No paths are shown. Links still accept a hashed ID or the original plain name (the first match wins); exports retain the original names.

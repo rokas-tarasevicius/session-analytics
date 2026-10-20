@@ -460,16 +460,17 @@ when applicable.
 
 Percent changes require a previous value of at least $0.01, 100 tokens, 3 sessions/model
 calls, or 5 tool calls. Value/token percentages also require at least 3 prior model calls.
+For guarded comparisons, a current/prior ratio strictly above 10× is displayed as a multiple of the prior value (for example, $816.08 versus $5.23 is `▲ 156×`), rounded to at most one decimal, instead of a percentage increase. Exactly 10× still reads `▲ 900.0%`; declines retain percentages. Summary, Tools and Velocity (including Top increases) share this display rule; the underlying delta and baseline guards are unchanged.
 A tiny baseline produces N/A with the minimum stated, never an infinite percentage or a
 fabricated 0%. An observed prior period with exactly zero value shows **New** when the current
 period has activity and **No activity** when both are zero. Unavailable comparisons state their
 specific reason (no observed prior history, partly observed period, insufficient evidence,
 small baseline, or a stale snapshot).
-Top movers rank absolute increases separately for repository, model and agent over the
+Top increases rank positive absolute increases separately for repository, model and agent over the
 last seven completed days versus the preceding seven. Percent guards use each group's
-own prior calls; new groups can have a positive absolute increase with an N/A percentage.
+own prior calls; an observed zero baseline shows New, while a nonzero baseline below the minimum shows a small-baseline dash.
 Groups with incomplete evidence in either period are excluded from mover rankings; their
-count is displayed. Ranked rows show each period's known/eligible counts. This prevents a
+count is displayed. Ranked rows show compact evidence for previous → current (for example, `13.8M priced (100%) → 9.3M priced (100%)`); each cell's tooltip and accessible name retain the exact known/eligible counts and any unsupported-breakdown note. This prevents a
 return of pricing or token telemetry from being described as a workload increase.
 
 Burn is today's partial value divided by the median of the previous 14 full calendar

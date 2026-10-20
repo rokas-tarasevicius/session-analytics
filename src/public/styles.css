@@ -330,7 +330,7 @@ input { caret-color: var(--text); }
 .repo-nav { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .repo-list { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow: auto; }
 .repo-row { gap: 8px; }
-.repo-row .repo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-row .repo-name { flex: 1; min-width: 0; font-weight: 450; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-row .spark { width: 44px; height: 16px; flex: 0 0 auto; color: var(--spark); }
 .repo-row .spark path.line { stroke: currentColor; stroke-width: 1.5; }
 .repo-row .spark path.area { fill: currentColor; fill-opacity: .12; stroke: none; }

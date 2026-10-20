@@ -65,3 +65,19 @@ test("delta text uses shared arrows, precision and optional adjacent-period cont
   assert.equal(deltaText("new", 7), "new · vs previous 7d");
   assert.equal(deltaText(0.2), "▲ 20.0%");
 });
+
+
+test("large changes use current-to-prior multiples strictly above ten times across shared delta consumers", async () => {
+  const { deltaText } = await import("../src/public/format.js");
+  const { deltaDescription } = await import("../src/public/view-model.js");
+  const { changeLabel } = await import(new URL("../src/public/tools.js", import.meta.url).href);
+  assert.equal(deltaText(9), "▲ 900.0%", "exactly 10× stays a percentage");
+  assert.equal(deltaText(9.01), "▲ 10×");
+  assert.equal(deltaText(154.022), "▲ 155×", "the multiple includes the original baseline");
+  assert.equal(deltaText(155.038), "▲ 156×");
+  assert.equal(deltaText(11.34, 7), "▲ 12.3× vs previous 7d");
+  assert.equal(deltaText(-1), "▼ 100.0%", "a decline to zero stays a percentage");
+  assert.equal(changeLabel(155.038), "▲ 156×");
+  assert.equal(deltaDescription(816.08, 5.23, 7)?.text, "▲ 156× vs previous 7d");
+  assert.equal(deltaDescription(816.08, 5.23, 7)?.label, "Current value is 156 times the previous 7 days");
+});

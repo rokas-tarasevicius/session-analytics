@@ -359,6 +359,11 @@ test("Costs reserve a separate fixed badge slot so all amounts align", async () 
 test("selected sidebar repositories preserve the unselected label width", async () => {
   const cssRules = rules(await readCss("styles.css"));
   const selected = cssRules.find(({ selector }) => selector === '.repo-row[aria-pressed="true"]')!;
+  const label = cssRules.find(({ selector }) => selector === ".repo-row .repo-name")!;
+  assert.match(label.body, /flex:\s*1;/);
+  assert.match(label.body, /min-width:\s*0;/);
+  assert.match(label.body, /font-weight:\s*450;/, "the label keeps the same font metrics in active and inactive rows");
+  assert.ok(!cssRules.some(({ selector }) => selector.includes("aria-pressed") && selector.includes("repo-name")), "selection cannot reduce the label's width budget");
   assert.match(selected.body, /box-shadow:\s*inset 0 0 0 1px/);
   assert.doesNotMatch(selected.body, /(?:^|;)\s*(?:border(?:-width)?|padding(?:-inline)?|gap):/);
 });
@@ -409,4 +414,21 @@ test("pricing refresh instructions mark the runnable command as code", async () 
   const source = await readFile(new URL("../src/public/pricing.js", import.meta.url), "utf8");
   assert.match(source, /el\("code", "session-analytics rates update"\)/);
   assert.match(await readCss("pricing.css"), /\.pricing-notice code\s*\{[^}]*var\(--font-mono\)/);
+});
+
+
+test("wide Summary gives the daily chart more height beside the totals rail", async () => {
+  const source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
+  assert.match(source, /height = window\.matchMedia\("\(min-width: 1400px\)"\)\.matches \? 600 : width < 560 \? 220 : 272/);
+});
+
+
+test("Velocity docs describe Top increases and compact evidence with exact accessible counts", async () => {
+  const [dashboard, metrics] = await Promise.all(["dashboard", "metrics"].map((name) => readFile(new URL(`../docs/${name}.md`, import.meta.url), "utf8")));
+  for (const doc of [dashboard!, metrics!]) {
+    assert.doesNotMatch(doc, /Top movers/);
+    assert.match(doc, /Top increases/);
+    assert.match(doc, /13\.8M priced \(100%\) → 9\.3M priced \(100%\)/);
+    assert.match(doc, /tooltip.*accessible name/);
+  }
 });

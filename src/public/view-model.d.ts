@@ -85,3 +85,5 @@ export function singleFlight<A extends unknown[], R>(task: (...args: A) => R | P
 export const tableAccessors: Record<string, (item: RepositoryRow) => number | string>;
 export function sortRepositories(repositories: RepositoryRow[], key: string, direction: "ascending" | "descending"): RepositoryRow[];
 export function repositoryKey(id: string): string;
+
+export function repositoryDisplaySnapshot<T extends { repositories: Array<{ repository: { id: string; name: string } }>; sessions: SessionLike[] }>(snapshot: T): T;

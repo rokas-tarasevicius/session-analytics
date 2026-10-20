@@ -299,3 +299,18 @@ test("value used says 'first reading' only for a provider whose accounts start a
   // The dates start after Codex's first reading: Codex is counted from the start of the dates, which is no reading.
   assert.match(worth(at("2026-10-11T22:00:00Z")), /^Claude since 13 Oct \(first reading\), Codex since 11 Oct, to now, matched to accounts/);
 });
+
+
+test("pending limit reads show the limits-first skeleton with one screen-reader status and no invented account names", () => {
+  const container = new Element();
+  renderSubscription(container, { limits: null });
+  assert.equal(container.querySelector('[role="status"]')!.textContent, "Reading limit meters…");
+  assert.equal(container.querySelector('[role="status"]')!.className, "sr-only");
+  assert.deepEqual(container.querySelectorAll("h3").map((heading) => heading.textContent), ["Limits now", "Next", "Accounts", "What it's worth", "History", "Sources and method"]);
+  assert.equal(container.querySelector(".limits-now")!.querySelectorAll(".shimmer").length, 3);
+  assert.ok(container.querySelectorAll(".subscription-loading-row").every((row) => row.getAttribute("aria-hidden") === "true"));
+  render(container);
+  assert.equal(container.querySelectorAll(".subscription-loading").length, 0, "real meter rows replace the skeleton");
+  assert.equal(container.querySelectorAll('[role="status"]').length, 0);
+  assert.equal(container.querySelectorAll(".limit-row").length, 3);
+});
