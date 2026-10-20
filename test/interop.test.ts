@@ -573,6 +573,27 @@ test("imports reject private model identifiers in rate cards, provenance and vel
   }
 });
 
+test("snapshot imports reject invalid ledger dates, hours and dimension references", () => {
+  const source = cohort(1);
+  const mutations: Array<(s: MachineAnalytics) => void> = [
+    (s) => { s.velocity!.timeZone = "Invalid/Time_Zone"; },
+    (s) => { s.sessions[0]!.velocity!.buckets[0]![0] = "2026-02-30"; },
+    (s) => { s.sessions[0]!.velocity!.buckets[0]![1] = 24; },
+    (s) => { s.sessions[0]!.velocity!.buckets[0]![2] = s.sessions[0]!.velocity!.dimensions.length; },
+    (s) => { s.sessions[0]!.velocity!.undated.push([1000, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]); },
+    (s) => { s.sessions[0]!.velocity!.sessionDated = [["2026-02-30", 0, 0, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]]; },
+    (s) => { s.sessions[0]!.mcpEvidence!.pricingByDay![0]!.day = "2026-02-30"; },
+    (s) => { const row = s.sessions[0]!.mcpEvidence!.pricingByDay![0]!; row.pricedTokens = row.eligibleTokens + 1; },
+    (s) => { const rows = s.sessions[0]!.mcpEvidence!.pricingByDay!; rows.push({ ...rows[0]! }); },
+  ];
+  validateSnapshot(source);
+  for (const [index, mutate] of mutations.entries()) {
+    const bad = structuredClone(source); mutate(bad);
+    assert.equal(matchesSchema(bad, snapshotSchema), true, String(index));
+    assert.throws(() => validateSnapshot(bad), /Snapshot is invalid/, String(index));
+  }
+});
+
 test("integration: every metric namespace and pricing provenance survives filtered exports", () => {
   const filtered = filterSnapshot(snapshot, { providers: ["claude"] });
   validateSnapshot(filtered);

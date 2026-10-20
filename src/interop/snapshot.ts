@@ -83,8 +83,13 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
   if (!matchesSchema(value, snapshotSchema)) fail();
   const snapshot = value as MachineAnalytics;
   const date = (value: string) => Number.isFinite(timestampMilliseconds(value));
+  const day = (value: string) => /^\d{4}-\d\d-\d\d$/.test(value) && date(`${value}T00:00:00Z`);
   if (!date(snapshot.generatedAt)) fail();
-  if (!/^\d{4}-\d\d-\d\d$/.test(snapshot.rateCard.effectiveDate) || !date(`${snapshot.rateCard.effectiveDate}T00:00:00Z`)) fail();
+  if (!day(snapshot.rateCard.effectiveDate)) fail();
+  if (snapshot.velocity) {
+    try { new Intl.DateTimeFormat("en", { timeZone: snapshot.velocity.timeZone }); }
+    catch { fail(); }
+  }
   for (const { model, source, provenance } of snapshot.rateCard.models) {
     if (!validModel(model) || provenance && !validModel(provenance.rateModel)) fail();
     try {
@@ -103,6 +108,18 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
   for (const session of snapshot.sessions) {
     if (!validSessionHistory(session)) fail();
     if (session.velocity?.dimensions.some(({ model }) => !validModel(model))) fail();
+    if (session.velocity) {
+      const { dimensions, buckets, sessionDated, undated } = session.velocity;
+      for (const cells of [buckets, sessionDated ?? []]) for (const [date, hour, dimension] of cells) {
+        if (!day(date) || hour >= 24 || dimension >= dimensions.length) fail();
+      }
+      if (undated.some(([dimension]) => dimension >= dimensions.length)) fail();
+    }
+    const pricingDays = new Set<string>();
+    for (const row of session.mcpEvidence?.pricingByDay ?? []) {
+      if (!day(row.day) || pricingDays.has(row.day) || row.pricedTokens > row.eligibleTokens) fail();
+      pricingDays.add(row.day);
+    }
     if (session.machine !== undefined && !machines.has(session.machine)) fail();
     const key = `${session.provider}:${session.sessionKey}`;
     if (sessions.has(key) || repositories.get(session.repositoryId) !== session.repositoryName) fail();
@@ -110,7 +127,7 @@ export function validateSnapshot(input: unknown): MachineAnalytics {
     if (!session.transcript.warnings.every(approvedWarning)) fail();
     if (session.pricedTokenCoverage !== null && session.pricedTokenCoverage > 1) fail();
     if (new Set(session.models.map(({ model }) => model)).size !== session.models.length) fail();
-    if (Object.keys(session.spendByDay).some((day) => !/^\d{4}-\d\d-\d\d$/.test(day) || !date(`${day}T00:00:00Z`))) fail();
+    if (Object.keys(session.spendByDay).some((value) => !day(value))) fail();
     const source = session.evidence?.source;
     const cursor = session.provider === "cursor" && !source;
     const receipt = source === "conductor-result";
