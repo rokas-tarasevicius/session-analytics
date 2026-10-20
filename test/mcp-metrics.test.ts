@@ -100,6 +100,28 @@ test("tool stats count calls by name and never emit result or error fields", () 
   assert.deepEqual(response.data.tools, [{ name: "Bash", calls: 30 }, { name: "Read", calls: 5 }]);
 });
 
+test("tool breakdowns use the same evidence eligibility as MCP coverage totals", () => {
+  const observed = session({ tools: { Read: 3 } }); observed.metrics.toolCalls = 3;
+  const invalid = session({ tools: { Read: 100, Invalid: 100 } });
+  invalid.metrics.toolCalls = 200; invalid.transcript.status = "invalid";
+  const unavailable = session({ tools: { Read: 1000, Unavailable: 1000 }, evidence: {
+    source: "cursor-sdk", fidelity: "summary", tokens: "reported", tools: "unavailable", turns: "observed", timing: "provider", usageUnit: "run",
+  } });
+  unavailable.metrics.toolCalls = 2000;
+  const data = snapshot([observed, invalid, unavailable]);
+  const expected = [{ name: "Read", calls: 3 }];
+  const stats = buildPayload(data, "tool_stats", {}, NOW, 60);
+  assert.equal(stats.totals.coverage?.toolSessions, 1);
+  assert.equal(stats.totals.toolCalls, 3);
+  assert.ok("tools" in stats.data);
+  assert.deepEqual(stats.data.tools, expected);
+  assert.equal(stats.data.totalTools, 1);
+  assert.deepEqual(profile(data.analytics.sessions).toolMix, expected);
+  const comparison = buildPayload(data, "compare_agents", {}, NOW, 60);
+  assert.ok("agents" in comparison.data);
+  assert.deepEqual(comparison.data.agents.find((row) => row.provider === "claude")!.profile.toolMix, expected);
+});
+
 test("budget status reports dated value without quota headroom", () => {
   const response = buildPayload(snapshot([session()]), "budget_status", {}, NOW, 60);
   assert.ok("today" in response.data);
