@@ -60,6 +60,21 @@ test("simultaneous readings have one level and cannot provide reset or projectio
   }
 });
 
+test("zero pace never runs out, and utilization needs an observed close or a supported live projection", () => {
+  const now = start + 2 * DAY;
+  const zero = liveMeter(buildMeters([
+    reading("claude", "seven_day", start + WEEK, start + DAY, 0),
+    reading("claude", "seven_day", start + WEEK, now, 0),
+  ], now)[0]!, now);
+  assert.equal(zero.rate, 0);
+  assert.equal(zero.projected, 0);
+  assert.equal(zero.capAt, null);
+  assert.equal(zero.burnAt, null);
+  assert.equal(resetUtilization([], null), null);
+  const closed = resetHistory(buildMeters([reading("claude", "seven_day", start + WEEK, start + WEEK, 75)], start + WEEK)[0]!);
+  assert.deepEqual(resetUtilization(closed, null), { mean: 75, closed: 1, includesProjection: false });
+});
+
 test("cycles end at the next cycle's first reading; an early provider reset is not counted as waste", () => {
   const firstReset = start + WEEK, secondReset = start + DAY + WEEK;
   const meters = buildMeters([
