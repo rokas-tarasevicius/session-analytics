@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Install from npm: `npm install -g session-analytics`, or `npx session-analytics` to try it. npm serves the same tarball as the GitHub Release, and the release workflow publishes it with provenance through trusted publishing. See [installation](docs/cli.md#install).
+
 ## [0.10.1] - 2026-10-20
 
 ### Added

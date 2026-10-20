@@ -60,8 +60,6 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P1 | Maintainer step: claim the unscoped npm name by publishing the 0.10.0 release tarball with 2FA, so nobody else can register `session-analytics`; then configure trusted publishing for `release.yml` and environment `npm` (`npm trust github`) and set `NPM_PUBLISH`. The Homebrew tap, its deploy key and `HOMEBREW_TAP` are set up. | [release.md](docs/release.md#one-time-maintainer-steps) |
-| P2 | Once npm serves a release, add its install, upgrade and uninstall commands to the README, `docs/cli.md#install`, the FAQ and the agent skill (Homebrew's are there). They are held back until then, so no guide names a package that does not exist or that someone else could register. | [One-time maintainer steps](docs/release.md#one-time-maintainer-steps) |
 | P3 | Decide whether the package should ship declaration files; it ships none today. The release check already installs and runs the compiled artifact and requires CHANGELOG and license assets. | §4 P3; §6, Not in scope for 0.8.0 |
 | P3 | Upload the social preview through repository settings at release time. | §4 P3; §6 Release 0.8.0, maintainer step |
 | P3 | Make `release:check` compare the CHANGELOG's versions with `git tag` (fetching tags in the check job), with a documented exception list: 0.8.1 was prepared at `67b0281` but never tagged. | Release review (changelog versions without a tag) |

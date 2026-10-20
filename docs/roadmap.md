@@ -13,7 +13,7 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 - [ ] Resolve the documented comparison/denominator/context prerequisites and agree shared schema semantics before promoting new ratios or period comparisons.
 - [x] Build a compiled package and gate it on installing and running the packed tarball (`npm run release:check`).
 - [x] Publish that package from the tag workflow as a GitHub Release tarball with `SHA256SUMS` and a build provenance attestation, from 0.10.0.
-- [ ] Publish the same bytes on npm and in a Homebrew tap. The Homebrew tap serves 0.10.0 (`brew install rokas-tarasevicius/tap/session-analytics`); npm's [one-time setup](release.md#one-time-maintainer-steps) and first publish are pending.
+- [x] Publish the same bytes on npm (from 0.10.1) and in a Homebrew tap (from 0.10.0).
 - [ ] Evaluate standalone executable packaging separately.
 
 ## M0: Correctness
