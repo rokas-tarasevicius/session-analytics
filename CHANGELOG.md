@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Selected provider chips use the chart provider colour in both themes; deselected chips keep a hollow state mark.
+
 - Velocity explains the actual guard blocking a burn ratio or projection, including calendar days, pricing coverage and minimum activity figures.
 
 - Costs shows wholly unpriced model, provider and total values and shares as unavailable rather than free; accounting totals are unchanged.

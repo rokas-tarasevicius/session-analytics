@@ -261,6 +261,7 @@ test("chart contrast and theme-scoped grid and area tokens meet their surface ro
 
 test("unchecked chips keep readable text, solid borders and distinct state marks", async () => {
   const cssRules = rules(await readCss("styles.css"));
+  assert.match(cssRules.find(({ selector }) => selector === ".chip::before")!.body, /background: var\(--chip-color, var\(--text\)\)/);
   const body = cssRules.find(({ selector }) => selector === ".chip:has(input:not(:checked))")!.body;
   assert.match(body, /color:\s*var\(--text-2\)/); assert.match(body, /border-color:\s*var\(--line\)/); assert.doesNotMatch(body, /dashed/);
   assert.match(cssRules.find(({ selector }) => selector === ".chip:has(input:not(:checked))::before")!.body, /background:\s*transparent;.*inset/);
