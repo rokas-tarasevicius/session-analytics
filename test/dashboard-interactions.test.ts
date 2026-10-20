@@ -559,9 +559,9 @@ test("snapshot status shows live counts after load and follows the selected wind
   const { context, document, run } = await harness([live]);
   context["fetch"] = async () => ({ ok: true, json: async () => run("({...fixture, rateCard: {effectiveDate: '2026-10-01', models: []}})") });
   await run("loadSnapshot()");
-  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 1 live");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 1 session in progress");
   run("windowPreset = 'custom'; elements.windowStart.value = elements.windowEnd.value = '2026-09-01'; renderView()");
-  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready · 0 live");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "Local snapshot ready");
   run("elements.sync.dataset.state = 'loading'; elements.syncLabel.textContent = 'Refreshing…'; renderView()");
   assert.equal(document.querySelector("#sync-label")!.textContent, "Refreshing…");
   context["fetch"] = async () => ({ ok: true, json: async () => ({ kind: "shared", sources: [], minimumSessions: 5, summary: { sessions: 0 }, repositories: [] }) });
@@ -648,4 +648,13 @@ test("Summary, Velocity, Tools and Activity chips share registry labels, marks a
   assert.deepEqual(summary.querySelectorAll("input").map((input) => input.dataset["providerFilter"]), providerIds);
   assert.deepEqual(summary.querySelectorAll("input").map((input) => input.getAttribute("aria-label")), providerIds.map((id) => `${id === "unsupported" ? "Unsupported provider" : providerLabels[id]} daily usage`));
   assert.deepEqual(summary.querySelectorAll(".mark").map((mark) => mark.textContent), ["CP", "OC", "G", "AG", "?"]);
+});
+
+
+test("multi-machine ready status names sessions in progress and omits zero", async () => {
+  const { document, run } = await harness([sample()]);
+  run("fullSnapshot = {machines: [{state: 'ok'}, {state: 'ok'}]}; showReady({summary: {workingSnapshots: 3}})");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "2 of 2 machines ready · 3 sessions in progress");
+  run("showReady({summary: {workingSnapshots: 0}})");
+  assert.equal(document.querySelector("#sync-label")!.textContent, "2 of 2 machines ready");
 });

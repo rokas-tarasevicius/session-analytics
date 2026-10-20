@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Snapshot status names sessions in progress and omits the opaque “0 live” suffix.
+
 - Summary and Velocity provider chips share the registry names, marks and order used by Tools and Activity, including Copilot CLI and Gemini CLI.
 
 - Selected provider chips use the chart provider colour in both themes; deselected chips keep a hollow state mark.

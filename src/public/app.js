@@ -1050,7 +1050,8 @@ function closeMachines() { if (elements.machinesDialog.open) elements.machinesDi
 function showReady(view) {
   const machines = fullSnapshot?.machines ?? [], { ok, total, failed, stale, reading } = machineTally(machines);
   const named = (...states) => machines.filter(({ state }) => states.includes(state)).map(({ label }) => label).join(", ");
-  const live = view ? ` · ${integer(view.summary.workingSnapshots)} live` : "";
+  const working = view?.summary.workingSnapshots ?? 0;
+  const live = working ? ` · ${integer(working)} session${working === 1 ? "" : "s"} in progress` : "";
   elements.sync.dataset.state = failed || stale ? "warn" : reading ? "reading" : "live";
   elements.syncLabel.textContent = total < 2 ? `Local snapshot ready${live}`
     : `${ok} of ${total} machines ready${reading ? ` · reading ${named("reading")}` : ""}${failed ? ` · ${named("failed")} not read` : ""}${stale ? ` · ${named("stale")} stale` : ""}${live}`;

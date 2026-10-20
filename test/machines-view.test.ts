@@ -84,7 +84,7 @@ test("the strip lists every machine; a failed one opens its reason and fix; the 
   assert.match(document.querySelector("#machine-strip-meta")!.textContent, /^snapshot \d\d:\d\d$/);
   const sync = document.querySelector("#sync-context")!;
   assert.equal(sync.dataset["state"], "warn");
-  assert.equal(document.querySelector("#sync-label")!.textContent, `1 of 3 machines ready · boxa not read · agentbox stale · ${run("integer(activeView().summary.workingSnapshots)")} live`);
+  assert.equal(document.querySelector("#sync-label")!.textContent, "1 of 3 machines ready · boxa not read · agentbox stale");
   chips[2]!.listeners.get("click")!();
   const dialog = document.querySelector("#machines-dialog")!;
   assert.equal(dialog.open, true);
@@ -136,7 +136,7 @@ test("one machine keeps the plain sync label and no strip, and Coverage says whe
   assert.match(readFileSync(new URL("../src/public/index.html", import.meta.url), "utf8"), /id="coverage-machines-note" hidden>Agents on a server or VM too\? Run <code>session-analytics machines add HOST<\/code>/);
   assert.equal(document.querySelector("#coverage-machines-link")!.getAttribute("href"), "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/interop.md#combine-machines");
   assert.equal(document.querySelector("#machine-spend-panel")!.hidden, true);
-  assert.match(document.querySelector("#sync-label")!.textContent, /^Local snapshot ready · \d+ live$/);
+  assert.match(document.querySelector("#sync-label")!.textContent, /^Local snapshot ready$/);
   assert.equal(document.querySelector("#sync-context")!.dataset["state"], "live");
 });
 
@@ -155,7 +155,7 @@ test("while a machine is reading, the dashboard polls /api/machines and fetches 
   };
   run(`fixture.rateCard = { effectiveDate: '2026-10-01', models: [] }; fixture.machines = ${JSON.stringify(reading)}; render(fixture); showReady(activeView())`);
   assert.equal(document.querySelector("#sync-context")!.dataset["state"], "reading");
-  assert.match(document.querySelector("#sync-label")!.textContent, /^1 of 2 machines ready · reading agentbox · \d+ live$/);
+  assert.match(document.querySelector("#sync-label")!.textContent, /^1 of 2 machines ready · reading agentbox$/);
   assert.equal(document.querySelector("#machine-chips")!.children[1]!.querySelector(".machine-note")!.textContent, "reading · showing 2 h ago");
   assert.equal(ticks.length, 1);
   ticks[0]!();
@@ -166,7 +166,7 @@ test("while a machine is reading, the dashboard polls /api/machines and fetches 
   for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(requests, ["/api/machines", "/api/machines", "/api/analytics?wait=10"]);
   assert.equal(run("fullSnapshot.machines.every(({ state }) => state === 'ok')"), true);
-  assert.match(document.querySelector("#sync-label")!.textContent, /^2 of 2 machines ready · \d+ live$/);
+  assert.match(document.querySelector("#sync-label")!.textContent, /^2 of 2 machines ready$/);
 });
 
 test("Subscription counts every machine whose limits and sessions were read, whatever the strip shows, and names the others", async () => {
