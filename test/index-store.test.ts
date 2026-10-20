@@ -12,7 +12,7 @@ import { inflateRawSync } from "node:zlib";
 import { analyzeMachineSessions, analyzeRepositorySessions } from "../src/analyzer.ts";
 import { analyzeOptionsFrom } from "../src/options.ts";
 import { dataDirectory, indexPath, indexStatus, migrate, openIndexDatabase, pruneIndex, resetIndex, SCHEMA_VERSION, validatePruneDate } from "../src/store/database.ts";
-import { fingerprint } from "../src/store/fingerprint.ts";
+import { fingerprint, stillMatches } from "../src/store/fingerprint.ts";
 import { IndexScan, lastActivityAt } from "../src/store/index.ts";
 import { projectSession, sessionForIndex } from "../src/store/projection.ts";
 import type { AnalyzeOptions, MachineAnalytics, RateCard, SessionAnalytics } from "../src/types.ts";
@@ -639,6 +639,18 @@ test("same-size rewrites with restored mtime still invalidate fingerprints", asy
     assert.equal(changed.head, initial.head); assert.equal(changed.tail, initial.tail);
     assert.notEqual(changed.ctime, initial.ctime);
     assert.notDeepEqual(changed, initial);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("evidence fingerprints reject symlinks even when their targets match a saved generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "session-analytics-fingerprint-link-"));
+  try {
+    const path = join(root, "source.jsonl"), link = join(root, "replacement.jsonl"), secret = Buffer.alloc(32, 7);
+    await writeFile(path, "synthetic evidence\n");
+    const previous = await fingerprint(path, secret);
+    await symlink(path, link);
+    assert.equal(await stillMatches(link, previous), false);
+    await assert.rejects(fingerprint(link, secret));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
