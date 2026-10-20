@@ -319,3 +319,12 @@ test("Activity heatmap scrolls inside its panel without widening the view", asyn
   assert.match(cssRules.find(({ selector }) => selector === ".activity-panel")!.body, /min-width:\s*0/);
   assert.match(cssRules.find(({ selector }) => selector === ".activity-heatmap-scroll")!.body, /max-width:\s*100%;\s*overflow-x:\s*auto/);
 });
+
+
+test("phone legends keep provider words intact in a single list column", async () => {
+  const css = await readCss("styles.css");
+  const label = rules(css).find(({ selector }) => selector === ".chart-legend-label")!;
+  assert.match(label.body, /overflow-wrap:\s*normal/);
+  assert.doesNotMatch(label.body, /break-word|anywhere|break-all/);
+  assert.match(css, /@media \(max-width: 440px\)\s*\{\s*#daily-spend \.chart-legend\[data-layout="list"\]\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
