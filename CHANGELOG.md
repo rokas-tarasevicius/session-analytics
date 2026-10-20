@@ -40,6 +40,18 @@ All notable changes to this project are documented here. The format follows [Kee
 - Subscription active-session counts now follow the snapshot's local hours across daylight-saving changes. Sessions in the repeated hour and after a clock change are counted in the correct period; API-equivalent dollar totals are unchanged.
 - Subscription sessions from a profile claimed by two accounts now stay unattributed instead of going to whichever account was listed first. Misassigned account value and capacity decrease; unattributed value increases.
 - Subscription value calibration no longer uses rejected readings below 5%: 0% refusals could produce infinite capacity, and tiny levels overstated value per percent. Those segments now stay uncalibrated.
+- A delayed machine snapshot read can no longer replace a newer manual refresh with older totals or restart polling for the old snapshot.
+
+- A manual Subscription refresh now waits for an in-flight automatic meter read and then requests fresh meters once; the automatic read previously swallowed the forced refresh.
+
+- Dashboard links retain the active view’s provider chips, including an empty selection, across reload and Back/Forward. Refresh removes vanished repository focus and records any date-range clamping in the address bar.
+
+- Pricing freshness and Coverage source links now accept only HTTP(S), matching the model details dialog and excluding executable or local-file links from imported snapshots.
+
+- Velocity top movers label increases from an observed zero baseline as “New”, matching the calendar comparisons instead of claiming the baseline is too small.
+
+- Dashboard calendar comparisons normalize timezone-free snapshot timestamps as UTC, preventing Velocity from crashing and keeping window bounds in the snapshot timezone, including empty snapshots.
+
 - The dashboard no longer gives up on a scan that takes more than about a minute, such as the first scan after an upgrade, which parses all history again. It showed "No snapshot yet" and Retry did the same, since Safari drops a request that waits that long. It now asks `/api/analytics?wait=10`, which answers 202 while the scan runs on, and asks again until the snapshot is ready. When the analysis does fail, the banner gives the server's reason, such as the worker's heap limit, instead of a generic line.
 
 ## [0.10.3] - 2026-10-20

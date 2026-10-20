@@ -257,9 +257,9 @@ test("URL state round-trips view, window, custom dates and repository, and drops
   // One-shot instructions are removed and unrelated parameters survive.
   assert.equal(serializeUrlState({ view: "costs", window: "90" }, "?open=palette&theme=dark&density=comfortable&debug=1&view=summary"), "?view=costs&window=90&debug=1");
   const loaded = parseUrlState("?view=models&window=custom&start=2026-09-01&end=2026-09-31&open=palette&theme=dark&density=roomy", options);
-  assert.deepEqual(loaded, { view: "costs", window: "custom", start: "2026-09-01", end: null, repo: null, open: "palette", theme: "dark", density: null });
+  assert.deepEqual(loaded, { view: "costs", window: "custom", start: "2026-09-01", end: null, repo: null, providers: null, open: "palette", theme: "dark", density: null });
   assert.equal(parseUrlState("?start=2026-09-01&end=2026-09-07", options).window, "custom");
-  assert.deepEqual(parseUrlState("?view=nope&window=12", options), { view: null, window: null, start: null, end: null, repo: null, open: null, theme: null, density: null });
+  assert.deepEqual(parseUrlState("?view=nope&window=12", options), { view: null, window: null, start: null, end: null, repo: null, providers: null, open: null, theme: null, density: null });
 });
 
 test("dashboard writes view, window and repository changes to history and restores them on Back", async () => {

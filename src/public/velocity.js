@@ -3,6 +3,7 @@ import { categoryColor, categorySlotCount, modelColor, providerColor, providerKe
 import { renderLegend } from "./chart-legend.js";
 import { providerIds, providerLabels } from "./providers.js";
 import { DASH, chartWidth, redrawOnResize, dataTable, el, evidence, filterBar, kpi, selectField } from "./ui.js";
+import { normalizeTimestamp } from "./timestamps.js";
 import { ledgerAvailability } from "./view-model.js";
 import { agentLabels, averagePrice, buildVelocity, comparisonEvidenceFloor, comparisonSpan, localDay, metricDefinitions, shiftDay, topMovers, velocityIndicators } from "./velocity-data.js";
 
@@ -240,7 +241,7 @@ export function renderVelocity(container, sessions, context) {
       if (options.granularity === "hour" && options.mode === "cumulative") { options.mode = "lines"; mode.select.value = "lines"; }
       rolling.disabled = options.granularity !== "day" || options.mode === "cumulative";
       rollingLabel.title = rolling.disabled ? "A daily average is shown on non-cumulative daily charts." : "Seven calendar days, including inactive dates.";
-      const today = localDay(current.generatedAt, current.timeZone);
+      const today = localDay(normalizeTimestamp(current.generatedAt), current.timeZone);
       const comparison = comparisonSpan(current.end, today);
       // Long windows also need six dates before their first plotted day.
       const rollingStart = shiftDay(current.start, -6);
@@ -308,7 +309,7 @@ export function renderVelocity(container, sessions, context) {
       movers.heading.textContent = "Top movers";
       movers.article.append(el("p", "Last 7 completed days vs preceding 7", "chart-note"));
       if (!movement.available || !movement.rows.length) movers.article.append(el("p", !movement.available ? "Select at least 14 completed days of observed history with velocity data to compare movers." : "No measured increases among groups with complete evidence.", "empty-state"));
-      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]), { className: "velocity-movers" }));
+      else movers.article.append(dataTable([{ text: "Dimension", align: "left" }, { text: "Name", align: "left" }, "Previous 7 days", "Last 7 days", "Increase", "Change", { text: "Evidence · previous → current", align: "left" }], movement.rows.map((item) => [item.group, item.label, formatMetric(item.previous, options.metric), formatMetric(item.current, options.metric), `+${formatMetric(item.increase, options.metric)}`, item.previous === 0 ? "New" : item.delta === null ? `${DASH} small baseline` : deltaLabel(item.delta), `${evidenceText(item.previousEvidence, options.metric)} → ${evidenceText(item.currentEvidence, options.metric)}`]), { className: "velocity-movers" }));
       movers.article.append(evidence([`${dateRange(movement.start, movement.end)} vs ${dateRange(movement.previousStart, movement.previousEnd)} · ${metricDefinitions[options.metric].label}.`, movement.excludedGroups ? `${movement.excludedGroups} groups excluded because current or prior metric evidence is incomplete. A change in telemetry is not a measured change in workload.` : "Groups need complete current and prior metric evidence to appear. A change in telemetry is not a measured change in workload."]));
     };
     controller.update = update;
@@ -320,13 +321,18 @@ export function renderVelocity(container, sessions, context) {
         const label = el("label", null, "chip"), input = el("input"); input.type = "checkbox"; input.checked = selectedProviders.has(provider);
         label.dataset.provider = provider; label.style.setProperty("--chip-color", providerColor(provider)); input.setAttribute("aria-label", `${providerLabels[provider]} sessions`);
         label.append(input, el("span", providerLabels[provider]));
-        input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); }); filters.append(label);
+        input.addEventListener("change", () => { if (input.checked) selectedProviders.add(provider); else selectedProviders.delete(provider); update(); controller.context.onProvidersChange?.([...selectedProviders]); }); filters.append(label);
       }
     };
     for (const input of [group.select, metric.select, granularity.select, mode.select, rolling]) input.addEventListener("change", update);
     controllers.set(container, controller);
   }
   controller.sessions = sessions; controller.context = context;
+  if (context.selectedProviders) {
+    controller.selectedProviders.clear();
+    for (const provider of context.selectedProviders) controller.selectedProviders.add(provider);
+    for (const chip of container.querySelectorAll(".provider-key .chip")) chip.querySelector("input").checked = controller.selectedProviders.has(chip.dataset.provider);
+  }
   controller.syncChips(context.providers ?? providerIds);
   controller.update();
 }
