@@ -1928,8 +1928,12 @@ function render(data) {
 
 /** Fetch the snapshot a machine just completed, without the loading state or an error banner; false when it failed. */
 async function loadQuietly() {
+  const previous = fullSnapshot ?? snapshot ?? sharedSnapshot;
   try {
-    render(await fetchAnalytics(false)); showReady(snapshot ? activeView() : null);
+    const data = await fetchAnalytics(false);
+    // A newer render owns the snapshot and its machine polling. A delayed read must not roll either back.
+    if ((fullSnapshot ?? snapshot ?? sharedSnapshot) !== previous) return true;
+    render(data); showReady(snapshot ? activeView() : null);
     return true;
   } catch { return false; /* The snapshot on screen stays. */ }
 }

@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- A delayed machine snapshot read can no longer replace a newer manual refresh with older totals or restart polling for the old snapshot.
+
 - A manual Subscription refresh now waits for an in-flight automatic meter read and then requests fresh meters once; the automatic read previously swallowed the forced refresh.
 
 - Dashboard links retain the active view’s provider chips, including an empty selection, across reload and Back/Forward. Refresh removes vanished repository focus and records any date-range clamping in the address bar.
