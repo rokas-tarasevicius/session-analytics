@@ -385,3 +385,11 @@ test("checkbox controls retain a full control-height label and a visible box", a
   assert.match(cssRules.find(({ selector }) => selector === ".check")!.body, /min-height:\s*var\(--control\)/);
   assert.match(cssRules.find(({ selector }) => selector === ".check input")!.body, /width:\s*18px;\s*height:\s*18px;\s*flex-shrink:\s*0/);
 });
+
+
+test("export actions precede the collapsible scope and privacy explanation", async () => {
+  const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
+  const menu = html.slice(html.indexOf('class="export-options"'), html.indexOf('</details>', html.indexOf('class="export-options"')));
+  assert.ok(menu.indexOf('data-export="json"') < menu.indexOf('id="export-description"'));
+  assert.match(menu, /<details class="export-includes"><summary>What’s included<\/summary><p id="export-description">/);
+});

@@ -13,6 +13,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Narrow headers keep a short sync status and expose its full description to assistive technology and in a tooltip.
 - Snapshot metadata wraps without leaving a dangling separator on narrow screens.
+- Export downloads appear first; the detailed scope and privacy explanation sits under “What’s included”.
 - Checkbox controls, including Velocity’s 7-day average, use a larger visible box and a full-height clickable label.
 - Tool detail metrics use readable columns and a shorter per-session label.
 - Tools tables wrap structured names at separators and keep “small baseline” together.

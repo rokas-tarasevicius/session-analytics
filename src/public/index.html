@@ -127,13 +127,14 @@
             <details id="export-menu" class="export-menu">
               <summary class="icon-button" title="Export view" aria-label="Export view"><svg aria-hidden="true"><use href="#i-export"/></svg></summary>
               <div class="export-options">
-                <p id="export-description">Downloads stay on this machine.</p>
                 <button class="button" type="button" data-export="json">JSON snapshot</button>
                 <button class="button" type="button" data-export="sessions">Sessions CSV</button>
                 <button class="button" type="button" data-export="daily">Daily value CSV</button>
                 <button class="button" type="button" data-export="models">Models CSV</button>
                 <button class="button" type="button" data-export="tools">Tools CSV</button>
                 <button class="button" type="button" data-export="shared" hidden>Shared aggregates CSV</button>
+                <p>Downloads stay on this machine.</p>
+                <details class="export-includes"><summary>What’s included</summary><p id="export-description"></p></details>
               </div>
             </details>
           </div>

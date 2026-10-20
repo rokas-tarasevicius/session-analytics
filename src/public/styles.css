@@ -845,6 +845,8 @@ dialog::backdrop { background: var(--backdrop); }
 .export-options .button { display: block; width: 100%; min-height: var(--control); padding: 0 8px; border-radius: var(--radius-sm); text-align: left; font-size: var(--fs-sm); color: var(--text); }
 .export-options .button:hover { background: var(--surface-2); }
 .export-options .button[hidden] { display: none; }
+.export-includes > summary { min-height: var(--control); padding: 6px 8px; color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
+.export-includes[open] { max-height: 50vh; overflow-y: auto; }
 #export-status:empty { display: none; }
 #export-status { margin: 0 0 10px; font-size: var(--fs-sm); }
 
