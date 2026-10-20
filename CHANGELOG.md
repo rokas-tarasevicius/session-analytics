@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Pricing freshness and Coverage source links now accept only HTTP(S), matching the model details dialog and excluding executable or local-file links from imported snapshots.
+
 - Velocity top movers label increases from an observed zero baseline as “New”, matching the calendar comparisons instead of claiming the baseline is too small.
 
 - Dashboard calendar comparisons normalize timezone-free snapshot timestamps as UTC, preventing Velocity from crashing and keeping window bounds in the snapshot timezone, including empty snapshots.

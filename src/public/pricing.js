@@ -205,9 +205,12 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
     const age = ageLabel(source.ageDays);
     const card = kpi({ label: `${source.source} prices`, value: age === null ? null : `${age[0].toUpperCase()}${age.slice(1)} old`, reason: age === null ? "No cached snapshot" : null, note: `${integer(source.models)} models · ${source.stale ? "stale or missing" : "current"}` });
     card.className += " pricing-freshness";
-    const link = el("a", "Public price list ↗");
-    link.href = source.url; link.target = "_blank"; link.rel = "noreferrer";
-    card.append(link); cards.append(card);
+    if (/^https?:\/\//i.test(source.url ?? "")) {
+      const link = el("a", "Public price list ↗");
+      link.href = source.url; link.target = "_blank"; link.rel = "noreferrer";
+      card.append(link);
+    }
+    cards.append(card);
   }
   const updates = kpi({ label: "Price updates", value: status.policy === "reviewed-only" ? "Pinned" : status.offline ? "Offline" : "Automatic", note: `Reviewed card: ${humanDate(rateCard.effectiveDate)}` });
   updates.className += " pricing-updates"; cards.append(updates);

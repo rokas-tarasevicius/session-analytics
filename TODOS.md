@@ -22,7 +22,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | P3 | Preserve history coverage consistently in full-provider Summary and Costs JSON exports. | §2 P3, Behavior and copy |
 | P3 | Unify dialog and export coverage-warning implementations. | §2 P3, Behavior and copy |
 | P3 | Guard Velocity indicators against timezone-free hand-edited snapshot timestamps. Fixed by /qa on `t3/test-dashboard-logic`, 2026-10-20. | §2 P3, Behavior and copy |
-| P3 | Validate the scheme of Pricing freshness links like model-card links. | §2 P3, Behavior and copy |
+| P3 | Validate the scheme of Pricing freshness links like model-card links. Fixed by /qa on `t3/test-dashboard-logic`, 2026-10-20. | §2 P3, Behavior and copy |
 
 ## Accessibility
 

@@ -1167,6 +1167,7 @@ function renderRateCards(rateCard) {
   clear(elements.rateCardLinks);
   const groups = new Map();
   for (const item of rateCard.models) {
+    if (!/^https?:\/\//i.test(item.source ?? "")) continue;
     const source = item.provenance?.source ?? "reviewed";
     const urls = groups.get(source) ?? new Map();
     urls.set(item.source, item.model); groups.set(source, urls);
