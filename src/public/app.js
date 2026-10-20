@@ -62,7 +62,7 @@ const elements = {
   sessionNote: $("#metric-session-note"), sessions: $("#metric-sessions"),
   shortcutsToggle: $("#shortcuts-toggle"),
   spend: $("#metric-spend"), spendNote: $("#metric-spend-note"),
-  sync: $("#sync-context"), syncLabel: $("#sync-label"), syncShort: $("#sync-short"),
+  scanProgress: $("#scan-progress"), sync: $("#sync-context"), syncLabel: $("#sync-label"), syncShort: $("#sync-short"),
   theme: $("#theme-switch"), themeLabel: $("#theme-label"), toolCalls: $("#tool-calls"),
   toolsView: $("#tools-view"), toolsProviderFilters: $("#tools-provider-filters"),
   tools: $("#metric-tools"), viewStatus: $("#view-status"), warning: $("#warning-banner"), warningList: $("#warning-list"),
@@ -110,6 +110,9 @@ function snapshotProviders() {
 }
 // The initial analysis failed and there is no snapshot to show.
 let loadFailed = false;
+let scanRun = null;
+let scanTimer = null;
+let syncDescription = null;
 // The selected window has no sessions and no dated activity, so the view shows an empty state instead.
 let windowEmpty = false;
 // The last custom range applied; an empty or half-typed date input falls back to it.
@@ -1074,8 +1077,13 @@ function closeMachines() { if (elements.machinesDialog.open) elements.machinesDi
 /** Keep the compact status meaningful while preserving the full snapshot description. */
 function describeSyncStatus() {
   const label = elements.syncLabel.textContent;
-  elements.sync.setAttribute("aria-label", label); elements.sync.title = label;
+  if (syncDescription !== label) { elements.sync.setAttribute("aria-label", label); syncDescription = label; }
+  elements.sync.title = label;
   elements.syncShort.textContent = { live: "Ready", reading: "Reading…", loading: "Reading…", warn: "Check", error: "Stale" }[elements.sync.dataset.state] ?? "Check";
+  if (scanRun && elements.sync.dataset.state === "loading") {
+    const { done, total } = scanRun.progress;
+    elements.syncShort.textContent = total === null ? "Reading…" : `Reading ${total ? Math.floor(done / total * 100) : 100}%`;
+  }
   if (elements.sync.dataset.state === "error" && !snapshot && !sharedSnapshot) elements.syncShort.textContent = "Failed";
 }
 
@@ -1888,6 +1896,66 @@ function describeLoadError(error) {
   return `The analysis failed (HTTP ${status[1]}).${reason}`;
 }
 
+function scanElapsed(milliseconds) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+function endScanProgress() {
+  window.clearTimeout(scanTimer); scanTimer = null; scanRun = null;
+  elements.scanProgress.hidden = true;
+}
+
+function beginScanProgress(refreshing, now = Date.now()) {
+  endScanProgress();
+  const current = scanRun = { refreshing, textAt: now,
+    progress: { phase: "discover", done: 0, total: null, startedAt: new Date(now).toISOString(), fullParse: false } };
+  elements.scanProgress.hidden = false;
+  elements.scanProgress.removeAttribute("value");
+  elements.scanProgress.removeAttribute("aria-valuenow");
+  elements.scanProgress.removeAttribute("aria-valuemax");
+  const tick = () => {
+    if (scanRun !== current) return;
+    paintScanProgress(); scanTimer = window.setTimeout(tick, 1000);
+  };
+  scanTimer = window.setTimeout(tick, 1000);
+}
+
+function paintScanProgress(now = Date.now()) {
+  if (!scanRun) return;
+  const { progress, refreshing } = scanRun, { phase, done, total, startedAt, fullParse } = progress;
+  if (total === null) {
+    elements.scanProgress.removeAttribute("value");
+    elements.scanProgress.removeAttribute("aria-valuenow");
+    elements.scanProgress.removeAttribute("aria-valuemax");
+  } else {
+    // A discovered empty store is complete, on a native/ARIA range of zero to one.
+    const maximum = Math.max(1, total), value = total ? done : 1;
+    elements.scanProgress.setAttribute("max", maximum); elements.scanProgress.setAttribute("value", value);
+    elements.scanProgress.setAttribute("aria-valuemax", maximum); elements.scanProgress.setAttribute("aria-valuenow", value);
+  }
+  if (now - scanRun.textAt >= 2000) {
+    const action = phase === "discover" ? "Discovering sessions" : phase === "combine" ? "Combining sessions"
+      : fullParse ? "Parsing all history" : refreshing ? "Refreshing" : "Mapping local sessions";
+    const count = total === null ? (done ? ` · ${integer(done)} read` : "") : ` · ${integer(done)} of ${integer(total)}`;
+    const label = `${action}${count} · ${scanElapsed(now - Date.parse(startedAt))}`;
+    if (elements.syncLabel.textContent !== label) { elements.syncLabel.textContent = label; scanRun.textAt = now; }
+  }
+  describeSyncStatus();
+}
+
+function updateScanProgress(progress, now = Date.now()) {
+  if (!scanRun || !progress || !["discover", "parse", "combine"].includes(progress.phase)
+    || !Number.isSafeInteger(progress.done) || progress.done < 0
+    || (progress.total !== null && (!Number.isSafeInteger(progress.total) || progress.total < progress.done))
+    || typeof progress.startedAt !== "string" || !Number.isFinite(Date.parse(progress.startedAt))
+    || typeof progress.fullParse !== "boolean") return;
+  scanRun.progress = { phase: progress.phase, done: progress.done, total: progress.total, startedAt: progress.startedAt, fullParse: progress.fullParse };
+  paintScanProgress(now);
+}
+
 /**
  * The snapshot, asked for again every few seconds while the server is still analyzing: a first scan or one after an
  * upgrade can take minutes, longer than a browser keeps one request open. Only the first request asks for a new scan.
@@ -1895,7 +1963,11 @@ function describeLoadError(error) {
 async function fetchAnalytics(refresh) {
   for (let query = refresh ? "?refresh=1&wait=10" : "?wait=10"; ; query = "?wait=10") {
     const response = await fetch(`/api/analytics${query}`);
-    if (response.status === 202) continue;
+    if (response.status === 202) {
+      const body = await response.json();
+      updateScanProgress(body?.progress);
+      continue;
+    }
     if (!response.ok) {
       const error = new Error(`HTTP ${response.status}`);
       error.reason = await response.json().then((body) => body?.error, () => null);
@@ -1985,6 +2057,7 @@ async function loadSnapshot(refresh = false) {
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
+  beginScanProgress(Boolean(previous || refresh));
   describeSyncStatus();
   elements.main.dataset.state = previous ? "refreshing" : "loading";
   if (!previous) {
@@ -2013,6 +2086,7 @@ async function loadSnapshot(refresh = false) {
       showActivePanel(); renderViewStatus(null);
     }
   } finally {
+    endScanProgress();
     describeSyncStatus();
     elements.refresh.disabled = false;
   }

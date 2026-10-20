@@ -35,7 +35,7 @@ import { codexCounterFingerprint, readCodexLedger } from "./store/codex-ledger.t
 import { codexIntervalKey, codexIntervalCovered } from "./metrics/codex-counter-intervals.ts";
 
 import type {
-  AgentIdentity, ClaudeSubagentType, VelocityDimension,
+  AgentIdentity, AnalysisProgress, ClaudeSubagentType, VelocityDimension,
   AnalyzeOptions,
   RateCard,
   CostBreakdown,
@@ -2196,7 +2196,7 @@ function aggregate(
 
 /** Callbacks the analysis process passes; they never travel with the serialized options. */
 export interface AnalysisHooks {
-  onProgress?: (progress: import("./types.ts").AnalysisProgress) => void;
+  onProgress?: (progress: AnalysisProgress) => void;
   /** The index parses every present session again: it was cold, or its code or prices changed. */
   onFullParse?: () => void;
 }
@@ -2205,7 +2205,7 @@ export interface AnalysisHooks {
 function analysisWork(hooks: AnalysisHooks) {
   const known = new Set<string>(), completed = new Set<string>();
   let enumerated = false;
-  const report = (phase: import("./types.ts").AnalysisProgress["phase"]) => hooks.onProgress?.({
+  const report = (phase: AnalysisProgress["phase"]) => hooks.onProgress?.({
     phase, done: completed.size, total: enumerated ? known.size : null,
   });
   report("discover");
@@ -2309,6 +2309,7 @@ async function analyzeSelectedRepositories(
       workspaceRepositories,
     );
     progress.complete("cursor-database");
+    progress.discover([]);
     // Explicit roots replace discovery for that provider, so a narrowed or
     // synthetic scan never mixes in the machine's own history.
     const discoveredRoots = await discoverProviderRoots({

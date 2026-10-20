@@ -661,3 +661,72 @@ test("multi-machine ready status names sessions in progress and omits zero", asy
   run("showReady({summary: {workingSnapshots: 0}})");
   assert.equal(document.querySelector("#sync-label")!.textContent, "2 of 2 machines ready");
 });
+
+test("scan labels announce bounded progress, full parses and elapsed time while the bar updates immediately", async () => {
+  const { context, document, run } = await harness([]);
+  run("beginScanProgress(false, 0)");
+  context["progressFixture"] = { phase: "parse", done: 1240, total: 4567, startedAt: new Date(-118000).toISOString(), fullParse: false };
+  run("updateScanProgress(progressFixture, 2000)");
+  const label = document.querySelector("#sync-label")!, bar = document.querySelector("#scan-progress")!, short = document.querySelector("#sync-short")!;
+  assert.equal(label.textContent, "Mapping local sessions · 1,240 of 4,567 · 2 min");
+  assert.equal(document.querySelector("#sync-context")!.getAttribute("aria-label"), label.textContent);
+  assert.equal(bar.hidden, false);
+  assert.equal(bar.getAttribute("role"), "progressbar");
+  assert.equal(bar.getAttribute("aria-valuemin"), "0");
+  assert.equal(bar.getAttribute("aria-valuemax"), "4567");
+  assert.equal(bar.getAttribute("aria-valuenow"), "1240");
+  assert.equal(bar.getAttribute("value"), "1240");
+  assert.equal(short.textContent, "Reading 27%");
+  run("progressFixture.done = 2000; progressFixture.fullParse = true; updateScanProgress(progressFixture, 2500)");
+  assert.equal(label.textContent, "Mapping local sessions · 1,240 of 4,567 · 2 min", "live text changes at most every two seconds");
+  assert.equal(bar.getAttribute("aria-valuenow"), "2000", "the visual bar has the newest count");
+  assert.equal(short.textContent, "Reading 43%");
+  run("paintScanProgress(4000)");
+  assert.equal(label.textContent, "Parsing all history · 2,000 of 4,567 · 2 min");
+  run("progressFixture.phase = 'combine'; progressFixture.done = 4567; updateScanProgress(progressFixture, 6000)");
+  assert.match(label.textContent, /^Combining sessions · 4,567 of 4,567/);
+  run("progressFixture.phase = 'discover'; progressFixture.total = null; updateScanProgress(progressFixture, 8000)");
+  assert.match(label.textContent, /^Discovering sessions · 4,567 read/);
+  assert.equal(bar.getAttribute("aria-valuenow"), null);
+  assert.equal(bar.getAttribute("aria-valuemax"), null);
+  assert.equal(bar.getAttribute("value"), null);
+  assert.equal(short.textContent, "Reading…");
+  run("endScanProgress(); beginScanProgress(true, 10000); progressFixture.phase = 'parse'; progressFixture.total = 5000; updateScanProgress(progressFixture, 12000)");
+  assert.match(label.textContent, /^Parsing all history/);
+  run("progressFixture.fullParse = false; updateScanProgress(progressFixture, 14000)");
+  assert.match(label.textContent, /^Refreshing · 4,567 of 5,000/);
+  run("progressFixture.done = progressFixture.total = 0; updateScanProgress(progressFixture, 16000)");
+  assert.equal(bar.getAttribute("aria-valuenow"), "1", "empty work is complete");
+  assert.equal(bar.getAttribute("aria-valuemax"), "1");
+  run("endScanProgress()");
+  assert.equal(bar.hidden, true);
+});
+
+test("pending bodies update progress between polls and the local elapsed timer stops on success or failure", async () => {
+  for (const failed of [false, true]) {
+    const { context, document, run } = await harness([sample()]);
+    let timer: (() => void) | undefined, cleared = 0, release!: (value: unknown) => void;
+    const testWindow = context["window"] as { setTimeout: (callback: () => void, ms: number) => number; clearTimeout: (id: number) => void };
+    testWindow.setTimeout = (callback, ms) => { if (ms === 1000) timer = callback; return 42; };
+    testWindow.clearTimeout = (id) => { if (id === 42) cleared++; };
+    const fixture = run("fixture");
+    let calls = 0;
+    context["fetch"] = async () => ++calls === 1
+      ? { status: 202, json: async () => ({ pending: true, progress: { phase: "parse", done: 27, total: 100, startedAt: new Date(Date.now() - 61000).toISOString(), fullParse: false } }) }
+      : await new Promise((resolve) => { release = resolve; });
+    const pending = run("loadSnapshot(true)");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(document.querySelector("#scan-progress")!.getAttribute("aria-valuenow"), "27");
+    assert.equal(document.querySelector("#sync-short")!.textContent, "Reading 27%");
+    run("scanRun.textAt = -Infinity");
+    timer!();
+    assert.match(document.querySelector("#sync-label")!.textContent, /^Refreshing · 27 of 100 · 1 min$/);
+    release(failed ? { ok: false, status: 500, json: async () => ({ error: "Analysis failed." }) } : { ok: true, status: 200, json: async () => fixture });
+    await pending;
+    assert.ok(cleared > 0);
+    assert.equal(document.querySelector("#scan-progress")!.hidden, true);
+    const label = document.querySelector("#sync-label")!.textContent;
+    timer!();
+    assert.equal(document.querySelector("#sync-label")!.textContent, label, "a queued timer cannot overwrite a ready/error label");
+  }
+});

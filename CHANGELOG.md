@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Dashboard scans show the current phase, completed session work, elapsed time and a progress bar during first scans, full history re-parses and refreshes, with compact phone status and quiet screen-reader updates.
+
 ### Fixed
 
 - Subscription shows section headings and a meter-row skeleton while limits load, with a screen-reader loading status.

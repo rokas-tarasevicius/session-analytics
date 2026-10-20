@@ -466,6 +466,21 @@ Week/month/hour series, rolling means, changes, movers and projection bands are 
 in the browser from these cells and are not additional exported fields. Definitions,
 minimum-activity guards and unknown-data rules are in [metrics.md](metrics.md#velocity-snapshot-version-1).
 
+### Dashboard pending analytics fields
+
+`/api/analytics?wait=10` may return HTTP 202 with only `pending: true` and `progress`.
+Progress is transient and content-free; it never includes provider names, paths, session IDs or errors.
+
+| Field | Meaning | Privacy tier |
+| --- | --- | --- |
+| `pending` | Fixed boolean `true` while the scan runs | P0 |
+| `progress` | Current scan counters, or null when no scan is running | P0 |
+| `progress.phase` | Fixed vocabulary: `discover`, `parse`, `combine` | P0 |
+| `progress.done` | Nonnegative integer completed work units | P0 |
+| `progress.total` | Nonnegative integer known work units, or null | P0 |
+| `progress.startedAt` | Server-generated UTC scan start timestamp | P0 |
+| `progress.fullParse` | Boolean: this index is parsing all history again | P0 |
+
 ### Health endpoint
 
 `GET /api/health` returns `{ service: "session-analytics", dataSource: "live" | "snapshot", snapshot: "ready" | "building" | "not-started", status: "ok", instanceToken: "<64 hex characters>", optionsHash: "<64 hex characters>", scanHash: "<64 hex characters>", version: "X.Y.Z" }`. All fields are P0 and carry no local evidence. `instanceToken` is random per launch; `optionsHash` is the SHA-256 of normalized analysis options, including a digest of the machines read; `scanHash` is the same without the machines, so a launch can say that only the machines differ; `version` is the tool version, also shown in the dashboard footer. None returns paths, option values, snapshot filenames or transcript data. Live port reuse requires the same version, the same options hash and a token matching `dashboard-PORT.token` in the private data directory; a launch that finds another version prints the running version only when it matches the release grammar (`X.Y.Z` with an optional short prerelease suffix). Each dashboard writes its token even with `--no-index` or `--snapshot`; this does not open or write the index. Tokens are replaced on the next launch on that port and contain no retained analytics.
@@ -760,18 +775,3 @@ Calibration uses the same locally projected SDK metadata and already analyzed na
 New fixed warnings disclose partial reported model allocations, retained main-loop token lower bounds and unallocated unknown-model balances. They are P0 enumerated explanations, with no raw text. Version-qualified Conductor marginal values and result identity correlations remain internal. Per-model historical tariff provenance uses existing P0/P1 price metadata; no new content tier or network request at analysis time is introduced.
 
 External SQLite readers remain read-only when a checkpointed WAL database has no sidecars in a non-writable source directory. The guarded immutable fallback reads the original file without creating sidecars; it rejects a newly appeared WAL/journal or any main-file generation change. Its fixed error contains no path, schema value or source text. Generation metadata stays inside the reader and adds no public field.
-
-### Dashboard pending analytics fields
-
-`/api/analytics?wait=10` may return HTTP 202 with only `pending: true` and `progress`.
-Progress is transient and content-free; it never includes provider names, paths, session IDs or errors.
-
-| Field | Meaning | Privacy tier |
-| --- | --- | --- |
-| `pending` | Fixed boolean `true` while the scan runs | P0 |
-| `progress` | Current scan counters, or null when no scan is running | P0 |
-| `progress.phase` | Fixed vocabulary: `discover`, `parse`, `combine` | P0 |
-| `progress.done` | Nonnegative integer completed work units | P0 |
-| `progress.total` | Nonnegative integer known work units, or null | P0 |
-| `progress.startedAt` | Server-generated UTC scan start timestamp | P0 |
-| `progress.fullParse` | Boolean: this index is parsing all history again | P0 |
