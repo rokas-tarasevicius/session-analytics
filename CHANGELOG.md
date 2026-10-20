@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Release builds copy only the public reviewed rate card from `data/`; a private index, saved-machine file or cached snapshot stored alongside it can no longer enter the package.
 - Independent Claude and Codex verification skips malformed non-object JSON records while retaining later valid evidence; a `null` record no longer aborts a file or the oracle.
 - Manually running the Release PR workflow from another branch still prepares the release from `master`, so unrelated branch changes cannot enter the release pull request.
 - Release preparation generates notes from commit titles when Unreleased contains only empty category headings, instead of creating an empty release that preflight rejects.

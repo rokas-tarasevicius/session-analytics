@@ -88,7 +88,10 @@ export function build(out: string): void {
   // other non-TypeScript file under src that a module reads at run time without importing it.
   const assets = (path: string): boolean => !basename(path).startsWith(".") && !path.endsWith(".d.ts");
   cpSync(join(root, "src"), join(out, "src"), { recursive: true, filter: (path) => assets(path) && !path.endsWith(".ts") });
-  for (const directory of ["data", "schemas", "skills"]) cpSync(join(root, directory), join(out, directory), { recursive: true, filter: assets });
+  // Only the reviewed public rate card is a release input. An in-checkout data directory can also hold a private index.
+  const data = join(root, "data");
+  cpSync(data, join(out, "data"), { recursive: true, filter: (path) => path === data || path === join(data, "rate-cards.json") });
+  for (const directory of ["schemas", "skills"]) cpSync(join(root, directory), join(out, directory), { recursive: true, filter: assets });
   for (const file of ["README.md", "LICENSE", "CHANGELOG.md"]) cpSync(join(root, file), join(out, file));
   const manifest = packageManifest(JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>);
   writeFileSync(join(out, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);

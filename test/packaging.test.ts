@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { stripTypeScriptTypes } from "node:module";
 import { dirname, join } from "node:path";
@@ -116,6 +116,31 @@ test("packaging: the build empties only a new, empty or earlier build directory,
     }
     assert.throws(() => checkOutput(scratch, join(scratch, "alias", "home")), /contains this checkout or your home/, "canonicalize home as well");
     assert.doesNotThrow(() => checkOutput(join(scratch, "alias", "new"), home), "a safe new directory below a symlink is allowed");
+  } finally { await rm(scratch, { recursive: true, force: true }); }
+});
+
+test("packaging: an in-checkout private data directory cannot add files to the release", { timeout: 60_000 }, async () => {
+  const checkout = fileURLToPath(new URL("../", import.meta.url));
+  const scratch = await mkdtemp(join(tmpdir(), "session-analytics-private-build-")), root = join(scratch, "checkout"), out = join(scratch, "package");
+  try {
+    await mkdir(join(root, "scripts"), { recursive: true });
+    for (const path of ["bin", "src", "data", "schemas", "skills", "package.json", "tsconfig.json", "tsconfig.build.json", "README.md", "LICENSE", "CHANGELOG.md", "scripts/build.ts"]) {
+      await cp(join(checkout, path), join(root, path), { recursive: true });
+    }
+    await symlink(join(checkout, "node_modules"), join(root, "node_modules"), "dir");
+    await mkdir(join(root, "data/private-cache"));
+    const sentinel = "PRIVATE_BUILD_DATA_SENTINEL";
+    await writeFile(join(root, "data/private-cache/snapshot.json"), sentinel);
+    await writeFile(join(root, "data/index.sqlite"), sentinel);
+    await writeFile(join(root, "data/machines.json"), sentinel);
+    const result = spawnSync(process.execPath, [join(root, "scripts/build.ts"), "--out", out], { encoding: "utf8", timeout: 55_000,
+      env: { ...process.env, SESSION_ANALYTICS_DATA_DIR: join(root, "data") } });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(await readdir(join(out, "data")), ["rate-cards.json"]);
+    assert.equal(await readFile(join(root, "data/private-cache/snapshot.json"), "utf8"), sentinel, "building does not change the private source");
+    const packed = spawnSync("npm", ["pack", out, "--dry-run", "--json", "--ignore-scripts"], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    assert.equal(packed.status, 0, packed.stderr);
+    assert.deepEqual(JSON.parse(packed.stdout)[0].files.map((entry: { path: string }) => entry.path).filter((path: string) => path.startsWith("data/")), ["data/rate-cards.json"]);
   } finally { await rm(scratch, { recursive: true, force: true }); }
 });
 
