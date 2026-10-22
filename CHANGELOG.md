@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Activity shows the longest consecutive start-day streak, active-day count, busiest hour and busiest weekday for the selected window, repository and providers, using known starts in the snapshot timezone and labeling ties.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

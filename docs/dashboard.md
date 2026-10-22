@@ -160,6 +160,8 @@ Tools answers "how do the agents work?" using tool-call names only; arguments an
 
 Activity answers "when do sessions start?" A weekday-by-hour heatmap counts session starts in your local timezone for the selected providers, and a repository list shows where those sessions went. Sessions without a provider-recorded start time are excluded rather than guessed from file dates.
 
+Above the heatmap, **Longest start-day streak** shows the longest run of consecutive calendar dates with at least one known session start in the selected window, alongside the number of active start days. **Busiest hour** sums starts at the same clock hour across all weekdays; **Busiest weekday** sums starts on each weekday. All three follow the repository focus, provider chips and snapshot timezone (`--time-zone`), even when the browser uses another zone. Ties display the earliest hour or Monday-first weekday with a tie count; assistive text lists every tied value. Without known starts, the existing empty state replaces these insights. These are patterns in session starts, not continuous work time or a productivity score.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-activity-dark.webp" />

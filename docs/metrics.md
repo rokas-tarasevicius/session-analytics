@@ -266,6 +266,8 @@ The chart header shows the selected metric's period total.
 
 ### Calendar and attribution
 
+Activity's rhythm KPIs use the same known session starts as its weekday-hour heatmap, after the selected date window, repository and provider filters. Unknown, invalid and file-mtime starts are excluded. **Active days** count distinct calendar start dates in the snapshot timezone. **Longest start-day streak** is the longest consecutive run of those dates inside the window; gaps break a run, multiple starts on one date count once, and daylight-saving changes do not break adjacent calendar dates. It is not a live/current streak or a duration. **Busiest hour** aggregates starts per local clock hour across weekdays; **Busiest weekday** aggregates starts per weekday across hours. Repeated daylight-saving clock hours share a bucket, as in the heatmap. Ties are retained; the display chooses the earliest hour or Monday-first weekday and labels the tie count. No known starts means unavailable insights, never a zero-day streak or a zero-count winner. These browser-derived aggregates add no snapshot fields and change no accounting totals.
+
 - A velocity cell is one **local calendar date × local clock hour × dimension**. Dimensions
   combine agent, model, execution kind and effort. Provider and repository come from the
   containing session, so the payload does not duplicate their identifying metadata.
