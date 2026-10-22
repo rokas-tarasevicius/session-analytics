@@ -3,6 +3,14 @@ import type { MetricCoverage } from "./providers.js";
 
 export type ToolChange = number | null | "new";
 export function callCount(value: number): number;
+export interface ToolOriginRow {
+  name: string; calls: number; callShare: number | null;
+  sessions: number; sessionShare: number | null; repositories: number; repositoryShare: number | null;
+}
+export interface ToolOrigins {
+  coverage: MetricCoverage; eligibleRepositories: number; groups: ToolOriginRow[]; servers: ToolOriginRow[];
+}
+export function buildToolOrigins(sessions: SessionAnalytics[]): ToolOrigins;
 export interface ToolRow {
   name: string; calls: number; share: number; sessions: number; repositories: number;
   providers: Array<{ provider: string; label: string; calls: number }>;
