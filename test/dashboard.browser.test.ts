@@ -336,6 +336,16 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-label')`), "Search views, repositories and commands");
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-expanded')`), "true");
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-activedescendant')`), "command-option-0");
+    // IME Enter, including the commit boundary, cannot execute the focused command.
+    for (const isComposing of [true, false]) {
+      assert.deepEqual(await browser.evaluate(`(() => {
+        const input = document.querySelector('#command-input');
+        input.value = 'Go to Tools'; input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: ${isComposing}, bubbles: true }));
+        return { paletteOpen: document.querySelector('#command-palette').open, view: document.querySelector('[data-view-button][aria-current=page]').dataset.viewButton };
+      })()`), { paletteOpen: true, view: "summary" });
+    }
+    await browser.evaluate(`const input = document.querySelector('#command-input'); input.value = ''; input.dispatchEvent(new Event('input'));`);
     // Ranking: the closest match comes first and weak fuzzy matches drop out.
     await browser.send("Input.insertText", { text: "help" });
     assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('#command-list .option-label')].map((label) => label.textContent)`), ["Keyboard shortcuts"]);

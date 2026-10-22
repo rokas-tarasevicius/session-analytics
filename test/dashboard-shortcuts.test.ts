@@ -34,6 +34,7 @@ test("typing, composition, held keys, and browser modifiers cannot fire characte
       assert.equal(matchShortcut({ key, target }), null, key);
       assert.equal(matchShortcut({ key, target }, { pending: "g" }), null, key);
     }
+    assert.equal(matchShortcut({ ...keyEvent(key), keyCode: 229, isComposing: false }), null, `${key}: IME commit boundary`);
     for (const flag of ["defaultPrevented", "isComposing", "repeat", "altKey", "ctrlKey", "metaKey"]) assert.equal(matchShortcut({ ...keyEvent(key), [flag]: true }), null, `${key}: ${flag}`);
   }
   assert.deepEqual(matchShortcut({ key: "K", ctrlKey: true, target: { tagName: "INPUT", type: "text" } }), { action: "palette", value: null });
@@ -84,9 +85,13 @@ test("composing or held Enter in the palette cannot run a command", async () => 
   run("openPalette(); renderPalette('Go to Tools')");
   const input = document.querySelector("#command-input")!;
   const keydown = input.listeners.get("keydown")!;
-  for (const flag of ["isComposing", "repeat"]) {
-    keydown({ key: "Enter", [flag]: true, preventDefault() { throw new Error("Composition must keep its default behavior"); } });
+  for (const flags of [{ isComposing: true }, { keyCode: 229, isComposing: false }, { keyCode: 229, isComposing: true }, { repeat: true }]) {
+    keydown({ key: "Enter", ...flags, preventDefault() { throw new Error("Composition must keep its default behavior"); } });
     assert.equal(run("currentViewName()"), "summary");
     assert.equal(document.querySelector("#command-palette")!.open, true);
   }
+  run("resetExportMenu = () => {}; snapshot.rateCard = {};");
+  keydown({ key: "Enter", preventDefault() {} });
+  assert.equal(run("currentViewName()"), "tools");
+  assert.equal(document.querySelector("#command-palette")!.open, false);
 });

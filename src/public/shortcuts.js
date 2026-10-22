@@ -28,7 +28,7 @@ export function shortcutHint(id, value = null) {
 
 /** Resolves an eligible global shortcut or chord prefix, without touching the DOM or app state. */
 export function matchShortcut(event, { enabled = true, pending = null } = {}) {
-  if (event.defaultPrevented || event.isComposing || event.repeat) return null;
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat) return null;
   const modified = event.metaKey || event.ctrlKey;
   if (event.altKey || (modified && (event.shiftKey || event.key.toLowerCase() !== "k"))) return null;
   const key = modified ? "Mod+k" : event.key;

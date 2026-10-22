@@ -1862,7 +1862,7 @@ function closeHelp() { if (elements.help.open) elements.help.close(); }
 elements.palette.addEventListener("close", syncPaletteExpanded);
 elements.commandInput.addEventListener("input", () => renderPalette(elements.commandInput.value));
 elements.commandInput.addEventListener("keydown", (event) => {
-  if (event.isComposing || (event.repeat && event.key === "Enter")) return;
+  if (event.isComposing || event.keyCode === 229 || (event.repeat && event.key === "Enter")) return;
   if (event.key === "ArrowDown") { event.preventDefault(); setPaletteActive(paletteActive + 1); }
   else if (event.key === "ArrowUp") { event.preventDefault(); setPaletteActive(paletteActive - 1); }
   else if (event.key === "Home") { event.preventDefault(); setPaletteActive(0); }
