@@ -236,7 +236,22 @@ function sessionsForProviders(sessions, scope) {
   return sessions.filter(({ provider }) => selected.has(provider));
 }
 
+let activeViewCache = null;
+
 function activeView() {
+  // Provider chips and view switches only change presentation. Keep one model until its data or scope changes.
+  // Use object identity, not generatedAt: a refreshed or machine-filtered snapshot can have the same timestamp.
+  // Stale/reading machine warnings include relative ages, which can change without a new snapshot.
+  const inputs = [snapshot, fullSnapshot, sessionsByRepository, elements.repositoryFilter.value, windowPreset,
+    elements.windowStart.value, elements.windowEnd.value, elements.windowStart.min, elements.windowEnd.max,
+    machineWarnings(fullSnapshot?.machines, []).join("\n")];
+  if (activeViewCache && inputs.every((value, index) => value === activeViewCache.inputs[index])) return activeViewCache.view;
+  const view = buildActiveView();
+  activeViewCache = { inputs, view };
+  return view;
+}
+
+function buildActiveView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
@@ -2043,7 +2058,7 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; activeViewCache = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
   elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");
