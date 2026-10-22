@@ -101,6 +101,45 @@ test("MCP rendering uses names and counters only, with explicit denominators and
   assert.doesNotMatch(panel.textContent, /PRIVATE_TOOL_(ARGUMENT|RESULT)_SENTINEL/);
 });
 
+test("MCP server list shows five ranked servers, discloses the remainder in place, and follows the ranking", async () => {
+  const tools = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`mcp__server_${i}__run`, i + 1]));
+  const { document, run } = await harness([session(tools), session({})]);
+  run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
+  const panel = document.querySelector(".tools-origins")!;
+  const names = () => panel.querySelectorAll(".tools-origin-name").map(node => node.textContent);
+  assert.deepEqual(names(), ["MCP-prefixed tools", "Other tool names", "server_29", "server_28", "server_27", "server_26", "server_25"]);
+  const toggle = panel.querySelector("button")!;
+  assert.equal(toggle.textContent, "+25 more servers");
+  assert.equal(toggle.getAttribute("type"), "button");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.ok(panel.querySelector(`#${toggle.getAttribute("aria-controls")}`));
+  assert.match(panel.textContent, /2 eligible sessions/);
+  const layout = panel.parentElement!;
+  const rankingIndex = layout.children.findIndex(node => node.querySelector(".tools-ranking"));
+  assert.ok(rankingIndex >= 0 && rankingIndex < layout.children.indexOf(panel));
+  toggle.listeners.get("click")!();
+  assert.equal(names().length, 32);
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(toggle.textContent, "Show fewer servers");
+  assert.equal(panel.querySelector("button"), toggle); // Focus stays on the same disclosure.
+  assert.match(panel.textContent, /2 eligible sessions/);
+  toggle.listeners.get("click")!();
+  assert.equal(names().length, 7);
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(toggle.textContent, "+25 more servers");
+});
+
+test("MCP server disclosure is absent when all servers fit", async () => {
+  for (const count of [0, 1, 5]) {
+    const tools = Object.fromEntries(Array.from({ length: count }, (_, i) => [`mcp__server_${i}__run`, 1]));
+    const { document, run } = await harness([session(tools)]);
+    run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
+    const panel = document.querySelector(".tools-origins")!;
+    assert.equal(panel.querySelectorAll(".tools-origin-name").length, count + 2);
+    assert.equal(panel.querySelector("button"), null);
+  }
+});
+
 test("profile footer names the snapshot timezone", async () => {
   const { document, run } = await harness([session({ Read: 3 })], { timeZone: "Europe/London" });
   run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");

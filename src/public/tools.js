@@ -66,17 +66,37 @@ function originsPanel(sessions) {
   const data = buildToolOrigins(sessions), section = panel("MCP server usage", "tools-origins-title");
   section.result.classList.add("tools-origins");
   const reach = (count, share) => `${integer(count)} · ${percent(share)}`;
-  const rows = [...data.groups, ...data.servers].map((row, index) => {
-    const name = el("span", row.name, "tools-origin-name");
-    if (index < data.groups.length) name.classList.add("tools-origin-group");
-    return [name, labelledCell("Calls · share", reach(row.calls, row.callShare)),
-      labelledCell("Sessions · reach", reach(row.sessions, row.sessionShare)),
-      labelledCell("Repositories · reach", reach(row.repositories, row.repositoryShare))];
-  });
-  section.result.append(note("MCP-prefixed calls versus other tool names, followed by each observed MCP server."),
-    dataTable(["Tool origin / server", "Calls · share", "Sessions · reach", "Repositories · reach"], rows,
+  const table = el("div"), limit = 5;
+  table.setAttribute("id", "tools-origins-rows");
+  const renderRows = (expanded) => {
+    const rows = [...data.groups, ...(expanded ? data.servers : data.servers.slice(0, limit))].map((row, index) => {
+      const name = el("span", row.name, "tools-origin-name");
+      if (index < data.groups.length) name.classList.add("tools-origin-group");
+      return [name, labelledCell("Calls · share", reach(row.calls, row.callShare)),
+        labelledCell("Sessions · reach", reach(row.sessions, row.sessionShare)),
+        labelledCell("Repositories · reach", reach(row.repositories, row.repositoryShare))];
+    });
+    table.replaceChildren(dataTable(["Tool origin / server", "Calls · share", "Sessions · reach", "Repositories · reach"], rows,
       { rowHeader: true, className: "tools-origins-table", caption: "Tool origins and MCP servers in the current selection",
-        empty: `${DASH} No selected sessions carry tool evidence.` }),
+        empty: `${DASH} No selected sessions carry tool evidence.` }));
+  };
+  renderRows(false);
+  section.result.append(note("MCP-prefixed calls versus other tool names, followed by observed MCP servers ranked by calls."), table);
+  if (data.servers.length > limit) {
+    let expanded = false;
+    const label = `+${integer(data.servers.length - limit)} more servers`;
+    const toggle = el("button", label, "button tools-toggle");
+    toggle.setAttribute("type", "button"); toggle.dataset.focusKey = "tools:origins-toggle";
+    toggle.setAttribute("aria-expanded", "false"); toggle.setAttribute("aria-controls", "tools-origins-rows");
+    toggle.addEventListener("click", () => {
+      expanded = !expanded;
+      renderRows(expanded);
+      toggle.textContent = expanded ? "Show fewer servers" : label;
+      toggle.setAttribute("aria-expanded", String(expanded));
+    });
+    section.result.append(toggle);
+  }
+  section.result.append(
     note(`Shares use all recorded calls, ${integer(data.coverage.eligible)} eligible sessions and ${integer(data.eligibleRepositories)} repositories with tool evidence in this selection. Session and repository reach can overlap.`),
     note("MCP recognition uses mcp__<server>__<tool> names only. Other names may include MCP calls without that prefix. This shows usage, not server configuration or reliability."));
   return section.result;
@@ -181,7 +201,6 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
       note: top ? `${percent(top.share)} of calls` : null }),
   );
   layout.append(cards);
-  layout.append(originsPanel(sessions));
 
   const ranking = panel("Top tools", "tools-ranking-title");
   const badge = coverageBadge(data.coverage, "tool evidence");
@@ -245,7 +264,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
     splits.append(providerSplit(profile), breakdown("By repository", repositoryRows, profile.calls));
     profilePanel.result.append(splits);
   } else profilePanel.result.append(note(available ? "A profile appears when there are recorded tool calls." : `${DASH} ${reason}.`, "empty-line"));
-  layout.append(profilePanel.result, evidence([
+  layout.append(profilePanel.result, originsPanel(sessions), evidence([
     `${data.coverage.eligible} of ${data.coverage.selected} selected sessions carry tool evidence. Sessions without tool evidence are excluded from counts and averages; unavailable values are ${DASH}, not zero.`,
     "Tool names come from structured tool-call records only; arguments and results remain excluded. Calls per session uses eligible sessions, including observed zero-call sessions. A tool’s profile average uses only sessions using that tool.",
     `Day attribution uses the session start day (${timeZone}), not the time of each call. Unknown starts are excluded from the chart. All observed time shows at most the latest 366 calendar days; totals include the full selection.`,
