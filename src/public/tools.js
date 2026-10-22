@@ -1,7 +1,7 @@
 import { decimal, dayLabel, deltaText, integer, percent as formatPercent, toolDayLabel } from "./format.js";
 import { providerColor } from "./chart-colors.js";
 import { barPercent } from "./chart-scale.js";
-import { buildToolsView, toolProfile } from "./tools-data.js";
+import { buildToolOrigins, buildToolsView, toolProfile } from "./tools-data.js";
 import { providerMark } from "./providers.js";
 import { DASH, coverageBadge, dataTable, el, evidence, kpi, note } from "./ui.js";
 
@@ -60,6 +60,26 @@ function providerCell(providers) {
 
 function labelledCell(label, text) {
   const cell = el("span", text, "tools-cell"); cell.dataset.label = label; return cell;
+}
+
+function originsPanel(sessions) {
+  const data = buildToolOrigins(sessions), section = panel("MCP server usage", "tools-origins-title");
+  section.result.classList.add("tools-origins");
+  const reach = (count, share) => `${integer(count)} · ${percent(share)}`;
+  const rows = [...data.groups, ...data.servers].map((row, index) => {
+    const name = el("span", row.name, "tools-origin-name");
+    if (index < data.groups.length) name.classList.add("tools-origin-group");
+    return [name, labelledCell("Calls · share", reach(row.calls, row.callShare)),
+      labelledCell("Sessions · reach", reach(row.sessions, row.sessionShare)),
+      labelledCell("Repositories · reach", reach(row.repositories, row.repositoryShare))];
+  });
+  section.result.append(note("MCP-prefixed calls versus other tool names, followed by each observed MCP server."),
+    dataTable(["Tool origin / server", "Calls · share", "Sessions · reach", "Repositories · reach"], rows,
+      { rowHeader: true, className: "tools-origins-table", caption: "Tool origins and MCP servers in the current selection",
+        empty: `${DASH} No selected sessions carry tool evidence.` }),
+    note(`Shares use all recorded calls, ${integer(data.coverage.eligible)} eligible sessions and ${integer(data.eligibleRepositories)} repositories with tool evidence in this selection. Session and repository reach can overlap.`),
+    note("MCP recognition uses mcp__<server>__<tool> names only. Other names may include MCP calls without that prefix. This shows usage, not server configuration or reliability."));
+  return section.result;
 }
 
 function providerSplit(profile) {
@@ -161,6 +181,7 @@ export function renderToolsView(container, { sessions, previousSessions = null, 
       note: top ? `${percent(top.share)} of calls` : null }),
   );
   layout.append(cards);
+  layout.append(originsPanel(sessions));
 
   const ranking = panel("Top tools", "tools-ranking-title");
   const badge = coverageBadge(data.coverage, "tool evidence");

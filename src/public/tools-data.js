@@ -6,6 +6,38 @@ const order = (provider) => { const index = providerIds.indexOf(provider); retur
 export const callCount = (value) => Number.isFinite(value) && value > 0 ? value : 0;
 // Session start days use the snapshot timezone, the calendar of the window and the activity ledger.
 const startDay = sessionStartDay;
+
+/** Prefix recognition only: unprefixed names do not establish that a tool is built-in. */
+export function buildToolOrigins(sessions) {
+  const coverage = metricCoverage(sessions, "tools"), repositories = new Set(), servers = new Map();
+  const group = (name) => ({ name, calls: 0, sessions: 0, repositories: new Set() });
+  const mcp = group("MCP-prefixed tools"), other = group("Other tool names");
+  for (const session of sessions) {
+    if (!metricEligible(session, "tools")) continue;
+    repositories.add(session.repositoryId);
+    const used = new Set();
+    for (const [name, value] of Object.entries(session.tools)) {
+      const count = callCount(value);
+      if (!count) continue;
+      const match = /^mcp__([^\s]+?)__(\S+)$/.exec(name);
+      const origin = match ? mcp : other;
+      origin.calls += count; used.add(origin);
+      if (match) {
+        const server = servers.get(match[1]) ?? group(match[1]);
+        server.calls += count; used.add(server); servers.set(match[1], server);
+      }
+    }
+    for (const row of used) { row.sessions++; row.repositories.add(session.repositoryId); }
+  }
+  const totalCalls = mcp.calls + other.calls;
+  const project = (row) => ({ name: row.name, calls: row.calls,
+    callShare: totalCalls ? row.calls / totalCalls : null,
+    sessions: row.sessions, sessionShare: coverage.eligible ? row.sessions / coverage.eligible : null,
+    repositories: row.repositories.size, repositoryShare: repositories.size ? row.repositories.size / repositories.size : null });
+  return { coverage, eligibleRepositories: repositories.size,
+    groups: coverage.eligible ? [mcp, other].map(project) : [],
+    servers: [...servers.values()].sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name)).map(project) };
+}
 const comparison = (current, previous) => {
   const change = current === null || previous === null ? null
     : previous > 0 ? guardedDelta(current, previous, "tools") : current > 0 ? "new" : 0;

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Tools shows MCP-prefixed versus other tool usage and each observed MCP server’s call share and reach across eligible sessions and repositories, using existing structured names only.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed
