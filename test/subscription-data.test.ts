@@ -972,3 +972,13 @@ test("a tier first observed while idle also supplies subsequent missing active e
   assert.equal(meter.cycles.length, 2, "the idle tier reading is not an extra active cycle");
   assert.equal(calibrate(meter, { between: () => 100 }, "pro").perPercent, 5);
 });
+
+test("simultaneous idle and active tiers remain ambiguous after idle rows leave the cycles", () => {
+  const rows = [1, 2].flatMap((week) => {
+    const row = reading("codex", "seven_day", start + week * WEEK, start + week * WEEK - HOUR, 20);
+    return [{ ...row, planType: "plus" as const }, { ...row, usedPercent: 0, status: "idle" as const, planType: "pro" as const }];
+  });
+  const meter = buildMeters(rows, start + 2 * WEEK)[0]!;
+  assert.equal(calibrate(meter, { between: () => 100 }, "plus").cycles, 0);
+  assert.ok(meter.cycles.every((cycle) => cycle.samples.every((sample) => sample.planType === "other")));
+});

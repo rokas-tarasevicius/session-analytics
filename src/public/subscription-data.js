@@ -110,7 +110,7 @@ function cyclesOf(readings, window, now) {
   let planType = null;
   const contextual = [...readings].sort((left, right) => left.observedAt - right.observedAt).map((reading) => {
     planType = evidence.get(reading.observedAt) ?? planType;
-    return reading.planType ? reading : { ...reading, planType };
+    return { ...reading, planType };
   });
   const groups = [];
   for (const reading of contextual.filter((reading) => reading.status !== "idle").sort((left, right) => left.resetsAt - right.resetsAt)) {

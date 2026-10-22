@@ -326,7 +326,7 @@ test("a Codex tier change within one reset window renders pace without inventing
   ];
   render(container, { limits: snapshot });
   const card = cardOf(container, codex);
-  assert.match(card.querySelector(".chart-pace")!.textContent, /since the tier change/);
+  assert.match(card.querySelector(".chart-pace")!.textContent, /since this tier was observed/);
   assert.doesNotMatch(card.textContent, /In-place reset|Restarted in place|since the reset/);
   assert.equal(card.querySelector(".burn-chart")!.querySelector("svg")!.getAttribute("tabindex"), "0");
 });

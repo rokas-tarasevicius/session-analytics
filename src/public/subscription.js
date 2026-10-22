@@ -380,7 +380,7 @@ function burnChart(container, item, fmt, now) {
   key.style.setProperty("--meter-color", color);
   const pace = meterPace(live, now);
   const paceText = live.stale || live.state !== "active" || !pace ? null
-    : `Pace ≈ ${rate(pace.segment)}${segment.baseline ? ` since the tier change ${fmt.when(segment.start)}` : segment.before ? ` since the reset ${fmt.when(segment.start)}, ${rate(pace.cycle)} across the week` : " this week"}${pace.budget !== null ? `; up to ${rate(pace.budget)} lasts until the reset.` : "."}`;
+    : `Pace ≈ ${rate(pace.segment)}${segment.baseline ? ` since this tier was observed ${fmt.when(segment.start)}` : segment.before ? ` since the reset ${fmt.when(segment.start)}, ${rate(pace.cycle)} across the week` : " this week"}${pace.budget !== null ? `; up to ${rate(pace.budget)} lasts until the reset.` : "."}`;
   container.append(root, key, readout);
   if (paceText) container.append(note(paceText, "subscription-note chart-pace"));
 }
