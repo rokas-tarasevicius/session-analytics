@@ -96,6 +96,9 @@ const caption = (key, granularity) => granularity === "hour" ? `${key}:00` : gra
 /** One focus stop, arrow-key inspection, and a text equivalent for every plotted bucket. */
 export function renderVelocityChart(container, data, { rolling = false, compactView = false, keepInspected = false } = {}) {
   redrawOnResize(container, () => renderVelocityChart(container, data, { rolling, compactView, keepInspected: true }));
+  // redrawOnResize restores focus after replacing the SVG. That restoration is
+  // not a new inspection and must not repeat the bucket to a screen reader.
+  let restoringFocus = keepInspected && container.contains?.(document.activeElement);
   container.replaceChildren(); container.classList.add("velocity-chart");
   if (!data.series.length) {
     container.append(element("p", data.missingSessions ? "Velocity is unavailable in this snapshot. Refresh to collect activity buckets." : "No observed activity for this metric in the selected dates and providers.", "empty-state"));
@@ -167,23 +170,38 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   })), { target: svg });
   if (overlay) legend.append(element("span", "Dashed: total · rolling 7-day average", "velocity-average-key"));
   const inspection = element("div", undefined, "velocity-inspection");
-  inspection.setAttribute("aria-live", "polite"); inspection.setAttribute("aria-atomic", "true");
+  const announcer = document.querySelector("#chart-announcer");
   const remembered = keepInspected ? data.keys.indexOf(inspectedKeys.get(container)) : -1;
   let selected = remembered >= 0 ? remembered : data.keys.length - 1;
-  const inspect = (index) => {
+  let painted = -1;
+  const inspect = (index, announce = false) => {
     selected = Math.max(0, Math.min(data.keys.length - 1, index));
     inspectedKeys.set(container, data.keys[selected]);
+    inspection.hidden = false;
     marker.setAttribute("x1", String(x(selected))); marker.setAttribute("x2", String(x(selected))); marker.setAttribute("visibility", "visible");
-    inspection.replaceChildren(element("strong", `${caption(data.keys[selected], data.granularity)} · ${data.mode === "cumulative" ? "cumulative " : ""}${formatMetric(totals[selected], data.metric)}`));
-    for (const series of data.series) inspection.append(element("span", `${series.label}: ${formatMetric(series.values[selected], data.metric)}`));
-    if (overlay) inspection.append(element("span", `7-day average: ${formatMetric(data.rolling[selected], data.metric)}`));
+    if (painted !== selected) {
+      inspection.replaceChildren(element("strong", `${caption(data.keys[selected], data.granularity)} · ${data.mode === "cumulative" ? "cumulative " : ""}${formatMetric(totals[selected], data.metric)}`));
+      for (const series of data.series) inspection.append(element("span", `${series.label}: ${formatMetric(series.values[selected], data.metric)}`));
+      if (overlay) inspection.append(element("span", `7-day average: ${formatMetric(data.rolling[selected], data.metric)}`));
+      painted = selected;
+    }
+    // Pointer hover remains visual. Only deliberate keyboard inspection updates
+    // the stable live region, once per changed readout (including boundary keys).
+    const description = [...inspection.children].map((child) => child.textContent).join("; ");
+    if (announce && announcer && announcer.textContent !== description) announcer.textContent = description;
   };
   svg.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !inspection.hidden) {
+      event.preventDefault(); event.stopPropagation();
+      marker.setAttribute("visibility", "hidden"); inspection.hidden = true;
+      if (announcer) announcer.textContent = "";
+      return;
+    }
     const target = { ArrowLeft: selected - 1, ArrowRight: selected + 1, Home: 0, End: data.keys.length - 1 }[event.key];
     if (target === undefined) return;
-    event.preventDefault(); inspect(target);
+    event.preventDefault(); inspect(target, true);
   });
-  svg.addEventListener("focus", () => inspect(selected));
+  svg.addEventListener("focus", () => { inspect(selected, !restoringFocus); restoringFocus = false; });
   const pointer = (event) => {
     const bounds = svg.getBoundingClientRect();
     // Account for SVG letterboxing at narrow viewports.

@@ -180,7 +180,11 @@ test("Escape cancels an armed g chord and dashboard statuses are live regions", 
   assert.equal(fireKey("Escape").defaultPrevented, true);
   assert.equal(run("pendingChord"), null);
   assert.equal(document.querySelector("#sync-context")!.getAttribute("role"), "status");
-  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "polite");
+  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "off");
+  for (const selector of ["#view-announcer", "#snapshot-announcer"]) {
+    assert.equal(document.querySelector(selector)!.getAttribute("aria-live"), "polite");
+    assert.equal(document.querySelector(selector)!.getAttribute("aria-atomic"), "true");
+  }
 });
 
 test("palette ranks exact, prefix, word-start, substring, then subsequence matches and drops weak fuzzy matches", async () => {

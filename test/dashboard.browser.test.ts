@@ -350,6 +350,12 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#export-menu').open`, true);
     await browser.until(`document.activeElement?.dataset.export`, "json");
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#export-menu').open`, false);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#export-menu > summary')`), true);
+    assert.match(await browser.evaluate<string>(`document.querySelector('#export-status').textContent`), /Download prepared locally/);
+    await browser.evaluate(`document.querySelector('#export-menu summary').click()`);
+    await browser.until(`document.querySelector('#export-menu').open`, true);
     await browser.key("Escape");
     await browser.until(`document.querySelector('#export-menu').open`, false);
 
@@ -442,6 +448,23 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.evaluate(`document.documentElement.dataset.theme = 'dark'; document.querySelector('[data-view-button="velocity"]').click()`);
     await browser.until(`document.querySelector('#velocity-view')?.firstElementChild?.classList.contains('velocity-lead')`, true);
     assert.equal(await browser.evaluate(`document.querySelector('.velocity-lead article:last-child strong').textContent`), headline);
+    await browser.evaluate(`document.querySelector('.velocity-chart > svg').focus()`);
+    await browser.key("Home");
+    const inspected = await browser.evaluate<string>(`document.querySelector('#chart-announcer').textContent`);
+    assert.ok(inspected.length > 0);
+    await browser.evaluate(`window.auditChartMutations = 0; window.auditObserver = new MutationObserver(() => window.auditChartMutations++); window.auditObserver.observe(document.querySelector('#chart-announcer'), {childList:true,subtree:true,characterData:true})`);
+    await browser.evaluate(`for (let i=0;i<30;i++) document.querySelector('.velocity-chart > svg').dispatchEvent(new PointerEvent('pointermove', {clientX:800+i}))`);
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.key("Home");
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1200 });
+    await delay(250);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('.velocity-chart > svg')`), true);
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.key("Escape");
+    assert.equal(await browser.evaluate(`document.querySelector('.velocity-inspection').hidden`), true);
+    await browser.evaluate(`window.auditObserver.disconnect()`);
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
     // Velocity chips list the snapshot's providers, and p 1 toggles the first of them.
     assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('#velocity-view .provider-key .chip')].map((chip) => chip.dataset.provider)`), ["codex", "claude", "cursor"]);
     await browser.evaluate(`document.activeElement?.blur()`);
