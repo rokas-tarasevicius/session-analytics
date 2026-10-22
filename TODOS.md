@@ -25,6 +25,8 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Accessibility
 
+- **P3:** Make provider digit chords work on AZERTY layouts: after `p`, the Shift keydown needed to type `1` currently cancels the chord and the digit changes the time window instead of toggling provider 1. Preserve the chord across modifier keydowns and verify shifted digits without changing the chord deadline or browser modifier behavior. (#107 accessibility review; pre-existing.)
+
 | Priority | Item | Plan reference |
 | --- | --- | --- |
 | P3 | Announce refresh and empty-window status through live regions. Fixed by accessibility audit on `t3/a11y-audit`, 2026-10-22. | §2 P3, Accessibility; §6 optional PR-B1 work |

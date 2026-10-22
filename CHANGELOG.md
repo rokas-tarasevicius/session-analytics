@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- Dashboard shortcut help, command-palette key hints and global key handling share one registry, with documentation parity checks. Provider help includes the eighth chip; held keys and input composition no longer trigger dashboard actions.
 - Dashboard provider filters and view switches reuse the current window's model, reducing repeated aggregation on larger snapshots. Displayed values and exports are unchanged.
 
 ### Fixed

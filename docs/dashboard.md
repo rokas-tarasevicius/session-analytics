@@ -201,3 +201,33 @@ The command palette jumps to any view or repository, toggles provider chips and 
 </p>
 
 Repositories with the same display name keep that name for the first hashed repository ID and use ` · 2`, ` · 3`, and so on for later IDs. These dashboard-only labels stay stable across usage sorting and machine filters; their tooltips explain “another checkout with the same name”. No paths are shown. Links still accept a hashed ID or the original plain name (the first match wins); exports retain the original names.
+
+### Keyboard shortcuts
+
+Press `?` or choose **Keyboard shortcuts** in the palette to open help. Its list and the palette hints come from the same registry as global key handling. `Mod+k` means ⌘K on macOS or Ctrl+K elsewhere; a space means press keys in sequence, within 1.5 seconds. Provider numbers follow the chips present in the snapshot; absent numbers do nothing.
+
+<!-- global-shortcuts:start -->
+| Shortcut | Action |
+| --- | --- |
+| `g s` | Summary |
+| `g v` | Velocity |
+| `g c` | Costs |
+| `g p` | Pricing |
+| `g u` | Subscription |
+| `g t` | Tools |
+| `g a` | Activity |
+| `[ or ]` | Previous / next view |
+| `Mod+K or /` | Command palette |
+| `1 or 2 or 3 or 4` | Last 7 · 30 · 90 days · all |
+| `p 1 or p 2 or p 3 or p 4 or p 5 or p 6 or p 7 or p 8` | Toggle provider chips in order (Summary chart, Velocity, Tools, Activity) |
+| `e` | Data coverage |
+| `Escape` | Clear repository focus / close dialog |
+| `t` | Switch theme |
+| `d` | Switch density |
+| `r` | Refresh snapshot |
+| `?` | Keyboard shortcuts |
+<!-- global-shortcuts:end -->
+
+Single-key shortcuts work in every view where their action applies. Provider shortcuts apply to Summary’s daily chart, Velocity, Tools and Activity. Text inputs, selects and editable content suppress character shortcuts; ⌘K / Ctrl+K can still open the palette while editing. Held keys and input composition do not run shortcuts. Escape cancels an unfinished chord, closes the top dialog or export menu, or clears repository focus when no overlay is open. Closing a dialog returns focus to its opener. Switch off **Single-key shortcuts** in help to retain only the modifier palette shortcut, Escape and buttons.
+
+Links restore view, time window, repository focus and active-view provider chips, including through Back/Forward. Unknown repositories fall back to all repositories; unknown provider names are ignored, with all providers selected if none are recognized. `theme`, `density` and `open` are one-visit overrides removed after load; theme and density buttons remember preferences on this browser.

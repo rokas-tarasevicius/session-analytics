@@ -391,12 +391,45 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-label')`), "Search views, repositories and commands");
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-expanded')`), "true");
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-activedescendant')`), "command-option-0");
+    // IME Enter, including the commit boundary, cannot execute the focused command.
+    for (const isComposing of [true, false]) {
+      assert.deepEqual(await browser.evaluate(`(() => {
+        const input = document.querySelector('#command-input');
+        input.value = 'Go to Tools'; input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: ${isComposing}, bubbles: true }));
+        return { paletteOpen: document.querySelector('#command-palette').open, view: document.querySelector('[data-view-button][aria-current=page]').dataset.viewButton };
+      })()`), { paletteOpen: true, view: "summary" });
+    }
+    await browser.evaluate(`const input = document.querySelector('#command-input'); input.value = ''; input.dispatchEvent(new Event('input'));`);
     // Ranking: the closest match comes first and weak fuzzy matches drop out.
     await browser.send("Input.insertText", { text: "help" });
     assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('#command-list .option-label')].map((label) => label.textContent)`), ["Keyboard shortcuts"]);
     await browser.key("Escape");
     await browser.until(`document.querySelector('#command-palette').open`, false);
     assert.equal(await browser.evaluate(`document.activeElement.id`), "command-button");
+    // Shortcut help is generated from the dispatch registry and native dialog closing restores its opener.
+    await browser.evaluate(`document.querySelector('#help-button').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#help-overlay').open`, true);
+    assert.equal(await browser.evaluate(`(async () => {
+      const { shortcutRegistry } = await import('/shortcuts.js');
+      return JSON.stringify([...document.querySelectorAll('#shortcut-list dt')].map(row => row.textContent)) === JSON.stringify(shortcutRegistry.map(item => item.label));
+    })()`), true);
+    await browser.key("Escape");
+    await browser.until(`document.querySelector('#help-overlay').open`, false);
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "help-button");
+    // Bare slash stays within modal boundaries; the explicit modifier shortcut remains available.
+    for (const [button, dialog] of [["help-button", "help-overlay"], ["coverage-button", "coverage-dialog"], ["machine-details", "machines-dialog"]]) {
+      await browser.evaluate(`document.querySelector('#${button}').click()`);
+      await browser.key("/", { code: "Slash", text: "/" });
+      assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('dialog[open]')].map(dialog => dialog.id)`), [dialog]);
+      await browser.key("k", { code: "KeyK", modifiers: 4 });
+      await browser.until(`document.querySelector('#command-palette').open`, true);
+      await browser.evaluate(`document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close())`);
+    }
+    const originalTheme = await browser.evaluate(`document.documentElement.dataset.theme`);
+    await browser.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', repeat: true, bubbles: true })); document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', isComposing: true, bubbles: true }));`);
+    assert.equal(await browser.evaluate(`document.documentElement.dataset.theme`), originalTheme);
     // Meta/Ctrl+K toggles it from anywhere; "export" runs the Export entry, which opens the menu on its first download.
     await browser.key("k", { code: "KeyK", modifiers: 4 });
     await browser.until(`document.querySelector('#command-palette').open`, true);
