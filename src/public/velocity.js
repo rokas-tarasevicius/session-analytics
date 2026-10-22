@@ -192,7 +192,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   };
   svg.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !inspection.hidden) {
-      event.preventDefault(); event.stopPropagation();
+      event.preventDefault();
       marker.setAttribute("visibility", "hidden"); inspection.hidden = true;
       if (announcer) announcer.textContent = "";
       return;

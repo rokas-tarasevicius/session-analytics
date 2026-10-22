@@ -451,7 +451,7 @@ test("Velocity announces keyboard inspections once, keeps pointer movement and r
     assert.match(container.querySelector(".velocity-inspection")!.textContent, /1 Sept/);
     let prevented = false, stopped = false;
     svg.listeners.get("keydown")!({ key: "Escape", preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
-    assert.ok(prevented && stopped, "dismissal cannot also clear repository focus");
+    assert.ok(prevented && !stopped, "dismissal bubbles to cancel shortcut chords while preventing repository clearing");
     assert.equal(container.querySelector(".velocity-inspection")!.hidden, true);
     assert.equal(container.querySelector(".velocity-marker")!.getAttribute("visibility"), "hidden");
     assert.equal(announcer.textContent, "");

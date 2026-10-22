@@ -58,8 +58,10 @@ export async function harness(sessions: SessionAnalytics[], { repositories = [{ 
  run(`snapshot=fixture; sessionsByRepository=groupByRepository(snapshot.sessions); elements.repositoryFilter.value='all'; elements.windowStart.value=elements.windowStart.min=${JSON.stringify(start)};elements.windowEnd.value=elements.windowEnd.max=${JSON.stringify(end)};`);
  // Capture listeners (including Export's Escape handler) run before the dashboard handler.
  const fireKey = (key: string, target = document.body) => {
-   const event = { key, target, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
-   for (const { listener } of listeners.filter(({ name }) => name === "keydown").sort((a, b) => Number(b.capture) - Number(a.capture))) listener(event);
+   const event = { key, target, defaultPrevented: false, propagationStopped: false, preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.propagationStopped = true; } };
+   for (const { listener } of listeners.filter(({ name, capture }) => name === "keydown" && capture)) listener(event);
+   target.listeners.get("keydown")?.(event);
+   if (!event.propagationStopped) for (const { listener } of listeners.filter(({ name, capture }) => name === "keydown" && !capture)) listener(event);
    return event;
  };
  return {run,context,document,fireKey};
