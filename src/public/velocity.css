@@ -21,7 +21,8 @@
 .velocity-band-range { stroke: var(--series-2); stroke-width: 10; opacity: .45; }
 .velocity-band-point { fill: var(--text); stroke: var(--surface); stroke-width: 2; }
 .velocity-movers td:first-child { color: var(--muted); text-transform: capitalize; }
-.velocity-movers td:nth-child(2) { min-width: 20ch; white-space: nowrap; }
+.velocity-movers th { white-space: normal; }
+.velocity-movers td:nth-child(2) { min-width: 20ch; white-space: normal; overflow-wrap: anywhere; }
 .velocity-movers td:last-child { min-width: 200px; white-space: normal; font-size: var(--fs-xs); }
 .velocity-projection h3 { margin: 0; }
 .velocity-projection .projected { font: 500 var(--fs-lg)/1.1 var(--font-mono); letter-spacing: -0.03em; margin: 6px 0 2px; }

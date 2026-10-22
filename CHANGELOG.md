@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- The Velocity movers table wraps its headers and long names to fit laptop viewports in comfortable density.
+
 ## [0.12.0] - 2026-10-20
 
 ### Added
