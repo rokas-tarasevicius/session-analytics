@@ -724,7 +724,7 @@ function renderCounterfactual(sessions, range) {
   result.setAttribute("role", "status");
   const update = () => {
     const target = models.find(({ model }) => model === counterfactualModel);
-    const data = counterfactualValue(sessions, target?.rate, range);
+    const data = counterfactualValue(sessions, target?.rate, range, snapshot.rateCard.models);
     clear(result);
     const amount = node("div", null, "counterfactual-amount");
     amount.append(node("span", "Hypothetical API-equivalent value", "counterfactual-label"), node("strong", data.valueUsd === null ? DASH : money(data.valueUsd)));
@@ -733,6 +733,15 @@ function renderCounterfactual(sessions, range) {
     // Round the excluded share upward: a small omitted class must never read as 0%.
     if (data.coverage !== null) coverage.append(node("p", `${percent(Math.ceil(data.unrepricedTokens / data.tokens * 1000) / 1000)} not re-priced · ${integer(data.repricedTokens)} tokens re-priced`, "counterfactual-note"));
     result.append(amount, coverage);
+    for (const row of data.vendors) {
+      const source = providerLabels[row.vendor] ?? "Unknown vendor", targetVendor = providerLabels[target?.rate?.provider] ?? "Unknown vendor";
+      const text = row.vendor === null
+        ? `Source vendor unavailable: ${money(row.valueUsd)} · ${integer(row.tokens)} re-priced tokens; cross-vendor share cannot be determined.`
+        : row.crossVendor
+        ? `Cross-vendor comparison: ${source} tokens re-priced at a ${targetVendor} model's rates: ${money(row.valueUsd)} · ${integer(row.tokens)} tokens.`
+        : `${source} tokens re-priced: ${money(row.valueUsd)} · ${integer(row.tokens)} tokens.`;
+      result.append(node("p", text, "counterfactual-note counterfactual-vendor"));
+    }
     const reasons = [
       data.excluded.cacheWrite ? `${integer(data.excluded.cacheWrite)} cache-write tokens (TTL unavailable)` : null,
       data.excluded.inputSplit ? `${integer(data.excluded.inputSplit)} input tokens without an evidenced cache split` : null,

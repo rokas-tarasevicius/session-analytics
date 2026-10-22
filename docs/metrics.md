@@ -168,6 +168,15 @@ provider-reported tokens. The displayed excluded percentage rounds upward to 0.1
 No dated tokens means unavailable coverage; no re-priced tokens means an unavailable amount, never a free estimate.
 Undated tokens and sessions without a ledger are disclosed separately for the whole scope and never assigned to the window.
 
+The panel breaks the re-priced amount and token count down by **source vendor**. A ledger dimension's model is
+matched to `rateCard.models` (or its recorded pricing provenance's latest `rateModel` alias); the matched rate's
+`provider` establishes the vendor. Neither the session's agent/provider nor model-name text establishes a vendor:
+for example, Cursor can use a Claude model. A contribution is labelled **Cross-vendor comparison** when its source
+rate vendor differs from the comparison rate's `provider`. Only actually re-priced classes enter these amounts
+and counts; they sum to the hypothetical total and re-priced denominator. Missing source rate evidence remains
+an explicitly unknown-vendor contribution; it is never silently treated as same-vendor. This comparison holds the
+recorded tokens constant across vendors and does not establish what another vendor would have billed.
+
 Request context sizes are unavailable in the ledger, so long-context and tier premiums are omitted, rather than
 applied to an aggregate as if it were one request. Token counts and cache behavior are held constant; models can
 tokenize differently and have different capabilities. Current target rates do not reproduce historical tariffs.

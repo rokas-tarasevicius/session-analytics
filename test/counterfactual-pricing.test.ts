@@ -116,3 +116,50 @@ test("Costs supports no rate card, an empty window and replacing a missing targe
   assert.match(document.querySelector(".counterfactual-result")!.textContent, /No dated tokens/);
   assert.doesNotMatch(document.querySelector(".counterfactual-result")!.textContent, /\$0\.00/);
 });
+
+test("vendor contributions follow each ledger model's rate evidence, never its agent or model spelling", () => {
+  const s = session(); s.provider = "cursor";
+  s.velocity!.dimensions[0]!.model = "gpt-looking-name";
+  s.velocity!.dimensions.push({ ...s.velocity!.dimensions[0]!, model: "claude-looking-name" });
+  s.velocity!.buckets.push(["2026-09-16", 12, 1, counts()]);
+  s.velocity!.buckets.push(["2026-08-31", 12, 1, counts()]);
+  const sourceRates = [{ model: "gpt-looking-name", rate },
+    { model: "claude-looking-name", rate: { ...rate, provider: "codex" as const } }];
+  const actual = counterfactualValue([s], rate, window, sourceRates);
+  assert.deepEqual(actual.vendors.map(({ vendor, tokens, crossVendor }) => ({ vendor, tokens, crossVendor })), [
+    { vendor: "claude", tokens: 1_100_000, crossVendor: false },
+    { vendor: "codex", tokens: 1_100_000, crossVendor: true },
+  ]);
+  for (const vendor of actual.vendors) assert.ok(Math.abs(vendor.valueUsd - 4.89) < 1e-12);
+  assert.equal(actual.vendors.reduce((sum, row) => sum + row.tokens, 0), actual.repricedTokens);
+  const same = counterfactualValue([session()], rate, window, [{ model: "<unknown>", rate }]);
+  assert.equal(same.vendors[0]!.crossVendor, false);
+  const unknown = counterfactualValue([session()], rate, window, sourceRates);
+  assert.equal(unknown.vendors[0]!.vendor, null);
+  assert.equal(unknown.vendors[0]!.crossVendor, null);
+  assert.equal(unknown.vendors[0]!.tokens, 1_100_000);
+  const unavailable = counterfactualValue([s], null, window, sourceRates);
+  assert.deepEqual(unavailable.vendors, []);
+  s.models[0]!.model = "gpt-looking-name";
+  s.models[0]!.pricing = [{ source: "reviewed", kind: "reviewed", snapshotDate: "2026-09-01", rateModel: "rate-alias",
+    match: "alias", temporal: "at-or-before", assumptions: [], payloadSha256: "0".repeat(64) }];
+  const aliased = counterfactualValue([s], rate, window, [{ model: "rate-alias", rate }]);
+  assert.equal(aliased.vendors[0]!.vendor, "claude");
+  assert.equal(aliased.vendors[0]!.crossVendor, false);
+  assert.equal(aliased.vendors[1]!.vendor, null);
+});
+
+test("Costs labels mixed-vendor amounts and unknown vendors, and removes the cross-vendor label for same-vendor tokens", async () => {
+  const s = session(); s.provider = "cursor";
+  s.velocity!.dimensions[0]!.model = "source-model";
+  const { document, run, context } = await harness([s]);
+  context.rates = [{ model: "target-model", rate }, { model: "source-model", rate: { ...rate, provider: "codex" } }];
+  run("snapshot.rateCard = { models: rates }; counterfactualModel = 'target-model'; renderCosts(activeView())");
+  const result = () => document.querySelector(".counterfactual-result")!.textContent;
+  assert.match(result(), /Cross-vendor comparison: Codex tokens re-priced at a Claude model's rates: \$4.89 · 1,100,000 tokens/);
+  run("snapshot.rateCard.models[1].rate.provider = 'claude'; renderCosts(activeView())");
+  assert.match(result(), /Claude tokens re-priced: \$4.89 · 1,100,000 tokens/);
+  assert.doesNotMatch(result(), /Cross-vendor/);
+  run("snapshot.rateCard.models.pop(); renderCosts(activeView())");
+  assert.match(result(), /Source vendor unavailable: \$4.89 · 1,100,000 re-priced tokens; cross-vendor share cannot be determined/);
+});
