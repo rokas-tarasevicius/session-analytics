@@ -419,6 +419,10 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
   svg.setAttribute("aria-label", `${label}. Use Left and Right arrows, Home and End to read each day; Escape dismisses the readout.`);
   let current = null;
   let inspected = initialIndex;
+  const announceSelection = (index) => {
+    const message = `${title(index)}: ${rows(index).map((row) => `${row.label} ${row.value}`).join(", ")}`;
+    if (elements.announcer.textContent !== message) elements.announcer.textContent = message;
+  };
   const show = (index, announce = true) => {
     if (index === null || index === undefined || xs[index] === undefined) return hide();
     if (index === current) return;
@@ -443,7 +447,7 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
     meta.append(node("span", detail.sessions, "readout-sessions"), disclosure);
     readout.append(heading, values, meta);
     if (onIndex) onIndex(index);
-    if (announce) elements.announcer.textContent = `${title(index)}: ${rows(index).map((row) => `${row.label} ${row.value}`).join(", ")}`;
+    if (announce) announceSelection(index);
   };
   const hide = () => {
     if (current === null && readout.hidden) return;
@@ -457,8 +461,14 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
     for (let index = 1; index < xs.length; index += 1) if (Math.abs(xs[index] - x) < Math.abs(xs[best] - x)) best = index;
     return best;
   };
-  svg.addEventListener("pointermove", (event) => show(nearest(event.clientX)));
-  svg.addEventListener("click", (event) => show(nearest(event.clientX)));
+  svg.addEventListener("pointermove", (event) => show(nearest(event.clientX), false));
+  // MouseEvent clicks round clientX in dense windows; release uses the same fractional scale as hover.
+  svg.addEventListener("pointerup", (event) => {
+    if (event.button !== 0) return;
+    const index = nearest(event.clientX);
+    show(index, false);
+    announceSelection(index);
+  });
   svg.addEventListener("focus", () => show(inspected));
   svg.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {

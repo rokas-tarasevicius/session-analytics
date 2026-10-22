@@ -195,7 +195,7 @@ test("daily readout exposes exact day values without hover and retains inspectio
   svg.listeners.get("focus")!();
   assert.equal(readout.hidden, false); assert.match(title(), /1 Jan 2026/);
   svg.listeners.get("pointermove")!({ clientX: 886 }); assert.match(title(), /2 Jan 2026/);
-  svg.listeners.get("click")!({ clientX: 52 }); assert.match(title(), /30 Dec 2025/);
+  svg.listeners.get("pointerup")!({ clientX: 52, button: 0 }); assert.match(title(), /30 Dec 2025/);
   key("End"); key("ArrowRight"); assert.match(title(), /2 Jan 2026/);
   // A resize redraw can restore by calendar day, including a zero-activity day.
   run(`renderLine(${JSON.stringify(days)}, "2025-12-31")`);
@@ -234,4 +234,45 @@ test("daily readout counts known session starts in the snapshot timezone separat
   const chart = document.querySelector("#daily-spend")!;
   assert.equal(chart.querySelector(".readout-sessions")!.textContent, "1 session started");
   assert.equal(chart.querySelector(".readout-total")!.textContent, "$1.00");
+});
+
+for (const [description, index, coordinate] of [
+  ["inside the final band", 399, 375.9],
+  ["just past a band boundary", 122, 52 + (121.5 / 399) * 324 + 0.0001],
+] as const) test(`400-day pointer selection ${description} uses the same nearest centres as hover`, async () => {
+  const { document, run } = await harness([]);
+  const chart = document.querySelector("#daily-spend")!;
+  Object.assign(chart, { clientWidth: 390 });
+  const days = Array.from({ length: 400 }, (_, i) => ({ name: new Date(Date.UTC(2025, 0, i + 1)).toISOString().slice(0, 10), claude: 1 }));
+  run(`renderLine(${JSON.stringify(days)})`);
+  const svg = chart.querySelector("svg")!;
+  svg.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: 390, height: 220 });
+  const title = () => chart.querySelector(".tip-title")!.textContent;
+  const expected = run(`dateLabel(${JSON.stringify(days[index]!.name)})`);
+  svg.listeners.get("pointermove")!({ clientX: coordinate });
+  assert.equal(title(), expected);
+  // Real MouseEvent clicks can round clientX; PointerEvent release retains the hover precision.
+  svg.listeners.get("pointerup")?.({ clientX: coordinate, button: 0 });
+  svg.listeners.get("click")?.({ clientX: Math.floor(coordinate) });
+  assert.equal(title(), expected);
+});
+
+test("daily inspection announces each explicit selection once and leaves pointer exploration quiet", async () => {
+  const { document, run } = await harness([]);
+  run(`renderLine(["2026-01-01", "2026-01-02", "2026-01-03"].map(name => ({ name, claude: 1 })))`);
+  const svg = document.querySelector("#daily-spend")!.querySelector("svg")!;
+  const announcer = document.querySelector("#chart-announcer")!;
+  let message = announcer.textContent;
+  const updates: string[] = [];
+  Object.defineProperty(announcer, "textContent", { get: () => message, set: (value: string) => { message = value; updates.push(value); } });
+  svg.listeners.get("pointermove")!({ clientX: 52 });
+  assert.equal(updates.length, 0);
+  svg.listeners.get("pointerup")!({ clientX: 52, button: 0 });
+  assert.equal(updates.length, 1);
+  assert.match(message, /1 Jan 2026: Claude \$1.00/);
+  svg.listeners.get("pointerup")!({ clientX: 52, button: 0 });
+  svg.listeners.get("focus")!();
+  assert.equal(updates.length, 1);
+  svg.listeners.get("keydown")!({ key: "ArrowRight", preventDefault() {} });
+  assert.equal(updates.length, 2);
 });
