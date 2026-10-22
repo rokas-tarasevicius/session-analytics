@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { AnalyzeOptions } from "../src/types.ts";
@@ -533,4 +533,52 @@ export async function createSessionAnalyticsFixture(
   );
 
   return { noIndex: true, dataDir: join(root, "index"), additionalProviders: false, claudeRoot, codexArchiveRoot, codexRoot, cursorDatabasePath, databasePath, remote, repositoryRoot };
+}
+
+/** Synthetic canaries for surfaces that must never carry transcript metadata or content. */
+export const privacySentinelPattern = /BOUNDARY-(?:TITLE|CWD|BRANCH|INPUT|RESULT|ERROR|MODEL|FILE)-SENTINEL/;
+
+export async function plantPrivacySentinels(fixture: SessionAnalyticsFixture): Promise<void> {
+  const title = "BOUNDARY-TITLE-SENTINEL";
+  const cwd = "/private/BOUNDARY-CWD-SENTINEL";
+  const branch = "BOUNDARY-BRANCH-SENTINEL";
+  const input = "BOUNDARY-INPUT-SENTINEL";
+  const result = "BOUNDARY-RESULT-SENTINEL";
+  const error = "Error: BOUNDARY-ERROR-SENTINEL";
+  const model = "gpt-5\n/private/BOUNDARY-MODEL-SENTINEL";
+  const timestamp = "2026-07-20T15:00:00Z";
+  const claudeFile = join(fixture.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", `${claudeSessionId}.jsonl`);
+  await appendFile(claudeFile, [
+    { type: "assistant", timestamp, cwd, title, gitBranch: branch, error,
+      message: { id: "boundary-assistant", model, usage: { input_tokens: 17, output_tokens: 3 },
+        content: [{ type: "text", text: title }, { type: "thinking", thinking: result },
+          { type: "tool_use", id: "boundary-tool", name: "Read", input: { path: cwd, command: input } }] } },
+    { type: "user", timestamp, cwd, toolUseResult: { stdout: result, stderr: error },
+      message: { content: [{ type: "tool_result", tool_use_id: "boundary-tool", is_error: true, content: result }] } },
+  ].map((row) => JSON.stringify(row)).join("\n") + "\n");
+  await appendFile(join(fixture.codexRoot, "2026/07/20", `rollout-2026-07-20T10-00-00-${codexSessionId}.jsonl`), [
+    { type: "turn_context", timestamp, payload: { cwd, model, title, git: { branch }, error } },
+    { type: "response_item", timestamp, payload: { type: "function_call", call_id: "boundary-call", name: "Read", arguments: JSON.stringify({ path: cwd, command: input }) } },
+    { type: "response_item", timestamp, payload: { type: "function_call_output", call_id: "boundary-call", output: result, error } },
+  ].map((row) => JSON.stringify(row)).join("\n") + "\n");
+  // Invalid source names must not become diagnostic output, even when JSON cannot be parsed.
+  await writeFile(join(fixture.codexRoot, "2026/07/20", "BOUNDARY-FILE-SENTINEL.jsonl"), "{malformed\n");
+  const conductor = new DatabaseSync(fixture.databasePath);
+  try {
+    conductor.prepare("UPDATE sessions SET title = ?").run(title);
+    conductor.prepare("UPDATE workspaces SET branch = ?").run(branch);
+    conductor.prepare("UPDATE repos SET default_branch = ?").run(branch);
+  } finally { conductor.close(); }
+  const cursor = new DatabaseSync(fixture.cursorDatabasePath);
+  try {
+    const key = "composerData:cursor-fixture";
+    const row = cursor.prepare("SELECT value FROM cursorDiskKV WHERE key = ?").get(key)!;
+    const data = JSON.parse(String(row["value"]));
+    data.name = title; data.cwd = cwd; data.gitBranch = branch; data.error = error;
+    data.conversation.push({ type: 1, text: input, toolResults: result, error });
+    const source = join(fixture.repositoryRoot, "BOUNDARY-FILE-SENTINEL.ts");
+    await writeFile(source, input);
+    data.originalModelLines[source] = [];
+    cursor.prepare("UPDATE cursorDiskKV SET value = ? WHERE key = ?").run(JSON.stringify(data), key);
+  } finally { cursor.close(); }
 }

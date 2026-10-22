@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- The loopback dashboard validates the complete HTTP Origin, rejects GET bodies before refresh work and limits request targets to 8 KiB; HTTP parser errors now retain private no-store and security headers. Analytics totals are unchanged.
 - JSONL histories with a leading UTF-8 BOM now retain their first record. Claude, Codex, Cursor SDK, Copilot and Gemini histories could be omitted when that record supplied identity; Cursor activity transcripts could lose their first turn or tool call. Affected session, token, API-equivalent value and activity totals increase. Present indexed sources automatically reparse on the next scan.
 
 ## [0.12.1] - 2026-10-22
