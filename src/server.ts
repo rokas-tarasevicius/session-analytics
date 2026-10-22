@@ -2,9 +2,10 @@ import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, STATUS_CODES, type ServerResponse } from "node:http";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Duplex } from "node:stream";
 
 import { AnalysisHeapLimitError, analyzeMachineSessionsIsolated, noticeFullParse } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, optionErrorMessage, pricingHelp, remoteBooleanFlags, remoteHelp, remoteValueFlags, setting, sourceHelp, argument, type RemoteOptions } from "./options.ts";
@@ -93,7 +94,15 @@ function headers(contentType: string, cacheControl = "no-store"): Record<string,
   };
 }
 
+// Node can dispatch pipelined requests buffered before a closing response reaches the socket.
+const rejectedConnections = new WeakSet<Duplex>();
+
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
+  // Rejected requests may still advertise a body; never drain it to reuse the connection.
+  if (status >= 400) {
+    response.shouldKeepAlive = false;
+    rejectedConnections.add(response.req.socket);
+  }
   response.writeHead(status, headers("application/json; charset=utf-8"));
   response.end(`${JSON.stringify(value)}\n`);
 }
@@ -147,7 +156,11 @@ function sameOriginApiRequest(request: { headers: Record<string, string | string
   const origin = request.headers.origin;
   if (origin === undefined) return true;
   if (Array.isArray(origin)) return false;
-  try { return new URL(origin).host === request.headers.host; }
+  try {
+    const parsed = new URL(origin);
+    // Origin is a serialized origin, never a URL with credentials, a path, query or fragment.
+    return origin === parsed.origin && parsed.protocol === "http:" && parsed.host === request.headers.host;
+  }
   catch { return false; }
 }
 
@@ -360,10 +373,17 @@ process.on("unhandledRejection", () => {
 });
 
 const server = createServer(async (request, response) => {
+  if (rejectedConnections.has(request.socket)) return;
   let url: URL | undefined;
   try {
     if (!loopbackRequest(request)) {
       sendJson(response, 403, { error: "Session analytics accepts loopback requests only." });
+      return;
+    }
+    // Bound paths and query values before URL parsing or starting any analysis work.
+    if (Buffer.byteLength(request.url ?? "/") > 8_192) {
+      response.shouldKeepAlive = false;
+      sendJson(response, 414, { error: "Request target is too long." });
       return;
     }
     url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -373,6 +393,13 @@ const server = createServer(async (request, response) => {
     }
     if (request.method !== "GET") {
       sendJson(response, 405, { error: "Session analytics is read-only." });
+      return;
+    }
+    // This GET-only interface has no body inputs. Close instead of draining arbitrary bytes.
+    if (request.headers["transfer-encoding"] !== undefined ||
+        (request.headers["content-length"] !== undefined && request.headers["content-length"] !== "0")) {
+      response.shouldKeepAlive = false;
+      sendJson(response, 413, { error: "Request bodies are not supported." });
       return;
     }
     if (url.pathname.startsWith("/api/")) followMachines();
@@ -431,6 +458,22 @@ const server = createServer(async (request, response) => {
     if (url.pathname === "/api/analytics") analyticsPromise = null;
     sendJson(response, 502, { error: safeError(error) });
   }
+});
+
+// Route Expect requests through the same validation before Node can send 100 Continue.
+server.on("checkContinue", (request, response) => { server.emit("request", request, response); });
+server.on("checkExpectation", (request, response) => {
+  if (rejectedConnections.has(request.socket)) return;
+  sendJson(response, 417, { error: "Request expectation is not supported." });
+});
+// Parser failures happen before the request handler; keep their output fixed and private too.
+server.on("clientError", (error: NodeJS.ErrnoException, socket) => {
+  if (rejectedConnections.has(socket) || !socket.writable || socket.writableEnded) return;
+  rejectedConnections.add(socket);
+  const status = error.code === "HPE_HEADER_OVERFLOW" ? 431 : error.code === "ERR_HTTP_REQUEST_TIMEOUT" ? 408 : 400;
+  const body = `${JSON.stringify({ error: status === 431 ? "Request headers are too large." : "Bad request." })}\n`;
+  const fields = { ...headers("application/json; charset=utf-8"), "Connection": "close", "Content-Length": String(Buffer.byteLength(body)) };
+  socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\n${Object.entries(fields).map(([name, value]) => `${name}: ${value}\r\n`).join("")}\r\n${body}`);
 });
 
 const conductorPort = process.env["CONDUCTOR_PORT"];

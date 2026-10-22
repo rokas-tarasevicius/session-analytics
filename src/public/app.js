@@ -237,7 +237,22 @@ function sessionsForProviders(sessions, scope) {
   return sessions.filter(({ provider }) => selected.has(provider));
 }
 
+let activeViewCache = null;
+
 function activeView() {
+  // Provider chips and view switches only change presentation. Keep one model until its data or scope changes.
+  // Use object identity, not generatedAt: a refreshed or machine-filtered snapshot can have the same timestamp.
+  // Stale/reading machine warnings include relative ages, which can change without a new snapshot.
+  const inputs = [snapshot, fullSnapshot, sessionsByRepository, elements.repositoryFilter.value, windowPreset,
+    elements.windowStart.value, elements.windowEnd.value, elements.windowStart.min, elements.windowEnd.max,
+    machineWarnings(fullSnapshot?.machines, []).join("\n")];
+  if (activeViewCache && inputs.every((value, index) => value === activeViewCache.inputs[index])) return activeViewCache.view;
+  const view = buildActiveView();
+  activeViewCache = { inputs, view };
+  return view;
+}
+
+function buildActiveView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
@@ -998,6 +1013,7 @@ function renderRepositoryTable(repositories) {
   clear(footer);
   if (quiet.length && !tableExpansion.showEmpty) {
     const row = node("tr"), cell = node("td", null, "empty-line"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell");
     const button = statusAction("Show them", () => {
       tableExpansion.showEmpty = true;
       renderRepositoryTable(repositories);
@@ -1015,6 +1031,7 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
+    row.setAttribute("role", "row");
     const comparator = item.repository.id === null;
     const repositoryDetails = comparator ? item.repository.name : `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
     if (comparator) row.className = "fleet-total";
@@ -1038,10 +1055,22 @@ function renderRepositoryTable(repositories) {
     if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
     else value.append(node("span", money(item.usage.value)));
     row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    // Reuse the column names for visual card labels; headers remain the accessible labels.
+    // Explicit roles preserve the table structure when narrow-screen CSS changes its display.
+    [...row.children].forEach((cell, index) => {
+      const button = sortButtons[index];
+      cell.setAttribute("role", "cell");
+      cell.setAttribute("headers", button.closest("th").id);
+      if (index === 0) return;
+      const label = node("span", button.textContent, "repository-cell-label");
+      label.setAttribute("aria-hidden", "true");
+      cell.append(label);
+    });
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
-    const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
+    const row = node("tr"); const cell = node("td"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell"); emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
   }
   restoreFocus();
 }
@@ -2047,7 +2076,7 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; activeViewCache = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
   elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");

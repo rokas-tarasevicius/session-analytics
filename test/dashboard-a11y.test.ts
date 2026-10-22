@@ -16,9 +16,25 @@ test("fleet rows expose a native repository button and select once when its clic
   assert.equal(button.textContent, "Synthetic");
   assert.equal(button.dataset["focusKey"], "table:synthetic");
   assert.equal(cell.querySelector("small"), null);
+  const columns = ["name", "sessions", "value", "input", "output", "tools", "cache", "coverage"];
+  for (const [index, cell] of row.children.entries()) {
+    assert.equal(cell.getAttribute("role"), "cell");
+    const header = document.querySelector(`#${cell.getAttribute("headers")}`)!;
+    assert.ok(header);
+    assert.equal(header.getAttribute("scope"), "col");
+    assert.equal(header.getAttribute("role"), "columnheader");
+    assert.equal(cell.getAttribute("headers"), `repository-column-${columns[index]}`);
+    const label = cell.querySelector(".repository-cell-label");
+    if (index === 0) assert.equal(label, null);
+    else {
+      assert.equal(label!.textContent, header.querySelector("button")!.textContent);
+      assert.equal(label!.getAttribute("aria-hidden"), "true", "visual labels do not duplicate table headers for screen readers");
+    }
+  }
+
   assert.match((button as any).title, /^Synthetic · ID [a-z0-9]{8}$/i);
   assert.equal(button.getAttribute("aria-label"), (button as any).title);
-  assert.equal(row.getAttribute("role"), null);
+  assert.equal(row.getAttribute("role"), "row");
   assert.equal(row.getAttribute("tabindex"), null);
   assert.equal("tabIndex" in row, false);
   assert.match(row.getAttribute("aria-label")!, /^Synthetic · ID [a-z0-9]{8} · 1 session · .*top-level/i);

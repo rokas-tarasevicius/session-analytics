@@ -32,7 +32,7 @@ to Refresh snapshot after completion if disabling the button displaced it and fo
 
 ### Summary: the state of the machine
 
-On narrow screens, repository and time-window selectors share the header, and metrics stack into one column below 400 pixels. Custom ranges keep the native date inputs.
+On narrow screens, repository and time-window selectors share the header, and metrics stack into one column below 400 pixels. Custom ranges keep the native date inputs. At widths up to 800 pixels, the repository fleet table shows each row as a card with labeled figures and wrapping repository names. The column buttons above the cards still sort all eight columns; activating a repository focuses it, and Clear focus restores the fleet. The same table and native buttons preserve keyboard and screen-reader navigation. Wider screens keep the table layout.
 
 <details>
 <summary>Phone layout</summary>
