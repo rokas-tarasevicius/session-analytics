@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- The Summary repository table becomes labeled cards on phone and portrait-tablet screens, keeping every metric, column sorting and keyboard repository focus without horizontal scrolling. Long repository names also stay within Summary’s repository breakdown charts on these screens. Desktop layouts and totals are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

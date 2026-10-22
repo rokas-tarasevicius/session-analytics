@@ -567,6 +567,7 @@ h2 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
 /* ---------------------------------------------------------------- tables */
 .comparison-section { margin-top: var(--gap); min-height: 0; }
 .fleet-total td { color: var(--muted); }
+#repository-comparison .repository-cell-label { display: none; }
 .table-hint { color: var(--muted); font-size: var(--fs-xs); white-space: normal; }
 /* Positioned so visually hidden (absolute) text in a cell stays inside the scroll area instead of widening the page. */
 .table-wrap {
@@ -955,6 +956,30 @@ dialog::backdrop { background: var(--backdrop); }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpi .spark { width: 84px; }
   main { padding: 16px 16px 40px; }
+}
+
+/* Keep one semantic, sortable table; only its narrow-screen presentation becomes cards. */
+@media (max-width: 800px) {
+  :is(#repository-spend, #repository-tokens, #repository-subagent-spend), :is(#repository-spend, #repository-tokens, #repository-subagent-spend) .bar-row { grid-template-columns: minmax(0, 1fr); }
+  #repository-comparison .table-wrap { overflow: visible; max-height: none; border: 0; border-radius: 0; background: none; }
+  #repository-comparison table { display: block; min-width: 0; }
+  #repository-comparison :is(thead, tbody, tfoot) { display: block; }
+  #repository-comparison thead tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 12px; }
+  #repository-comparison thead th { position: static; height: auto; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-xs); letter-spacing: 0; text-transform: none; }
+  #repository-comparison th .sort { justify-content: space-between; min-height: 44px; padding: 6px 10px; white-space: normal; text-align: left; }
+  #repository-comparison th[aria-sort] { border-color: var(--line-strong); background: var(--surface-3); }
+  #repository-comparison :is(tbody, tfoot) tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+  #repository-comparison td { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; padding: 10px; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  #repository-comparison :is(th, td):first-child { position: static; z-index: auto; }
+  #repository-comparison td:first-child { grid-column: 1 / -1; width: auto; max-width: none; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  #repository-comparison .row-link { width: 100%; min-height: 44px; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+  #repository-comparison .repository-cell-label { display: block; order: -1; margin-bottom: 4px; color: var(--muted); font: 500 var(--fs-xs) var(--font-sans); }
+  #repository-comparison td:last-child { grid-column: 1 / -1; }
+  #repository-comparison td > small { white-space: normal; }
+  #repository-comparison td[colspan] { grid-column: 1 / -1; border: 0; }
+  #repository-comparison :is(td[colspan], .table-hint) .button { min-height: 44px; }
+  #repository-comparison tr[aria-current="true"] td { background: var(--accent-soft); }
+  #repository-comparison tr:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 }
 
 @media (max-width: 760px) {
