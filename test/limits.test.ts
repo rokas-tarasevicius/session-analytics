@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { readClaudeProfile } from "../src/limits/accounts.ts";
 import { collectLimits } from "../src/limits/index.ts";
-import { compactObservations, readLedger } from "../src/limits/ledger.ts";
+import { compactObservations, emptyLedger, ledgerName, readLedger, toRow, writeLedger } from "../src/limits/ledger.ts";
 import { codexAccountState } from "../src/limits/codex-account.ts";
 import { claudeSdkAccount, claudeSdkLimitRecord, codexLimitRecord, statuslineObservations } from "../src/limits/sources.ts";
 import type { LimitObservation, LimitsSnapshot } from "../src/limits/types.ts";
@@ -272,6 +272,10 @@ test("per-reading Codex plans are a closed allowlist in sources, ledger, and rem
   assert.equal(account.observations[0]!.planType, "other");
   assert.doesNotMatch(JSON.stringify(account.observations), /private_sentinel/);
   assert.equal(compactObservations([{ ...rows[0]!, planType: sentinel } as unknown as LimitObservation], now)[0]!.planType, "other");
+  const directory = mkdtempSync(join(tmpdir(), "limits-plan-privacy-"));
+  writeLedger(directory, { ...emptyLedger(), rows: [toRow({ ...rows[0]!, planType: sentinel } as unknown as LimitObservation)] }, now);
+  assert.doesNotMatch(readFileSync(join(directory, ledgerName), "utf8"), /private_sentinel/);
+  assert.equal(readLedger(directory, now).ledger!.rows[0]![9], "other");
   assert.equal(codexLimitRecord(JSON.parse(codexLine(new Date(now * 1000).toISOString(), {
     primary: { used_percent: 20, window_minutes: 10080, resets_at: now + 86_400 }, plan_type: "pro",
   })))!.observations[0]!.planType, "pro");
