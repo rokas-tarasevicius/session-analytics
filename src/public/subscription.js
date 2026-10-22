@@ -554,7 +554,7 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide, sco
       : totals.otherMonthlyPotential !== null ? [`On employer-paid or unpriced seats; no plan you pay for is calibrated`, banked].filter(Boolean).join("; ")
       : "Needs two weekly cycles with matched sessions");
   total("Typical week closes at", totals.resetsUsed !== null ? percentText(totals.resetsUsed) : DASH, totals.resetsUsed !== null ? "Observed weekly closes, plus this week's projection" : "Needs a weekly reset whose close was observed");
-  details.append(totalsList);
+  details.append(totalsList, note("Tier boundaries are approximated from readings. A single change can shift price by up to the price difference over the gap between readings; missed changes and invoice rules add uncertainty."));
   const rows = accounts.map((item) => {
     const { economics: value, calibration, period } = item;
     const empty = period.days <= 0;
@@ -757,7 +757,7 @@ function sourcesSection(limits, items, fmt, scope) {
     "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline` in each profile's settings.json. It records the documented rate_limits field for that profile's account and prints the meters.",
     scope.limits ? "Value per 1% divides the API-equivalent value of an account's own sessions on every machine whose limits are read (matched through each machine's Claude profiles, or every Codex session on a machine with one Codex account) by the meter's reading."
       : "Value per 1% divides the API-equivalent value of an account's own sessions on this machine (matched through its Claude profiles, or every Codex session when there is one Codex account) by the meter's reading.",
-    "Codex value per 1% uses only cycles on the same reported tier; a cycle spanning a tier change cannot calibrate capacity. A manual plan prices all selected dates but keeps tier calibrations separate. Older untagged history has no proved tier once tagged readings arrive; Claude and wholly untagged Codex histories use the current-plan fallback.",
+    "Codex value per 1% uses only cycles on the same reported tier; a cycle spanning a tier change cannot calibrate capacity. Calibration uses all retained eligible history (up to 120 days), independently of the selected value dates. A manual plan prices all selected dates but keeps tier calibrations separate. Older untagged history has no proved tier once tagged readings arrive; Claude and wholly untagged Codex histories use the current-plan fallback.",
     `Plan prices were reviewed on ${plansReviewedAt}. Team, Enterprise and Business seats are treated as paid by the employer: they show API value without a personal multiple unless you say you pay. Plan and payer choices stay in this browser.`,
   ]) list.append(el("li", text));
   details.append(list);

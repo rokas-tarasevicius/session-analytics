@@ -693,8 +693,8 @@ Null/absent means missing evidence; every unrecognised source string becomes
 
 Subscription value uses the existing hourly activity ledger and account/machine join; token counts and API-equivalent
 usage totals do not change. Codex value per 1% is the median of qualifying segments **on the same reported tier**,
-with outlier filtering applied within that tier and at least two segments. A cycle containing more than one tier,
-including readings before the first known tier, has no reliable allowance baseline and cannot calibrate. Missing/`unknown` readings carry the last observed tier forward for analysis, just as price periods do; earlier readings are never backfilled. Historical reset dollar
+with outlier filtering applied within that tier and at least two segments. Calibration uses all retained eligible history (up to 120 days), independently of the selected value window. A cycle containing more than one tier,
+including readings before the first known tier, has no reliable allowance baseline and cannot calibrate. Missing readings carry the last observed tier forward for analysis, just as price periods do; earlier readings are never backfilled. Historical reset dollar
 values use their cycle's tier. A change within an unchanged reset window starts pace at the first new-tier reading,
 using the percent increase since that reading, without inventing a redeemed reset.
 
@@ -702,7 +702,9 @@ Each new observed Codex tier starts a price period at that reading's Unix timest
 `monthly USD × overlap seconds / (86400 × 30.4375)` per period; capacity is
 `that tier's weekly capacity × overlap seconds / (86400 × 7)`. The account's counted period still begins at its first
 meter reading and ends at the earlier of now and the selected window's end. UTC-second overlaps handle fractional
-days and DST without assuming that every local day is 24 hours. These are observed plan periods, not invoice dates.
+days and DST without assuming that every local day is 24 hours. These are observed plan periods, not invoice dates. Assuming one transition between consecutive known-tier readings,
+its price timing error is at most `abs(new monthly USD − old monthly USD) × gap seconds / (86400 × 30.4375)`.
+Missed intermediate changes and invoice rules add separate uncertainty; there is no fixed billing-error guarantee.
 The headline value multiple includes only matched value from periods with a positive personal price, paired with
 those same periods' prorated prices; employer-paid, free and unknown-price periods are reported beside it. The account
 row's multiple is unavailable if any counted period lacks a personal price. Current full-month potential uses the
