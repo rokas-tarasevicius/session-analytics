@@ -453,6 +453,8 @@ export interface AnalyzeOptions extends PricingOptions {
   portableIds?: boolean;
   /** IANA zone for local day/hour activity cells; the analysis worker runs with it as `TZ`. */
   timeZone?: string;
+  /** Where Windows drives are mounted, for sessions recorded by Windows agents and read from WSL. Detected when omitted; `null` disables. */
+  windowsDriveRoot?: string | null;
   rateCardPath?: string;
   repositoryId?: string;
   repositoryName?: string;

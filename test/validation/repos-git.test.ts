@@ -6,7 +6,9 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { analyzeMachineSessions } from '../../src/analyzer.ts';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { analyzeMachineSessions, windowsPathUnder } from '../../src/analyzer.ts';
 import { openIndexDatabase } from '../../src/store/database.ts';
 import { keyedHash } from '../../src/store/fingerprint.ts';
 import { NO_REPOSITORY_ID } from '../../verify/repos/git-oracle.ts';
@@ -345,4 +347,54 @@ for (const keptFirst of [true, false]) test(`R-LOCAL-03: retained sessions from 
   assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
   assert.equal(result.repositories.filter(r => r.repository.id === result.sessions[0]!.repositoryId).length, 1);
   assert.equal(JSON.stringify(result).includes('(local directory)'), false);
+});
+
+test('R-GIT-WSL: a Windows drive path resolves through the WSL drive mount', async t => {
+  const f = await fixture(t); const drives = join(f.root, 'mnt');
+  await f.git(join(drives, 'd', 'GIT', 'project'));
+  await mkdir(join(drives, 'd', 'GIT', 'project', 'src'));
+  await f.session('D:\\GIT\\project'); await f.session('d:/GIT/project/src');
+  const result = await analyzeMachineSessions({ ...f.options, windowsDriveRoot: drives });
+  assert.equal(result.sessions.length, 2);
+  assert.ok(result.sessions.every(s => s.repositoryId !== NO_REPOSITORY_ID && s.repositoryName === 'project'));
+  assert.equal(new Set(result.sessions.map(s => s.repositoryId)).size, 1);
+});
+
+test('R-GIT-WSL: Windows drive paths stay unassigned without a drive mount', async t => {
+  const f = await fixture(t); const drives = join(f.root, 'mnt');
+  await f.git(join(drives, 'd', 'GIT', 'project'));
+  await f.session('D:\\GIT\\project');
+  const result = await analyzeMachineSessions({ ...f.options, windowsDriveRoot: null });
+  assert.equal(result.sessions[0]!.repositoryId, NO_REPOSITORY_ID);
+});
+
+test('R-GIT-WSL: only absolute drive paths are translated', () => {
+  assert.equal(windowsPathUnder('C:\\', '/mnt'), '/mnt/c');
+  assert.equal(windowsPathUnder('D:\\GIT\\Lexori\\', '/mnt'), '/mnt/d/GIT/Lexori');
+  assert.equal(windowsPathUnder('D:relative', '/mnt'), 'D:relative');
+  assert.equal(windowsPathUnder('\\\\server\\share\\repo', '/mnt'), '\\\\server\\share\\repo');
+  assert.equal(windowsPathUnder('/home/user/repo', '/mnt'), '/home/user/repo');
+  assert.equal(windowsPathUnder('D:\\GIT\\..\\..\\etc', '/mnt'), 'D:\\GIT\\..\\..\\etc');
+  assert.equal(windowsPathUnder('D:\\GIT', null), 'D:\\GIT');
+});
+
+test('R-GIT-WSL: UNC and drive-relative paths never resolve against the working directory', async t => {
+  const f = await fixture(t);
+  await f.session('\\\\server\\share\\project'); await f.session('D:project');
+  const result = await analyzeMachineSessions({ ...f.options, windowsDriveRoot: join(f.root, 'mnt') });
+  assert.ok(result.sessions.every(s => s.repositoryId === NO_REPOSITORY_ID));
+});
+
+test('R-GIT-WSL: unmapped Windows paths stay unassigned when launched from a temporary directory', async t => {
+  const f = await fixture(t);
+  await f.session('D:\\GIT\\project');
+  await f.session('\\\\server\\share\\project');
+  await f.session('D:project');
+  const analyzer = new URL('../../src/analyzer.ts', import.meta.url).href;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', `
+    import { analyzeMachineSessions } from ${JSON.stringify(analyzer)};
+    const result = await analyzeMachineSessions(JSON.parse(process.argv[1]));
+    process.stdout.write(JSON.stringify(result.sessions.map(session => session.repositoryId)));
+  `, JSON.stringify({ ...f.options, windowsDriveRoot: null })], { cwd: f.root });
+  assert.deepEqual(JSON.parse(stdout), [NO_REPOSITORY_ID, NO_REPOSITORY_ID, NO_REPOSITORY_ID]);
 });

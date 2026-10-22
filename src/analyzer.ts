@@ -1515,9 +1515,27 @@ function pathInside(path: string, root: string): boolean {
   return resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}/`);
 }
 
+const WINDOWS_DRIVE_PATH = /^([A-Za-z]):[\\/](.*)$/s;
+const WINDOWS_PATH = /^(?:[A-Za-z]:|\\\\)/;
+
+/** `D:\GIT\repo` as WSL sees it under `driveRoot`; any other path is returned unchanged. */
+export function windowsPathUnder(path: string, driveRoot: string | null): string {
+  const drive = driveRoot ? WINDOWS_DRIVE_PATH.exec(path) : null;
+  const segments = drive?.[2]!.split(/[\\/]+/).filter(Boolean) ?? [];
+  if (!drive || segments.includes("..")) return path;
+  return join(driveRoot!, drive[1]!.toLowerCase(), ...segments);
+}
+
+async function detectedWindowsDriveRoot(): Promise<string | null> {
+  if (process.platform !== "linux") return null;
+  const release = await readFile("/proc/sys/kernel/osrelease", "utf8").catch(() => "");
+  return /microsoft/i.test(release) && await directoryExists("/mnt") ? "/mnt" : null;
+}
+
 // One scan owns one discovered map. Thousands of sessions share a few hundred working
 // directories, and each lookup walks the filesystem and every workspace root.
 const repositoryLookups = new WeakMap<Map<string, RepositoryRow>, Map<string, Promise<RepositoryRow>>>();
+const windowsDriveRoots = new WeakMap<Map<string, RepositoryRow>, string | null>();
 
 function repositoryForPath(
   cwd: string,
@@ -1526,6 +1544,7 @@ function repositoryForPath(
   discovered: Map<string, RepositoryRow>,
   metadataRemote: string | null = null,
 ): Promise<RepositoryRow> {
+  cwd = windowsPathUnder(cwd, windowsDriveRoots.get(discovered) ?? null);
   let lookups = repositoryLookups.get(discovered);
   if (!lookups) { lookups = new Map(); repositoryLookups.set(discovered, lookups); }
   const key = JSON.stringify([cwd, metadataRemote]);
@@ -1544,11 +1563,13 @@ async function resolveRepositoryForPath(
   discovered: Map<string, RepositoryRow>,
   metadataRemote: string | null,
 ): Promise<RepositoryRow> {
-  const resolvedCwd = await realpath(cwd).catch(() => resolve(cwd));
+  // An unmapped Windows path is not relative to this process's directory.
+  const windowsPath = WINDOWS_PATH.test(cwd);
+  const resolvedCwd = windowsPath ? cwd : await realpath(cwd).catch(() => resolve(cwd));
   const workspaceMatch = workspaceRepositories.get(resolvedCwd);
   if (workspaceMatch) return workspaceMatch;
   metadataRemote = canonicalizeRemote(metadataRemote) ? metadataRemote : null;
-  const gitRoot = metadataRemote && !(await stat(resolvedCwd).catch(() => null)) ? null : await gitRootForPath(resolvedCwd);
+  const gitRoot = windowsPath || (metadataRemote && !(await stat(resolvedCwd).catch(() => null))) ? null : await gitRootForPath(resolvedCwd);
   const repositoryRemote = (gitRoot ? await repositoryRemoteAtRoot(gitRoot) : null) ?? metadataRemote;
   const remoteIdentity = repositoryRemote ? normalizeRemote(repositoryRemote) : null;
   // Workspace keys are normalized absolute paths: the deepest owning ancestor is the longest containing root.
@@ -1564,7 +1585,7 @@ async function resolveRepositoryForPath(
     if (dirname(root) === root) break;
   }
   const direct = repositories
-    .filter(({ root_path }) => root_path && pathInside(resolvedCwd, root_path))
+    .filter(({ root_path }) => root_path && !windowsPath && pathInside(resolvedCwd, root_path))
     .sort((left, right) => resolve(right.root_path).length - resolve(left.root_path).length)[0];
   if (direct && !gitRoot && !metadataRemote) return direct;
   const workspaceParts = resolvedCwd.match(/\/conductor\/workspaces\/([^/]+)\//);
@@ -1583,7 +1604,7 @@ async function resolveRepositoryForPath(
   // Without a Git root, a recorded remote or Conductor ownership a directory is not a
   // repository: scratch folders, the home directory and deleted checkouts share one group.
   const ephemeral = !gitRoot && !remoteIdentity;
-  if (ephemeral && !isTemporaryPath(resolvedCwd)) return noRepositoryGroup(discovered, resolvedCwd);
+  if (ephemeral && (windowsPath || !isTemporaryPath(resolvedCwd))) return noRepositoryGroup(discovered, resolvedCwd);
   const ephemeralRoot = "/private/var/folders/session-analytics-ephemeral";
   const groupingRoot = remoteIdentity ? `remote:${remoteIdentity}` : gitRoot ?? ephemeralRoot;
   const existing = discovered.get(groupingRoot);
@@ -2297,6 +2318,7 @@ async function analyzeSelectedRepositories(
       }
     }
     const discovered = new Map<string, RepositoryRow>();
+    windowsDriveRoots.set(discovered, options.windowsDriveRoot !== undefined ? options.windowsDriveRoot : await detectedWindowsDriveRoot());
     // Keep Cursor's hydrated composer objects serialized until the much larger
     // Codex and Claude transcript pass has finished. Retaining both object
     // graphs at once needlessly pushes machine-wide scans over V8's heap limit.
