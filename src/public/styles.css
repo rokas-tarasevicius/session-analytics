@@ -886,6 +886,12 @@ dialog::backdrop { background: var(--backdrop); }
 .date-range-note { color: var(--muted); font-size: var(--fs-xs); }
 #generated-at[data-stale="true"] { color: var(--warn-text); }
 .view-status { margin-bottom: var(--gap); }
+.view-status .empty-state { gap: 12px; padding: 28px 20px; }
+.view-status .empty-state > span, .view-status .empty-state > p, .first-run-checks { max-width: 64ch; margin: 0; }
+.first-run-checks { text-align: left; }
+.first-run-checks p { margin: 8px 0; }
+.source-checks { padding-left: 20px; margin: 8px 0; }
+.source-checks li { margin: 4px 0; }
 .view-status .status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 
 /* Summary is a workspace: charts lead, totals stay in a narrow reading rail.

@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { installExportMenu, openExportMenu } from "../src/public/export-menu.js";
+import { sourceCheckNotes } from "../src/public/providers.js";
 import { parseUrlState, serializeUrlState } from "../src/public/url-state.js";
 import {
   clampWindow, isTextEntryTarget, presentProviders, providerShortcutTarget, rankPaletteItems, resolveCustomWindow, singleFlight, validDay,
@@ -15,6 +16,78 @@ import { harness, sample, withLedger } from "./validation/aggregation-ui-harness
 
 const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const presets = ["7", "30", "90", "all", "custom"];
+
+test("source checks project fixed provider labels and outcomes without forwarding private fields", () => {
+  const sentinel = "/private/SOURCE-SECRET raw error";
+  const health = [
+    { provider: "claude" as const, status: "available" as const, sourcesRead: 1, missingSources: 0, unreadableSources: 0, path: sentinel },
+    { provider: "codex" as const, status: "incomplete" as const, sourcesRead: 1, missingSources: 1, unreadableSources: 1, error: sentinel },
+    { provider: "cursor" as const, status: "unavailable" as const, sourcesRead: 0, missingSources: 1, unreadableSources: 0 },
+    { provider: "gemini" as const, status: "unknown" as const, sourcesRead: 0, missingSources: 0, unreadableSources: 0 },
+  ];
+  assert.deepEqual(sourceCheckNotes(health), [
+    "Codex: history readable; history missing; history could not be read.",
+    "Claude Code: history readable.", "Cursor: history missing.", "Gemini CLI: discovery details unavailable.",
+  ]);
+  assert.deepEqual(sourceCheckNotes(), []);
+  assert.doesNotMatch(JSON.stringify(sourceCheckNotes(health)), /SOURCE-SECRET|private|raw error/);
+  assert.deepEqual(sourceCheckNotes([{ ...health[0]!, provider: sentinel as never }]), []);
+});
+
+test("first-run guidance and reported checks stay consistent across all seven views and Coverage", async () => {
+  const { document, run } = await harness([]);
+  run(`fixture.mcpSourceHealth = [
+    { provider: 'claude', sourcesRead: 1, missingSources: 0, unreadableSources: 0 },
+    { provider: 'cursor', sourcesRead: 0, missingSources: 1, unreadableSources: 0 }
+  ]; fixture.rateCard = { effectiveDate: '2026-10-01', models: [], pricing: { offline: true, warnings: [], sources: [], stale: false } }`);
+  for (const view of [...views, "subscription"]) {
+    run(`switchView('${view}')`);
+    const status = document.querySelector("#view-status")!;
+    assert.equal(status.hidden, false, view);
+    assert.match(status.textContent, /Your first session starts here/);
+    assert.match(status.textContent, /Claude Code: history readable/);
+    assert.match(status.textContent, /Cursor: history missing/);
+    assert.match(status.textContent, /Offline pricing does not prevent local history scans/);
+    assert.ok(status.querySelectorAll("button").some((b) => b.textContent === "Refresh snapshot"));
+    assert.equal((status.querySelector("a") as Element & { href: string }).href, "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/providers.md");
+    assert.equal(document.querySelector(`[data-view-panel="${view}"]`)!.hidden, view !== "pricing");
+    assert.match(document.querySelector("#coverage-summary")!.textContent, /No saved agent sessions/);
+    assert.match(document.querySelector("#coverage-source-checks")!.textContent, /Cursor: history missing/);
+    assert.doesNotMatch(status.textContent, /Show all time|Clear repository focus/);
+  }
+  run("delete fixture.mcpSourceHealth; renderView()");
+  assert.match(document.querySelector("#view-status")!.textContent, /Source discovery details are unavailable/);
+  assert.match(document.querySelector("#coverage-source-checks")!.textContent, /Source discovery details are unavailable/);
+  assert.match(document.querySelector("#provider-evidence-rows")!.textContent, /No session evidence/);
+});
+
+test("a pending first scan and a failed first scan explain their state in every view", async () => {
+  const { document, run } = await harness([]);
+  run("snapshot = null; elements.main.dataset.state = 'loading'; loadFailed = false");
+  for (const view of [...views, "subscription"]) {
+    run(`switchView('${view}'); renderViewStatus(null)`);
+    assert.match(document.querySelector("#view-status")!.textContent, /Reading local history/);
+    assert.match(document.querySelector("#view-status")!.textContent, /Results appear when the scan finishes/);
+    assert.ok(document.querySelector("#view-status")!.querySelector("a"));
+    assert.equal(document.querySelector(`[data-view-panel="${view}"]`)!.hidden, view !== "subscription");
+  }
+  run("loadFailed = true; renderViewStatus(null); showActivePanel()");
+  assert.match(document.querySelector("#view-status")!.textContent, /No snapshot/);
+  assert.ok(document.querySelector("#view-status")!.querySelector("a"));
+  assert.ok(document.querySelectorAll("[data-view-panel]").every((p) => p.hidden));
+});
+
+test("empty machine selections and machines still reading do not claim there is no saved history", async () => {
+  const { document, run } = await harness([sample()]);
+  run(`fullSnapshot = fixture; snapshot = { ...fixture, sessions: [] }; sessionsByRepository = groupByRepository([]); renderView()`);
+  assert.match(document.querySelector("#view-status")!.textContent, /No sessions from selected machines/);
+  assert.match(document.querySelector("#view-status")!.textContent, /Choose machines/);
+  assert.doesNotMatch(document.querySelector("#view-status")!.textContent, /Your first session|Complete a session/);
+  assert.match(document.querySelector("#scope-description")!.textContent, /selected machines/);
+  run(`fullSnapshot = snapshot; fullSnapshot.machines = [{ key: 'remote', state: 'reading' }]; renderView()`);
+  assert.match(document.querySelector("#view-status")!.textContent, /Reading machine history/);
+  assert.doesNotMatch(document.querySelector("#scope-description")!.textContent, /Scan complete/);
+});
 
 test("pricing health polling adds the refresh notice without fetching analytics or mutating displayed totals", async () => {
   const { context, document, run } = await harness([withLedger(sample(), [["synthetic", 2]])]);
@@ -61,7 +134,11 @@ test("shared snapshot ignores view, window and provider shortcuts", async () => 
   context["sharedFixture"] = { kind: "shared", sources: [], minimumSessions: 5,
     summary: { sessions: 5 }, repositories: [{ repository: "repo-synthetic", sessions: 5, apiEquivalentSpendUsd: 1,
       providerReportedSpendUsd: 0, inputTokens: 100, outputTokens: 20, priceableTokens: 120, pricedTokens: 120 }] };
+  run("snapshot = null; elements.main.dataset.state = 'loading'; renderViewStatus(null)");
+  assert.equal(document.querySelector("#view-status")!.hidden, false);
   run("render(sharedFixture); elements.windowStart.value = elements.windowEnd.value = elements.windowStart.min = elements.windowEnd.max = ''");
+  assert.equal(document.querySelector("#view-status")!.hidden, true);
+  assert.equal(document.querySelector("#view-status")!.textContent, "");
   assert.equal(run("snapshot"), null);
   assert.equal(run("exportSelection() === sharedFixture"), true);
   const assertHidden = () => {

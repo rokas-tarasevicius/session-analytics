@@ -10,7 +10,7 @@ import {
   sortRepositories, sparklineSummary, summarize, tickScale, unknownStartsInRange, validDay, windowStartFor,
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
-import { providerMark, renderProviderEvidence, metricCoverage } from "./providers.js";
+import { providerMark, renderProviderEvidence, metricCoverage, sourceCheckNotes } from "./providers.js";
 
 import { renderPricingPanel } from "./pricing.js";
 import { renderToolsView } from "./tools.js";
@@ -324,7 +324,7 @@ function restoreUrlState() {
 /** Shows only the active view's panel, or none when there is no snapshot or the window is empty. */
 function showActivePanel() {
   const name = currentViewName();
-  const blocked = Boolean(sharedSnapshot) || (!snapshot && loadFailed) || (windowEmpty && name !== "pricing");
+  const blocked = Boolean(sharedSnapshot) || (!snapshot && (loadFailed || name !== "subscription")) || (windowEmpty && name !== "pricing");
   for (const panel of viewPanels) panel.hidden = blocked || panel.dataset.viewPanel !== name;
 }
 
@@ -1055,6 +1055,8 @@ function renderWarnings(warnings) {
 
 /** Selection explanations live in Coverage; chart and KPI notes stay short. */
 function renderCoverageSummary(view) {
+  const discovery = $("#coverage-source-checks");
+  clear(discovery); appendSourceChecks(discovery);
   elements.coverageCostNote.hidden = true;
   const summary = view.summary, activity = view.activity, context = velocityContext();
   const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} older-snapshot session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates (refresh to include)`] : [])];
@@ -1064,7 +1066,14 @@ function renderCoverageSummary(view) {
   elements.coverageSessionNote.textContent = `${executionBreakdown(summary)}${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
 
   const sessions = view.sessions.length;
-  if (!sessions) { elements.coverageSummary.textContent = "No sessions in this selection. Widen the window or clear the repository focus."; return; }
+  if (!sessions) {
+    elements.coverageSummary.textContent = fullSnapshot?.machines?.some(({ state }) => state === "reading") && !(fullSnapshot ?? snapshot).sessions.length
+      ? "Machine history is still being read. Session evidence will appear as each machine finishes."
+      : (fullSnapshot ?? snapshot).sessions.length
+      ? "No sessions started in this selection. Widen the window or clear the repository focus; activity from earlier starts can still appear."
+      : "No saved agent sessions were found in this snapshot. Complete a session in a supported agent, then refresh. If you expected history, check provider setup and the source checks below.";
+    return;
+  }
   const part = (metric, what) => { const { eligible } = metricCoverage(view.sessions, metric); return `${eligible} ${what}`; };
   elements.coverageSummary.textContent = `${sessions} selected session${sessions === 1 ? "" : "s"} across ${view.summary.repositoriesWithSessions} repositor${view.summary.repositoriesWithSessions === 1 ? "y" : "ies"}: ${part("tokens", "carry token evidence")}, ${part("tools", "tool evidence")}, ${part("cost", "priced or reported value")}. Every number is a lower bound from local evidence; badges on the dashboard show the eligible share behind each figure.`;
 }
@@ -1347,7 +1356,13 @@ function renderSharedView(view) {
     : name === "summary" ? `Usage value by activity date; sessions, tokens and tools for sessions started during ${windowCaption()} (${timeZone}).`
     : name === "costs" || name === "pricing" ? `Usage value by activity date during ${windowCaption()} (${timeZone}).`
     : `Sessions started during ${windowCaption()} (${timeZone}); whole-session totals.`;
-  if (name === "summary" && selected) {
+  if (!snapshot.sessions.length) {
+    elements.scope.textContent = (fullSnapshot ?? snapshot).sessions.length
+      ? "No sessions from the selected machines. Change the Machines selection to include history."
+      : fullSnapshot?.machines?.some(({ state }) => state === "reading")
+        ? "Waiting for machine history. Results appear as each machine finishes."
+        : "Scan complete · no saved sessions found. Coverage explains the reported source checks.";
+  } else if (name === "summary" && selected) {
     elements.scope.textContent = `${selected.repository.name} · ${integer(view.sessions.length)} session${view.sessions.length === 1 ? "" : "s"} · ${dateRange(elements.windowStart.value, elements.windowEnd.value)} (${timeZone})`;
   } else if (name === "summary" && view.sessions.length === 1 && soleContributor(view, view.sessions[0])) {
     const session = view.sessions[0];
@@ -1520,27 +1535,65 @@ function renderProviderEmptyState(container, scope, eligibleCount, windowCount) 
   return true;
 }
 
-/** The view-level status in place of the panels: no snapshot, or nothing in the selected window. */
+const providerSetupGuide = "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/providers.md";
+
+function setupLink() {
+  const link = node("a", "Provider setup guide ↗", "button");
+  link.href = providerSetupGuide; link.target = "_blank"; link.rel = "noreferrer";
+  return link;
+}
+
+/** Discovery is independent of the selected window. Only reported checks are named. */
+function appendSourceChecks(container) {
+  const notes = sourceCheckNotes(snapshot?.mcpSourceHealth);
+  container.append(node("p", "Supported providers: Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI and Antigravity."));
+  if (notes.length) {
+    container.append(node("p", "Reported source checks (readable history may still be empty or incomplete):"));
+    const list = node("ul", null, "source-checks");
+    for (const note of notes) list.append(node("li", note));
+    container.append(list);
+    container.append(node("p", "Discovery details for other providers are not reported here. Missing history does not establish whether an agent is installed."));
+  } else container.append(node("p", "Source discovery details are unavailable in this snapshot. Refresh to check local history again."));
+}
+
+/** The same guidance in every view, while Pricing keeps its usable catalog. */
 function renderViewStatus(view) {
   const target = elements.viewStatus;
   if (!target) return;
   clear(target);
   if (!snapshot && loadFailed) {
-    emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
+    const box = emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
+    const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
     target.hidden = false;
     return;
+  }
+  if (!snapshot && elements.main.dataset.state === "loading") {
+    const box = emptyState(target, "The first scan may take a few minutes. Results appear when the scan finishes; progress is shown above.", "Reading local history");
+    const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
+    target.hidden = false; return;
   }
   if (!view || !windowEmpty) { target.hidden = true; return; }
   const selected = selectedRepository();
   const scope = selected ? ` for ${selected.repository.name}` : "";
-  const message = !snapshot.sessions.length ? "No local agent sessions were found in this snapshot."
+  const firstRun = !(fullSnapshot ?? snapshot).sessions.length;
+  const readingMachines = firstRun && fullSnapshot?.machines?.some(({ state }) => state === "reading");
+  const machinesEmpty = !firstRun && !snapshot.sessions.length;
+  const message = readingMachines ? "No sessions are available yet. Another machine is still being read; results will appear when it finishes."
+    : firstRun ? "No saved agent sessions were found. Complete a session in a supported agent on this machine, then refresh. If you expected history, check provider setup."
+    : machinesEmpty ? "Saved sessions exist, but none are from the selected machines. Choose a machine with history to see its sessions."
     : windowPreset === "all" ? `No sessions${scope} in the observed history.`
       : `No sessions${scope} started or were active during ${windowCaption()}.`;
-  const box = emptyState(target, message, "Nothing in this window");
+  const box = emptyState(target, message, readingMachines ? "Reading machine history" : firstRun ? "Your first session starts here" : machinesEmpty ? "No sessions from selected machines" : "Nothing in this window");
+  if (firstRun && !readingMachines) {
+    const checks = node("div", null, "first-run-checks"); appendSourceChecks(checks); box.append(checks);
+  }
+  if (snapshot.rateCard?.pricing?.offline) box.append(node("p", "Pricing is offline: cached and reviewed rates remain available. Offline pricing does not prevent local history scans."));
   const actions = node("div", null, "status-actions");
+  if (firstRun && !readingMachines) actions.append(statusAction("Refresh snapshot", () => load(true)));
+  if (machinesEmpty || readingMachines) actions.append(statusAction("Choose machines", openMachines));
   if (windowPreset !== "all" && snapshot.sessions.length) actions.append(statusAction("Show all time", () => applyWindowPreset("all")));
   if (selected) actions.append(statusAction("Clear repository focus", () => selectRepository("all", { scroll: false })));
-  if (actions.childElementCount) box.append(actions);
+  actions.append(setupLink()); box.append(actions);
   target.hidden = false;
 }
 
@@ -2043,7 +2096,7 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; clear(elements.viewStatus); elements.viewStatus.hidden = true; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
   elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");
@@ -2091,6 +2144,7 @@ async function loadSnapshot(refresh = false) {
   elements.main.dataset.state = previous ? "refreshing" : "loading";
   if (!previous) {
     loadFailed = false; renderViewStatus(null); showActivePanel();
+    elements.scope.textContent = "Reading saved local agent history. Results appear when the scan finishes.";
     elements.generated.textContent = "Building snapshot…";
     if (!elements.repositoryList.childElementCount) for (let index = 0; index < 5; index += 1) elements.repositoryList.append(node("div", null, "repo-skeleton"));
   }
@@ -2112,6 +2166,7 @@ async function loadSnapshot(refresh = false) {
       loadFailed = true;
       clear(elements.repositoryList);
       elements.generated.textContent = "No snapshot";
+      elements.scope.textContent = "No snapshot yet. Retry the scan to read local history.";
       showError(`The local analysis did not finish. ${describeLoadError(error)} Retry, or check the terminal running the dashboard.`, "No snapshot yet");
       showActivePanel(); renderViewStatus(null);
     }
