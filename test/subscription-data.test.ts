@@ -946,3 +946,16 @@ test("untagged history cannot establish historical capacity after Codex tier evi
   assert.equal(item.history[0]!.expiredUsd, null);
   assert.equal(item.economics.potential, null, "full-period utilization stays unknown when its historical denominator is unknown");
 });
+
+test("missing Codex plan evidence carries the last observed tier without inventing pace resets or losing calibration", () => {
+  const rows = [0, 1].flatMap((week) => [
+    { ...reading("codex", "seven_day", start + (week + 1) * WEEK, start + week * WEEK, 0), ...(week === 0 ? { planType: "pro" as const } : {}) },
+    reading("codex", "seven_day", start + (week + 1) * WEEK, start + week * WEEK + DAY, 10),
+    reading("codex", "seven_day", start + (week + 1) * WEEK, start + week * WEEK + 2 * DAY, 20),
+  ]);
+  const meter = buildMeters(rows, start + WEEK + 2 * DAY)[0]!;
+  assert.deepEqual(meter.cycles.map((cycle) => cycle.segments.length), [1, 1]);
+  assert.equal(calibrate(meter, { between: () => 100 }, "pro").cycles, 2);
+  assert.equal(calibrate(meter, { between: () => 100 }, "pro").perPercent, 5);
+  assert.equal(liveMeter(meter, start + WEEK + 2 * DAY).rate, 10 / DAY);
+});

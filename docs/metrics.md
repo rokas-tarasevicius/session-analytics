@@ -694,7 +694,7 @@ Null/absent means missing evidence (including Codex's `unknown`); every other un
 Subscription value uses the existing hourly activity ledger and account/machine join; token counts and API-equivalent
 usage totals do not change. Codex value per 1% is the median of qualifying segments **on the same reported tier**,
 with outlier filtering applied within that tier and at least two segments. A cycle containing more than one tier,
-including an untagged/tagged mixture, has no reliable allowance baseline and cannot calibrate. Historical reset dollar
+including readings before the first known tier, has no reliable allowance baseline and cannot calibrate. Missing/`unknown` readings carry the last observed tier forward for analysis, just as price periods do; earlier readings are never backfilled. Historical reset dollar
 values use their cycle's tier. A change within an unchanged reset window starts pace at the first new-tier reading,
 using the percent increase since that reading, without inventing a redeemed reset.
 

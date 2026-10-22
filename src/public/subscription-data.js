@@ -100,8 +100,20 @@ function meterOrder(meter) {
 }
 
 function cyclesOf(readings, window, now) {
+  // Missing evidence is not a tier change. Carry the last observed tier forward, as price periods do;
+  // never backfill readings before the first tier was observed. Resolve simultaneous evidence before carrying it.
+  const evidence = new Map();
+  for (const reading of readings) if (reading.planType) {
+    const previous = evidence.get(reading.observedAt);
+    evidence.set(reading.observedAt, previous && previous !== reading.planType ? "other" : reading.planType);
+  }
+  let planType = null;
+  const contextual = [...readings].sort((left, right) => left.observedAt - right.observedAt).map((reading) => {
+    planType = evidence.get(reading.observedAt) ?? planType;
+    return reading.planType ? reading : { ...reading, planType };
+  });
   const groups = [];
-  for (const reading of [...readings].sort((left, right) => left.resetsAt - right.resetsAt)) {
+  for (const reading of contextual.sort((left, right) => left.resetsAt - right.resetsAt)) {
     const group = groups.at(-1);
     if (group && reading.resetsAt - group.first <= resetDrift) group.readings.push(reading);
     else groups.push({ first: reading.resetsAt, readings: [reading] });
