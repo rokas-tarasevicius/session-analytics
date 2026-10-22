@@ -48,7 +48,7 @@ test("first-run guidance and reported checks stay consistent across all seven vi
     assert.match(status.textContent, /Claude Code: history readable/);
     assert.match(status.textContent, /Cursor: history missing/);
     assert.match(status.textContent, /Offline pricing does not prevent local history scans/);
-    assert.ok(status.querySelectorAll("button").some((b) => b.textContent === "Refresh snapshot"));
+    assert.equal(status.querySelectorAll("button").find((b) => b.textContent === "Refresh snapshot")!.dataset.focusKey, "first-run:refresh");
     assert.equal((status.querySelector("a") as Element & { href: string }).href, "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/providers.md");
     assert.equal(document.querySelector(`[data-view-panel="${view}"]`)!.hidden, view !== "pricing");
     assert.match(document.querySelector("#coverage-summary")!.textContent, /No saved agent sessions/);

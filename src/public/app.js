@@ -1590,7 +1590,10 @@ function renderViewStatus(view) {
   }
   if (snapshot.rateCard?.pricing?.offline) box.append(node("p", "Pricing is offline: cached and reviewed rates remain available. Offline pricing does not prevent local history scans."));
   const actions = node("div", null, "status-actions");
-  if (firstRun && !readingMachines) actions.append(statusAction("Refresh snapshot", () => load(true)));
+  if (firstRun && !readingMachines) {
+    const refresh = statusAction("Refresh snapshot", () => load(true));
+    refresh.dataset.focusKey = "first-run:refresh"; actions.append(refresh);
+  }
   if (machinesEmpty || readingMachines) actions.append(statusAction("Choose machines", openMachines));
   if (windowPreset !== "all" && snapshot.sessions.length) actions.append(statusAction("Show all time", () => applyWindowPreset("all")));
   if (selected) actions.append(statusAction("Clear repository focus", () => selectRepository("all", { scroll: false })));
