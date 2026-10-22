@@ -26,7 +26,7 @@ import { localMachine, machineAge, machineNote, machineReasons, machineTally, ma
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
-import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize } from "./ui.js";
+import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize, kpi } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -529,17 +529,12 @@ function renderActivity(view) {
   $("#activity-insights-note").hidden = !counted;
   if (counted) {
     const rhythm = activityInsights(eligible, snapshotTimeZone());
-    const card = (label, value, note) => {
-      const item = node("article", null, "kpi");
-      item.append(node("span", label, "kpi-label"), node("strong", value), node("small", note, "kpi-note"));
-      insights.append(item);
-      return item;
-    };
-    card("Longest start-day streak", `${integer(rhythm.longestStreak)} ${rhythm.longestStreak === 1 ? "day" : "days"}`, `${integer(rhythm.activeDays)} active ${rhythm.activeDays === 1 ? "day" : "days"} in this window`);
+    insights.append(kpi({ label: "Longest start-day streak", value: `${integer(rhythm.longestStreak)} ${rhythm.longestStreak === 1 ? "day" : "days"}`, note: `${integer(rhythm.activeDays)} active ${rhythm.activeDays === 1 ? "day" : "days"} in this window` }));
     const peak = (label, result, labels, unit) => {
       const winners = result.indexes.map((index) => labels[index]);
-      const item = card(label, winners[0], `${integer(result.starts)} ${result.starts === 1 ? "start" : "starts"}${winners.length > 1 ? ` · ${integer(winners.length)} ${unit} tied` : ""}`);
+      const item = kpi({ label, value: winners[0], note: `${integer(result.starts)} ${result.starts === 1 ? "start" : "starts"}${winners.length > 1 ? ` · ${integer(winners.length)} ${unit} tied` : ""}` });
       if (winners.length > 1) item.append(node("span", `Tied: ${winners.join(", ")}`, "sr-only"));
+      insights.append(item);
     };
     peak("Busiest hour", rhythm.busiestHour, Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00–${String(hour).padStart(2, "0")}:59`), "hours");
     peak("Busiest weekday", rhythm.busiestWeekday, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], "weekdays");

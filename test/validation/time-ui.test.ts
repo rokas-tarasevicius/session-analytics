@@ -20,11 +20,12 @@ function productionFunction(name: string, context: Record<string, unknown>) {
 }
 
 test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch session', () => {
+  (globalThis as any).document = { createElement: (tag: string) => new Element(tag) };
   const elements = { activityProviderFilters: new Element(), activityTooltip: new Element(), activityHeatmap: new Element(), activityRepositories: new Element() };
   const evidence = new Element(), key = new Element(), insights = new Element();
   const status = new Element();
   const render = productionFunction('renderActivity', {
-    elements, normalizeTimestamp, activityGrid, activityInsights, heatLegend, heatLevel, renderProviderEmptyState: () => false,
+    ...ui, elements, normalizeTimestamp, activityGrid, activityInsights, heatLegend, heatLevel, renderProviderEmptyState: () => false,
     document: { querySelector: (selector: string) => selector === '#activity-heatmap-key' ? key : status }, integer, snapshotTimeZone: () => 'UTC',
     $: (selector: string) => selector === '#activity-insights' ? insights : evidence, renderViewProviderFilters() {}, sessionsForProviders: (s: unknown) => s,
     node: (tag: string, text?: string, cls?: string) => { const e = new Element(tag); e.textContent=text??'';e.className=cls??'';return e; },
