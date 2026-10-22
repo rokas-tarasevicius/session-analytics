@@ -43,6 +43,8 @@ On narrow screens, repository and time-window selectors share the header, and me
 
 Summary answers "what happened in this window?" Six metrics show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each metric shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. On wide desktops, the metrics form a totals rail beside the daily usage chart and session mix; narrower layouts put totals first. Repository and model breakdowns, top tools, sub-agent value and a sortable fleet table follow below.
 
+The daily chart keeps the inspected date and each provider's dollar value below the plot, starting with the last day in the window. Hover or tap the plot to inspect a day, or focus it and use Left, Right, Home and End. The readout stays visible when you move to the legend; Escape dismisses it. It never covers the plotted lines. Windows with only one or two active days keep their compact value summary.
+
 Changes share arrow marks and one decimal place for percentages; ratios above 10× use a multiple of the prior value, such as `▲ 156×`. Adjacent equal-length windows say “vs previous Nd”; calendar week/month comparisons retain their named weekday/month periods.
 
 <p align="center">

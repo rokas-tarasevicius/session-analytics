@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Summary daily-value charts keep exact provider values in a keyboard-accessible readout below the plot, so inspecting a day no longer covers the lines on narrow screens.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

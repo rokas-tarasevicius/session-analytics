@@ -150,6 +150,57 @@ test("donut and daily lines draw every provider in legend order, using brand col
   assert.deepEqual(narrow.querySelectorAll(".axis-label").filter((label) => label.getAttribute("y") === "208").map((label) => label.textContent), ["1 Oct", "2 Oct", "3 Oct", "4 Oct", "5 Oct", "6 Oct", "7 Oct"]);
 });
 
+test("daily readout exposes exact day values without hover and retains inspection through keyboard and pointer use", async () => {
+  const { document, run } = await harness([]);
+  run("for (const input of providerFilters) input.closest('.chip').hidden = false");
+  const days = [
+    { name: "2025-12-30", claude: 10.25, codex: 1.01 },
+    { name: "2025-12-31", claude: 0, codex: 0 },
+    { name: "2026-01-01", claude: 20.50, codex: 2.02 },
+    { name: "2026-01-02", claude: 30.75, codex: 3.03 },
+  ];
+  run(`renderLine(${JSON.stringify(days)})`);
+  const chart = document.querySelector("#daily-spend")!;
+  const svg = chart.querySelector("svg")!, readout = chart.querySelector(".chart-readout")!;
+  const title = () => readout.querySelector(".tip-title")!.textContent;
+  assert.equal(svg.getAttribute("role"), "group");
+  assert.equal(svg.getAttribute("aria-describedby"), readout.id);
+  assert.match(svg.getAttribute("aria-label")!, /Home and End/);
+  assert.equal(readout.hidden, false);
+  assert.match(title(), /2 January 2026/);
+  assert.deepEqual(readout.querySelectorAll("strong").map((value) => value.textContent), ["$30.75", "$3.03"]);
+  const key = (name: string) => {
+    let prevented = false, stopped = false;
+    svg.listeners.get("keydown")!({ key: name, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
+    return { prevented, stopped };
+  };
+  assert.equal(key("Home").prevented, true);
+  assert.match(title(), /30 December 2025/);
+  key("ArrowLeft"); assert.match(title(), /30 December 2025/);
+  key("ArrowRight"); assert.match(title(), /31 December 2025/);
+  assert.deepEqual(readout.querySelectorAll("strong").map((value) => value.textContent), ["$0.00", "$0.00"]);
+  assert.match(document.querySelector("#chart-announcer")!.textContent, /31 December 2025.*Claude.*\$0.00/);
+  // Leaving the plot or moving focus to the legend does not take away the values.
+  svg.listeners.get("pointerleave")?.(); svg.listeners.get("blur")?.();
+  assert.equal(readout.hidden, false);
+  assert.deepEqual(key("Escape"), { prevented: true, stopped: true });
+  assert.equal(readout.hidden, true);
+  assert.deepEqual(key("Escape"), { prevented: false, stopped: false });
+  key("ArrowRight"); assert.match(title(), /1 January 2026/);
+  key("Escape");
+  svg.listeners.get("focus")!();
+  assert.equal(readout.hidden, false); assert.match(title(), /1 January 2026/);
+  svg.listeners.get("pointermove")!({ clientX: 886 }); assert.match(title(), /2 January 2026/);
+  svg.listeners.get("click")!({ clientX: 52 }); assert.match(title(), /30 December 2025/);
+  key("End"); key("ArrowRight"); assert.match(title(), /2 January 2026/);
+  // A resize redraw can restore by calendar day, including a zero-activity day.
+  run(`renderLine(${JSON.stringify(days)}, "2025-12-31")`);
+  assert.match(chart.querySelector(".tip-title")!.textContent, /31 December 2025/);
+  run("renderLine([])");
+  assert.equal(chart.querySelector(".chart-readout"), null);
+  assert.match(chart.textContent, /Nothing to plot/);
+});
+
 test("legend keeps safe wrapping text and order, drops only numeric zero and resets highlights", async () => {
   await harness([]);
   const target = new Element(), container = new Element(), mark = new Element("path");
