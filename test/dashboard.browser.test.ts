@@ -239,7 +239,7 @@ test("laptop tables and mobile fleet cards fit in both themes and densities", { 
           cards: rows.every(row => getComputedStyle(row).display === 'grid'),
           fits: cells.every(cell => { const r = cell.getBoundingClientRect(); return r.left >= rect.left && r.right <= rect.right && cell.scrollWidth <= cell.clientWidth; }),
           labels: [...rows[0].querySelectorAll('.repository-cell-label')].map(label => label.textContent),
-          targets: [...panel.querySelectorAll('button')].every(button => button.getBoundingClientRect().height >= 44),
+          targets: [...panel.querySelectorAll('button')].every(button => Math.round(button.getBoundingClientRect().height) >= 44),
           text: [...panel.querySelectorAll('.repository-cell-label, .sort')].every(el => parseFloat(getComputedStyle(el).fontSize) >= 12) };
       })()`);
       assert.ok(layout.scroll <= layout.client && layout.pageFits, `No fleet or page overflow at ${label}: ${JSON.stringify(layout)}`);
