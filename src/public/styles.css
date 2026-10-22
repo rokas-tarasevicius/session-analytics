@@ -495,7 +495,8 @@ h2 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
 .compact-metrics { margin-top: 0; }
 
 /* ---------------------------------------------------------------- bars */
-.quiet-repositories-panel { margin-bottom: var(--gap); }
+.quiet-repositories-panel { margin-top: var(--gap); }
+.quiet-repository-more > summary { width: fit-content; min-height: var(--control); margin-bottom: 12px; padding: 6px 0; color: var(--text-2); cursor: pointer; }
 .quiet-repository-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
 .quiet-repository-link { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; min-height: 52px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); text-align: left; overflow-wrap: anywhere; }
 .quiet-repository-link:hover { background: var(--surface-3); }

@@ -88,7 +88,7 @@ test("Summary lists last observed dates, focuses with a button and clears rows f
   const panel = document.querySelector("#quiet-repositories")!;
   const list = document.querySelector("#quiet-repository-list")!;
   assert.equal(panel.hidden, false);
-  assert.equal(document.querySelector("#quiet-repository-count")!.textContent, "1 quiet");
+  assert.equal(document.querySelector("#quiet-repository-count")!.textContent, "(1)");
   const button = list.querySelector("button")!;
   assert.match(button.textContent, /Synthetic.*Last observed 10 Oct 2026/);
   assert.match(button.getAttribute("aria-label")!, /Focus Synthetic/);
@@ -108,4 +108,52 @@ test("Summary lists last observed dates, focuses with a button and clears rows f
   assert.equal(document.querySelector('[data-view-panel="summary"]')!.hidden, true);
   assert.equal(panel.hidden, false, "an entirely empty window still lists previously active repositories");
   assert.equal(list.querySelectorAll("button").length, 2);
+});
+
+test("Summary caps fourteen quiet repositories at five, keeps newest first, and discloses the remaining nine", async () => {
+  const { harness, sample, withLedger } = await import("./validation/aggregation-ui-harness.ts");
+  const sessions = Array.from({ length: 14 }, (_, index) => {
+    const day = `2026-10-${String(index + 1).padStart(2, "0")}`;
+    const row = withLedger(sample(), [["synthetic", 0]], { day });
+    row.repositoryId = `quiet-${index + 1}`; row.repositoryName = `Quiet ${index + 1}`;
+    row.createdAt = `${day}T12:00:00Z`;
+    return row;
+  });
+  const { document, run } = await harness(sessions, {
+    repositories: sessions.map((row) => ({ id: row.repositoryId, name: row.repositoryName })),
+    start: "2026-10-01", end: "2026-10-22",
+  });
+  run("populateRepositories(); windowPreset = 'custom'; setWindowInputs('2026-10-15', '2026-10-22'); renderView()");
+  const list = document.querySelector("#quiet-repository-list")!;
+  const overflow = document.querySelector("#quiet-repository-overflow")!;
+  const more = document.querySelector("#quiet-repository-more")!;
+  const keys = (element: typeof list) => element.querySelectorAll("button").map((button) => button.dataset.focusKey);
+  assert.deepEqual(keys(list), [14, 13, 12, 11, 10].map((n) => `quiet:quiet-${n}`));
+  assert.deepEqual(keys(overflow), [9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => `quiet:quiet-${n}`));
+  assert.equal(document.querySelector("#quiet-repository-count")!.textContent, "(14)");
+  assert.equal(document.querySelector("#quiet-repository-remaining")!.textContent, "+9 more");
+  assert.equal(more.tagName, "details");
+  assert.equal(document.querySelector("#quiet-repository-remaining")!.tagName, "summary");
+  assert.equal(overflow.parentElement, more);
+  assert.equal(more.hidden, false);
+  assert.equal(more.open, false);
+  more.open = true;
+  run("renderView()");
+  assert.equal(more.open, false, "expansion is not persisted between renders");
+  const panel = document.querySelector("#quiet-repositories")!;
+  const summary = document.querySelector('[data-view-panel="summary"]')!;
+  assert.equal(panel.parentElement, summary.parentElement, "panel stays outside the empty-window chart region");
+  assert.equal(panel.parentElement!.children.indexOf(panel), panel.parentElement!.children.indexOf(summary) + 1, "panel is additive after all primary Summary content");
+  assert.equal(document.querySelector("#quiet-repository-count")!.closest("h2")!.id, "quiet-repository-title");
+  run("setWindowInputs('2026-10-06', '2026-10-22'); renderView()");
+  assert.equal(list.children.length, 5);
+  assert.equal(overflow.children.length, 0);
+  assert.equal(more.hidden, true, "exactly five rows need no disclosure");
+  run("setWindowInputs('2026-10-05', '2026-10-22'); renderView()");
+  assert.equal(list.children.length, 4);
+  assert.equal(more.hidden, true, "short lists need no disclosure");
+  run("windowPreset = 'all'; renderView()");
+  assert.equal(list.children.length, 0);
+  assert.equal(overflow.children.length, 0);
+  assert.equal(more.hidden, true);
 });

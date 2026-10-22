@@ -546,7 +546,7 @@ test("Summary has six KPIs, noun-phrase titles and short notes with full explana
   run("renderView()");
   const summary = document.querySelector('[data-view-panel="summary"]')!;
   const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
-  const summaryHtml = html.split('data-view-panel="summary"')[1]!.split('data-view-panel="activity"')[0]!;
+  const summaryHtml = html.split('data-view-panel="summary"')[1]!.split('<article class="panel quiet-repositories-panel"')[0]!;
   assert.deepEqual([...summaryHtml.matchAll(/class="kpi-label"[^>]*>([^<]+)</g)].map((match) => match[1]), [
     "Usage value", "Sessions analyzed", "Request input processed", "Output tokens", "Effective tools", "Compactions",
   ]);

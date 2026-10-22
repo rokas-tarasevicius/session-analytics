@@ -1397,17 +1397,25 @@ function subagentValue(sessions, { start, end }) {
 function renderQuietRepositories(view, context) {
   const panel = $("#quiet-repositories");
   const list = $("#quiet-repository-list");
+  const more = $("#quiet-repository-more");
+  const overflow = $("#quiet-repository-overflow");
   clear(list);
+  clear(overflow);
+  more.open = false;
+  more.hidden = true;
   panel.hidden = windowPreset === "all" || currentViewName() !== "summary" || Boolean(sharedSnapshot);
   if (panel.hidden) return;
   const rows = quietRepositories(view.repositories, view.scopeSessions, context);
   $("#quiet-repository-context").textContent = `Activity before ${dateLabel(context.start)}, with none observed during ${dateRange(context.start, context.end)} (${context.timeZone}).`;
-  $("#quiet-repository-count").textContent = `${integer(rows.length)} quiet`;
+  $("#quiet-repository-count").textContent = `(${integer(rows.length)})`;
   if (!rows.length) {
     panel.hidden = true;
     return;
   }
-  for (const row of rows) {
+  const visibleLimit = 5;
+  more.hidden = rows.length <= visibleLimit;
+  $("#quiet-repository-remaining").textContent = `+${integer(Math.max(0, rows.length - visibleLimit))} more`;
+  for (const [index, row] of rows.entries()) {
     const item = node("li");
     const button = node("button", null, "quiet-repository-link");
     button.type = "button";
@@ -1415,7 +1423,7 @@ function renderQuietRepositories(view, context) {
     button.append(node("span", row.name), node("span", `Last observed ${dateLabel(row.lastActiveDay)}`, "quiet-repository-date"));
     button.setAttribute("aria-label", `Focus ${row.name}, last observed active ${dateLabel(row.lastActiveDay)}`);
     button.addEventListener("click", () => selectRepository(row.id));
-    item.append(button); list.append(item);
+    item.append(button); (index < visibleLimit ? list : overflow).append(item);
   }
 }
 
