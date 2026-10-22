@@ -8,6 +8,12 @@ The dashboard runs on `127.0.0.1` and has seven views in three groups: **Overvie
 
 Each view’s screen-reader region is named “Summary overview”, “Velocity overview”, and so on, distinct from its page heading.
 
+### When there is nothing to show
+
+All seven views share a guided empty state. With no sessions in the snapshot, it explains that the scan found no saved history, lists supported providers, and offers **Refresh snapshot** and the [provider setup guide](providers.md). Reported source checks name providers only: readable history does not prove completeness, and missing history does not prove an agent is uninstalled. Coverage repeats these checks independently of the current selection; older snapshots without discovery details say so. Other providers' discovery details are not yet reported here.
+
+With history outside the selected dates or repository, **Show all time** and **Clear repository focus** recover the selection. Pricing keeps its catalog available beneath the explanation and identifies offline pricing separately from missing history. First scans explain that results are pending; a failed first scan offers Retry and a setup link. A failed refresh keeps the previous snapshot and marks it stale.
+
 ### While a scan runs
 
 A first scan, an index re-parse after a code or price-list update, and **Refresh snapshot** show scan progress:

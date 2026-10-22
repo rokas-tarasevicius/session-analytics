@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Empty dashboard views guide first-time users with provider source checks, setup documentation and refresh actions; empty date and repository selections keep recovery controls. Coverage explains missing history separately from unreadable sources and offline pricing. Totals are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed
