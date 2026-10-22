@@ -644,6 +644,8 @@ tbody tr:first-child th { border-top: 0; }
 .view-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); margin-top: var(--gap); }
 
 /* heatmap */
+.activity-insights { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--gap); }
+.activity-insights .kpi strong { font-size: var(--fs-lg); }
 .activity-panel { min-width: 0; min-height: auto; margin-top: 0; overflow-x: auto; }
 .activity-heatmap-scroll { max-width: 100%; overflow-x: auto; }
 .activity-heatmap { display: grid; grid-template-columns: 64px repeat(24, minmax(16px, 1fr)); gap: 3px; align-items: center; min-width: 720px; }
@@ -958,6 +960,7 @@ dialog::backdrop { background: var(--backdrop); }
 }
 
 @media (max-width: 760px) {
+  .activity-insights { grid-template-columns: minmax(0, 1fr); }
   .activity-panel { overflow-x: visible; }
   .activity-heatmap { grid-auto-flow: column; grid-template-rows: repeat(25, auto); grid-template-columns: 40px repeat(7, minmax(0, 1fr)); min-width: 0; }
   .activity-heatmap .heat-cell { aspect-ratio: auto; height: 20px; }

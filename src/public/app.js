@@ -3,6 +3,7 @@ import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
+import { activityInsights } from "./activity-insights.js";
 import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
   groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
@@ -523,6 +524,25 @@ function renderActivity(view) {
   elements.activityTooltip.hidden = true;
   const eligible = sessionsForProviders(view.sessions, "activity");
   const { grid, counted, maximum } = activityGrid(eligible, snapshotTimeZone());
+  const insights = $("#activity-insights");
+  clear(insights); insights.hidden = !counted;
+  if (counted) {
+    const rhythm = activityInsights(eligible, snapshotTimeZone());
+    const card = (label, value, note) => {
+      const item = node("article", null, "kpi");
+      item.append(node("span", label, "kpi-label"), node("strong", value), node("small", note, "kpi-note"));
+      insights.append(item);
+      return item;
+    };
+    card("Longest start-day streak", `${integer(rhythm.longestStreak)} ${rhythm.longestStreak === 1 ? "day" : "days"}`, `${integer(rhythm.activeDays)} active ${rhythm.activeDays === 1 ? "day" : "days"} in this window`);
+    const peak = (label, result, labels, unit) => {
+      const winners = result.indexes.map((index) => labels[index]);
+      const item = card(label, winners[0], `${integer(result.starts)} ${result.starts === 1 ? "start" : "starts"}${winners.length > 1 ? ` · ${integer(winners.length)} ${unit} tied` : ""}`);
+      if (winners.length > 1) item.append(node("span", `Tied: ${winners.join(", ")}`, "sr-only"));
+    };
+    peak("Busiest hour", rhythm.busiestHour, Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00–${String(hour).padStart(2, "0")}:59`), "hours");
+    peak("Busiest weekday", rhythm.busiestWeekday, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], "weekdays");
+  }
   $("#activity-evidence").textContent = `${counted}/${eligible.length} sessions have provider start timestamps. Unknown starts and file modification dates are excluded.`;
   const status = document.querySelector?.("#activity-status");
   const heatmapPanel = document.querySelector?.("#activity-heatmap-panel"), repositoriesPanel = document.querySelector?.("#activity-repositories-panel");
