@@ -34,7 +34,7 @@ function harness(sessions: unknown[], { preset = "7", start = "2026-09-08", end 
   windowStart.value = start; windowStart.min = min; windowEnd.value = end; windowEnd.max = max;
   const deltas: Record<string, unknown> = {};
   const repositories = [...new Set((sessions as Array<{ repositoryId: string }>).map(({ repositoryId }) => repositoryId))].map((id) => ({ repository: { id, name: id } }));
-  const context = productionFunctions(["renderSummary", "renderCoverageSummary", "spendDelta", "renderRepositoryNav", "windowDays", "velocityContext", "snapshotTimeZone", "pricedBadge", "executionBreakdown", "subagentValue"], {
+  const context = productionFunctions(["renderSummary", "renderCoverageSummary", "appendSourceChecks", "spendDelta", "renderRepositoryNav", "windowDays", "velocityContext", "snapshotTimeZone", "pricedBadge", "executionBreakdown", "subagentValue"], {
     ...ui, ...providers, ...viewModel, ...velocityData, elements, $: lookup, windowPreset: preset, Map, Set, Intl,
     snapshot: { generatedAt: "2026-09-15T09:00:00Z", velocity: { timeZone: "UTC" }, sessions, repositories },
     fullSnapshot: null, renderMachineSpend() {}, wideLayout: { matches: true, addEventListener() {} }, navCache: { key: null }, navHoverListeners: new Set(), navDirty: false,

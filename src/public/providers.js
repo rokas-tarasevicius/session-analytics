@@ -4,6 +4,22 @@ export const providerLabels = { codex: "Codex", claude: "Claude", cursor: "Curso
 export const providerIds = Object.keys(providerLabels);
 export const providerColors = Object.fromEntries(providerIds.map((provider) => [provider, providerColor(provider)]));
 
+/** Fixed labels only: discovery details must never echo paths, errors or unknown provider names. */
+export function sourceCheckNotes(health = []) {
+  const notes = [];
+  for (const provider of providerIds.filter((id) => id !== "unsupported")) {
+    const checks = health.filter((item) => item.provider === provider);
+    if (!checks.length) continue;
+    const label = provider === "claude" ? "Claude Code" : providerLabels[provider];
+    const outcomes = [];
+    if (checks.some(({ sourcesRead }) => sourcesRead > 0)) outcomes.push("history readable");
+    if (checks.some(({ missingSources }) => missingSources > 0)) outcomes.push("history missing");
+    if (checks.some(({ unreadableSources }) => unreadableSources > 0)) outcomes.push("history could not be read");
+    notes.push(`${label}: ${outcomes.length ? outcomes.join("; ") : "discovery details unavailable"}.`);
+  }
+  return notes;
+}
+
 export function dailySpendByProvider(sessions, start, end) {
   const days = new Map();
   const empty = (name) => ({ name, ...Object.fromEntries(providerIds.map((provider) => [provider, 0])) });
@@ -47,6 +63,11 @@ export function providerEvidenceRows(sessions) {
 
 export function renderProviderEvidence(container, sessions) {
   container.replaceChildren();
+  if (!sessions.length) {
+    const row = document.createElement("tr"), cell = document.createElement("td"); cell.colSpan = 7;
+    cell.textContent = "No session evidence in this selection. See source checks below for discovery details.";
+    row.append(cell); container.append(row); return;
+  }
   const labels = { message: "Message evidence", summary: "Summary only", "activity-only": "Activity only" };
   for (const item of providerEvidenceRows(sessions)) {
     const row = document.createElement("tr");

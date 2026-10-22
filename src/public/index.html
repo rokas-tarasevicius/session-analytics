@@ -98,7 +98,7 @@
       <div class="frame">
         <header class="topbar">
           <div class="topbar-title">
-            <h1 id="page-title">Summary</h1>
+            <h1 id="page-title" tabindex="-1">Summary</h1>
             <button class="scope-chip" id="scope-chip" type="button" hidden aria-label="Clear repository focus"><svg class="scope-icon" aria-hidden="true"><use href="#i-repo"/></svg><span id="scope-chip-label"></span><svg class="scope-close" aria-hidden="true"><use href="#i-close"/></svg></button>
           </div>
           <div class="topbar-controls">
@@ -155,7 +155,7 @@
             <span class="machine-strip-meta" id="machine-strip-meta"></span>
             <button class="button machine-details-button" id="machine-details" type="button" aria-haspopup="dialog" aria-controls="machines-dialog">Machine details</button>
           </div>
-          <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
+          <p class="scope-line"><span id="scope-description">Reading saved local agent history. Results appear when the scan finishes.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
           <section class="view-status" id="view-status" aria-live="off" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
@@ -304,6 +304,11 @@
           <h3 id="provider-evidence-title">What the local history can tell you</h3>
           <p>Coverage is sessions with evidence / selected sessions. Summary and activity-only sources cannot establish all metrics. Unavailable is shown as a dash, never as zero activity. Counts do not prove success or quality.</p>
           <div class="table-wrap"><table class="data-table"><thead><tr><th class="align-left">Provider</th><th class="align-left">Source</th><th class="align-left">Fidelity</th><th>Sessions</th><th>Token evidence</th><th>Tool evidence</th><th class="align-left">Time basis</th></tr></thead><tbody id="provider-evidence-rows"></tbody></table></div>
+        </section>
+        <section class="coverage-footnotes" aria-labelledby="source-checks-title">
+          <h3 id="source-checks-title">Source checks</h3>
+          <div id="coverage-source-checks"><p>Source checks appear after the scan finishes.</p></div>
+          <p><a id="coverage-setup-link" target="_blank" rel="noreferrer">Provider setup guide ↗</a></p>
         </section>
         <section class="coverage-footnotes" aria-label="Interpretation notes">
           <h3>How to read these numbers</h3>

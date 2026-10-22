@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Empty dashboard views guide first-time users with provider source checks, setup documentation and refresh actions; empty date and repository selections keep recovery controls. Coverage explains missing history separately from unreadable sources and offline pricing. Totals are unchanged.
+
 ### Changed
 
 - Dashboard shortcut help, command-palette key hints and global key handling share one registry, with documentation parity checks. Provider help includes the eighth chip; held keys and input composition no longer trigger dashboard actions.
