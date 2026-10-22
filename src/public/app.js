@@ -1012,6 +1012,7 @@ function renderRepositoryTable(repositories) {
   clear(footer);
   if (quiet.length && !tableExpansion.showEmpty) {
     const row = node("tr"), cell = node("td", null, "empty-line"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell");
     const button = statusAction("Show them", () => {
       tableExpansion.showEmpty = true;
       renderRepositoryTable(repositories);
@@ -1029,6 +1030,7 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
+    row.setAttribute("role", "row");
     const comparator = item.repository.id === null;
     const repositoryDetails = comparator ? item.repository.name : `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
     if (comparator) row.className = "fleet-total";
@@ -1052,10 +1054,22 @@ function renderRepositoryTable(repositories) {
     if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
     else value.append(node("span", money(item.usage.value)));
     row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    // Reuse the column names for visual card labels; headers remain the accessible labels.
+    // Explicit roles preserve the table structure when narrow-screen CSS changes its display.
+    [...row.children].forEach((cell, index) => {
+      const button = sortButtons[index];
+      cell.setAttribute("role", "cell");
+      cell.setAttribute("headers", button.closest("th").id);
+      if (index === 0) return;
+      const label = node("span", button.textContent, "repository-cell-label");
+      label.setAttribute("aria-hidden", "true");
+      cell.append(label);
+    });
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
-    const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
+    const row = node("tr"); const cell = node("td"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell"); emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
   }
   restoreFocus();
 }

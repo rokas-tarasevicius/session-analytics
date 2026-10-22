@@ -6,7 +6,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Finish the mobile fleet table card layout. | §3.2 deferred mobile pass; §6 |
+| Done | Mobile fleet table cards retain all metrics, sorting, keyboard focus and table semantics at widths up to 800 px. | §3.2 deferred mobile pass; §6 |
 
 ## Dashboard behavior and copy
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createContext, runInContext } from "node:vm";
 import test from "node:test";
+import { documentFromHtml } from "./release-dom.ts";
 import { emptySession, reportedModel, tokens } from "../src/providers/common.ts";
 import type { ProviderEvidence, SessionAnalytics } from "../src/types.ts";
 
@@ -28,7 +29,8 @@ class Element {
 async function harness() {
   const providers = await import(new URL("../src/public/providers.js", import.meta.url).href);
   const elements = new Map<string, Element>();
-  const document = { addEventListener() {}, querySelector: (s: string) => { if (!elements.has(s)) elements.set(s, new Element()); return elements.get(s); }, querySelectorAll: () => [], createElement: (tag: string) => new Element(tag), createElementNS: (_ns: string, tag: string) => new Element(tag), createTextNode: (text: string) => { const n = new Element("text"); n.textContent = text; return n; } };
+  const headers = documentFromHtml(await readFile(new URL("../src/public/index.html", import.meta.url), "utf8"));
+  const document = { addEventListener() {}, querySelector: (s: string) => { if (!elements.has(s)) elements.set(s, new Element()); return elements.get(s); }, querySelectorAll: (selector: string) => selector === "th .sort[data-sort]" ? headers.querySelectorAll(selector) : [], createElement: (tag: string) => new Element(tag), createElementNS: (_ns: string, tag: string) => new Element(tag), createTextNode: (text: string) => { const n = new Element("text"); n.textContent = text; return n; } };
   const viewModel = await import(new URL("../src/public/view-model.js", import.meta.url).href);
   const evidenceHelpers = await import(new URL("../src/public/evidence.js", import.meta.url).href);
   const exportHelpers = await import(new URL("../src/public/export-data.js", import.meta.url).href);

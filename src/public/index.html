@@ -215,16 +215,16 @@
             <section class="panel comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
               <header class="section-header"><div><h2 id="comparison-title">Repositories</h2></div><span class="table-hint" id="repository-table-hint">Click a column to sort · click a row to focus</span></header>
               <p class="chart-note">Activity-dated value · session-start counters</p>
-              <div class="table-wrap"><table class="data-table"><thead><tr>
-                <th scope="col"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col" class="col-bar"><button type="button" class="sort" data-sort="value">Usage value<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="input">Input<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="output">Output<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="tools">Tools<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="cache">Cache<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-              </tr></thead><tbody id="repository-rows"></tbody><tfoot id="repository-footer"></tfoot></table></div>
+              <div class="table-wrap"><table class="data-table" role="table" aria-labelledby="comparison-title"><thead role="rowgroup"><tr role="row">
+                <th scope="col" role="columnheader" id="repository-column-name"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-sessions"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-value" class="col-bar"><button type="button" class="sort" data-sort="value">Usage value<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-input"><button type="button" class="sort" data-sort="input">Input<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-output"><button type="button" class="sort" data-sort="output">Output<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-tools"><button type="button" class="sort" data-sort="tools">Tools<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-cache"><button type="button" class="sort" data-sort="cache">Cache<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-coverage"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+              </tr></thead><tbody id="repository-rows" role="rowgroup"></tbody><tfoot id="repository-footer" role="rowgroup"></tfoot></table></div>
             </section>
           </section>
 
