@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard provider filters and view switches reuse the current window's model, reducing repeated aggregation on larger snapshots. Displayed values and exports are unchanged.
 ### Fixed
 
 - Terminal reports wrap prose to the terminal width (or `COLUMNS`, defaulting to 80 when piped), align repository columns including evidence labels, and use labeled rows when a table cannot fit. Shortened model lists now show an ellipsis. Accounting totals and JSON snapshots are unchanged.
