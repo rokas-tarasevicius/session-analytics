@@ -95,9 +95,14 @@ export async function readJson(path: string): Promise<RecordValue | null> {
 export async function* jsonLines(path: string, maxLineLength = 16 * 1024 * 1024): AsyncGenerator<RecordValue | null> {
   const input = createReadStream(path, { encoding: "utf8" });
   let parts: string[] = [], length = 0, oversized = false;
+  let atStart = true;
   try {
     for await (const raw of input) {
-      const chunk = String(raw);
+      const text = String(raw);
+      if (!text.length) continue;
+      // The BOM is stream framing, not JSON text or part of the line budget.
+      const chunk = atStart && text.startsWith("\uFEFF") ? text.slice(1) : text;
+      atStart = false;
       let start = 0;
       while (start < chunk.length) {
         const newline = chunk.indexOf("\n", start), end = newline < 0 ? chunk.length : newline;

@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Empty dashboard views guide first-time users with provider source checks, setup documentation and refresh actions; empty date and repository selections keep recovery controls. Coverage explains missing history separately from unreadable sources and offline pricing. Totals are unchanged.
 
+### Changed
+
+- Dashboard shortcut help, command-palette key hints and global key handling share one registry, with documentation parity checks. Provider help includes the eighth chip; held keys and input composition no longer trigger dashboard actions.
+- Dashboard provider filters and view switches reuse the current window's model, reducing repeated aggregation on larger snapshots. Displayed values and exports are unchanged.
+
+### Fixed
+
+- Dashboard screen readers receive refresh outcomes and empty-window status without repeated Velocity hover or resize announcements. Downloads and refreshes restore displaced keyboard focus, Velocity Escape dismisses its readout, and command-palette search has a visible focus ring in both themes.
+- The Summary repository table becomes labeled cards on phone and portrait-tablet screens, keeping every metric, column sorting and keyboard repository focus without horizontal scrolling. Long repository names also stay within Summary’s repository breakdown charts on these screens. Desktop layouts and totals are unchanged.
+- Terminal reports wrap prose to the terminal width (or `COLUMNS`, defaulting to 80 when piped), align repository columns including evidence labels, and use labeled rows when a table cannot fit. Shortened model lists now show an ellipsis. Accounting totals and JSON snapshots are unchanged.
+- The loopback dashboard validates the complete HTTP Origin, rejects GET bodies before refresh work and limits request targets to 8 KiB; HTTP parser errors now retain private no-store and security headers. Analytics totals are unchanged.
+- JSONL histories with a leading UTF-8 BOM now retain their first record. Claude, Codex, Cursor SDK, Copilot and Gemini histories could be omitted when that record supplied identity; Cursor activity transcripts could lose their first turn or tool call. Affected session, token, API-equivalent value and activity totals increase. Present indexed sources automatically reparse on the next scan.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

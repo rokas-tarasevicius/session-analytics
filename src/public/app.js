@@ -5,11 +5,12 @@ import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "./char
 import { renderHistoryCoverage } from "./history-coverage.js";
 import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
-  groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
+  groupByRepository, heatLegend, heatLevel, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
   providerOrder, providerShortcutTarget, rankPaletteItems, repositoryDisplaySnapshot, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
   sortRepositories, sparklineSummary, summarize, tickScale, unknownStartsInRange, validDay, windowStartFor,
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
+import { matchShortcut, shortcutHint, shortcutRegistry } from "./shortcuts.js";
 import { providerMark, renderProviderEvidence, metricCoverage, sourceCheckNotes } from "./providers.js";
 
 import { renderPricingPanel } from "./pricing.js";
@@ -33,7 +34,7 @@ const writePreference = (key, value) => { try { localStorage.setItem(key, value)
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
   activityRepositories: $("#activity-repositories"), activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
-  viewAnnouncer: $("#view-announcer"),
+  snapshotAnnouncer: $("#snapshot-announcer"), viewAnnouncer: $("#view-announcer"),
   cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
   costApiTotal: $("#cost-api-total"), costApiNote: $("#cost-api-note"), costCoverage: $("#cost-coverage"), costCoverageNote: $("#cost-coverage-note"),
@@ -90,7 +91,7 @@ const viewOrder = ["summary", "velocity", "costs", "pricing", "subscription", "t
 const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", pricing: "Pricing", subscription: "Subscription", tools: "Tools", activity: "Activity" };
 // Retired view names that old links and saved preferences may still carry.
 const viewAliases = { models: "costs" };
-const viewChords = { s: "summary", v: "velocity", c: "costs", p: "pricing", u: "subscription", t: "tools", a: "activity" };
+const viewChords = Object.fromEntries(shortcutRegistry.filter((item) => item.action === "view").map((item) => [item.bindings[0].keys[1], item.bindings[0].value]));
 const providerScopedViews = ["activity", "tools", "velocity"];
 const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
@@ -237,7 +238,22 @@ function sessionsForProviders(sessions, scope) {
   return sessions.filter(({ provider }) => selected.has(provider));
 }
 
+let activeViewCache = null;
+
 function activeView() {
+  // Provider chips and view switches only change presentation. Keep one model until its data or scope changes.
+  // Use object identity, not generatedAt: a refreshed or machine-filtered snapshot can have the same timestamp.
+  // Stale/reading machine warnings include relative ages, which can change without a new snapshot.
+  const inputs = [snapshot, fullSnapshot, sessionsByRepository, elements.repositoryFilter.value, windowPreset,
+    elements.windowStart.value, elements.windowEnd.value, elements.windowStart.min, elements.windowEnd.max,
+    machineWarnings(fullSnapshot?.machines, []).join("\n")];
+  if (activeViewCache && inputs.every((value, index) => value === activeViewCache.inputs[index])) return activeViewCache.view;
+  const view = buildActiveView();
+  activeViewCache = { inputs, view };
+  return view;
+}
+
+function buildActiveView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
@@ -998,6 +1014,7 @@ function renderRepositoryTable(repositories) {
   clear(footer);
   if (quiet.length && !tableExpansion.showEmpty) {
     const row = node("tr"), cell = node("td", null, "empty-line"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell");
     const button = statusAction("Show them", () => {
       tableExpansion.showEmpty = true;
       renderRepositoryTable(repositories);
@@ -1015,6 +1032,7 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
+    row.setAttribute("role", "row");
     const comparator = item.repository.id === null;
     const repositoryDetails = comparator ? item.repository.name : `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
     if (comparator) row.className = "fleet-total";
@@ -1038,10 +1056,22 @@ function renderRepositoryTable(repositories) {
     if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
     else value.append(node("span", money(item.usage.value)));
     row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    // Reuse the column names for visual card labels; headers remain the accessible labels.
+    // Explicit roles preserve the table structure when narrow-screen CSS changes its display.
+    [...row.children].forEach((cell, index) => {
+      const button = sortButtons[index];
+      cell.setAttribute("role", "cell");
+      cell.setAttribute("headers", button.closest("th").id);
+      if (index === 0) return;
+      const label = node("span", button.textContent, "repository-cell-label");
+      label.setAttribute("aria-hidden", "true");
+      cell.append(label);
+    });
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
-    const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
+    const row = node("tr"); const cell = node("td"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell"); emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
   }
   restoreFocus();
 }
@@ -1809,8 +1839,7 @@ function paletteItems() {
   const items = [];
   const selectedId = elements.repositoryFilter.value;
   for (const name of sharedSnapshot ? [] : viewOrder) {
-    const chord = Object.entries(viewChords).find(([, view]) => view === name)?.[0] || "";
-    items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? `g ${chord}` : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
+    items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? shortcutHint(`view-${name}`) : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
   }
   if (snapshot) {
     items.push({ group: "Repositories", icon: "repo", label: "All repositories", keywords: "repo clear focus everything", state: selectedId === "all", run: () => selectRepository("all") });
@@ -1822,23 +1851,23 @@ function paletteItems() {
       const where = scope === "chart" ? "in the daily chart" : `in ${viewLabels[scope]}`;
       for (const [index, provider] of snapshotProviders().entries()) {
         const on = providerShown(scope, provider);
-        items.push({ group: "Providers", icon: "models", label: `${on ? "Hide" : "Show"} ${providerLabels[provider]} ${where}`, hint: shortcutsEnabled && index < 9 ? `p ${index + 1}` : "", keywords: `provider toggle ${provider} filter`, state: on, run: () => toggleProvider(provider) });
+        items.push({ group: "Providers", icon: "models", label: `${on ? "Hide" : "Show"} ${providerLabels[provider]} ${where}`, hint: shortcutsEnabled && index < 9 ? shortcutHint("provider", String(index + 1)) : "", keywords: `provider toggle ${provider} filter`, state: on, run: () => toggleProvider(provider) });
       }
     }
     for (const preset of ["7", "30", "90", "all"]) {
-      items.push({ group: "Time window", icon: "activity", label: windowLabels[preset], hint: shortcutsEnabled ? String(["7", "30", "90", "all"].indexOf(preset) + 1) : "", keywords: `window days range ${preset}`, state: windowPreset === preset, run: () => applyWindowPreset(preset) });
+      items.push({ group: "Time window", icon: "activity", label: windowLabels[preset], hint: shortcutsEnabled ? shortcutHint("window", preset) : "", keywords: `window days range ${preset}`, state: windowPreset === preset, run: () => applyWindowPreset(preset) });
     }
     items.push({ group: "Time window", icon: "activity", label: "Custom range", keywords: "window custom dates", state: windowPreset === "custom", run: () => { applyWindowPreset("custom"); elements.windowStart.focus(); } });
   }
   const dark = document.documentElement.dataset.theme === "dark";
-  items.push({ group: "Display", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: shortcutsEnabled ? "t" : "", keywords: "theme dark light mode appearance", run: toggleTheme });
+  items.push({ group: "Display", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: shortcutsEnabled ? shortcutHint("theme") : "", keywords: "theme dark light mode appearance", run: toggleTheme });
   const comfortable = document.documentElement.dataset.density === "comfortable";
-  items.push({ group: "Display", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? "d" : "", keywords: "density spacing compact comfortable", run: toggleDensity });
+  items.push({ group: "Display", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? shortcutHint("density") : "", keywords: "density spacing compact comfortable", run: toggleDensity });
   items.push({ group: "Keyboard", icon: "help", label: `${shortcutsEnabled ? "Disable" : "Enable"} single-key shortcuts`, keywords: "keyboard shortcuts keys toggle character", state: shortcutsEnabled, run: () => setShortcuts(!shortcutsEnabled) });
-  items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? "?" : "", keywords: "help keys shortcuts", run: openHelp });
-  items.push({ group: "Snapshot", icon: "coverage", label: "Data coverage", hint: shortcutsEnabled ? "e" : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
+  items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? shortcutHint("help") : "", keywords: "help keys shortcuts", run: openHelp });
+  items.push({ group: "Snapshot", icon: "coverage", label: "Data coverage", hint: shortcutsEnabled ? shortcutHint("coverage") : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
   if ((fullSnapshot?.machines?.length ?? 0) > 1) items.push({ group: "Snapshot", icon: "coverage", label: "Machine details", keywords: "machines remote ssh server status stale failed fix", run: openMachines });
-  items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? "r" : "", keywords: "reload rescan refresh", run: () => load(true) });
+  items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? shortcutHint("refresh") : "", keywords: "reload rescan refresh", run: () => load(true) });
   items.push({ group: "Snapshot", icon: "export", label: "Export view…", keywords: "export download save csv json snapshot", run: () => openExportMenu() });
   return items;
 }
@@ -1900,13 +1929,34 @@ function closePalette() { if (elements.palette.open) elements.palette.close(); s
 
 function togglePalette() { if (elements.palette.open) closePalette(); else openPalette(); }
 
-function openHelp() { closePalette(); closeCoverage(); closeMachines(); if (!elements.help.open) elements.help.showModal(); }
+function renderShortcutHelp() {
+  const grid = $("#shortcut-list");
+  clear(grid);
+  for (const group of ["Navigate", "Control"]) {
+    const section = node("section"), list = node("dl");
+    section.append(node("h3", group), list);
+    for (const item of shortcutRegistry.filter((item) => item.group === group)) {
+      const row = node("div"), keys = node("dd");
+      const bindings = item.id === "provider" ? [item.bindings[0], item.bindings.at(-1)] : item.bindings;
+      bindings.forEach((binding, index) => {
+        if (index) keys.append(node("span", item.id === "provider" ? "–" : " or "));
+        for (const key of (item.id === "provider" && index ? binding.keys.slice(1) : binding.keys)) keys.append(node("kbd", key === "Mod+k" ? (/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K") : key === "Escape" ? "esc" : key));
+      });
+      row.dataset.shortcutId = item.id;
+      row.append(node("dt", item.label), keys); list.append(row);
+    }
+    grid.append(section);
+  }
+}
+
+function openHelp() { closePalette(); closeCoverage(); closeMachines(); renderShortcutHelp(); if (!elements.help.open) elements.help.showModal(); }
 
 function closeHelp() { if (elements.help.open) elements.help.close(); }
 
 elements.palette.addEventListener("close", syncPaletteExpanded);
 elements.commandInput.addEventListener("input", () => renderPalette(elements.commandInput.value));
 elements.commandInput.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229 || (event.repeat && event.key === "Enter")) return;
   if (event.key === "ArrowDown") { event.preventDefault(); setPaletteActive(paletteActive + 1); }
   else if (event.key === "ArrowUp") { event.preventDefault(); setPaletteActive(paletteActive - 1); }
   else if (event.key === "Home") { event.preventDefault(); setPaletteActive(0); }
@@ -1942,39 +1992,29 @@ function armChord(key) {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { pendingChord = null; window.clearTimeout(chordTimer); }
-  if (event.defaultPrevented) return;
-  const key = event.key;
-  if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "k") { event.preventDefault(); togglePalette(); return; }
+  const match = matchShortcut(event, { enabled: shortcutsEnabled, pending: pendingChord });
+  pendingChord = null; window.clearTimeout(chordTimer);
+  if (!match) return;
+  if (match.action === "palette" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); togglePalette(); return; }
   if (elements.palette.open || elements.help.open || elements.coverageDialog.open || elements.machinesDialog.open) return;
-  if (event.metaKey || event.ctrlKey || event.altKey) return;
-  // Only text entry swallows shortcuts; a focused checkbox, radio or button still lets them through.
-  if (isTextEntryTarget(event.target)) return;
-  if (key === "Escape") {
+  if (match.prefix) { armChord(match.prefix); return; }
+  const { action, value } = match;
+  if (action === "palette") { event.preventDefault(); togglePalette(); return; }
+  if (action === "clear") {
     if (snapshot && elements.repositoryFilter.value !== "all") selectRepository("all", { scroll: false });
     return;
   }
-  if (!shortcutsEnabled) return;
-  if (pendingChord) {
-    const chord = pendingChord; pendingChord = null; window.clearTimeout(chordTimer);
-    if (chord === "g" && viewChords[key]) { event.preventDefault(); switchView(viewChords[key]); }
-    if (chord === "p") {
-      const provider = providerScope() ? providerShortcutTarget(key, snapshotProviders()) : null;
-      if (provider) { event.preventDefault(); toggleProvider(provider); }
-    }
-    return;
-  }
-  if (key === "g" || key === "p") { armChord(key); return; }
-  const presets = { 1: "7", 2: "30", 3: "90", 4: "all" };
-  if (presets[key]) { applyWindowPreset(presets[key]); return; }
-  if (key === "?") { event.preventDefault(); openHelp(); return; }
-  if (key === "e") { openCoverage(); return; }
-  if (key === "/") { event.preventDefault(); openPalette(); return; }
-  if (key === "t") { toggleTheme(); return; }
-  if (key === "d") { toggleDensity(); return; }
-  if (key === "r") { load(true); return; }
-  if (key === "[") { stepView(-1); return; }
-  if (key === "]") stepView(1);
+  if (action === "view") { event.preventDefault(); switchView(value); }
+  else if (action === "provider") {
+    const provider = providerScope() ? providerShortcutTarget(value, snapshotProviders()) : null;
+    if (provider) { event.preventDefault(); toggleProvider(provider); }
+  } else if (action === "window") applyWindowPreset(value);
+  else if (action === "help") { event.preventDefault(); openHelp(); }
+  else if (action === "coverage") openCoverage();
+  else if (action === "theme") toggleTheme();
+  else if (action === "density") toggleDensity();
+  else if (action === "refresh") load(true);
+  else if (action === "step") stepView(Number(value));
 });
 
 // --------------------------------------------------------------------- loading
@@ -2108,7 +2148,7 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; clear(elements.viewStatus); elements.viewStatus.hidden = true; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; activeViewCache = null; sharedSnapshot = data; loadFailed = false; clear(elements.viewStatus); elements.viewStatus.hidden = true; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
   elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");
@@ -2153,6 +2193,7 @@ async function loadSnapshot(refresh = false) {
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
+  elements.snapshotAnnouncer.textContent = previous || refresh ? "Refreshing snapshot." : "Building snapshot.";
   beginScanProgress(Boolean(previous || refresh));
   describeSyncStatus();
   elements.main.dataset.state = previous ? "refreshing" : "loading";
@@ -2166,7 +2207,9 @@ async function loadSnapshot(refresh = false) {
     render(await fetchAnalytics(refresh && previous));
     watchPricingUpdates();
     showReady(snapshot ? activeView() : null);
+    elements.snapshotAnnouncer.textContent = previous || refresh ? "Snapshot refreshed." : "Snapshot ready.";
   } catch (error) {
+    elements.snapshotAnnouncer.textContent = ""; // The error alert owns the failure announcement.
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;
     if (previous) {

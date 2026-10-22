@@ -121,7 +121,7 @@
             </div>
           </div>
           <div class="topbar-actions">
-            <span class="status" id="sync-context" role="status" aria-label="Mapping local sessions" title="Mapping local sessions" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span><span class="sync-short" id="sync-short" aria-hidden="true">Reading…</span></span>
+            <span class="status" id="sync-context" role="status" aria-live="off" aria-label="Mapping local sessions" title="Mapping local sessions" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span><span class="sync-short" id="sync-short" aria-hidden="true">Reading…</span></span>
             <button class="coverage-button" id="coverage-button" type="button" aria-label="Coverage: 0 notes" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
             <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
@@ -156,8 +156,7 @@
             <button class="button machine-details-button" id="machine-details" type="button" aria-haspopup="dialog" aria-controls="machines-dialog">Machine details</button>
           </div>
           <p class="scope-line"><span id="scope-description">Reading saved local agent history. Results appear when the scan finishes.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
-          <p class="sr-only" id="view-announcer" aria-live="polite" aria-atomic="true"></p>
-          <section class="view-status" id="view-status" aria-label="View status" hidden></section>
+          <section class="view-status" id="view-status" aria-live="off" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
             <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary overview</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
@@ -216,16 +215,16 @@
             <section class="panel comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
               <header class="section-header"><div><h2 id="comparison-title">Repositories</h2></div><span class="table-hint" id="repository-table-hint">Click a column to sort · click a row to focus</span></header>
               <p class="chart-note">Activity-dated value · session-start counters</p>
-              <div class="table-wrap"><table class="data-table"><thead><tr>
-                <th scope="col"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col" class="col-bar"><button type="button" class="sort" data-sort="value">Usage value<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="input">Input<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="output">Output<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="tools">Tools<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="cache">Cache<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-              </tr></thead><tbody id="repository-rows"></tbody><tfoot id="repository-footer"></tfoot></table></div>
+              <div class="table-wrap"><table class="data-table" role="table" aria-labelledby="comparison-title"><thead role="rowgroup"><tr role="row">
+                <th scope="col" role="columnheader" id="repository-column-name"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-sessions"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-value" class="col-bar"><button type="button" class="sort" data-sort="value">Usage value<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-input"><button type="button" class="sort" data-sort="input">Input<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-output"><button type="button" class="sort" data-sort="output">Output<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-tools"><button type="button" class="sort" data-sort="tools">Tools<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-cache"><button type="button" class="sort" data-sort="cache">Cache<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-coverage"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+              </tr></thead><tbody id="repository-rows" role="rowgroup"></tbody><tfoot id="repository-footer" role="rowgroup"></tfoot></table></div>
             </section>
           </section>
 
@@ -279,6 +278,8 @@
 
     <div class="heatmap-tooltip" id="activity-tooltip" role="tooltip" hidden></div>
     <div class="sr-only" id="chart-announcer" aria-live="polite"></div>
+    <div class="sr-only" id="snapshot-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="sr-only" id="view-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <dialog class="palette" id="command-palette" aria-label="Command palette">
       <div class="palette-field">
@@ -341,29 +342,7 @@
 
     <dialog class="help" id="help-overlay" aria-labelledby="help-title">
       <header><h2 id="help-title" tabindex="-1" autofocus>Keyboard shortcuts</h2><button class="icon-button" id="help-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
-      <div class="help-grid">
-        <section><h3>Navigate</h3><dl>
-          <div><dt>Summary</dt><dd><kbd>g</kbd><kbd>s</kbd></dd></div>
-          <div><dt>Velocity</dt><dd><kbd>g</kbd><kbd>v</kbd></dd></div>
-          <div><dt>Costs</dt><dd><kbd>g</kbd><kbd>c</kbd></dd></div>
-          <div><dt>Pricing</dt><dd><kbd>g</kbd><kbd>p</kbd></dd></div>
-          <div><dt>Subscription</dt><dd><kbd>g</kbd><kbd>u</kbd></dd></div>
-          <div><dt>Tools</dt><dd><kbd>g</kbd><kbd>t</kbd></dd></div>
-          <div><dt>Activity</dt><dd><kbd>g</kbd><kbd>a</kbd></dd></div>
-          <div><dt>Previous / next view</dt><dd><kbd>[</kbd><kbd>]</kbd></dd></div>
-        </dl></section>
-        <section><h3>Control</h3><dl>
-          <div><dt>Command palette</dt><dd><kbd><span class="key-command">⌘</span>K</kbd> or <kbd>/</kbd></dd></div>
-          <div><dt>Last 7 · 30 · 90 days · all</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
-          <div><dt>Toggle provider chips in order (Summary chart, Velocity, Tools, Activity)</dt><dd><kbd>p</kbd> <kbd>1</kbd>–<kbd>7</kbd></dd></div>
-          <div><dt>Data coverage</dt><dd><kbd>e</kbd></dd></div>
-          <div><dt>Clear repository focus</dt><dd><kbd>esc</kbd></dd></div>
-          <div><dt>Switch theme</dt><dd><kbd>t</kbd></dd></div>
-          <div><dt>Switch density</dt><dd><kbd>d</kbd></dd></div>
-          <div><dt>Refresh snapshot</dt><dd><kbd>r</kbd></dd></div>
-          <div><dt>This overlay</dt><dd><kbd>?</kbd></dd></div>
-        </dl></section>
-      </div>
+      <div class="help-grid" id="shortcut-list"></div>
       <p class="help-note">In charts, <kbd>←</kbd><kbd>→</kbd> move the crosshair and <kbd>esc</kbd> closes the readout; in the heatmap, arrow keys move between cells.</p>
       <label class="help-toggle"><input type="checkbox" id="shortcuts-toggle" checked /><span><strong>Single-key shortcuts</strong><small>Switch off to keep only <kbd><span class="key-command">⌘</span>K</kbd>, <kbd>esc</kbd>, and the buttons. The setting is remembered on this machine.</small></span></label>
     </dialog>

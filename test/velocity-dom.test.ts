@@ -206,6 +206,7 @@ test("Velocity leads with value cards before filters and keeps them independent 
 test("agent SVG encodings are unique, stable under filtering and reproduced in the legend", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    querySelector: () => null,
     createElement: (tag: string) => new Element(tag),
     createElementNS: (_namespace: string, tag: string) => new Element(tag),
   } });
@@ -259,6 +260,7 @@ test("agent SVG encodings are unique, stable under filtering and reproduced in t
 test("Velocity provider and model groups use shared brand colours and reciprocal legend hover", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    querySelector: () => null,
     createElement: (tag: string) => new Element(tag), createElementNS: (_namespace: string, tag: string) => new Element(tag),
   } });
   try {
@@ -406,6 +408,117 @@ test("Velocity daily and hourly ticks use uniform calendar steps", async () => {
       const ticks = container.querySelectorAll(".axis-label").filter((node) => node.getAttribute("y") === "318");
       assert.deepEqual(ticks.map((tick) => tick.textContent), granularity === "hour" ? ["00:00", "06:00", "12:00", "18:00"] : ["1 Sept", "2 Sept", "3 Sept", "4 Sept", "5 Sept", "6 Sept", "7 Sept"]);
     }
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("Velocity announces keyboard inspections once, keeps pointer movement and resize quiet, and dismisses on Escape", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const document = documentFromHtml('<div id="chart-announcer"></div>');
+  Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const data = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-02" });
+    const container = Object.assign(new Element(), { contains: (element: Element) => container.all().includes(element) });
+    const announcer = document.querySelector("#chart-announcer")!;
+    const writes: string[] = [];
+    Object.defineProperty(announcer, "textContent", { get: () => writes.at(-1) ?? "", set: (text: string) => writes.push(text) });
+    renderVelocityChart(container, data);
+    let svg = container.querySelector("svg")!;
+    const key = (key: string) => svg.listeners.get("keydown")!({ key, preventDefault() {}, stopPropagation() {} });
+    assert.deepEqual(writes, [], "initial paint does not announce a bucket");
+    svg.listeners.get("focus")!();
+    assert.equal(writes.length, 1);
+    assert.match(writes[0]!, /2 Sept/);
+    key("End"); key("ArrowRight");
+    assert.equal(writes.length, 1, "boundary keys do not rewrite the same live text");
+    const inspection = container.querySelector(".velocity-inspection")!;
+    const firstChild = inspection.children[0];
+    for (let i = 0; i < 50; i++) svg.listeners.get("pointermove")!({ clientX: 800 });
+    assert.equal(inspection.children[0], firstChild, "same-bucket movement does not rebuild the readout");
+    svg.listeners.get("pointermove")!({ clientX: 0 });
+    assert.match(inspection.textContent, /1 Sept/);
+    assert.equal(writes.length, 1, "pointer movement changes visible text without live-region churn");
+    key("Home");
+    assert.equal(writes.length, 2, "keyboard inspection announces even after pointer inspection");
+    document.activeElement = svg;
+    renderVelocityChart(container, data, { keepInspected: true });
+    svg = container.querySelector("svg")!;
+    svg.listeners.get("focus")!();
+    assert.equal(writes.length, 2, "resize focus restoration is silent");
+    assert.match(container.querySelector(".velocity-inspection")!.textContent, /1 Sept/);
+    let prevented = false, stopped = false;
+    svg.listeners.get("keydown")!({ key: "Escape", preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
+    assert.ok(prevented && !stopped, "dismissal bubbles to cancel shortcut chords while preventing repository clearing");
+    assert.equal(container.querySelector(".velocity-inspection")!.hidden, true);
+    assert.equal(container.querySelector(".velocity-marker")!.getAttribute("visibility"), "hidden");
+    assert.equal(announcer.textContent, "");
+    key("ArrowRight");
+    assert.equal(container.querySelector(".velocity-inspection")!.hidden, false);
+    assert.match(announcer.textContent, /2 Sept/);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("Velocity touch selects the tapped bucket before focus announces it", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const document = documentFromHtml('<div id="chart-announcer"></div>');
+  Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const data = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-02" });
+    const container = new Element();
+    renderVelocityChart(container, data);
+    const svg = container.querySelector("svg")!;
+    const announcer = document.querySelector("#chart-announcer")!;
+    const tap = (clientX: number, focus: boolean) => {
+      const event = { clientX, pointerType: "touch" };
+      svg.listeners.get("pointerdown")?.(event);
+      if (focus) svg.listeners.get("focus")!();
+      svg.listeners.get("click")!(event);
+    };
+    tap(0, true);
+    assert.match(announcer.textContent, /^1 Sept/);
+    tap(900, true);
+    assert.match(announcer.textContent, /^2 Sept/);
+    assert.match(container.querySelector(".velocity-inspection")!.textContent.trim(), /^2 Sept/);
+    tap(0, false);
+    assert.match(announcer.textContent, /^1 Sept/, "a second tap while already focused also announces the tapped bucket");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
+
+test("Velocity spoken readouts omit duplicate totals and unavailable series while retaining observed zero", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const document = documentFromHtml('<div id="chart-announcer"></div>');
+  Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const base = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-02" });
+    const spoken = (values: Array<[string, number | null]>, average: number | null = null) => {
+      const data = { ...base, rolling: [4, average], series: values.map(([label, value]) => ({ ...base.series[0], id: label, label, values: [value, value], total: value ?? 0 })) };
+      const container = new Element();
+      renderVelocityChart(container, data, { rolling: true });
+      container.querySelector("svg")!.listeners.get("focus")!();
+      return document.querySelector("#chart-announcer")!.textContent;
+    };
+    const single = spoken([["repo-a", 2]]);
+    assert.equal(single.match(/\$2\.00/g)?.length, 1);
+    assert.match(single, /repo-a: \$2\.00/);
+    assert.doesNotMatch(single, /N\/A|7-day average/);
+    const partial = spoken([["repo-a", 2], ["missing", null]]);
+    assert.match(partial, /repo-a: \$2\.00/);
+    assert.doesNotMatch(partial, /missing|N\/A|unavailable/);
+    assert.match(spoken([["zero", 0], ["missing", null]]), /zero: \$0\.00/);
+    assert.match(spoken([["repo-a", 2]], 3), /7-day average: \$3\.00/);
+    assert.match(spoken([["missing", null]]), /unavailable/);
+    assert.doesNotMatch(spoken([["missing", null]]), /N\/A|missing:/);
   } finally {
     if (previous) Object.defineProperty(globalThis, "document", previous);
     else Reflect.deleteProperty(globalThis, "document");
