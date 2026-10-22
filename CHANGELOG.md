@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Dashboard screen readers receive refresh outcomes and empty-window status without repeated Velocity hover or resize announcements. Downloads and refreshes restore displaced keyboard focus, Velocity Escape dismisses its readout, and command-palette search has a visible focus ring in both themes.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

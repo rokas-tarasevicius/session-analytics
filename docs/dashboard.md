@@ -6,7 +6,7 @@ All screenshots use synthetic demo data from all seven providers, including Anti
 
 The dashboard runs on `127.0.0.1` and has seven views in three groups: **Overview** (Summary, Velocity), **Economics** (Costs, Pricing, Subscription) and **Usage** (Tools, Activity). A window selector at the top switches between the last 7, 30 or 90 days, all history, or a custom range. The sidebar lists every repository with a sparkline and its value, and clicking one focuses every view on that repository except Subscription, whose limits are account-wide. A command palette (<kbd>⌘K</kbd>), `g`-prefixed shortcuts, light and dark themes, two densities and an address bar that follows the view, window and focus make it quick to move around and to share a link to exactly what you are looking at.
 
-Each view’s screen-reader region is named “Summary overview”, “Velocity overview”, and so on, distinct from its page heading.
+Each view’s screen-reader region is named “Summary overview”, “Velocity overview”, and so on, distinct from its page heading. Export downloads return keyboard focus to the Export view control before their menu closes; a scope change that invalidates a focused download does the same.
 
 ### While a scan runs
 
@@ -25,7 +25,10 @@ The dashboard polls `/api/analytics?wait=10`. A scan still running after ten sec
 `phase` is `discover`, `parse`, or `combine`; `total` is null before enumeration. `startedAt` and `fullParse` reset
 for each scan. Progress is null when no scan is running. A ready scan answers HTTP 200 with the normal snapshot.
 Only the first request of a manual refresh uses `?refresh=1&wait=10`; subsequent polls join that scan. The client
-updates elapsed time locally every second and limits status announcements to one change per two seconds.
+updates elapsed time locally every second and visual progress text at most once per two seconds.
+Screen readers receive a polite announcement when a scan starts, completes or fails, without repeated elapsed-time
+announcements. An empty date window is announced once when selected, with its scope and dates. Keyboard focus returns
+to Refresh snapshot after completion if disabling the button displaced it and focus is still on the page body.
 
 ### Summary: the state of the machine
 
@@ -76,6 +79,10 @@ The dashboard shows this machine's sessions as soon as its own scan is done, rat
 Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every change, and a **Top increases** table ranks positive absolute increases by repository, model and agent over the last seven completed days versus the preceding seven. Evidence cells use compact counts, such as `13.8M priced (100%) → 9.3M priced (100%)`; exact known/eligible counts stay in the tooltip and accessible name. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
 
 Daily chart ticks use equal calendar steps, labelling every day in windows up to 14 days when the labels fit. Hour profiles use 00:00, 06:00, 12:00 and 18:00, with fewer equally spaced ticks on narrow charts.
+
+Focus the Velocity chart and use Left/Right arrows or Home/End to inspect and announce a bucket. Pointer hover updates
+the visible readout quietly; repeated movement within a bucket and resize redraws do not repeat announcements. Escape
+dismisses the readout before the dashboard's separate shortcut to clear repository focus.
 
 Velocity’s “Average per active day” is usage value divided by days with positive usage value in the selected window, independent of the plotted metric.
 
