@@ -482,7 +482,8 @@ export function readLedger(directory: string, now = Date.now() / 1000): LedgerRe
   const current = readLedgerFile(directory, now, ledgerName, [2, 3]);
   if (!current.ledger) return current;
   const previous = readLedgerFile(directory, now, "limits-v3.json", [3]);
-  if (!previous.ledger) return previous;
+  // Recovery renames only the canonical file. An unreadable secondary import must never move that valid file.
+  if (!previous.ledger) return { status: "foreign", ledger: null };
   return previous.status === "ok"
     ? { status: "ok", ledger: mergeLedgers(previous.ledger, current.ledger, now) }
     : current;

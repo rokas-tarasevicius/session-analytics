@@ -662,3 +662,16 @@ test("compaction preserves adjacent Plus to Pro to Plus runs and their prorated 
     assert.ok(Math.abs(item.economics.price! - (20 * 3 + 200) * step / (86400 * MONTH_DAYS)) < 1e-12);
   }
 });
+
+test("an unreadable separate v3 import cannot quarantine a valid canonical ledger", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-import-unreadable-")), dataDir = join(home, "data");
+  writeLedger(dataDir, emptyLedger(), now);
+  const canonical = join(dataDir, "limits-v2.json"), separate = join(dataDir, "limits-v3.json");
+  const bytes = readFileSync(canonical, "utf8");
+  writeFileSync(separate, '{"version":3,"rows":[', { mode: 0o600 });
+  const snapshot = await collectLimits({ dataDir, codexRoot: join(home, "none"), claudeRoot: join(home, "none") }, environmentFor(home), now);
+  assert.deepEqual([snapshot.ledger, snapshot.persisted], ["unreadable", false]);
+  assert.equal(readFileSync(canonical, "utf8"), bytes);
+  assert.equal(readFileSync(separate, "utf8"), '{"version":3,"rows":[');
+  assert.ok(!readdirSync(dataDir).some((name) => name.includes(".unreadable-")));
+});
