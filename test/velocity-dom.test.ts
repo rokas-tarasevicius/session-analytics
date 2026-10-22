@@ -463,3 +463,33 @@ test("Velocity announces keyboard inspections once, keeps pointer movement and r
     else Reflect.deleteProperty(globalThis, "document");
   }
 });
+
+test("Velocity touch selects the tapped bucket before focus announces it", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const document = documentFromHtml('<div id="chart-announcer"></div>');
+  Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const data = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-02" });
+    const container = new Element();
+    renderVelocityChart(container, data);
+    const svg = container.querySelector("svg")!;
+    const announcer = document.querySelector("#chart-announcer")!;
+    const tap = (clientX: number, focus: boolean) => {
+      const event = { clientX, pointerType: "touch" };
+      svg.listeners.get("pointerdown")?.(event);
+      if (focus) svg.listeners.get("focus")!();
+      svg.listeners.get("click")!(event);
+    };
+    tap(0, true);
+    assert.match(announcer.textContent, /^1 Sept/);
+    tap(900, true);
+    assert.match(announcer.textContent, /^2 Sept/);
+    assert.match(container.querySelector(".velocity-inspection")!.textContent.trim(), /^2 Sept/);
+    tap(0, false);
+    assert.match(announcer.textContent, /^1 Sept/, "a second tap while already focused also announces the tapped bucket");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});

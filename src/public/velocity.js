@@ -185,7 +185,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
       if (overlay) inspection.append(element("span", `7-day average: ${formatMetric(data.rolling[selected], data.metric)}`));
       painted = selected;
     }
-    // Pointer hover remains visual. Only deliberate keyboard inspection updates
+    // Pointer hover remains visual. Keyboard focus, keys and touch selection update
     // the stable live region, once per changed readout (including boundary keys).
     const description = [...inspection.children].map((child) => child.textContent).join("; ");
     if (announce && announcer && announcer.textContent !== description) announcer.textContent = description;
@@ -202,14 +202,18 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     event.preventDefault(); inspect(target, true);
   });
   svg.addEventListener("focus", () => { inspect(selected, !restoringFocus); restoringFocus = false; });
-  const pointer = (event) => {
+  const pointer = (event, announce = false) => {
     const bounds = svg.getBoundingClientRect();
     // Account for SVG letterboxing at narrow viewports.
     const scale = Math.min(bounds.width / width, bounds.height / height);
     const offset = (bounds.width - width * scale) / 2;
-    inspect(Math.round(((event.clientX - bounds.left - offset) / scale - left) / plotWidth * (data.keys.length - 1)));
+    inspect(Math.round(((event.clientX - bounds.left - offset) / scale - left) / plotWidth * (data.keys.length - 1)), announce);
   };
-  svg.addEventListener("pointermove", pointer); svg.addEventListener("click", pointer);
+  // Native pointer focus follows pointerdown. Select first so focus cannot
+  // announce the previous bucket; click also covers taps on an already focused SVG.
+  svg.addEventListener("pointerdown", (event) => pointer(event));
+  svg.addEventListener("pointermove", (event) => pointer(event));
+  svg.addEventListener("click", (event) => pointer(event, event.pointerType === "touch" || event.pointerType === "pen"));
   container.append(svg, legend, inspection);
   inspect(selected);
 }

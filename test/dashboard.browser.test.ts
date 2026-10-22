@@ -464,6 +464,25 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.key("Escape");
     assert.equal(await browser.evaluate(`document.querySelector('.velocity-inspection').hidden`), true);
     await browser.evaluate(`window.auditObserver.disconnect()`);
+    // Native touch focus must announce the tapped bucket, including successive taps.
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 812, mobile: true, width: 375 });
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await browser.until(`innerWidth`, 375);
+    const touchDates: string[] = [];
+    for (const fraction of [0.35, 0.7, 0.45]) {
+      if (fraction !== 0.45) await browser.evaluate(`document.activeElement?.blur()`);
+      const point = await browser.evaluate<{ x: number; y: number }>(`(() => {
+        const svg = document.querySelector('.velocity-chart > svg'); svg.scrollIntoView({block:'center'});
+        const r = svg.getBoundingClientRect(); return { x:r.left+r.width*${fraction}, y:r.top+r.height/2 };
+      })()`);
+      await browser.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+      await browser.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await browser.until(`document.querySelector('#chart-announcer').textContent.startsWith(document.querySelector('.velocity-inspection strong').textContent.split(' · ')[0])`, true);
+      touchDates.push(await browser.evaluate<string>(`document.querySelector('.velocity-inspection strong').textContent.split(' · ')[0]`));
+    }
+    assert.notEqual(touchDates[0], touchDates[1], "tap A then B selects distinct buckets");
+    assert.notEqual(touchDates[1], touchDates[2], "already focused tap also selects another bucket");
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
     // Velocity chips list the snapshot's providers, and p 1 toggles the first of them.
     assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('#velocity-view .provider-key .chip')].map((chip) => chip.dataset.provider)`), ["codex", "claude", "cursor"]);
