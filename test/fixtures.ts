@@ -1,6 +1,62 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { AnalyzeOptions } from "../src/types.ts";
+
+/** Small cross-provider encoding fixture; every source root is synthetic. */
+export async function createProviderJsonlFixture(root: string): Promise<{ options: AnalyzeOptions; paths: string[] }> {
+  const at = "2026-07-20T09:00:00.000Z", content = "PRIVATE-JSONL-ENCODING-雪﻿";
+  const claudeId = "55555555-5555-4555-8555-555555555555", codexId = "66666666-6666-4666-8666-666666666666";
+  const cursorId = "77777777-7777-4777-8777-777777777777";
+  const options: AnalyzeOptions = {
+    noIndex: true, additionalProviders: false, offline: true, pricingPolicy: "reviewed-only", dataDir: join(root, "index"),
+    claudeRoot: join(root, "claude"), codexRoot: join(root, "codex"), codexArchiveRoot: join(root, "archive"),
+    databasePath: join(root, "absent-conductor.db"), cursorDatabasePath: join(root, "absent-cursor.db"),
+    cursorSdkRoot: join(root, "cursor-sdk"), cursorTranscriptRoot: join(root, "cursor-transcript"),
+    copilotRoot: join(root, "copilot"), geminiRoot: join(root, "gemini"),
+    opencodeDatabasePath: join(root, "absent-opencode.db"), antigravityRoot: join(root, "absent-antigravity"),
+  };
+  const usage = { input_tokens: 100, output_tokens: 20 };
+  const sources: Array<[string, object[]]> = [
+    [join(options.claudeRoot!, `${claudeId}.jsonl`), [
+      { type: "user", sessionId: claudeId, cwd: root, timestamp: at, message: { content } },
+      { type: "assistant", timestamp: at, message: { id: "encoding-response", model: "claude-opus-5", usage, content: [] } },
+      { type: "assistant", timestamp: at, message: { id: "encoding-response", model: "claude-opus-5", usage: { ...usage, output_tokens: 40 }, content: [] } },
+    ]],
+    [join(options.codexRoot!, `${codexId}.jsonl`), [
+      { type: "session_meta", timestamp: at, payload: { id: codexId, cwd: root, source: "cli", instructions: content } },
+      { type: "turn_context", timestamp: at, payload: { model: "gpt-5.4" } },
+      { type: "event_msg", timestamp: at, payload: { type: "token_count", info: { total_token_usage: usage, last_token_usage: usage } } },
+    ]],
+    [join(options.cursorSdkRoot!, "store", "agents.ndjson"), [
+      { agentId: "encoding-agent", cwd: root, createdAt: at, updatedAt: at, prompt: content },
+    ]],
+    [join(options.cursorSdkRoot!, "store", "runs.ndjson"), [
+      { agentId: "encoding-agent", runId: "encoding-run", model: { id: "claude-opus-5" }, createdAt: at, startedAt: at, endedAt: at, updatedAt: at, status: "finished", usage: { inputTokens: 70, outputTokens: 10 } },
+    ]],
+    [join(options.cursorSdkRoot!, "store", "run_events.ndjson"), [
+      { createdAt: at, payload: { type: "sdk_message", message: { type: "tool_call", agent_id: "encoding-agent", run_id: "encoding-run", call_id: "encoding-call", name: "read_file", arguments: content } } },
+    ]],
+    [join(options.cursorTranscriptRoot!, "project", "agent-transcripts", `${cursorId}.jsonl`), [
+      { role: "user", message: { content } },
+      { role: "assistant", message: { content: [{ type: "tool_use", id: "encoding-tool", name: "Read", input: content }] } },
+    ]],
+    [join(options.copilotRoot!, "encoding-copilot", "events.jsonl"), [
+      { id: "encoding-start", type: "session.start", timestamp: at, data: { sessionId: "encoding-copilot", context: { cwd: root } } },
+      { id: "encoding-user", type: "user.message", timestamp: at, data: { content } },
+    ]],
+    [join(options.geminiRoot!, "project", "chats", "session-encoding.jsonl"), [
+      { sessionId: "encoding-gemini", projectHash: "project", startTime: at, lastUpdated: at },
+      { id: "encoding-message", type: "gemini", timestamp: at, model: "unreviewed-model", tokens: { input: 30, output: 5 }, content },
+    ]],
+  ];
+  for (const [path, rows] of sources) {
+    await mkdir(join(path, ".."), { recursive: true });
+    // CRLF and a complete final record without LF are both valid JSONL framing.
+    await writeFile(path, rows.map(row => JSON.stringify(row)).join("\r\n"));
+  }
+  return { options, paths: sources.map(([path]) => path) };
+}
 
 export interface SessionAnalyticsFixture {
   additionalProviders: false;
