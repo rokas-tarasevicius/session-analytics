@@ -1,4 +1,4 @@
-import { compact, dateLabel, dateRange, dateTime, dayLabel, disjunction, fullDate, integer, money, timeLabel } from "./format.js";
+import { compact, dateLabel, dateRange, dateTime, dayLabel, disjunction, integer, money, timeLabel } from "./format.js";
 import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
@@ -930,7 +930,7 @@ function renderLine(items, inspectedDay = null) {
   attachCrosshair(elements.dailySpend, svg, {
     initialIndex: remembered >= 0 ? remembered : items.length - 1,
     xs, plotTop: top, plotBottom: baseline, plotLeft: left, plotRight: width - right, label: "Daily usage value in US dollars by provider",
-    title: (index) => fullDate(items[index].name),
+    title: (index) => dateLabel(items[index].name),
     summary: (index) => {
       const starts = selectedProviders.reduce((sum, provider) => sum + (items[index].starts?.[provider] || 0), 0);
       return { value: money(providers.reduce((sum, provider) => sum + items[index][provider], 0)), sessions: `${integer(starts)} session${starts === 1 ? "" : "s"} started` };
