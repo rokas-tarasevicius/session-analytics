@@ -90,7 +90,8 @@ async function calls(): Promise<SshCall[]> {
   return (await readFile(sshLog, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line) as SshCall);
 }
 function cli(args: string[], extra: NodeJS.ProcessEnv = {}): SpawnSyncReturns<string> {
-  return spawnSync(process.execPath, [bin, ...args], { env: { ...environment, ...extra }, encoding: "utf8", maxBuffer: 1 << 28 });
+  // Keep these machine-content assertions unwrapped; cli.test.ts checks narrow reports.
+  return spawnSync(process.execPath, [bin, ...args], { env: { ...environment, COLUMNS: "240", ...extra }, encoding: "utf8", maxBuffer: 1 << 28 });
 }
 /** Processes still running from this test's fake machines. */
 function leftovers(): string[] {
