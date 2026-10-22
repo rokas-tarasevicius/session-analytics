@@ -276,3 +276,17 @@ test("daily inspection announces each explicit selection once and leaves pointer
   svg.listeners.get("keydown")!({ key: "ArrowRight", preventDefault() {} });
   assert.equal(updates.length, 2);
 });
+
+test("a dismissed daily readout survives redraw and automatic focus restoration until another inspection", async () => {
+  const { document, run } = await harness([]);
+  const days = ["2026-01-01", "2026-01-02", "2026-01-03"].map((name) => ({ name, claude: 1 }));
+  run(`renderLine(${JSON.stringify(days)}, "2026-01-02", false, true)`);
+  const chart = document.querySelector("#daily-spend")!;
+  const svg = chart.querySelector("svg")!, readout = chart.querySelector(".chart-readout")!;
+  assert.equal(readout.hidden, true);
+  assert.equal(chart.querySelector(".tip-title")!.textContent, "2 Jan 2026");
+  svg.listeners.get("focus")!(); // The resize helper restores focus on the replacement SVG.
+  assert.equal(readout.hidden, true);
+  svg.listeners.get("focus")!(); // A later user focus explicitly restores inspection.
+  assert.equal(readout.hidden, false);
+});

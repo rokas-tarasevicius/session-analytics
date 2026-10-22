@@ -404,7 +404,7 @@ function renderSparkline(svg, rawValues, days, { width = 84, height = 30, label 
 
 // --------------------------------------------------------------------- crosshair + daily readout
 
-function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, plotRight, title, rows, summary, onIndex = null, label, initialIndex = xs.length - 1 }) {
+function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, plotRight, title, rows, summary, onIndex = null, label, initialIndex = xs.length - 1, initiallyVisible = true, restoringDismissedFocus = false }) {
   const viewBox = svg.viewBox.baseVal;
   const crosshair = svgNode("line", { class: "crosshair", y1: plotTop, y2: plotBottom, x1: 0, x2: 0 });
   crosshair.style.display = "none";
@@ -469,7 +469,11 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
     show(index, false);
     announceSelection(index);
   });
-  svg.addEventListener("focus", () => show(inspected));
+  svg.addEventListener("focus", () => {
+    // redrawOnResize restores focus automatically; that is not a new inspection.
+    if (restoringDismissedFocus) { restoringDismissedFocus = false; return; }
+    show(inspected);
+  });
   svg.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       // Consume Escape only when a readout is open so the global scope shortcut does not also run.
@@ -486,6 +490,7 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
   // Keep exact figures available while the pointer or keyboard moves to the legend.
   // The readout stays in the document flow, so it cannot cover the plot or escape the viewport.
   show(inspected, false);
+  if (!initiallyVisible) hide();
 }
 
 // --------------------------------------------------------------------- views
@@ -877,8 +882,11 @@ function dailyProviderSpend(sessions) {
   return [...days.values()];
 }
 
-function renderLine(items, inspectedDay = null) {
-  redrawOnResize(elements.dailySpend, () => renderLine(items, inspectedDay));
+function renderLine(items, inspectedDay = null, readoutActive = true, restoringDismissedFocus = false) {
+  redrawOnResize(elements.dailySpend, () => {
+    const restoreDismissed = !readoutActive && elements.dailySpend.contains(document.activeElement);
+    renderLine(items, inspectedDay, readoutActive, restoreDismissed);
+  });
   clear(elements.dailySpend);
   const selectedProviders = activeProviders();
   const totals = Object.fromEntries(selectedProviders.map((provider) => [provider, items.reduce((sum, item) => sum + item[provider], 0)]));
@@ -939,6 +947,7 @@ function renderLine(items, inspectedDay = null) {
   const remembered = items.findIndex((item) => item.name === inspectedDay);
   attachCrosshair(elements.dailySpend, svg, {
     initialIndex: remembered >= 0 ? remembered : items.length - 1,
+    initiallyVisible: readoutActive, restoringDismissedFocus,
     xs, plotTop: top, plotBottom: baseline, plotLeft: left, plotRight: width - right, label: "Daily usage value in US dollars by provider",
     title: (index) => dateLabel(items[index].name),
     summary: (index) => {
@@ -947,6 +956,7 @@ function renderLine(items, inspectedDay = null) {
     },
     rows: (index) => providers.map((provider) => ({ label: providerLabels[provider], color: providerColor(provider), value: money(items[index][provider]), dim: items[index][provider] <= 0 })),
     onIndex: (index) => {
+      readoutActive = index !== null;
       if (index !== null) inspectedDay = items[index].name;
       for (const provider of providers) {
         const { dot, points } = dots[provider];

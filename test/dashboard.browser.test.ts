@@ -710,6 +710,21 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.until(chartAtContainerWidth, true);
     assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#daily-spend svg')`), true);
     assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .tip-title').textContent`), inspectedDateBeforeResize);
+    // Resize must preserve explicit dismissal even when the redraw restores chart focus.
+    await browser.key("Escape");
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, true);
+    await browser.evaluate(`window.dispatchEvent(new Event('resize'))`);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .chart-readout').hidden`), true);
+    await setWidth(375);
+    await browser.until(chartAtContainerWidth, true);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#daily-spend svg')`), true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .chart-readout').hidden`), true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .tip-title').textContent`), inspectedDateBeforeResize);
+    await setWidth(1440);
+    await browser.until(chartAtContainerWidth, true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .chart-readout').hidden`), true);
+    await browser.evaluate(`document.activeElement.blur(); document.querySelector('#daily-spend svg').focus()`);
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, false);
     await browser.evaluate(`document.activeElement.blur()`);
 
     // The coverage dialog opens on its title (no focus ring on Close), keeps its table scrolling inside it on a phone,
