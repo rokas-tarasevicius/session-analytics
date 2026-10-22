@@ -1,6 +1,6 @@
 import { providerRoots } from "./roots.ts";
 import { lstat, readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { openSourceDatabase } from "../source-database.ts";
@@ -168,23 +168,41 @@ export function antigravityAdapter(reconcile?: (sessionKey: string, responses: s
       // Gemini CLI owns the same parent. Only Antigravity's stores establish its presence.
       return stores.length ? [root] : [];
     },
-    async *identify(root, onWarning) {
+    async *identify(root, onWarning, onSource) {
+      const health = new Map<string, string | null>();
+      const warn = (directory: string, warning: string): void => {
+        health.set(directory, warning);
+        if (!onWarning) throw new Error(warning);
+        onWarning(warning);
+      };
       const candidates = new Map<string, { identity: ProviderSession; modified: number }>();
       // An override accepts one surface's data root; the default contains all three.
       const directories = [root, ...["antigravity", "antigravity-ide", "antigravity-cli"].map((surface) => join(root, surface))];
       for (const directory of directories) {
-        let entries;
+        let entries, linked = false;
         try {
-          if (!(await lstat(directory)).isDirectory()) continue;
+          const surface = await lstat(directory);
+          if (surface.isSymbolicLink()) { linked = true; await stat(directory); }
+          if (!surface.isDirectory()) throw new Error("Unsupported Antigravity surface.");
           const store = await lstat(join(directory, "conversations"));
-          if (store.isSymbolicLink()) continue;
+          if (store.isSymbolicLink()) { linked = true; await stat(join(directory, "conversations")); }
+          if (store.isSymbolicLink()) throw new Error("Unsupported Antigravity conversation link.");
           if (!store.isDirectory()) throw new Error("Unsupported Antigravity conversation store.");
           entries = await readdir(join(directory, "conversations"), { withFileTypes: true });
         }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; if (!onWarning) throw error; onWarning(antigravityWarnings.unreadable); continue; }
+        catch (error) {
+          // An aggregate root need not have its own conversations, and sibling
+          // surfaces are optional. If none is usable, the selected root is missing.
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            if (linked) warn(directory, "A provider transcript root is missing.");
+            continue;
+          }
+          warn(directory, antigravityWarnings.unreadable); continue;
+        }
+        health.set(directory, null);
         for (const entry of entries) {
           if (!entry.isFile()) continue; // Never traverse source symlinks.
-          if (entry.name.endsWith(".pb")) { onWarning?.(antigravityWarnings.legacy); continue; }
+          if (entry.name.endsWith(".pb")) { warn(directory, antigravityWarnings.legacy); continue; }
           if (!entry.name.endsWith(".db") || !uuid.test(entry.name.slice(0, -3))) continue;
           try {
             const path = join(directory, "conversations", entry.name), data = projection(path);
@@ -192,7 +210,7 @@ export function antigravityAdapter(reconcile?: (sessionKey: string, responses: s
             const modified = (await stat(path)).mtimeMs, prior = candidates.get(data.identity.id);
             if (!prior || data.identity.updatedAt > prior.identity.updatedAt || (data.identity.updatedAt === prior.identity.updatedAt && modified > prior.modified)) candidates.set(data.identity.id, { identity: data.identity, modified });
           }
-          catch (error) { if (!onWarning) throw error; onWarning(antigravityWarnings.unreadable); }
+          catch { warn(directory, antigravityWarnings.unreadable); }
         }
       }
       const selected = [...candidates.values()].map(({ identity }) => identity).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.path.localeCompare(b.path));
@@ -206,8 +224,10 @@ export function antigravityAdapter(reconcile?: (sessionKey: string, responses: s
           if (!data || data.identity.cwd !== identity.cwd) continue;
           const ledger = data.generations.length ? data.generations : data.steps;
           reconcile(hash(`antigravity:${identity.id}`), ledger.flatMap((row) => row.usage?.response ? [row.usage.response] : []), !data.partial);
-        } catch { onWarning?.(antigravityWarnings.unreadable); }
+        } catch { warn(dirname(dirname(identity.path)), antigravityWarnings.unreadable); }
       }
+      if (!health.size) warn(root, "A provider transcript root is missing.");
+      for (const warning of health.values()) onSource?.(warning);
       yield* selected;
     },
     async analyze(identity, context) {

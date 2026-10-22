@@ -229,3 +229,30 @@ test("dangling default transcript, profile and database links remain missing sou
     assert.deepEqual((await discoverProviderRoots({ home })).claude, [join(home, ".claude-linked/projects")]);
   });
 });
+
+test("Antigravity health validates explicit conversations and malformed default surfaces", async () => {
+  await fixture(async (home) => {
+    const absent = await report(home);
+    assert.deepEqual(absent.mcpSourceHealth?.find((row) => row.provider === "antigravity"), {
+      provider: "antigravity", status: "unavailable", sourcesRead: 0, missingSources: 0, unreadableSources: 0,
+    });
+    const surface = join(home, "explicit-surface");
+    await mkdir(surface);
+    const missing = await report(home, ["--antigravity-root", surface]);
+    assert.deepEqual(missing.mcpSourceHealth?.find((row) => row.provider === "antigravity"), {
+      provider: "antigravity", status: "unavailable", sourcesRead: 0, missingSources: 1, unreadableSources: 0,
+    });
+    await mkdir(join(home, ".gemini"));
+    await writeFile(join(home, ".gemini/antigravity"), "PRIVATE-SOURCE-SENTINEL");
+    const malformed = await report(home);
+    assert.deepEqual(malformed.mcpSourceHealth?.find((row) => row.provider === "antigravity"), {
+      provider: "antigravity", status: "unavailable", sourcesRead: 0, missingSources: 0, unreadableSources: 1,
+    });
+    assert.ok(malformed.warnings.includes("An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."));
+    await mkdir(join(home, ".gemini/antigravity-ide/conversations"), { recursive: true });
+    const partial = await report(home);
+    assert.deepEqual(partial.mcpSourceHealth?.find((row) => row.provider === "antigravity"), {
+      provider: "antigravity", status: "incomplete", sourcesRead: 1, missingSources: 0, unreadableSources: 1,
+    });
+  });
+});

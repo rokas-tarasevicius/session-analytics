@@ -42,6 +42,7 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
     const roots = await adapter.discoverRoots(context);
     for (const root of roots) {
       let sourceWarning: string | null = null;
+      const storeHealth: Array<string | null> = [];
       const warn = (warning: string): void => { warnings.push(warning); sourceWarning = warning; };
       try {
         try { await stat(root); }
@@ -51,7 +52,7 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
           continue;
         }
         const copies = new Map<string, { identity: ProviderSession; modified: number }>();
-        try { for await (const identity of adapter.identify(root, warn)) {
+        try { for await (const identity of adapter.identify(root, warn, (warning) => storeHealth.push(warning))) {
           let modified = 0; try { modified = (await stat(identity.path)).mtimeMs; } catch { /* Analyze reports unreadable evidence. */ }
           const prior = copies.get(identity.id);
           const preferredFormat = adapter.id === "gemini-chat" ? Number(identity.path.endsWith(".jsonl")) - Number(prior?.identity.path.endsWith(".jsonl")) : 0;
@@ -76,7 +77,8 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
       } catch { warn("A provider evidence store could not be read or has an unsupported schema."); }
       finally {
         const health = sources.get(adapter.provider) ?? [];
-        health.push(sourceWarning); sources.set(adapter.provider, health);
+        if (storeHealth.length && sourceWarning && !storeHealth.includes(sourceWarning)) storeHealth.push(sourceWarning);
+        health.push(...(storeHealth.length ? storeHealth : [sourceWarning])); sources.set(adapter.provider, health);
       }
     }
   }
