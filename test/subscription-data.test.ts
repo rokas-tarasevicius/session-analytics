@@ -933,3 +933,16 @@ test("different unrecognised tiers collapsed to other never establish one shared
   const rows = [1, 2].map((week) => ({ ...reading("codex", "seven_day", start + week * WEEK, start + week * WEEK - HOUR, 20), planType: "other" as const }));
   assert.equal(calibrate(buildMeters(rows, start + 2 * WEEK)[0]!, { between: () => 100 }, "other").perPercent, null);
 });
+
+test("untagged history cannot establish historical capacity after Codex tier evidence arrives", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", owner = account("codex", key, { plan: "pro" }), now = start + 4 * WEEK;
+  const rows = [0, 1, 2, 3].flatMap((week) => {
+    const row = { ...reading("codex", "seven_day", start + (week + 1) * WEEK, start + week * WEEK, 0, "allowed", key), ...(week >= 2 ? { planType: "pro" as const } : {}) };
+    return [row, { ...row, observedAt: row.resetsAt - HOUR, usedPercent: 20 }];
+  });
+  const item = utilization(owner, rows, now, [spending("codex", start, now, 1)], { basis: "provider" });
+  assert.ok(item.economics.weeklyCapacity! > 0, "current Pro capacity is calibrated");
+  assert.equal(item.economicPeriods![0]!.potential, null, "two untagged cycles cannot prove a historical tier's capacity");
+  assert.equal(item.history[0]!.expiredUsd, null);
+  assert.equal(item.economics.potential, null, "full-period utilization stays unknown when its historical denominator is unknown");
+});

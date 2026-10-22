@@ -429,7 +429,7 @@ function calibrationSample({ samples }) {
  * and the median of the rest needs `calibrationMinimum` segments.
  */
 export function calibrate(meter, value, planType = undefined) {
-  if (planType === "other") return emptyCalibration();
+  if (planType === "other" || planType === null) return emptyCalibration();
   const candidates = [];
   for (const cycle of meter?.cycles ?? []) {
     // A cycle spanning tiers has no reliable zero baseline for either allowance.

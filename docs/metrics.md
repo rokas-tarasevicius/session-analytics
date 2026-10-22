@@ -710,7 +710,7 @@ current tier's calibration and monthly price independently of historical price c
 
 A manual plan override prices all counted periods at that selected plan; it never merges tier calibrations. A payer
 override applies to every period. Wholly untagged Codex histories and Claude retain the old current-plan fallback;
-once Codex has tagged evidence, its earlier untagged price period is unknown and excluded from the personal multiple.
+once Codex has tagged evidence, its earlier untagged period has unknown price and capacity and is excluded from the personal multiple.
 An upgrade typically lowers the historical price estimate and raises the multiple compared with pricing every prior
 day at the latest expensive tier; downgrades do the reverse. Calibration/capacity may move either way or become
 unavailable while the new tier accumulates evidence. Total extracted usage value is unchanged.
