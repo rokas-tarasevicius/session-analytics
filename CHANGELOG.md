@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Sessions recorded by Windows agents (`D:\GIT\repo`) and read from WSL resolve through the drive mount (`/mnt/d/GIT/repo`) and are attributed to their repository instead of "No repository detected". Outside WSL, and for UNC or drive-relative paths, a Windows path is no longer resolved against the directory the tool was started in, which could credit those sessions to an unrelated repository. Totals are unchanged. Usage moves between repositories.
+
 ## [0.12.0] - 2026-10-20
 
 ### Added

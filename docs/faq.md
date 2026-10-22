@@ -65,7 +65,7 @@ Yes, on the machine where T3 Code's server runs. T3 Code drives Claude Code and 
 <details>
 <summary><strong>Which platforms are supported?</strong></summary>
 
-macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Pull requests and pushes require GitHub-hosted Ubuntu, macOS and browser checks. See [release validation](release.md).
+macOS is the primary platform. Claude Code and Codex history paths are the same on Linux, so those sources work there; the default Cursor, Claude Desktop, and Conductor paths are macOS paths today, and Cursor can be pointed at another location with `--cursor-database`. Windows is not supported yet. Under WSL, Claude Code and Codex history written by Windows agents can be read by linking each Windows profile as a sibling (for example `~/.claude-win`). Its `D:\...` session paths resolve through `/mnt/d/...`. Pull requests and pushes require GitHub-hosted Ubuntu, macOS and browser checks. See [release validation](release.md).
 </details>
 
 <details>
