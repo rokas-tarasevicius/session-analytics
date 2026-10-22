@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard shortcut help, command-palette key hints and global key handling share one registry, with documentation parity checks. Provider help includes the eighth chip; held keys and input composition no longer trigger dashboard actions.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

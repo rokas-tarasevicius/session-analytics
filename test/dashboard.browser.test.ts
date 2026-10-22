@@ -342,6 +342,20 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.key("Escape");
     await browser.until(`document.querySelector('#command-palette').open`, false);
     assert.equal(await browser.evaluate(`document.activeElement.id`), "command-button");
+    // Shortcut help is generated from the dispatch registry and native dialog closing restores its opener.
+    await browser.evaluate(`document.querySelector('#help-button').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#help-overlay').open`, true);
+    assert.equal(await browser.evaluate(`(async () => {
+      const { shortcutRegistry } = await import('/shortcuts.js');
+      return JSON.stringify([...document.querySelectorAll('#shortcut-list dt')].map(row => row.textContent)) === JSON.stringify(shortcutRegistry.map(item => item.label));
+    })()`), true);
+    await browser.key("Escape");
+    await browser.until(`document.querySelector('#help-overlay').open`, false);
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "help-button");
+    const originalTheme = await browser.evaluate(`document.documentElement.dataset.theme`);
+    await browser.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', repeat: true, bubbles: true })); document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', isComposing: true, bubbles: true }));`);
+    assert.equal(await browser.evaluate(`document.documentElement.dataset.theme`), originalTheme);
     // Meta/Ctrl+K toggles it from anywhere; "export" runs the Export entry, which opens the menu on its first download.
     await browser.key("k", { code: "KeyK", modifiers: 4 });
     await browser.until(`document.querySelector('#command-palette').open`, true);

@@ -335,29 +335,7 @@
 
     <dialog class="help" id="help-overlay" aria-labelledby="help-title">
       <header><h2 id="help-title" tabindex="-1" autofocus>Keyboard shortcuts</h2><button class="icon-button" id="help-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
-      <div class="help-grid">
-        <section><h3>Navigate</h3><dl>
-          <div><dt>Summary</dt><dd><kbd>g</kbd><kbd>s</kbd></dd></div>
-          <div><dt>Velocity</dt><dd><kbd>g</kbd><kbd>v</kbd></dd></div>
-          <div><dt>Costs</dt><dd><kbd>g</kbd><kbd>c</kbd></dd></div>
-          <div><dt>Pricing</dt><dd><kbd>g</kbd><kbd>p</kbd></dd></div>
-          <div><dt>Subscription</dt><dd><kbd>g</kbd><kbd>u</kbd></dd></div>
-          <div><dt>Tools</dt><dd><kbd>g</kbd><kbd>t</kbd></dd></div>
-          <div><dt>Activity</dt><dd><kbd>g</kbd><kbd>a</kbd></dd></div>
-          <div><dt>Previous / next view</dt><dd><kbd>[</kbd><kbd>]</kbd></dd></div>
-        </dl></section>
-        <section><h3>Control</h3><dl>
-          <div><dt>Command palette</dt><dd><kbd><span class="key-command">⌘</span>K</kbd> or <kbd>/</kbd></dd></div>
-          <div><dt>Last 7 · 30 · 90 days · all</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
-          <div><dt>Toggle provider chips in order (Summary chart, Velocity, Tools, Activity)</dt><dd><kbd>p</kbd> <kbd>1</kbd>–<kbd>7</kbd></dd></div>
-          <div><dt>Data coverage</dt><dd><kbd>e</kbd></dd></div>
-          <div><dt>Clear repository focus</dt><dd><kbd>esc</kbd></dd></div>
-          <div><dt>Switch theme</dt><dd><kbd>t</kbd></dd></div>
-          <div><dt>Switch density</dt><dd><kbd>d</kbd></dd></div>
-          <div><dt>Refresh snapshot</dt><dd><kbd>r</kbd></dd></div>
-          <div><dt>This overlay</dt><dd><kbd>?</kbd></dd></div>
-        </dl></section>
-      </div>
+      <div class="help-grid" id="shortcut-list"></div>
       <p class="help-note">In charts, <kbd>←</kbd><kbd>→</kbd> move the crosshair and <kbd>esc</kbd> closes the readout; in the heatmap, arrow keys move between cells.</p>
       <label class="help-toggle"><input type="checkbox" id="shortcuts-toggle" checked /><span><strong>Single-key shortcuts</strong><small>Switch off to keep only <kbd><span class="key-command">⌘</span>K</kbd>, <kbd>esc</kbd>, and the buttons. The setting is remembered on this machine.</small></span></label>
     </dialog>
