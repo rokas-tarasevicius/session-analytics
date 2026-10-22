@@ -960,7 +960,11 @@ dialog::backdrop { background: var(--backdrop); }
 }
 
 @media (max-width: 760px) {
-  .activity-insights { grid-template-columns: minmax(0, 1fr); }
+  .activity-insights { grid-template-columns: minmax(0, 1fr); gap: 4px; margin-bottom: 4px; }
+  .activity-insights .kpi { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label value" "note value"; gap: 0 6px; min-height: 0; padding: 0; border: 0; }
+  .activity-insights .kpi strong { align-self: center; margin: 0; }
+  .activity-insights .kpi-label, .activity-insights .kpi .kpi-note { line-height: 1.1; }
+  .activity-insights .kpi .kpi-note { margin: 0; }
   .activity-panel { overflow-x: visible; }
   .activity-heatmap { grid-auto-flow: column; grid-template-rows: repeat(25, auto); grid-template-columns: 40px repeat(7, minmax(0, 1fr)); min-width: 0; }
   .activity-heatmap .heat-cell { aspect-ratio: auto; height: 20px; }
