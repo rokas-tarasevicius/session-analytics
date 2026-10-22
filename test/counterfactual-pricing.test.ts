@@ -163,3 +163,37 @@ test("Costs labels mixed-vendor amounts and unknown vendors, and removes the cro
   run("snapshot.rateCard.models.pop(); renderCosts(activeView())");
   assert.match(result(), /Source vendor unavailable: \$4.89 · 1,100,000 re-priced tokens; cross-vendor share cannot be determined/);
 });
+
+test("Costs reuses Pricing's offline, stale and newly cached price disclosures while keeping estimates usable", async () => {
+  const { document, run, context } = await harness([session()]);
+  context.rates = [{ model: "model-a", rate }];
+  run(`snapshot.rateCard = { models: rates, effectiveDate: '2026-09-01', pricing: {
+    policy: 'reviewed-first', offline: true, stale: true, warnings: [], refreshAfterDays: 7, sources: []
+  } }; renderCosts(activeView())`);
+  const result = () => document.querySelector(".counterfactual-result")!.textContent;
+  assert.match(result(), /\$4.89/);
+  assert.match(result(), /Cached prices only; no public price requests/);
+  assert.match(result(), /Pricing evidence needs a refresh/);
+  assert.match(result(), /A source is missing or older than 7 days. Cached and reviewed rates remain usable./);
+  run("renderPricingPanel(document.querySelector('#pricing-panel'), snapshot.rateCard, [], velocityContext())");
+  const pricing = document.querySelector("#pricing-panel")!.textContent;
+  for (const text of ["Cached prices only; no public price requests", "Pricing evidence needs a refresh",
+    "A source is missing or older than 7 days. Cached and reviewed rates remain usable."]) {
+    assert.ok(pricing.includes(text), `Pricing and Costs must share: ${text}`);
+  }
+  run("snapshot.rateCard.pricing.stale = false; renderCosts(activeView())");
+  assert.match(result(), /Cached prices only; no public price requests/);
+  assert.doesNotMatch(result(), /Pricing evidence needs a refresh/);
+  run("snapshot.rateCard.pricing.offline = false; renderCosts(activeView())");
+  assert.doesNotMatch(result(), /Cached prices only|Pricing evidence needs a refresh/);
+  context.fetch = async (url: string) => {
+    assert.equal(url, "/api/health");
+    return { ok: true, json: async () => ({ pricing: { updateAvailable: true, fetchedAt: null } }) };
+  };
+  run("viewButtons.forEach(button => button.setAttribute('aria-current', button.dataset.viewButton === 'costs' ? 'page' : 'false'))");
+  await run("pollPricingUpdate()");
+  assert.match(result(), /New prices were cached. Refresh snapshot to apply them; displayed totals stay unchanged until then./);
+  run("snapshot.rateCard.pricing.policy = 'reviewed-only'; renderCosts(activeView())");
+  assert.match(result(), /Reviewed card only; public sources bypassed/);
+  assert.doesNotMatch(result(), /New prices were cached/);
+});

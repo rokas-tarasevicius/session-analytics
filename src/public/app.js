@@ -12,7 +12,7 @@ import {
 import { parseUrlState, serializeUrlState } from "./url-state.js";
 import { providerMark, renderProviderEvidence, metricCoverage } from "./providers.js";
 
-import { renderPricingPanel } from "./pricing.js";
+import { pricingFreshness, renderPricingPanel } from "./pricing.js";
 import { counterfactualValue } from "./counterfactual-data.js";
 import { renderToolsView } from "./tools.js";
 import { renderSubscription, subscriptionRefreshMilliseconds } from "./subscription.js";
@@ -733,6 +733,16 @@ function renderCounterfactual(sessions, range) {
     // Round the excluded share upward: a small omitted class must never read as 0%.
     if (data.coverage !== null) coverage.append(node("p", `${percent(Math.ceil(data.unrepricedTokens / data.tokens * 1000) / 1000)} not re-priced · ${integer(data.repricedTokens)} tokens re-priced`, "counterfactual-note"));
     result.append(amount, coverage);
+    const freshness = pricingFreshness(snapshot.rateCard, { pricingUpdate, timeZone: snapshotTimeZone() });
+    if (!freshness) result.append(node("p", "Pricing source details are unavailable for this snapshot.", "counterfactual-note"));
+    else {
+      if (snapshot.rateCard.pricing.offline || snapshot.rateCard.pricing.policy === "reviewed-only") result.append(node("p", freshness.mode, "counterfactual-note counterfactual-limits"));
+      if (freshness.title) {
+        const notice = node("div", null, "counterfactual-freshness");
+        notice.append(node("strong", freshness.title), node("p", freshness.detail, "counterfactual-note"));
+        result.append(notice);
+      }
+    }
     for (const row of data.vendors) {
       const source = providerLabels[row.vendor] ?? "Unknown vendor", targetVendor = providerLabels[target?.rate?.provider] ?? "Unknown vendor";
       const text = row.vendor === null
@@ -1268,7 +1278,7 @@ async function pollPricingUpdate() {
     const next = pricing ? { updateAvailable: pricing.updateAvailable === true, fetchedAt: pricing.fetchedAt ?? null } : null;
     if (JSON.stringify(pricingUpdate) === JSON.stringify(next)) return;
     pricingUpdate = next;
-    if (snapshot && currentViewName() === "pricing") renderActiveAnalyticsView(activeView());
+    if (snapshot && ["pricing", "costs"].includes(currentViewName())) renderActiveAnalyticsView(activeView());
   } catch { /* The snapshot stays usable; the next poll asks again. */ }
 }
 

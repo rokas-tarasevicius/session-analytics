@@ -724,7 +724,7 @@ tbody tr:first-child th { border-top: 0; }
 .counterfactual-amount { display: grid; gap: 6px; }
 .counterfactual-amount > strong { font: 500 var(--fs-figure) var(--font-mono); }
 .counterfactual-coverage { flex: 1 1 220px; font-size: var(--fs-sm); }
-.counterfactual-limits { flex-basis: 100%; }
+.counterfactual-limits, .counterfactual-vendor, .counterfactual-freshness { flex-basis: 100%; }
 
 .detail-panel { min-height: 260px; margin-top: var(--gap); }
 

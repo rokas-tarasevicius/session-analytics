@@ -181,6 +181,9 @@ Request context sizes are unavailable in the ledger, so long-context and tier pr
 applied to an aggregate as if it were one request. Token counts and cache behavior are held constant; models can
 tokenize differently and have different capabilities. Current target rates do not reproduce historical tariffs.
 The selection lives only in browser memory. No snapshot field, accounting total, projection, or export changes.
+The estimate shares Pricing's freshness wording and state from `rateCard.pricing` and the existing `/api/health`
+pricing-update poll. Offline mode discloses that only cached prices are used; stale or newly cached prices carry
+the same refresh notice as Pricing. The hypothetical calculation stays available without presenting those rates as fresh.
 
 ## Additional provider evidence
 
