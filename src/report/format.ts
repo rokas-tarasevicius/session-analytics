@@ -94,13 +94,20 @@ export function wrapReport(text: string, width: number): string {
 /** Align complete cells when they fit; otherwise label each value under its row name. */
 export function reportTable(headers: string[], rows: string[][], width: number, right: number[] = []): string {
   if (!rows.length) return "";
-  const widths = headers.map((header, index) => rows.reduce((max, row) => Math.max(max, textWidth(row[index] ?? "")), textWidth(header)));
+  const money = (value: string): string | undefined => value.match(/^\$[\d,]+\.\d{2}(?=\s|$)/u)?.[0];
+  const amounts = headers.map((_, index) => right.includes(index)
+    ? rows.reduce((max, row) => Math.max(max, textWidth(money(row[index] ?? "") ?? "")), 0) : 0);
+  const aligned = rows.map((row) => row.map((value, index) => {
+    if (!amounts[index]) return value;
+    return " ".repeat(Math.max(0, amounts[index]! - textWidth(money(value) ?? value))) + value;
+  }));
+  const widths = headers.map((header, index) => aligned.reduce((max, row) => Math.max(max, textWidth(row[index] ?? "")), textWidth(header)));
   if (widths.reduce((sum, value) => sum + value, 0) + (headers.length - 1) * 2 > width) {
-    return wrapReport(rows.map((row) => [row[0], ...headers.slice(1).map((header, index) => `  ${header}: ${row[index + 1]}`)].join("\n")).join("\n\n") + "\n", width);
+    return wrapReport(aligned.map((row) => [row[0], ...headers.slice(1).map((header, index) => `  ${header}: ${row[index + 1]}`)].join("\n")).join("\n\n") + "\n", width);
   }
-  const format = (row: string[]): string => row.map((value, index) => {
+  const format = (row: string[], heading = false): string => row.map((value, index) => {
     const padding = " ".repeat(widths[index]! - textWidth(value));
-    return right.includes(index) ? padding + value : value + padding;
+    return right.includes(index) && (heading || !amounts[index]) ? padding + value : value + padding;
   }).join("  ").trimEnd();
-  return [headers, ...rows].map(format).join("\n") + "\n";
+  return [format(headers, true), ...aligned.map((row) => format(row))].join("\n") + "\n";
 }

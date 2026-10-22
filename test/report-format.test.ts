@@ -64,6 +64,26 @@ test("narrow repository tables label each value instead of scrambling columns", 
   assert.equal(reportTable(headers, [], 80), "");
 });
 
+test("currency decimals align independently of coverage suffixes at 80 and 120 columns", () => {
+  const evidence = [
+    ["data-pipeline", "95", "$1,054.86 · 84/95 sessions", "362.3M · 87/95 sessions"],
+    ["acme-web", "119", "$413.42 · 110/119 sessions", "454.7M · 111/119 sessions"],
+    ["complete", "1", "$2.00", "1K"],
+    ["unavailable", "1", "N/A", "N/A"],
+  ];
+  for (const width of [60, 80, 120]) {
+    const result = reportTable(headers, evidence, width, [1, 2, 3]);
+    const lines = result.trimEnd().split("\n");
+    const decimals = lines.filter((line) => line.includes("$")).map((line) => line.indexOf("."));
+    assert.equal(decimals.length, 3);
+    assert.equal(new Set(decimals).size, 1, `${width} columns:\n${result}`);
+    assert.ok(lines.every((line) => textWidth(line) <= width));
+    for (const row of evidence) for (const value of row) assert.ok(result.includes(value));
+    if (width === 120) assert.ok(result.startsWith("Repository"), "exercise the table layout");
+    if (width === 60) assert.match(result, /\n  Priced value:/, "exercise the stacked layout");
+  }
+});
+
 test("Unicode names align by terminal cells and long model lists show an ellipsis", () => {
   assert.equal(textWidth("界e\u0301👩‍💻🇬🇧"), 7);
   assert.equal(textWidth("©®™♥"), 4);
