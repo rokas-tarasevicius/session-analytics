@@ -1536,6 +1536,7 @@ function renderProviderEmptyState(container, scope, eligibleCount, windowCount) 
 }
 
 const providerSetupGuide = "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/providers.md";
+$("#coverage-setup-link").href = providerSetupGuide;
 
 function setupLink() {
   const link = node("a", "Provider setup guide ↗", "button");
