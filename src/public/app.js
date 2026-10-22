@@ -1604,7 +1604,7 @@ function renderViewStatus(view) {
   if (!snapshot && elements.main.dataset.state === "loading") {
     const box = emptyState(target, "The first scan may take a few minutes. Results appear when the scan finishes; progress is shown above.", "Reading local history", "h2");
     const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
-    announce("Reading local history.");
+    announce(""); // The snapshot announcer owns loading progress.
     target.hidden = false; return;
   }
   if (!view || !windowEmpty) { target.hidden = true; announce(""); return; }

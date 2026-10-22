@@ -108,14 +108,14 @@ test("view announcements change only with the situation and exclude static guida
   run("renderView(); renderView()");
   assert.equal(run("announcementWrites"), 1, "unchanged snapshot polls do not rewrite the announcer");
   run("snapshot = null; elements.main.dataset.state = 'loading'; renderViewStatus(null); renderViewStatus(null)");
-  assert.match(announcer.textContent, /Reading local history/);
+  assert.equal(announcer.textContent, "", "the snapshot announcer owns loading progress");
   assert.equal(run("announcementWrites"), 2);
   run("loadFailed = true; renderViewStatus(null); renderViewStatus(null)");
   assert.equal(announcer.textContent, "", "the error alert owns failure announcements");
-  assert.equal(run("announcementWrites"), 3);
+  assert.equal(run("announcementWrites"), 2);
   run("snapshot = fixture; loadFailed = false; windowEmpty = false; renderViewStatus(activeView()); renderViewStatus(activeView())");
   assert.equal(announcer.textContent, "");
-  assert.equal(run("announcementWrites"), 3);
+  assert.equal(run("announcementWrites"), 2);
 });
 
 test("pricing health polling adds the refresh notice without fetching analytics or mutating displayed totals", async () => {
