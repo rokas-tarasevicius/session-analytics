@@ -43,6 +43,33 @@ export function ellipsize(text: string, width: number): string {
   return `${result}…`;
 }
 
+/** Keep distinguishing tails when end-truncated labels collide; wrap full labels as a last resort. */
+export function abbreviateLabels(labels: string[], width: number): string[] {
+  const unique = [...new Set(labels)];
+  const shortened = unique.map((label) => ellipsize(label, width));
+  const collides = (values: string[], index: number): boolean => values.some((value, other) => other !== index && value === values[index]);
+  const candidates = unique.map((label, index) => {
+    if (!collides(shortened, index)) return shortened[index]!;
+    const segments = [...graphemes.segment(label)].map(({ segment }) => segment);
+    const peers = unique.filter((_, other) => other !== index && shortened[other] === shortened[index]);
+    let common = segments.length;
+    for (const peer of peers) {
+      const other = [...graphemes.segment(peer)].map(({ segment }) => segment);
+      let match = 0;
+      while (match < common && segments[match] === other[match]) match += 1;
+      common = match;
+    }
+    // Reserve at least half the width for the tail, including every differing segment.
+    let start = segments.length, tailWidth = 0;
+    while (start > 0 && (start > common || tailWidth < Math.floor(width / 2))) tailWidth += cells(segments[--start]!);
+    if (tailWidth >= width) return label;
+    const tail = segments.slice(start).join("");
+    return ellipsize(label, width - textWidth(tail)) + tail;
+  });
+  const result = new Map(unique.map((label, index) => [label, collides(candidates, index) ? label : candidates[index]!]));
+  return labels.map((label) => result.get(label)!);
+}
+
 /** Wrap prose without losing words, blank lines, indentation or the final newline. */
 export function wrapReport(text: string, width: number): string {
   return text.split("\n").map((line) => {

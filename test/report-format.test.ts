@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ellipsize, reportTable, reportWidth, textWidth, wrapReport } from "../src/report/format.ts";
+import { abbreviateLabels, ellipsize, reportTable, reportWidth, textWidth, wrapReport } from "../src/report/format.ts";
 
 test("report width honors COLUMNS, terminal columns, then an 80-column pipe default", () => {
   assert.equal(reportWidth({ COLUMNS: "80" }, 120), 80);
@@ -75,4 +75,20 @@ test("Unicode names align by terminal cells and long model lists show an ellipsi
   assert.equal(ellipsize("claude-opus-5, claude-sonnet-5", 20), "claude-opus-5, clau…");
   assert.equal(ellipsize("short", 20), "short");
   assert.equal(ellipsize("界e\u0301👩‍💻", 4), "界e\u0301…");
+});
+
+test("model abbreviations retain distinct dates after a shared long prefix", () => {
+  const models = ["claude-sonnet-4-20250514", "claude-sonnet-4-20250929"];
+  const labels = abbreviateLabels([...models, models[0]!], 20);
+  assert.equal(new Set(labels).size, 2);
+  assert.match(labels[0]!, /….*20250514$/);
+  assert.match(labels[1]!, /….*20250929$/);
+  assert.equal(labels[0], labels[2]);
+  assert.ok(labels.every((label) => textWidth(label) <= 20));
+  assert.deepEqual(abbreviateLabels(["short", "claude-opus-5, claude-sonnet-5"], 20), ["short", "claude-opus-5, clau…"]);
+
+  const variants = ["a-very-long-shared-prefix-alpha-shared-suffix-that-exceeds-width", "a-very-long-shared-prefix-beta-shared-suffix-that-exceeds-width"];
+  assert.deepEqual(abbreviateLabels(variants, 20), variants, "unresolved collisions keep the full labels for wrapping");
+  const lists = models.map((model) => `${model}, claude-sonnet-5, claude-haiku-4-5-20251001`);
+  assert.deepEqual(abbreviateLabels(lists, 20), lists, "a later model must not hide the distinguishing date");
 });

@@ -1,5 +1,5 @@
 import { historyReport } from "./report/history.ts";
-import { ellipsize, reportTable, reportWidth, wrapReport } from "./report/format.ts";
+import { abbreviateLabels, reportTable, reportWidth, wrapReport } from "./report/format.ts";
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, OptionError, optionErrorMessage, pricingHelp, sourceHelp, argument, remoteBooleanFlags, remoteHelp, remoteValueFlags, type RemoteOptions } from "./options.ts";
 import { remoteFor } from "./machines/config.ts";
@@ -208,10 +208,11 @@ if (analytics && process.argv.includes("--json")) {
   );
   write(historyReport(analytics));
   write("\nTop sessions by priced usage value\n");
-  const sessionRows = analytics.sessions.filter((s) => metricEligible(s, "cost"))
+  const topSessions = analytics.sessions.filter((s) => metricEligible(s, "cost"))
     .sort((left, right) => right.cost.totalUsd - left.cost.totalUsd)
-    .slice(0, 15).map((session) => [session.sessionKey, dollars(session.cost.totalUsd), session.provider,
-      ellipsize(session.models.map(({ model }) => model).join(", ") || "unknown model", 20)]);
+    .slice(0, 15);
+  const modelLabels = abbreviateLabels(topSessions.map((session) => session.models.map(({ model }) => model).join(", ") || "unknown model"), 20);
+  const sessionRows = topSessions.map((session, index) => [session.sessionKey, dollars(session.cost.totalUsd), session.provider, modelLabels[index]!]);
   write(reportTable(["Session", "Priced value", "Provider", "Model"], sessionRows, width, [1]));
   if (analytics.warnings.length > 0) {
     write("\nWarnings\n");
