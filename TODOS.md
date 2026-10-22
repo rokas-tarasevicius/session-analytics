@@ -54,6 +54,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | Priority | Item | Plan reference |
 | --- | --- | --- |
 | P2 | Store Codex `plan_type` with each ledger reading, calibrate value per 1% per plan and prorate price per plan period; today every cycle uses the account's latest plan, so value per 1% spans plan changes. A plan type that changes within one stream could also set apart readings from a conflicting limit context, such as a cycle that looks like an early reset. | Subscription review (codex-conflicting-cycles) |
+| P3 | Accept a UTF-8 BOM when attributing Codex limit readings to accounts: `src/limits/accounts.ts` and the private limits inbox parse rollout metadata directly, so a BOM-prefixed rollout caches missing attribution even though the provider-history readers accept a BOM since #99. | #99 review (multi-machine) |
 
 ## Distribution and release metadata
 
