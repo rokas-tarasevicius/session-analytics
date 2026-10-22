@@ -41,12 +41,17 @@ const generation = (usage: Buffer, time: string | null = later, model: string | 
 
 test("Antigravity: discovers app, IDE and CLI roots, explicit roots and opt-out flag precedence", async () => {
   const adapter = antigravityAdapter();
-  assert.deepEqual(await adapter.discoverRoots({ home: "/synthetic-home", options: {}, environment: {} }), ["/synthetic-home/.gemini"]);
+  assert.deepEqual(await adapter.discoverRoots({ home: "/synthetic-home", options: {}, environment: {} }), []);
   assert.deepEqual(await adapter.discoverRoots({ home: "/synthetic-home", options: { antigravityRoot: "/override" }, environment: {} }), ["/override"]);
   const options = analyzeOptionsFrom(["--antigravity-root", "/flag", "--no-additional-providers"], { SESSION_ANALYTICS_ANTIGRAVITY_ROOT: "/env" });
   assert.equal(options.antigravityRoot, "/flag"); assert.equal(options.additionalProviders, false);
   assert.equal(analyzeOptionsFrom([], { SESSION_ANALYTICS_ANTIGRAVITY_ROOT: "/env" }).antigravityRoot, "/env");
   await fixture(async (root, path) => {
+    const defaultRoot = join(root, ".gemini");
+    await mkdir(defaultRoot);
+    assert.deepEqual(await adapter.discoverRoots({ home: root, options: {}, environment: {} }), []);
+    await mkdir(join(defaultRoot, "antigravity", "conversations"), { recursive: true });
+    assert.deepEqual(await adapter.discoverRoots({ home: root, options: {}, environment: {} }), [defaultRoot]);
     for (const surface of ["antigravity-ide", "antigravity-cli"]) {
       const target = join(root, surface, "conversations", `${id}.db`);
       await mkdir(dirname(target), { recursive: true }); await copyFile(path, target);

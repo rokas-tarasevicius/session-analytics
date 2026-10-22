@@ -1,3 +1,4 @@
+import { providerRoots } from "./roots.ts";
 import { lstat, readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -160,7 +161,13 @@ export function antigravityAdapter(reconcile?: (sessionKey: string, responses: s
   let requestBytes = 0;
   return {
     id: "antigravity-db", provider: "antigravity",
-    async discoverRoots({ home, options }) { return [options.antigravityRoot ?? join(home, ".gemini")]; },
+    async discoverRoots({ home, options }) {
+      if (options.antigravityRoot !== undefined) return [options.antigravityRoot];
+      const root = join(home, ".gemini");
+      const stores = await providerRoots(undefined, ["antigravity", "antigravity-ide", "antigravity-cli"].map((surface) => join(root, surface, "conversations")));
+      // Gemini CLI owns the same parent. Only Antigravity's stores establish its presence.
+      return stores.length ? [root] : [];
+    },
     async *identify(root, onWarning) {
       const candidates = new Map<string, { identity: ProviderSession; modified: number }>();
       // An override accepts one surface's data root; the default contains all three.
@@ -168,7 +175,10 @@ export function antigravityAdapter(reconcile?: (sessionKey: string, responses: s
       for (const directory of directories) {
         let entries;
         try {
-          if (!(await lstat(directory)).isDirectory() || !(await lstat(join(directory, "conversations"))).isDirectory()) continue;
+          if (!(await lstat(directory)).isDirectory()) continue;
+          const store = await lstat(join(directory, "conversations"));
+          if (store.isSymbolicLink()) continue;
+          if (!store.isDirectory()) throw new Error("Unsupported Antigravity conversation store.");
           entries = await readdir(join(directory, "conversations"), { withFileTypes: true });
         }
         catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; if (!onWarning) throw error; onWarning(antigravityWarnings.unreadable); continue; }

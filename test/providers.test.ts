@@ -346,12 +346,21 @@ test("Gemini supports JSON and JSONL, registry mapping, thought tokens, checkpoi
 });
 
 test("provider root discovery and CLI settings are explicit, isolated, and honor XDG for OpenCode", async () => {
-  const environment = { home: "/synthetic/home", options: {}, environment: { XDG_DATA_HOME: "/synthetic/data" } };
-  assert.deepEqual(await copilotAdapter.discoverRoots(environment), ["/synthetic/home/.copilot/session-state"]);
-  assert.deepEqual(await opencodeAdapter.discoverRoots(environment), ["/synthetic/data/opencode/opencode.db"]);
-  assert.deepEqual(await geminiAdapter().discoverRoots(environment), ["/synthetic/home/.gemini/tmp"]);
-  assert.deepEqual(await cursorTranscriptAdapter().discoverRoots(environment), ["/synthetic/home/.cursor/projects"]);
-  assert.deepEqual(await cursorSdkAdapter.discoverRoots(environment), ["/synthetic/home/Library/Application Support/com.conductor.app/cursor-sdk-store"]);
+  await fixture(async (root) => {
+    const home = join(root, "home"), data = join(root, "data");
+    const environment = { home, options: {}, environment: { XDG_DATA_HOME: data } };
+    for (const [adapter, path] of [
+      [copilotAdapter, join(home, ".copilot/session-state")],
+      [opencodeAdapter, join(data, "opencode/opencode.db")],
+      [geminiAdapter(), join(home, ".gemini/tmp")],
+      [cursorTranscriptAdapter(), join(home, ".cursor/projects")],
+      [cursorSdkAdapter, join(home, "Library/Application Support/com.conductor.app/cursor-sdk-store")],
+    ] as const) {
+      if (adapter.id === "opencode-db") await write(path, "");
+      else await mkdir(path, { recursive: true });
+      assert.deepEqual(await adapter.discoverRoots(environment), [path]);
+    }
+  });
   const options = analyzeOptionsFrom(["--copilot-root", "/explicit/copilot", "--no-additional-providers"], { SESSION_ANALYTICS_COPILOT_ROOT: "/ignored", SESSION_ANALYTICS_GEMINI_ROOT: "/explicit/gemini" });
   assert.equal(options.copilotRoot, "/explicit/copilot"); assert.equal(options.geminiRoot, "/explicit/gemini"); assert.equal(options.additionalProviders, false);
 });

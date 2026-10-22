@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import type { SessionAnalytics } from "../types.ts";
+import type { SessionAnalytics, SessionProvider } from "../types.ts";
 import type { ProviderAdapter, ProviderContext, ProviderEnvironment, ProviderSession } from "./adapter.ts";
 import { antigravityAdapter } from "./antigravity.ts";
 import { copilotAdapter } from "./copilot.ts";
@@ -23,7 +23,7 @@ interface AdditionalContext extends ProviderEnvironment {
 }
 
 /** Sources are ordered by fidelity. A lower-fidelity Cursor copy never adds another session. */
-export async function additionalProviderSessions(context: AdditionalContext): Promise<{ sessions: SessionAnalytics[]; identities: Set<string>; warnings: string[] }> {
+export async function additionalProviderSessions(context: AdditionalContext): Promise<{ sessions: SessionAnalytics[]; identities: Set<string>; warnings: string[]; sources: Map<SessionProvider, Array<string | null>> }> {
   const adapters: Array<[ProviderAdapter, string | undefined]> = [
     [cursorSdkAdapter, context.options.cursorSdkRoot],
     [opencodeAdapter, context.options.opencodeDatabasePath],
@@ -33,6 +33,7 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
     [cursorTranscriptAdapter(context.knownPaths), context.options.cursorTranscriptRoot],
   ];
   const sessions: SessionAnalytics[] = [], warnings: string[] = [];
+  const sources = new Map<SessionProvider, Array<string | null>>();
   const identities = new Set<string>();
   const seen = new Set(context.existingSessions.map((s) => s.sessionKey));
   for (const [adapter, explicit] of adapters) {
@@ -40,15 +41,23 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
     context.onDiscover?.([]);
     const roots = await adapter.discoverRoots(context);
     for (const root of roots) {
+      let sourceWarning: string | null = null;
+      const warn = (warning: string): void => { warnings.push(warning); sourceWarning = warning; };
       try {
+        try { await stat(root); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          warn("A provider transcript root is missing.");
+          continue;
+        }
         const copies = new Map<string, { identity: ProviderSession; modified: number }>();
-        try { for await (const identity of adapter.identify(root, (warning) => warnings.push(warning))) {
+        try { for await (const identity of adapter.identify(root, warn)) {
           let modified = 0; try { modified = (await stat(identity.path)).mtimeMs; } catch { /* Analyze reports unreadable evidence. */ }
           const prior = copies.get(identity.id);
           const preferredFormat = adapter.id === "gemini-chat" ? Number(identity.path.endsWith(".jsonl")) - Number(prior?.identity.path.endsWith(".jsonl")) : 0;
           if (!prior || preferredFormat > 0 || (preferredFormat === 0 && (identity.updatedAt > prior.identity.updatedAt || (identity.updatedAt === prior.identity.updatedAt && modified > prior.modified)))) copies.set(identity.id, { identity, modified });
         }
-        } catch { warnings.push("A provider evidence store could not be fully read; identified sessions were retained."); }
+        } catch { warn("A provider evidence store could not be fully read; identified sessions were retained."); }
         const workKey = (identity: ProviderSession) => `${adapter.id}:${root}:${identity.id}`;
         context.onDiscover?.([...copies.values()].map(({ identity }) => workKey(identity)));
         for (const { identity } of copies.values()) {
@@ -61,11 +70,15 @@ export async function additionalProviderSessions(context: AdditionalContext): Pr
             context.completeRequests?.(session);
             if (!identity.cwd) session.transcript.warnings.push("The evidence does not establish a unique repository path; this session is grouped as unassigned.");
             seen.add(hash(key)); identities.add(key); sessions.push(session);
-          } catch { warnings.push("A provider evidence session could not be read; other sessions were retained."); }
+          } catch { warn("A provider evidence session could not be read; other sessions were retained."); }
           finally { context.onProcessed?.(workKey(identity)); }
         }
-      } catch { warnings.push("A provider evidence store could not be read or has an unsupported schema."); }
+      } catch { warn("A provider evidence store could not be read or has an unsupported schema."); }
+      finally {
+        const health = sources.get(adapter.provider) ?? [];
+        health.push(sourceWarning); sources.set(adapter.provider, health);
+      }
     }
   }
-  return { sessions, identities, warnings: [...new Set(warnings)] };
+  return { sessions, identities, warnings: [...new Set(warnings)], sources };
 }

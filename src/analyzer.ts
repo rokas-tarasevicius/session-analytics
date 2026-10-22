@@ -57,6 +57,7 @@ import { buildClaudeUsageOwners, type ClaudeUsageOwners } from "./providers/clau
 import { mapConcurrent } from "./concurrency.ts";
 import { track } from "./processes.ts";
 import { additionalProviderSessions } from "./providers/index.ts";
+import { cursorDatabaseDefault, providerRoots } from "./providers/roots.ts";
 import { modelName, name as safeName, effortName, safeTime, statusName } from "./providers/common.ts";
 import { conductorFallback, conductorLegacyProviderIds } from "./providers/conductor.ts";
 import { loadReviewed, loadPricingCatalog, mergeProvenance, publicRateCard, resolveRate, type PricingCatalog } from "./pricing/catalog.ts";
@@ -1219,7 +1220,7 @@ async function directoryExists(path: string): Promise<boolean> {
  * Profile directories for one provider: the default (`~/.claude`), sibling
  * profiles that people create for separate accounts (`~/.claude-work`), and an
  * explicit environment override. Sibling profiles are only returned when they
- * exist; the default is always returned so a missing store stays visible.
+ * exist; optional stores are filtered separately so absence is not a read failure.
  */
 async function providerProfiles(
   home: string,
@@ -1265,23 +1266,23 @@ export async function discoverProviderRoots(
 ): Promise<{ claude: string[]; codex: string[] }> {
   const { home } = environment;
   const claudeProfiles = await providerProfiles(home, ".claude", environment.claudeConfigDirectory);
-  const claude: string[] = [join(home, ".claude", "projects")];
+  const claude: string[] = [];
   for (const profile of [...claudeProfiles, join(home, ".config", "claude")]) {
     const projects = join(profile, "projects");
-    if (await directoryExists(projects)) claude.push(projects);
+    claude.push(projects);
   }
   const desktopAgents = join(home, "Library/Application Support/Claude/local-agent-mode-sessions");
-  if (await directoryExists(desktopAgents)) claude.push(desktopAgents);
+  claude.push(desktopAgents);
 
   const codexProfiles = await providerProfiles(home, ".codex", environment.codexHome);
-  const codex: string[] = [join(home, ".codex", "sessions"), join(home, ".codex", "archived_sessions")];
+  const codex: string[] = [];
   for (const profile of codexProfiles) {
     for (const store of ["sessions", "archived_sessions"]) {
       const root = join(profile, store);
-      if (await directoryExists(root)) codex.push(root);
+      codex.push(root);
     }
   }
-  return { claude: await uniqueRoots(claude), codex: await uniqueRoots(codex) };
+  return { claude: await uniqueRoots(await providerRoots(undefined, claude)), codex: await uniqueRoots(await providerRoots(undefined, codex)) };
 }
 
 async function* walkJsonl(root: string): AsyncGenerator<string> {
@@ -1969,6 +1970,8 @@ export async function cursorSessions(
 ): Promise<{ sessions: SessionAnalytics[]; warning: string | null }> {
   let database: DatabaseSync | null = null;
   try {
+    // Normalize missing files before SQLite turns ENOENT into a generic database error.
+    await stat(databasePath);
     database = openSourceDatabase(databasePath);
     repositories = await Promise.all(repositories.map(async (repository) => ({
       ...repository,
@@ -2322,14 +2325,15 @@ async function analyzeSelectedRepositories(
     // Keep Cursor's hydrated composer objects serialized until the much larger
     // Codex and Claude transcript pass has finished. Retaining both object
     // graphs at once needlessly pushes machine-wide scans over V8's heap limit.
-    const cursorDatabasePath = options.cursorDatabasePath ?? join(homedir(), "Library/Application Support/Cursor/User/globalStorage/state.vscdb");
+    const cursorDatabasePath = options.cursorDatabasePath ?? cursorDatabaseDefault({ home: homedir(), environment: process.env });
+    const cursorRoots = await providerRoots(options.cursorDatabasePath, [cursorDatabasePath]);
     progress.discover(["cursor-database"]);
     progress.parsing();
-    const cursorSerialized = await cursorSessionsSerialized(
+    const cursorSerialized = cursorRoots.length ? await cursorSessionsSerialized(
       cursorDatabasePath,
       availableRepositories,
       workspaceRepositories,
-    );
+    ) : JSON.stringify({ discovered: [], sessions: [], warning: null });
     progress.complete("cursor-database");
     progress.discover([]);
     // Explicit roots replace discovery for that provider, so a narrowed or
@@ -2630,9 +2634,11 @@ async function analyzeSelectedRepositories(
       } } : {}),
       ...(mcpContext ? { mcpContext } : {}),
       mcpSourceHealth: [sourceHealth("claude", claudeIndexes.map((item) => item.warning)),
-        sourceHealth("codex", codexIndexes.map((item) => item.warning)), sourceHealth("cursor", [cursorResult.warning])],
+        sourceHealth("codex", codexIndexes.map((item) => item.warning)),
+        sourceHealth("cursor", [...cursorRoots.map(() => cursorResult.warning), ...(additional.sources.get("cursor") ?? [])]),
+        ...(["copilot", "opencode", "gemini", "antigravity"] as const).map((provider) => sourceHealth(provider, additional.sources.get(provider) ?? []))],
       rateCard,
-      providerWarnings: [...new Set(additional.warnings)],
+      providerWarnings: [...new Set([codexIndex.warning, claudeIndex.warning, cursorResult.warning, ...additional.warnings].filter((warning): warning is string => Boolean(warning)))],
       repositories: [...repositoriesForOutput.values()].map(({ repository, sessions: repositorySessions }) => {
         const result = aggregate(repository, repositorySessions, rateCard);
         result.warnings.push(

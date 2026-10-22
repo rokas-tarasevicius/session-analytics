@@ -182,7 +182,9 @@ export function buildPayload(
     return { provider, status: source?.status ?? "unknown" as const, sourcesRead: number(source?.sourcesRead ?? 0),
       missingSources: number(source?.missingSources ?? 0), unreadableSources: number(source?.unreadableSources ?? 0) };
   });
-  if (sourceHealth.some((source) => source.status !== "available") || snapshot.analytics.warnings.length || snapshot.analytics.repositories.some((repo) => repo.warnings.length)) {
+  // Absent defaults are optional; "unsupported" has no provider store to discover.
+  const incompleteSources = sourceHealth.some((source) => source.status === "incomplete" || source.missingSources > 0 || source.unreadableSources > 0 || (source.status === "unknown" && source.provider !== "unsupported"));
+  if (incompleteSources || snapshot.analytics.warnings.length || snapshot.analytics.repositories.some((repo) => repo.warnings.length)) {
     notes.push("Some evidence sources are incomplete or have coverage notes; empty results do not establish no usage. Source health describes discovery independently of the selected sessions.");
   }
   if (sessions.some((s) => s.transcript.warnings.length)) notes.push("Some sessions have parser coverage notes; observed history may be incomplete.");
