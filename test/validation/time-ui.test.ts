@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import { Element } from '../release-dom.ts';
 import { normalizeTimestamp } from '../../src/public/timestamps.js';
 import { activityGrid, dailyCountSeries, dailySpendSeries, heatLegend, heatLevel, ledgerAvailability } from '../../src/public/view-model.js';
+import { activityInsights } from '../../src/public/activity-insights.js';
 // Loaded dynamically like the other harnesses: ui.js is browser JavaScript without type declarations.
 const ui: Record<string, unknown> = await import(new URL('../../src/public/ui.js', import.meta.url).href);
 const velocityData = await import(new URL('../../src/public/velocity-data.js', import.meta.url).href);
@@ -20,12 +21,12 @@ function productionFunction(name: string, context: Record<string, unknown>) {
 
 test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch session', () => {
   const elements = { activityProviderFilters: new Element(), activityTooltip: new Element(), activityHeatmap: new Element(), activityRepositories: new Element() };
-  const evidence = new Element(), key = new Element();
+  const evidence = new Element(), key = new Element(), insights = new Element();
   const status = new Element();
   const render = productionFunction('renderActivity', {
-    elements, normalizeTimestamp, activityGrid, heatLegend, heatLevel, renderProviderEmptyState: () => false,
+    elements, normalizeTimestamp, activityGrid, activityInsights, heatLegend, heatLevel, renderProviderEmptyState: () => false,
     document: { querySelector: (selector: string) => selector === '#activity-heatmap-key' ? key : status }, integer, snapshotTimeZone: () => 'UTC',
-    $: () => evidence, renderViewProviderFilters() {}, sessionsForProviders: (s: unknown) => s,
+    $: (selector: string) => selector === '#activity-insights' ? insights : evidence, renderViewProviderFilters() {}, sessionsForProviders: (s: unknown) => s,
     node: (tag: string, text?: string, cls?: string) => { const e = new Element(tag); e.textContent=text??'';e.className=cls??'';return e; },
     clear: (e: Element) => e.replaceChildren(), renderBars() {},
   });
@@ -37,6 +38,8 @@ test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch
   ], repositories: [] });
   assert.equal(elements.activityHeatmap.children.reduce((sum,e)=>sum+Number(e.dataset.value??0),0),1);
   assert.match(evidence.textContent,/1\/4 sessions/);
+  assert.equal(insights.children[0]!.querySelector('strong')!.textContent, '1 day');
+  assert.match(insights.textContent, /1 active day in this window/);
   assert.equal(key.children[1]!.textContent.trim(), '0');
   assert.equal(key.children.at(-2)!.textContent.trim(), '1');
   assert.deepEqual(key.children.filter(e => e.tagName === 'i').map(e => e.dataset.level), ['0', '7']);
