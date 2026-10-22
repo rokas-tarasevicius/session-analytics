@@ -57,6 +57,23 @@ test("calendar streaks cross both daylight-saving transitions and year boundarie
   }
 });
 
+test("Auckland midnight splits 23:30 and 00:30 starts into consecutive local dates", () => {
+  // NZDT is UTC+13: both instants are October 19 in UTC, but straddle local midnight.
+  const sessions = [start("2026-10-19T10:30:00Z"), start("2026-10-19T11:30:00Z")];
+  assert.equal(activityInsights(sessions, "UTC").activeDays, 1);
+  assert.deepEqual(activityInsights(sessions, "Pacific/Auckland"), {
+    activeDays: 2, longestStreak: 2,
+    busiestHour: { starts: 1, indexes: [0, 23] }, busiestWeekday: { starts: 1, indexes: [0, 1] },
+  });
+  const boundaries = [start("2026-10-19T10:59:59Z"), start("2026-10-19T11:00:00Z"), start("2026-10-20T10:59:59Z"), start("2026-10-20T11:00:00Z")];
+  const selected = sessionsInRange(boundaries, "2026-10-20", "2026-10-20", "Pacific/Auckland");
+  assert.deepEqual(selected, boundaries.slice(1, 3));
+  assert.deepEqual(activityInsights(selected, "Pacific/Auckland"), {
+    activeDays: 1, longestStreak: 1,
+    busiestHour: { starts: 1, indexes: [0, 23] }, busiestWeekday: { starts: 2, indexes: [1] },
+  });
+});
+
 test("window clipping never extends a streak with starts outside the selected local dates", () => {
   const sessions = [18, 19, 20, 21, 22].map((day) => start(`2026-10-${day}T23:30:00Z`));
   const selected = sessionsInRange(sessions, "2026-10-20", "2026-10-21", "Europe/London");
