@@ -139,7 +139,7 @@ test("harvest is incremental, persists a private ledger, and returns no paths, i
   assert.equal(first.persisted, true);
   assert.equal(first.plans.codex, "plus");
   assert.deepEqual(first.observations.map((item) => `${item.provider}:${item.meter}:${item.usedPercent}`).sort(), ["claude:five_hour:30", "codex:seven_day:50"]);
-  assert.equal(statSync(join(dataDir, "limits-v3.json")).mode & 0o777, 0o600);
+  assert.equal(statSync(join(dataDir, "limits-v2.json")).mode & 0o777, 0o600);
   const serialized = JSON.stringify(first) + JSON.stringify(readLedger(dataDir));
   for (const secret of ["SECRET", home, "rollout", "session_id"]) assert.equal(serialized.includes(secret), false, secret);
 

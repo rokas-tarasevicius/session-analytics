@@ -715,7 +715,8 @@ An upgrade typically lowers the historical price estimate and raises the multipl
 day at the latest expensive tier; downgrades do the reverse. Calibration/capacity may move either way or become
 unavailable while the new tier accumulates evidence. Total extracted usage value is unchanged.
 
-The private `limits-v3.json` appends an optional tenth column to readings for this tier. It reads and merges
-`limits-v2.json` on each harvest without rewriting it, so old installations can still add observations. The original
+The private `limits-v2.json` upgrades its version marker to 3 and appends an optional tenth column for this tier.
+Version 0.12.1 rejects that marker and reports an unreadable ledger instead of silently hiding new history. Existing
+nine-column v2 rows and the earlier separate `limits-v3.json` are imported; the separate file stays read-only. The original
 `limits.json` import and `limits-inbox-v2.jsonl` remain supported. Nine-column rows stay untagged; the migration does
 not infer historical plans or reread provider history to invent them. [Subscription semantics and migration](subscription.md#where-the-readings-come-from).

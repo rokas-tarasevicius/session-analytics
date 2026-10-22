@@ -105,7 +105,7 @@ test("two Claude accounts used side by side stay separate series, each with its 
   assert.deepEqual([overage.usedPercent, overage.status], [118, "overage"], "extra usage keeps the reading past 100% and is not a cap");
   assert.deepEqual(own(snapshot, weeklyPhaseKey(strayWeek), "seven_day").map((row) => row.usedPercent), [50], "an unmatched weekly phase is never folded into an account");
 
-  const serialized = JSON.stringify(snapshot) + readFileSync(join(dataDir, "limits-v3.json"), "utf8");
+  const serialized = JSON.stringify(snapshot) + readFileSync(join(dataDir, "limits-v2.json"), "utf8");
   for (const secret of ["SECRET", "example.com", home, session(1)]) assert.equal(serialized.includes(secret), false, secret);
 });
 
@@ -249,7 +249,7 @@ test("a ledger this version cannot read is never overwritten; an unparseable one
   const home = mkdtempSync(join(tmpdir(), "limits-unreadable-"));
   const dataDir = join(home, "data");
   mkdirSync(dataDir, { mode: 0o700 });
-  const path = join(dataDir, "limits-v3.json");
+  const path = join(dataDir, "limits-v2.json");
   const future = JSON.stringify({ version: 4, rows: [["claude", "x", "five_hour"]] });
   writeFileSync(path, future, { mode: 0o600 });
   const options = { dataDir, codexRoot: join(home, "none") };
@@ -263,7 +263,7 @@ test("a ledger this version cannot read is never overwritten; an unparseable one
   writeFileSync(path, "{\"version\":3,\"rows\":[", { mode: 0o600 });
   const recovered = await collectLimits(options, environment, now);
   assert.deepEqual([recovered.ledger, recovered.persisted], ["ok", true]);
-  assert.deepEqual(readdirSync(dataDir).filter((name) => name.includes("unreadable")), [`limits-v3.json.unreadable-${now}`]);
+  assert.deepEqual(readdirSync(dataDir).filter((name) => name.includes("unreadable")), [`limits-v2.json.unreadable-${now}`]);
 });
 
 test("version 1 history is imported once, attributed by weekly phase, majority and the sole Codex account, and never written", async () => {
@@ -582,29 +582,26 @@ test("a status-line claim a stopped harvest left behind is merged by the next on
   assert.deepEqual(readdirSync(dataDir).filter((name) => name.startsWith("limits-inbox")), []);
 
   appendInbox(dataDir, [sample("seven_day_opus")]);
-  writeFileSync(join(dataDir, "limits-v3.json"), JSON.stringify({ version: 4, rows: [] }), { mode: 0o600 });
+  writeFileSync(join(dataDir, "limits-v2.json"), JSON.stringify({ version: 4, rows: [] }), { mode: 0o600 });
   assert.throws(() => writeLedger(dataDir, emptyLedger(), now, { inbox: true }), /left untouched/);
   assert.match(readFileSync(join(dataDir, "limits-inbox-v2.jsonl"), "utf8"), /seven_day_opus/, "the samples wait for a ledger that can be written");
 });
 
-test("v3 imports nine-column v2 ledgers without rewriting them, including later old-version harvests", () => {
+test("v3 upgrades the v2 filename atomically and imports the earlier separate v3 file", () => {
   const directory = mkdtempSync(join(tmpdir(), "limits-plan-migration-"));
   const key = codexAccountKey("synthetic-migration");
   const sample = (observedAt: number, usedPercent: number): LimitObservation => ({ provider: "codex", account: key, meter: "seven_day", windowMinutes: 10_080,
     resetsAt: now + 3 * 86_400, observedAt, usedPercent, status: "allowed", source: "codex-session" });
-  const oldPath = join(directory, "limits-v2.json");
-  const old = JSON.stringify({ ...emptyLedger(), version: 2, rows: [toRow(sample(now - 3600, 20))] });
-  writeFileSync(oldPath, old, { mode: 0o600 });
-  const migrated = writeLedger(directory, { ...emptyLedger(), rows: [toRow({ ...sample(now, 5), planType: "pro" })] }, now).ledger;
+  const path = join(directory, "limits-v2.json"), separate = join(directory, "limits-v3.json");
+  writeFileSync(path, JSON.stringify({ ...emptyLedger(), version: 2, rows: [toRow(sample(now - 3600, 20))] }), { mode: 0o600 });
+  const previous = JSON.stringify({ ...emptyLedger(), rows: [toRow({ ...sample(now, 5), planType: "pro" })] });
+  writeFileSync(separate, previous, { mode: 0o600 });
+  const migrated = writeLedger(directory, emptyLedger(), now).ledger;
   assert.equal(migrated.version, 3);
   assert.deepEqual(migrated.rows.map((row) => row[9] ?? null), [null, "pro"]);
-  assert.equal(readFileSync(oldPath, "utf8"), old);
-  const updated = JSON.stringify({ ...JSON.parse(old), rows: [toRow(sample(now - 3600, 20)), toRow(sample(now + 3600, 30))] });
-  writeFileSync(oldPath, updated, { mode: 0o600 });
-  const merged = writeLedger(directory, migrated, now + 3600).ledger;
-  assert.ok(merged.rows.some((row) => row[5] === now + 3600));
-  assert.ok(merged.rows.some((row) => row[9] === "pro"));
-  assert.equal(readFileSync(oldPath, "utf8"), updated, "old writers cannot discard the separate v3 plan history");
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).version, 3, "0.12.1 checks this filename and rejects this version");
+  assert.equal(readFileSync(separate, "utf8"), previous, "pre-review v3 history is imported read-only");
+  assert.deepEqual(readLedger(directory, now).ledger!.rows, migrated.rows);
 });
 
 test("plan contexts survive compaction and keep the first plan-change timestamp", () => {

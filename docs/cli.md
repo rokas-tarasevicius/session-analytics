@@ -190,7 +190,7 @@ Readings come from Codex session `rate_limits` records, Claude Agent SDK `rate_l
 - `--unsettled` (with `--json --no-remote`) leaves full Claude readings that do not say whether work went on as reported, for a machine that merges them with others first; it is what each machine is asked to run.
 - `--identify-machine` (with `--json --no-remote`) lists this machine in `machines` with a hash of its machine ID and account, as for `report`; a machine reading this one with the bundled runtime asks for it, to count it once.
 
-Readings are kept in `limits-v3.json` in the data directory, other machines' readings of real accounts included; `--no-index` neither reads nor writes it, here or on the machines read. The previous `limits-v2.json` ledger and the 0.9.0 ledger, `limits.json`, are imported and never written, so an older installation can share the data directory. Codex reading tiers are preserved in v3; old readings remain untagged. See [Subscription limits and value](subscription.md#accounts).
+Readings are kept in `limits-v2.json` in the data directory, other machines' readings of real accounts included; `--no-index` neither reads nor writes it, here or on the machines read. The ledger is upgraded atomically to version 3; version 0.12.1 then refuses it with an unreadable-ledger warning instead of hiding newer history. The earlier separate `limits-v3.json` and 0.9.0 `limits.json` are imported read-only. Codex reading tiers are preserved in version 3; old readings remain untagged. See [Subscription limits and value](subscription.md#accounts).
 
 ## Other machines
 

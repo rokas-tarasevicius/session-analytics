@@ -14,10 +14,10 @@ import {
 
 /**
  * Private, content-free meter history. Provider logs rotate quickly; this ledger is what makes reset history possible.
- * Version 3 adds a plan column. Earlier binaries reject these rows, so it lives in a separate file; version 2 is read
- * and merged on every harvest without rewriting it, including any readings an older installation continues to add.
+ * Version 3 adds a plan column at the old filename, so earlier binaries reject the version rather than silently
+ * showing incomplete history. Version 2 and the pre-review separate v3 file are imported before the atomic write.
  */
-export const ledgerName = "limits-v3.json";
+export const ledgerName = "limits-v2.json";
 export const inboxName = "limits-inbox-v2.jsonl";
 export const legacyLedgerName = "limits.json";
 /** Ledger writers in every process take turns through their own gate, so a long index ingest never holds one up. */
@@ -464,15 +464,16 @@ function readPrivate(path: string, limit: number): string | "oversize" | null {
 export type LedgerRead = { status: "missing" | "ok"; ledger: Ledger } | { status: "corrupt" | "foreign"; ledger: null };
 
 export function readLedger(directory: string, now = Date.now() / 1000): LedgerRead {
-  const current = readLedgerFile(directory, now, ledgerName, 3);
+  const current = readLedgerFile(directory, now, ledgerName, [2, 3]);
   if (!current.ledger) return current;
-  const previous = readLedgerFile(directory, now, "limits-v2.json", 2);
-  return previous.ledger && previous.status === "ok"
+  const previous = readLedgerFile(directory, now, "limits-v3.json", [3]);
+  if (!previous.ledger) return previous;
+  return previous.status === "ok"
     ? { status: "ok", ledger: mergeLedgers(previous.ledger, current.ledger, now) }
     : current;
 }
 
-function readLedgerFile(directory: string, now: number, name: string, version: number): LedgerRead {
+function readLedgerFile(directory: string, now: number, name: string, versions: readonly number[]): LedgerRead {
   let text: string | "oversize" | null;
   try { text = readPrivate(join(directory, name), maximumLedgerBytes); } catch { return { status: "foreign", ledger: null }; }
   if (text === null) return { status: "missing", ledger: emptyLedger() };
@@ -480,7 +481,7 @@ function readLedgerFile(directory: string, now: number, name: string, version: n
   let value: Record<string, unknown> | null;
   try { value = record(JSON.parse(text)); } catch { return { status: "corrupt", ledger: null }; }
   if (!value || !Array.isArray(value["rows"])) return { status: "corrupt", ledger: null };
-  if (value["version"] !== version) return { status: "foreign", ledger: null };
+  if (!versions.includes(value["version"] as number)) return { status: "foreign", ledger: null };
   const accounts: Record<string, LedgerAccount> = {};
   for (const [key, account] of Object.entries(record(value["accounts"]) ?? {})) { const valid = ledgerAccount(key, account); if (valid) accounts[key] = valid; }
   const cursors: Record<string, Cursor> = {};
