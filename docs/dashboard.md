@@ -166,6 +166,8 @@ Charts take Left, Right, Home and End to inspect readings. The two-minute refres
 
 Tools answers "how do the agents work?" using tool-call names only; arguments and results never reach any output. The table ranks tools by calls, share, sessions and repositories, with the change against the previous window, and provider chips narrow it to one or more agents. Selecting a tool opens its detail: calls by session-start day, the providers that made them, and the repositories they went into.
 
+**MCP server usage** separates names matching `mcp__<server>__<tool>` from other tool names, then ranks the observed servers by calls. The panel follows the tool ranking and profile, with the five busiest servers visible initially and a “+N more servers” button to expand the rest in place. Each row shows its share of all recorded calls and its reach across eligible sessions and repositories with tool evidence, including observed zero-call sessions. A session or repository counts once per row even when it uses several tools; reach can overlap across rows. The window, repository focus and provider chips apply to this panel too. Names without the prefix may still represent MCP calls. This is observed usage, not configured-server inventory or a reliability measure.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-tools-dark.webp" />

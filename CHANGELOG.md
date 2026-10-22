@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Tools shows MCP-prefixed versus other tool usage and each observed MCP server’s call share and reach across eligible sessions and repositories, using existing structured names only.
 - Costs can show the selected window's hypothetical API list-price equivalent at another snapshot model's ordinary rates, with exact token counts and the share that could not be re-priced. Cache-write TTL gaps, missing rates and evidence limits remain visible; recorded totals and exports are unchanged.
 - Summary lists quiet repositories with activity before the selected window and none observed inside it, their last observed active day, and a button to focus each repository. Undated activity and incomplete local history remain explicitly qualified; accounting totals are unchanged.
 - Empty dashboard views guide first-time users with provider source checks, setup documentation and refresh actions; empty date and repository selections keep recovery controls. Coverage explains missing history separately from unreadable sources and offline pricing. Totals are unchanged.

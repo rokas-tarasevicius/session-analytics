@@ -4,7 +4,7 @@ import { emptySession } from "../src/providers/common.ts";
 import type { SessionAnalytics } from "../src/types.ts";
 import { harness } from "./validation/aggregation-ui-harness.ts";
 
-const { buildToolsView, toolProfile, toolsDays }: typeof import("../src/public/tools-data.js") =
+const { buildToolOrigins, buildToolsView, toolProfile, toolsDays }: typeof import("../src/public/tools-data.js") =
   await import(new URL("../src/public/tools-data.js", import.meta.url).href);
 
 function session(tools: Record<string, number>, overrides: Partial<SessionAnalytics> = {}): SessionAnalytics {
@@ -16,6 +16,129 @@ function session(tools: Record<string, number>, overrides: Partial<SessionAnalyt
 const unavailable = (tools: Record<string, number> = {}) => {
   const result = session(tools); result.evidence!.tools = "unavailable"; return result;
 };
+
+test("MCP origins conserve calls and deduplicate session and repository reach across tools and providers", () => {
+  const sessions = [session({ Read: 4, mcp__github__read: 2, mcp__github__write: 3, mcp__docs__lookup: 1 }),
+    session({ mcp__github__read: 2 }, { provider: "codex" }),
+    session({ mcp__docs__lookup: 2 }, { repositoryId: "b", repositoryName: "B" }), session({})];
+  const result = buildToolOrigins(sessions);
+  assert.deepEqual(result.coverage, { eligible: 4, selected: 4 });
+  assert.equal(result.eligibleRepositories, 2);
+  assert.deepEqual(result.groups, [
+    { name: "MCP-prefixed tools", calls: 10, callShare: 10 / 14, sessions: 3, sessionShare: 3 / 4, repositories: 2, repositoryShare: 1 },
+    { name: "Other tool names", calls: 4, callShare: 4 / 14, sessions: 1, sessionShare: 1 / 4, repositories: 1, repositoryShare: 1 / 2 },
+  ]);
+  assert.deepEqual(result.servers, [
+    { name: "github", calls: 7, callShare: 7 / 14, sessions: 2, sessionShare: 1 / 2, repositories: 1, repositoryShare: 1 / 2 },
+    { name: "docs", calls: 3, callShare: 3 / 14, sessions: 2, sessionShare: 1 / 2, repositories: 2, repositoryShare: 1 },
+  ]);
+  assert.equal(result.servers.reduce((sum, row) => sum + row.calls, 0), result.groups[0]!.calls);
+  assert.equal(result.groups.reduce((sum, row) => sum + row.calls, 0), buildToolsView(sessions).totalCalls);
+  // A focused repo/provider selection supplies its own denominator, including observed zero calls.
+  const focused = buildToolOrigins([sessions[1]!, sessions[3]!]);
+  assert.equal(focused.servers[0]!.sessionShare, 1 / 2);
+  assert.equal(focused.servers[0]!.repositoryShare, 1);
+});
+
+test("MCP origins preserve unavailable evidence and observed zero calls", () => {
+  const invalid = session({ mcp__bad__run: 99 }); invalid.transcript.status = "invalid";
+  const missing = unavailable({ mcp__bad__run: 99 });
+  for (const sessions of [[], [missing], [invalid]]) {
+    const result = buildToolOrigins(sessions);
+    assert.deepEqual(result.groups, []); assert.deepEqual(result.servers, []);
+  }
+  const zero = buildToolOrigins([missing, invalid, session({})]);
+  assert.deepEqual(zero.coverage, { eligible: 1, selected: 3 });
+  assert.equal(zero.eligibleRepositories, 1);
+  for (const row of zero.groups) {
+    assert.equal(row.calls, 0); assert.equal(row.callShare, null);
+    assert.equal(row.sessions, 0); assert.equal(row.sessionShare, 0); assert.equal(row.repositoryShare, 0);
+  }
+  assert.deepEqual(zero.servers, []);
+});
+
+test("MCP origins require a complete case-sensitive prefix, ignore invalid counts, and sort ties by server", () => {
+  const tools = { mcp__z__run: 2, mcp__a__run: 2, mcp__a__zero: 0, mcp__bad__run: Number.NaN,
+    mcp__negative__run: -2, mcp__infinite__run: Infinity, "mcp____run": 1, mcp__server__: 1,
+    MCP__server__run: 1, "prefix_mcp__server__run": 1, "mcp__has space__run": 1 };
+  const result = buildToolOrigins([session(tools)]);
+  assert.deepEqual(result.servers.map(row => row.name), ["a", "z"]);
+  assert.equal(result.groups[1]!.calls, 5);
+});
+
+test("MCP origins split at the first separator and leave incomplete names in Other tool names", () => {
+  const malformed = ["mcp____read", "mcp____read__extra", "mcp______run", "mcp__server", "mcp__server__"];
+  for (const name of malformed) {
+    const result = buildToolOrigins([session({ [name]: 1 })]);
+    assert.deepEqual(result.servers, [], name);
+    assert.equal(result.groups[0]!.calls, 0, name);
+    assert.equal(result.groups[1]!.calls, 1, name);
+  }
+  // Extra separators belong to the tool suffix; single underscores belong to the server.
+  const valid = buildToolOrigins([session({ mcp__a__b__c: 2, mcp__a_b__c: 1 })]);
+  assert.deepEqual(valid.servers.map(({ name, calls }) => [name, calls]), [["a", 2], ["a_b", 1]]);
+});
+
+test("MCP origin splitting handles long and non-ASCII names without reading past the first separator", () => {
+  // Direct helper inputs exercise splitting; public source projections already bound tool names.
+  const suffix = "x".repeat(10_000);
+  const result = buildToolOrigins([session({ [`mcp__long__${suffix}`]: 2, "mcp__資料__read": 1,
+    [`mcp____${suffix}__read`]: 3 })]);
+  assert.deepEqual(result.servers.map(({ name, calls }) => [name, calls]), [["long", 2], ["資料", 1]]);
+  assert.equal(result.groups[1]!.calls, 3);
+});
+
+test("MCP rendering uses names and counters only, with explicit denominators and no transcript content", async () => {
+  const input = session({ mcp__github__read: 3 });
+  Object.assign(input, { arguments: "PRIVATE_TOOL_ARGUMENT_SENTINEL", result: "PRIVATE_TOOL_RESULT_SENTINEL" });
+  const { document, run } = await harness([input]);
+  run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
+  const panel = document.querySelector(".tools-origins")!;
+  assert.match(panel.textContent, /MCP server usage/);
+  assert.match(panel.textContent, /github/);
+  assert.match(panel.textContent, /1 eligible sessions and 1 repositories/);
+  assert.match(panel.textContent, /reach can overlap/);
+  assert.doesNotMatch(panel.textContent, /PRIVATE_TOOL_(ARGUMENT|RESULT)_SENTINEL/);
+});
+
+test("MCP server list shows five ranked servers, discloses the remainder in place, and follows the ranking", async () => {
+  const tools = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`mcp__server_${i}__run`, i + 1]));
+  const { document, run } = await harness([session(tools), session({})]);
+  run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
+  const panel = document.querySelector(".tools-origins")!;
+  const names = () => panel.querySelectorAll(".tools-origin-name").map(node => node.textContent);
+  assert.deepEqual(names(), ["MCP-prefixed tools", "Other tool names", "server_29", "server_28", "server_27", "server_26", "server_25"]);
+  const toggle = panel.querySelector("button")!;
+  assert.equal(toggle.textContent, "+25 more servers");
+  assert.equal(toggle.getAttribute("type"), "button");
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.ok(panel.querySelector(`#${toggle.getAttribute("aria-controls")}`));
+  assert.match(panel.textContent, /2 eligible sessions/);
+  const layout = panel.parentElement!;
+  const rankingIndex = layout.children.findIndex(node => node.querySelector(".tools-ranking"));
+  assert.ok(rankingIndex >= 0 && rankingIndex < layout.children.indexOf(panel));
+  toggle.listeners.get("click")!();
+  assert.equal(names().length, 32);
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(toggle.textContent, "Show fewer servers");
+  assert.equal(panel.querySelector("button"), toggle); // Focus stays on the same disclosure.
+  assert.match(panel.textContent, /2 eligible sessions/);
+  toggle.listeners.get("click")!();
+  assert.equal(names().length, 7);
+  assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(toggle.textContent, "+25 more servers");
+});
+
+test("MCP server disclosure is absent when all servers fit", async () => {
+  for (const count of [0, 1, 5]) {
+    const tools = Object.fromEntries(Array.from({ length: count }, (_, i) => [`mcp__server_${i}__run`, 1]));
+    const { document, run } = await harness([session(tools)]);
+    run("currentViewName = () => 'tools'; renderActiveAnalyticsView(activeView())");
+    const panel = document.querySelector(".tools-origins")!;
+    assert.equal(panel.querySelectorAll(".tools-origin-name").length, count + 2);
+    assert.equal(panel.querySelector("button"), null);
+  }
+});
 
 test("profile footer names the snapshot timezone", async () => {
   const { document, run } = await harness([session({ Read: 3 })], { timeZone: "Europe/London" });
