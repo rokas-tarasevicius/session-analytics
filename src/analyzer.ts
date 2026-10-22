@@ -1604,7 +1604,7 @@ async function resolveRepositoryForPath(
   // Without a Git root, a recorded remote or Conductor ownership a directory is not a
   // repository: scratch folders, the home directory and deleted checkouts share one group.
   const ephemeral = !gitRoot && !remoteIdentity;
-  if (ephemeral && !isTemporaryPath(resolvedCwd)) return noRepositoryGroup(discovered, resolvedCwd);
+  if (ephemeral && (windowsPath || !isTemporaryPath(resolvedCwd))) return noRepositoryGroup(discovered, resolvedCwd);
   const ephemeralRoot = "/private/var/folders/session-analytics-ephemeral";
   const groupingRoot = remoteIdentity ? `remote:${remoteIdentity}` : gitRoot ?? ephemeralRoot;
   const existing = discovered.get(groupingRoot);

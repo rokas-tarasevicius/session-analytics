@@ -6,6 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { analyzeMachineSessions, windowsPathUnder } from '../../src/analyzer.ts';
 import { openIndexDatabase } from '../../src/store/database.ts';
 import { keyedHash } from '../../src/store/fingerprint.ts';
@@ -381,4 +383,18 @@ test('R-GIT-WSL: UNC and drive-relative paths never resolve against the working 
   await f.session('\\\\server\\share\\project'); await f.session('D:project');
   const result = await analyzeMachineSessions({ ...f.options, windowsDriveRoot: join(f.root, 'mnt') });
   assert.ok(result.sessions.every(s => s.repositoryId === NO_REPOSITORY_ID));
+});
+
+test('R-GIT-WSL: unmapped Windows paths stay unassigned when launched from a temporary directory', async t => {
+  const f = await fixture(t);
+  await f.session('D:\\GIT\\project');
+  await f.session('\\\\server\\share\\project');
+  await f.session('D:project');
+  const analyzer = new URL('../../src/analyzer.ts', import.meta.url).href;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', `
+    import { analyzeMachineSessions } from ${JSON.stringify(analyzer)};
+    const result = await analyzeMachineSessions(JSON.parse(process.argv[1]));
+    process.stdout.write(JSON.stringify(result.sessions.map(session => session.repositoryId)));
+  `, JSON.stringify({ ...f.options, windowsDriveRoot: null })], { cwd: f.root });
+  assert.deepEqual(JSON.parse(stdout), [NO_REPOSITORY_ID, NO_REPOSITORY_ID, NO_REPOSITORY_ID]);
 });
