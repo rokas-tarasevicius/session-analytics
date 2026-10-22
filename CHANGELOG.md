@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Cursor history discovery uses each machine's platform defaults, including Linux's `~/.config/Cursor` and Windows's `%APPDATA%\Cursor`. Absent default provider stores, including Codex archives, no longer add missing-source warnings; explicit missing paths and unreadable stores still report coverage problems. Source-health counts cover all seven providers. Previously missed Cursor sessions on Linux and Windows can now be included; existing session totals are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

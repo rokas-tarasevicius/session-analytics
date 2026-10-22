@@ -111,7 +111,7 @@ Owned request peaks exclude foreign broadcast counters, and cumulative-only usag
 
 ## Cursor
 
-**Where:** `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (macOS) and the sibling `workspaceStorage` directory. Override with `--cursor-database PATH`; the `workspaceStorage` directory is located relative to that file, so on Linux you can point it at `~/.config/Cursor/User/globalStorage/state.vscdb` (not yet covered by tests).
+**Where:** `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` on macOS, `~/.config/Cursor/User/globalStorage/state.vscdb` on Linux (`$XDG_CONFIG_HOME/Cursor/…` when set), and `%APPDATA%\Cursor\User\globalStorage\state.vscdb` on Windows (falling back to `~/AppData/Roaming`). Platform and environment selection are covered by synthetic tests. Override with `--cursor-database PATH`; the sibling `workspaceStorage` directory is located relative to that file.
 
 **Format:** SQLite, opened read-only in a separate child process.
 
@@ -241,6 +241,8 @@ Project assignment follows the [project registry and ownership markers](https://
 
 Every added store has its own explicit option and `SESSION_ANALYTICS_*` variable, listed in the [command-line reference](cli.md#options). Defaults discover all supported providers independently of Conductor. `--no-additional-providers` (or `SESSION_ANALYTICS_ADDITIONAL_PROVIDERS=0`) disables the six additional default stores; explicit new-store paths still run. It does not disable the result fallback inside a selected Conductor database. Missing optional stores are normal. New adapters emit fixed warnings for inaccessible/unsupported stores, continue with other sources, never follow child-directory symlinks, and perform no network requests.
 
+An absent default store is treated as not installed and adds no missing-source warning, for every provider, including Claude/Codex profiles, the optional Codex archive, and Cursor's database, SDK and transcript stores. A path explicitly selected by a source flag or its `SESSION_ANALYTICS_*` variable remains a missing source when absent; unreadable or invalid stores still produce fixed coverage warnings. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` discover optional stores within those profiles, so an unused archive there is normal too. Source health counts readable, missing and unreadable stores for all seven providers; Cursor combines its three stores. No discovered stores means `unavailable` with zero source counts, rather than a missing installation. These statuses describe discovery, not whether retained history is complete.
+
 - Deleted Claude transcripts can use Conductor assistant metadata, then result receipts as a fallback. Other provider aggregates need independently verified accounting scopes.
 - Agent types other than Claude Code and Codex in Conductor are reported as unsupported evidence. Unknown agent names use the fixed public provider `unsupported`; raw names are omitted. These rows round-trip through interchange and remain outside sharing eligibility.
 
@@ -279,7 +281,7 @@ Gemini replay retains non-accounting message identities as rewind/order anchors 
 
 ## Antigravity App, IDE and CLI
 
-**Where:** `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/<UUID>.db`. `--antigravity-root PATH` (or `SESSION_ANALYTICS_ANTIGRAVITY_ROOT`) replaces discovery with one surface's data directory, or a parent containing those three roots. An explicit root still applies with `--no-additional-providers`. Only direct regular `.db` files with UUID names are considered; source symlinks are skipped.
+**Where:** `~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/conversations/<UUID>.db`. A Gemini CLI home without any of these conversation stores is not an Antigravity source. `--antigravity-root PATH` (or `SESSION_ANALYTICS_ANTIGRAVITY_ROOT`) replaces discovery with one surface's data directory, or a parent containing those three roots. An explicit root still applies with `--no-additional-providers`. Only direct regular `.db` files with UUID names are considered; source symlinks are skipped.
 
 **Format and identity:** read-only SQLite with `PRAGMA user_version = 1`. The single `trajectory_meta.cascade_id` must match the filename. `trajectory_metadata_blob`'s `main` row supplies workspace URI (field `1.1`, else `7`) and created time (`2`). Only a local absolute path or a local `file:` URI establishes repository ownership. Without one, sessions are unassigned. Step and generation timestamps establish activity; file modification times only choose among copies of the same session. The freshest copy across surfaces is analyzed once.
 
