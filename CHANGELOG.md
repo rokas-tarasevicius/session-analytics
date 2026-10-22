@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Summary lists quiet repositories with activity before the selected window and none observed inside it, their last observed active day, and a button to focus each repository. Undated activity and incomplete local history remain explicitly qualified; accounting totals are unchanged.
 - Empty dashboard views guide first-time users with provider source checks, setup documentation and refresh actions; empty date and repository selections keep recovery controls. Coverage explains missing history separately from unreadable sources and offline pricing. Totals are unchanged.
 
 ### Changed

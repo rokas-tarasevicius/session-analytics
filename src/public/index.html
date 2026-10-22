@@ -228,6 +228,16 @@
             </section>
           </section>
 
+          <article class="panel quiet-repositories-panel" id="quiet-repositories" aria-labelledby="quiet-repository-title" hidden>
+            <header><div><h2 id="quiet-repository-title">Quiet repositories <span id="quiet-repository-count"></span></h2><p class="chart-note" id="quiet-repository-context"></p></div></header>
+            <ul class="quiet-repository-list" id="quiet-repository-list"></ul>
+            <details class="quiet-repository-more" id="quiet-repository-more" hidden>
+              <summary id="quiet-repository-remaining"></summary>
+              <ul class="quiet-repository-list" id="quiet-repository-overflow"></ul>
+            </details>
+            <p class="chart-note">Known starts and dated activity only · undated activity excluded · local history may be incomplete.</p>
+          </article>
+
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
             <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity overview</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
             <div id="activity-status" class="activity-status" hidden></div>
@@ -324,6 +334,7 @@
             <li>Request input includes repeated context; the cached share measures recorded cache reads.</li>
             <li>Ratios with tiny denominators are withheld; a dash means not applicable, never zero.</li>
             <li>Activity counters do not prove success, quality, or value delivered.</li>
+            <li>Quiet repositories have known session starts or dated ledger activity before the selected window and none observed inside it. Their last observed active day excludes undated activity, unknown starts and file-mtime fallbacks; incomplete local history can hide activity.</li>
             <li id="coverage-machines-note" hidden>Agents on a server or VM too? Run <code>session-analytics machines add HOST</code> in a terminal, and every later scan reads that machine with this one. <a id="coverage-machines-link" target="_blank" rel="noreferrer">Combine machines ↗</a></li>
           </ul>
         </section>
