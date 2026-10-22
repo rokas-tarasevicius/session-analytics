@@ -44,7 +44,7 @@ test("first-run guidance and reported checks stay consistent across all seven vi
     run(`switchView('${view}')`);
     const status = document.querySelector("#view-status")!;
     assert.equal(status.hidden, false, view);
-    assert.match(status.textContent, /Your first session starts here/);
+    assert.equal(status.querySelector("h2")?.textContent, "No saved sessions found", view);
     assert.match(status.textContent, /Claude Code: history readable/);
     assert.match(status.textContent, /Cursor: history missing/);
     assert.match(status.textContent, /Offline pricing does not prevent local history scans/);
@@ -66,13 +66,13 @@ test("a pending first scan and a failed first scan explain their state in every 
   run("snapshot = null; elements.main.dataset.state = 'loading'; loadFailed = false");
   for (const view of [...views, "subscription"]) {
     run(`switchView('${view}'); renderViewStatus(null)`);
-    assert.match(document.querySelector("#view-status")!.textContent, /Reading local history/);
+    assert.equal(document.querySelector("#view-status h2")?.textContent, "Reading local history");
     assert.match(document.querySelector("#view-status")!.textContent, /Results appear when the scan finishes/);
     assert.ok(document.querySelector("#view-status")!.querySelector("a"));
     assert.equal(document.querySelector(`[data-view-panel="${view}"]`)!.hidden, view !== "subscription");
   }
   run("loadFailed = true; renderViewStatus(null); showActivePanel()");
-  assert.match(document.querySelector("#view-status")!.textContent, /No snapshot/);
+  assert.equal(document.querySelector("#view-status h2")?.textContent, "No snapshot");
   assert.ok(document.querySelector("#view-status")!.querySelector("a"));
   assert.ok(document.querySelectorAll("[data-view-panel]").every((p) => p.hidden));
 });
@@ -80,13 +80,13 @@ test("a pending first scan and a failed first scan explain their state in every 
 test("empty machine selections and machines still reading do not claim there is no saved history", async () => {
   const { document, run } = await harness([sample()]);
   run(`fullSnapshot = fixture; snapshot = { ...fixture, sessions: [] }; sessionsByRepository = groupByRepository([]); renderView()`);
-  assert.match(document.querySelector("#view-status")!.textContent, /No sessions from selected machines/);
+  assert.equal(document.querySelector("#view-status h2")?.textContent, "No sessions from selected machines");
   assert.equal(document.querySelector("#view-announcer")!.textContent, "No sessions from selected machines.");
   assert.match(document.querySelector("#view-status")!.textContent, /Choose machines/);
   assert.doesNotMatch(document.querySelector("#view-status")!.textContent, /Your first session|Complete a session/);
   assert.match(document.querySelector("#scope-description")!.textContent, /selected machines/);
   run(`fullSnapshot = snapshot; fullSnapshot.machines = [{ key: 'remote', state: 'reading' }]; renderView()`);
-  assert.match(document.querySelector("#view-status")!.textContent, /Reading machine history/);
+  assert.equal(document.querySelector("#view-status h2")?.textContent, "Reading machine history");
   assert.equal(document.querySelector("#view-announcer")!.textContent, "Reading machine history. No sessions are available yet.");
   assert.doesNotMatch(document.querySelector("#scope-description")!.textContent, /Scan complete/);
 });

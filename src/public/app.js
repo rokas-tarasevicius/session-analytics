@@ -182,10 +182,10 @@ function selectedWindow() {
 
 function clear(element) { element.replaceChildren(); }
 
-function emptyState(container, message, title = null) {
+function emptyState(container, message, title = null, titleTag = "strong") {
   const box = node("div", null, "empty-state");
   box.append(icon("summary"));
-  if (title) box.append(node("strong", title));
+  if (title) box.append(node(titleTag, title));
   box.append(node("span", message));
   container.append(box);
   return box;
@@ -1565,14 +1565,14 @@ function renderViewStatus(view) {
   const announce = (text) => { if (elements.viewAnnouncer.textContent !== text) elements.viewAnnouncer.textContent = text; };
   clear(target);
   if (!snapshot && loadFailed) {
-    const box = emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
+    const box = emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot", "h2");
     const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
     announce(""); // The error alert owns the failure announcement.
     target.hidden = false;
     return;
   }
   if (!snapshot && elements.main.dataset.state === "loading") {
-    const box = emptyState(target, "The first scan may take a few minutes. Results appear when the scan finishes; progress is shown above.", "Reading local history");
+    const box = emptyState(target, "The first scan may take a few minutes. Results appear when the scan finishes; progress is shown above.", "Reading local history", "h2");
     const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
     announce("Reading local history.");
     target.hidden = false; return;
@@ -1592,7 +1592,7 @@ function renderViewStatus(view) {
     : firstRun ? "No saved agent sessions were found."
     : machinesEmpty ? "No sessions from selected machines."
     : `Nothing in this window. ${message}`);
-  const box = emptyState(target, message, readingMachines ? "Reading machine history" : firstRun ? "Your first session starts here" : machinesEmpty ? "No sessions from selected machines" : "Nothing in this window");
+  const box = emptyState(target, message, readingMachines ? "Reading machine history" : firstRun ? "No saved sessions found" : machinesEmpty ? "No sessions from selected machines" : "Nothing in this window", "h2");
   if (firstRun && !readingMachines) {
     const checks = node("div", null, "first-run-checks"); appendSourceChecks(checks); box.append(checks);
   }

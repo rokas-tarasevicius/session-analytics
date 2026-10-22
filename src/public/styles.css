@@ -479,7 +479,7 @@ h2 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
 .panel header > span { max-width: 100%; color: var(--muted); font: 500 var(--fs-xs) var(--font-sans); white-space: normal; font-variant-numeric: tabular-nums; }
 .chart-note { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
 .empty-state { display: grid; place-items: center; gap: 4px; min-height: 180px; padding: 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--fs-sm); text-align: center; }
-.empty-state strong { font-weight: 500; color: var(--text-2); }
+.empty-state strong, .empty-state > h2 { font-size: inherit; font-weight: 500; color: var(--text-2); }
 .empty-state svg { width: 18px; height: 18px; color: var(--muted); }
 .muted { color: var(--muted); }
 
