@@ -234,8 +234,8 @@ export function accountLabel(provider: LimitProvider, key: string, plan: string 
   return weeklyAnchor && provider === "claude" ? `${title} · weekly reset ${weekday(weeklyAnchor)}` : title;
 }
 
-/** Missing/unknown is not plan evidence; all other unrecognised tiers collapse to a fixed enum. */
+/** Missing is not plan evidence; every unrecognised tier collapses to a fixed enum. */
 export const codexReadingPlan = (value: unknown): CodexReadingPlan | null =>
-  typeof value !== "string" || value === "unknown" || value === "" ? null : codexPlan(value) ?? (value === "promax" ? "promax" : "other");
+  typeof value !== "string" || value === "" ? null : codexPlan(value) ?? (value === "promax" ? "promax" : "unknown");
 
 export const codexPlan = (value: unknown): CodexPlan | null => typeof value === "string" && (codexPlans as readonly string[]).includes(value) ? value as CodexPlan : null;

@@ -478,6 +478,6 @@ test("remote per-reading plan evidence is revalidated before API output and ledg
   const valid = validateLimitsSnapshot({ ...snapshot, observations: [row] });
   assert.equal(valid.observations[0]!.planType, "plus");
   const unsafe = validateLimitsSnapshot({ ...snapshot, observations: [{ ...row, planType: sentinel, prompt: sentinel }] });
-  assert.equal(unsafe.observations[0]!.planType, "other");
+  assert.equal(unsafe.observations[0]!.planType, "unknown");
   assert.doesNotMatch(JSON.stringify(unsafe), /private_sentinel_content/);
 });

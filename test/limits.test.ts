@@ -266,16 +266,16 @@ test("per-reading Codex plans are a closed allowlist in sources, ledger, and rem
     primary: { used_percent: 20, window_minutes: 10080, resets_at: now + 86_400 }, plan_type: sentinel,
   })))!;
   const rows = compactObservations(session.observations, now);
-  assert.equal(rows[0]!.planType, "other");
-  assert.doesNotMatch(JSON.stringify(rows), /private_sentinel/);
+  assert.equal(rows[0]!.planType, "unknown");
+  assert.doesNotMatch(JSON.stringify(session), /private_sentinel/);
   const account = codexAccountState({ rateLimits: { planType: sentinel, primary: { usedPercent: 30, windowDurationMins: 10080, resetsAt: now + 86_400 } } }, now)!;
-  assert.equal(account.observations[0]!.planType, "other");
-  assert.doesNotMatch(JSON.stringify(account.observations), /private_sentinel/);
-  assert.equal(compactObservations([{ ...rows[0]!, planType: sentinel } as unknown as LimitObservation], now)[0]!.planType, "other");
+  assert.equal(account.observations[0]!.planType, "unknown");
+  assert.doesNotMatch(JSON.stringify(account), /private_sentinel/);
+  assert.equal(compactObservations([{ ...rows[0]!, planType: sentinel } as unknown as LimitObservation], now)[0]!.planType, "unknown");
   const directory = mkdtempSync(join(tmpdir(), "limits-plan-privacy-"));
   writeLedger(directory, { ...emptyLedger(), rows: [toRow({ ...rows[0]!, planType: sentinel } as unknown as LimitObservation)] }, now);
   assert.doesNotMatch(readFileSync(join(directory, ledgerName), "utf8"), /private_sentinel/);
-  assert.equal(readLedger(directory, now).ledger!.rows[0]![9], "other");
+  assert.equal(readLedger(directory, now).ledger!.rows[0]![9], "unknown");
   assert.equal(codexLimitRecord(JSON.parse(codexLine(new Date(now * 1000).toISOString(), {
     primary: { used_percent: 20, window_minutes: 10080, resets_at: now + 86_400 }, plan_type: "pro",
   })))!.observations[0]!.planType, "pro");

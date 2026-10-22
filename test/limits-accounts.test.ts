@@ -454,8 +454,8 @@ test("simultaneous readings never create an in-place reset and compact independe
   }
 });
 
-test("the newest plan evidence wins, including a tier this version does not recognise; Codex's 'unknown' plan type is no evidence", async () => {
-  const record = (plan: LedgerAccount["plan"], planType: string | null, planObservedAt: number | null): LedgerAccount => ({
+test("the newest plan evidence wins, including a tier this version does not recognise; unknown never retains a previous known price", async () => {
+  const record = (plan: LedgerAccount["plan"], planType: NonNullable<LedgerAccount["planEvidence"]>["planType"], planObservedAt: number | null): LedgerAccount => ({
     provider: "codex", plan, planSource: plan ? "codex-session" : null, planObservedAt, extraUsage: null, codex: null, profileKeys: [],
     planEvidence: { organizationType: null, organizationRateLimitTier: null, userRateLimitTier: null, seatTier: null, billingType: null, planType },
   });
@@ -472,7 +472,7 @@ test("the newest plan evidence wins, including a tier this version does not reco
   writeFileSync(rollout, [JSON.stringify({ type: "session_meta", payload: { creator_account_id: "SECRET-ACCOUNT" } }), line(now - 7200, "pro"), line(now - 600, "unknown")].join("\n") + "\n");
   const options = { dataDir: join(home, "data") };
   const codex = (snapshot: LimitsSnapshot) => snapshot.accounts.find((account) => account.provider === "codex")!;
-  assert.equal(codex(await collectLimits(options, environmentFor(home), now)).plan, "pro", "a later 'unknown' record keeps the plan");
+  assert.equal(codex(await collectLimits(options, environmentFor(home), now)).plan, null, "a later unknown record has no known price");
   appendFileSync(rollout, `${line(now - 60, "promax")}\n`);
   const upgraded = codex(await collectLimits(options, environmentFor(home), now + 60));
   assert.deepEqual([upgraded.plan, upgraded.planEvidence?.planType], [null, "promax"], "a newer unrecognised tier replaces the old plan");

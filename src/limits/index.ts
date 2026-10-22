@@ -121,13 +121,13 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     const seen = creatorsOf(profile);
     return seen.size === 1 ? [...seen][0]! : profile.fallbackKey;
   };
-  type CodexPlanReading = { plan: CodexAccountState["plan"]; planType: string | null; at: number; source: PlanSource };
+  type CodexPlanReading = { plan: CodexAccountState["plan"]; planType: CodexAccountState["planType"]; at: number; source: PlanSource };
   const codexPlans = new Map<string, CodexPlanReading>();
   const codexAccounts = new Map<string, CodexAccountSummary>();
   const limitNames = { ...base.limitNames };
-  // `unknown` (and a missing plan type) is no evidence: Codex writes it in some records of a known plan.
+  // Missing evidence keeps the previous plan; an unrecognised tier explicitly makes it unknown.
   const notePlan = (account: string, reading: CodexPlanReading) => {
-    if ((reading.plan || (reading.planType && reading.planType !== "unknown")) && reading.at >= (codexPlans.get(account)?.at ?? 0)) codexPlans.set(account, reading);
+    if ((reading.plan || reading.planType) && reading.at >= (codexPlans.get(account)?.at ?? 0)) codexPlans.set(account, reading);
   };
   let sessionReads = 0;
   for (const file of codex.files) {

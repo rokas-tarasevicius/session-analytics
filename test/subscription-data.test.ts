@@ -930,8 +930,8 @@ test("simultaneous v2 and v3 copies keep their known tier while genuinely differ
 });
 
 test("different unrecognised tiers collapsed to other never establish one shared capacity", () => {
-  const rows = [1, 2].map((week) => ({ ...reading("codex", "seven_day", start + week * WEEK, start + week * WEEK - HOUR, 20), planType: "other" as const }));
-  assert.equal(calibrate(buildMeters(rows, start + 2 * WEEK)[0]!, { between: () => 100 }, "other").perPercent, null);
+  const rows = [1, 2].map((week) => ({ ...reading("codex", "seven_day", start + week * WEEK, start + week * WEEK - HOUR, 20), planType: "unknown" as const }));
+  assert.equal(calibrate(buildMeters(rows, start + 2 * WEEK)[0]!, { between: () => 100 }, "unknown").perPercent, null);
 });
 
 test("untagged history cannot establish historical capacity after Codex tier evidence arrives", () => {
@@ -980,5 +980,5 @@ test("simultaneous idle and active tiers remain ambiguous after idle rows leave 
   });
   const meter = buildMeters(rows, start + 2 * WEEK)[0]!;
   assert.equal(calibrate(meter, { between: () => 100 }, "plus").cycles, 0);
-  assert.ok(meter.cycles.every((cycle) => cycle.samples.every((sample) => sample.planType === "other")));
+  assert.ok(meter.cycles.every((cycle) => cycle.samples.every((sample) => sample.planType === "unknown")));
 });

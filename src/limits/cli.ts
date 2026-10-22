@@ -100,7 +100,7 @@ function accountFacts(account: LimitAccount, codexAccount: LimitsSnapshot["codex
   if (account.plan === "team" && (evidence?.seatTier || evidence?.userRateLimitTier)) {
     lines.push(`  Seat: ${[evidence.seatTier && `tier ${evidence.seatTier}`, evidence.userRateLimitTier && `user rate-limit tier ${evidence.userRateLimitTier}`].filter(Boolean).join(", ")} (seat type and price not recorded locally)`);
   }
-  if (!account.plan && evidence?.planType && evidence.planType !== "unknown") lines.push(`  Plan: reported as ${evidence.planType}, which this version does not recognise; choose the plan in the dashboard`);
+  if (!account.plan && evidence?.planType) lines.push(`  Plan: reported as ${evidence.planType}, which this version does not recognise; choose the plan in the dashboard`);
   if (account.attribution === "unattributed") lines.push("  Readings that could not be tied to an account; left out of pace and value.");
   if (account.attribution === "weekly-phase") lines.push("  Readings whose session was not found in any profile; grouped by weekly reset time.");
   const extra = account.extraUsage;

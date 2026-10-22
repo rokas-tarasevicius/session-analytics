@@ -155,7 +155,7 @@ function planEvidence(value: unknown): PlanEvidence | null {
   return evidence ? {
     organizationType: enumValue(evidence["organizationType"]), organizationRateLimitTier: enumValue(evidence["organizationRateLimitTier"]),
     userRateLimitTier: enumValue(evidence["userRateLimitTier"]), seatTier: enumValue(evidence["seatTier"]), billingType: enumValue(evidence["billingType"]),
-    planType: enumValue(evidence["planType"]),
+    planType: codexReadingPlan(evidence["planType"]),
   } : null;
 }
 
@@ -571,7 +571,10 @@ export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
   const aliases = Object.fromEntries(Object.entries({ ...left.aliases, ...right.aliases }).filter(([key]) => (creators[key]?.length ?? 0) <= 1));
   const [first, second] = [applyAliases({ ...left, aliases }), applyAliases({ ...right, aliases })];
   const accounts = { ...first.accounts };
-  for (const [key, account] of Object.entries(second.accounts)) accounts[key] = mergeAccount(accounts[key], account);
+  for (const [key, account] of Object.entries(second.accounts)) {
+    const valid = ledgerAccount(key, account);
+    if (valid) accounts[key] = mergeAccount(accounts[key], valid);
+  }
   const max = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
   return {
     version: 3, harvestedThrough: max(left.harvestedThrough, right.harvestedThrough), importedV1Through: max(left.importedV1Through, right.importedV1Through),

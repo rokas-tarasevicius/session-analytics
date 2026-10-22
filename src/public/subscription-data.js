@@ -105,7 +105,7 @@ function cyclesOf(readings, window, now) {
   const evidence = new Map();
   for (const reading of readings) if (reading.planType) {
     const previous = evidence.get(reading.observedAt);
-    evidence.set(reading.observedAt, previous && previous !== reading.planType ? "other" : reading.planType);
+    evidence.set(reading.observedAt, previous && previous !== reading.planType ? "unknown" : reading.planType);
   }
   let planType = null;
   const contextual = [...readings].sort((left, right) => left.observedAt - right.observedAt).map((reading) => {
@@ -128,7 +128,7 @@ function cyclesOf(readings, window, now) {
       instants.set(reading.observedAt, {
         t: reading.observedAt, used: Math.max(previous?.used ?? 0, reading.usedPercent),
         planType: previous?.planType && reading.planType && previous.planType !== reading.planType
-          ? "other" : previous?.planType ?? reading.planType ?? null,
+          ? "unknown" : previous?.planType ?? reading.planType ?? null,
         status: previous && statusRank[previous.status] > statusRank[reading.status] ? previous.status : reading.status,
       });
     }
@@ -441,7 +441,7 @@ function calibrationSample({ samples }) {
  * and the median of the rest needs `calibrationMinimum` segments.
  */
 export function calibrate(meter, value, planType = undefined) {
-  if (planType === "other" || planType === null) return emptyCalibration();
+  if (planType === "unknown" || planType === null) return emptyCalibration();
   const candidates = [];
   for (const cycle of meter?.cycles ?? []) {
     // A cycle spanning tiers has no reliable zero baseline for either allowance.
@@ -664,7 +664,7 @@ function readingPlanPeriods(meters, from, to) {
   const instants = new Map();
   for (const meter of meters) for (const row of meter.planReadings ?? []) {
     const previous = instants.get(row.t);
-    instants.set(row.t, previous && previous !== row.planType ? "other" : row.planType);
+    instants.set(row.t, previous && previous !== row.planType ? "unknown" : row.planType);
   }
   const changes = [];
   for (const [at, planType] of [...instants].sort((a, b) => a[0] - b[0])) {

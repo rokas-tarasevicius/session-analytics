@@ -3,9 +3,9 @@ import { createReadStream, type Stats } from "node:fs";
 import { open, opendir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { codexPlan, codexReadingPlan, enumValue } from "./accounts.ts";
+import { codexPlan, codexReadingPlan } from "./accounts.ts";
 import type { Cursor } from "./ledger.ts";
-import type { ClaudeAccountSummary, CodexAccountState, CodexPlan, LimitObservation, LimitStatus } from "./types.ts";
+import type { ClaudeAccountSummary, CodexAccountState, CodexPlan, CodexReadingPlan, LimitObservation, LimitStatus } from "./types.ts";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -38,7 +38,7 @@ export const codexLimitId = (value: unknown): string => {
 export const limitName = (value: unknown): string | null => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$/.test(value) ? value : null;
 
 export interface CodexLimitRecord {
-  observations: LimitObservation[]; plan: CodexPlan | null; planType: string | null; credits: CodexAccountState["credits"];
+  observations: LimitObservation[]; plan: CodexPlan | null; planType: CodexReadingPlan | null; credits: CodexAccountState["credits"];
   limitId: string; limitName: string | null;
 }
 
@@ -70,7 +70,7 @@ export function codexLimitRecord(value: unknown): CodexLimitRecord | null {
   const credits = record(limits["credits"]);
   const balance = typeof credits?.["balance"] === "string" && /^\d+(?:\.\d+)?$/.test(credits["balance"]) ? Number(credits["balance"]) : finite(credits?.["balance"]);
   return observations.length || plan ? {
-    observations, plan, planType: enumValue(limits["plan_type"]),
+    observations, plan, planType: codexReadingPlan(limits["plan_type"]),
     credits: credits ? { hasCredits: credits["has_credits"] === true, unlimited: credits["unlimited"] === true, balance } : null,
     limitId: codexLimitId(limits["limit_id"]), limitName: limitName(limits["limit_name"]),
   } : null;

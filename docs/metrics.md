@@ -687,9 +687,9 @@ boolean indicating a cold index or a parser/price revision requiring all history
 
 Live limits (`GET /api/limits`, `limits --json`) are separate from saved analytics. The optional
 `observations[].planType` is the closed Codex tier enum declared in `src/types.ts` (via `limits/types.ts`):
-`free`, `go`, `plus`, `prolite`, `pro`, `team`, `business`, `enterprise`, `edu`, `promax`, or `other`.
-Null/absent means missing evidence (including Codex's `unknown`); every other unrecognised source string becomes
-`other`. It never carries arbitrary provider text. `other` cannot calibrate capacity because several unknown tiers could share it. Claude readings omit it.
+`free`, `go`, `plus`, `prolite`, `pro`, `team`, `business`, `enterprise`, `edu`, `promax`, or `unknown`.
+Null/absent means missing evidence; every unrecognised source string becomes
+`unknown`. The same vocabulary applies to `accounts[].planEvidence.planType`, including imported ledgers and remote snapshots. Neither field ever carries arbitrary provider text. `unknown` cannot calibrate capacity because several unknown tiers could share it. Claude readings omit it.
 
 Subscription value uses the existing hourly activity ledger and account/machine join; token counts and API-equivalent
 usage totals do not change. Codex value per 1% is the median of qualifying segments **on the same reported tier**,
