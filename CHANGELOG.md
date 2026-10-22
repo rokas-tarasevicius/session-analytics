@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- The loopback dashboard validates the complete HTTP Origin, rejects GET bodies before refresh work and limits request targets to 8 KiB; HTTP parser errors now retain private no-store and security headers. Analytics totals are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed
