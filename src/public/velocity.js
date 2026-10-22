@@ -187,7 +187,13 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     }
     // Pointer hover remains visual. Keyboard focus, keys and touch selection update
     // the stable live region, once per changed readout (including boundary keys).
-    const description = [...inspection.children].map((child) => child.textContent).join("; ");
+    const available = data.series.filter((series) => Number.isFinite(series.values[selected]));
+    const spoken = [caption(data.keys[selected], data.granularity) + (data.mode === "cumulative" ? " · cumulative" : "")];
+    if (available.length > 1) spoken.push(`Total: ${formatMetric(totals[selected], data.metric)}`);
+    for (const series of available) spoken.push(`${series.label}: ${formatMetric(series.values[selected], data.metric)}`);
+    if (!available.length) spoken.push("unavailable");
+    if (overlay && Number.isFinite(data.rolling[selected])) spoken.push(`7-day average: ${formatMetric(data.rolling[selected], data.metric)}`);
+    const description = spoken.join("; ");
     if (announce && announcer && announcer.textContent !== description) announcer.textContent = description;
   };
   svg.addEventListener("keydown", (event) => {

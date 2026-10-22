@@ -493,3 +493,34 @@ test("Velocity touch selects the tapped bucket before focus announces it", async
     else Reflect.deleteProperty(globalThis, "document");
   }
 });
+
+test("Velocity spoken readouts omit duplicate totals and unavailable series while retaining observed zero", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const document = documentFromHtml('<div id="chart-announcer"></div>');
+  Object.defineProperty(globalThis, "document", { configurable: true, value: document });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const base = buildVelocity(categorySessions("repository", ["repo-a"]), { start: "2026-09-01", end: "2026-09-02" });
+    const spoken = (values: Array<[string, number | null]>, average: number | null = null) => {
+      const data = { ...base, rolling: [4, average], series: values.map(([label, value]) => ({ ...base.series[0], id: label, label, values: [value, value], total: value ?? 0 })) };
+      const container = new Element();
+      renderVelocityChart(container, data, { rolling: true });
+      container.querySelector("svg")!.listeners.get("focus")!();
+      return document.querySelector("#chart-announcer")!.textContent;
+    };
+    const single = spoken([["repo-a", 2]]);
+    assert.equal(single.match(/\$2\.00/g)?.length, 1);
+    assert.match(single, /repo-a: \$2\.00/);
+    assert.doesNotMatch(single, /N\/A|7-day average/);
+    const partial = spoken([["repo-a", 2], ["missing", null]]);
+    assert.match(partial, /repo-a: \$2\.00/);
+    assert.doesNotMatch(partial, /missing|N\/A|unavailable/);
+    assert.match(spoken([["zero", 0], ["missing", null]]), /zero: \$0\.00/);
+    assert.match(spoken([["repo-a", 2]], 3), /7-day average: \$3\.00/);
+    assert.match(spoken([["missing", null]]), /unavailable/);
+    assert.doesNotMatch(spoken([["missing", null]]), /N\/A|missing:/);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+});
