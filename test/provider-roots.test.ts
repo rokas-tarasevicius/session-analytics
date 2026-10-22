@@ -207,3 +207,25 @@ test("mixed native-root failures remain separate schema-valid Coverage notes", a
     for (const warning of warnings) assert.ok(notes.includes(warning), notes.join("\n"));
   });
 });
+
+test("dangling default transcript, profile and database links remain missing sources", async () => {
+  await fixture(async (home) => {
+    await mkdir(join(home, ".codex"));
+    await symlink(join(home, "PRIVATE-SOURCE-SENTINEL"), join(home, ".codex/sessions"));
+    const database = cursorDatabaseDefault({ home, environment: {} });
+    await mkdir(join(database, ".."), { recursive: true });
+    await symlink(join(home, "PRIVATE-SOURCE-SENTINEL"), database);
+    assert.deepEqual(await discoverProviderRoots({ home }), { claude: [], codex: [join(home, ".codex/sessions")] });
+    assert.deepEqual(await providerRoots(undefined, [database]), [database]);
+    const snapshot = await report(home);
+    for (const provider of ["codex", "cursor"]) assert.deepEqual(snapshot.mcpSourceHealth?.find((row) => row.provider === provider), {
+      provider, status: "unavailable", sourcesRead: 0, missingSources: 1, unreadableSources: 0,
+    });
+    await symlink(join(home, "PRIVATE-SOURCE-SENTINEL"), join(home, ".claude-linked"));
+    assert.deepEqual((await discoverProviderRoots({ home })).claude, [join(home, ".claude-linked/projects")]);
+    const validProfile = join(home, "valid-profile");
+    await mkdir(validProfile);
+    await symlink(validProfile, join(home, ".claude-empty"));
+    assert.deepEqual((await discoverProviderRoots({ home })).claude, [join(home, ".claude-linked/projects")]);
+  });
+});
