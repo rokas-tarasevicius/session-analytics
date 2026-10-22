@@ -682,3 +682,40 @@ candidates and indexed results; the Cursor database child counts as one unit. `t
 and otherwise the work known so far; it can grow as providers finish discovery. These counters describe scan
 work, not the resulting snapshot's session count. `startedAt` is the scan's UTC ISO timestamp; `fullParse` is a
 boolean indicating a cold index or a parser/price revision requiring all history to be parsed again.
+
+## Subscription plan periods
+
+Live limits (`GET /api/limits`, `limits --json`) are separate from saved analytics. The optional
+`observations[].planType` is the closed Codex tier enum declared in `src/types.ts` (via `limits/types.ts`):
+`free`, `go`, `plus`, `prolite`, `pro`, `team`, `business`, `enterprise`, `edu`, `promax`, or `other`.
+Null/absent means missing evidence (including Codex's `unknown`); every other unrecognised source string becomes
+`other`. It never carries arbitrary provider text. `other` cannot calibrate capacity because several unknown tiers could share it. Claude readings omit it.
+
+Subscription value uses the existing hourly activity ledger and account/machine join; token counts and API-equivalent
+usage totals do not change. Codex value per 1% is the median of qualifying segments **on the same reported tier**,
+with outlier filtering applied within that tier and at least two segments. A cycle containing more than one tier,
+including an untagged/tagged mixture, has no reliable allowance baseline and cannot calibrate. Historical reset dollar
+values use their cycle's tier. A change within an unchanged reset window starts pace at the first new-tier reading,
+using the percent increase since that reading, without inventing a redeemed reset.
+
+Each new observed Codex tier starts a price period at that reading's Unix timestamp. Price is
+`monthly USD × overlap seconds / (86400 × 30.4375)` per period; capacity is
+`that tier's weekly capacity × overlap seconds / (86400 × 7)`. The account's counted period still begins at its first
+meter reading and ends at the earlier of now and the selected window's end. UTC-second overlaps handle fractional
+days and DST without assuming that every local day is 24 hours. These are observed plan periods, not invoice dates.
+The headline value multiple includes only matched value from periods with a positive personal price, paired with
+those same periods' prorated prices; employer-paid, free and unknown-price periods are reported beside it. The account
+row's multiple is unavailable if any counted period lacks a personal price. Current full-month potential uses the
+current tier's calibration and monthly price independently of historical price coverage.
+
+A manual plan override prices all counted periods at that selected plan; it never merges tier calibrations. A payer
+override applies to every period. Wholly untagged Codex histories and Claude retain the old current-plan fallback;
+once Codex has tagged evidence, its earlier untagged price period is unknown and excluded from the personal multiple.
+An upgrade typically lowers the historical price estimate and raises the multiple compared with pricing every prior
+day at the latest expensive tier; downgrades do the reverse. Calibration/capacity may move either way or become
+unavailable while the new tier accumulates evidence. Total extracted usage value is unchanged.
+
+The private `limits-v3.json` appends an optional tenth column to readings for this tier. It reads and merges
+`limits-v2.json` on each harvest without rewriting it, so old installations can still add observations. The original
+`limits.json` import and `limits-inbox-v2.jsonl` remain supported. Nine-column rows stay untagged; the migration does
+not infer historical plans or reread provider history to invent them. [Subscription semantics and migration](subscription.md#where-the-readings-come-from).

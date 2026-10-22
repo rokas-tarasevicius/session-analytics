@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Subscription keeps each Codex reading's plan tier, calibrates allowance value within a tier, and prorates historical prices by observed plan periods. Upgrades lower the historical price estimate (downgrades raise it); extracted usage value is unchanged. A separate v3 ledger imports older ledgers without rewriting them.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

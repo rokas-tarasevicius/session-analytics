@@ -51,9 +51,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Subscription limits
 
-| Priority | Item | Plan reference |
-| --- | --- | --- |
-| P2 | Store Codex `plan_type` with each ledger reading, calibrate value per 1% per plan and prorate price per plan period; today every cycle uses the account's latest plan, so value per 1% spans plan changes. A plan type that changes within one stream could also set apart readings from a conflicting limit context, such as a cycle that looks like an early reset. | Subscription review (codex-conflicting-cycles) |
+No open items. Codex plan history, per-tier calibration and observed-period proration are implemented in `src/limits/ledger.ts` and `src/public/subscription-data.js`; migration and limitations are in `docs/subscription.md`.
 
 ## Distribution and release metadata
 
