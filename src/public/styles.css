@@ -479,7 +479,7 @@ h2 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
 .panel header > span { max-width: 100%; color: var(--muted); font: 500 var(--fs-xs) var(--font-sans); white-space: normal; font-variant-numeric: tabular-nums; }
 .chart-note { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
 .empty-state { display: grid; place-items: center; gap: 4px; min-height: 180px; padding: 20px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--fs-sm); text-align: center; }
-.empty-state strong { font-weight: 500; color: var(--text-2); }
+.empty-state strong, .empty-state > h2 { font-size: inherit; font-weight: 500; color: var(--text-2); }
 .empty-state svg { width: 18px; height: 18px; color: var(--muted); }
 .muted { color: var(--muted); }
 
@@ -495,6 +495,12 @@ h2 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
 .compact-metrics { margin-top: 0; }
 
 /* ---------------------------------------------------------------- bars */
+.quiet-repositories-panel { margin-top: var(--gap); }
+.quiet-repository-more > summary { width: fit-content; min-height: var(--control); margin-bottom: 12px; padding: 6px 0; color: var(--text-2); cursor: pointer; }
+.quiet-repository-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.quiet-repository-link { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; min-height: 52px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); text-align: left; overflow-wrap: anywhere; }
+.quiet-repository-link:hover { background: var(--surface-3); }
+.quiet-repository-date { color: var(--text-2); font-size: var(--fs-sm); }
 .bar-list { display: grid; gap: calc(10px * var(--density)); align-content: start; }
 .bar-row { display: grid; gap: 4px; }
 .bar-row.repository-link { width: 100%; min-height: auto; padding: 4px 6px; margin: -4px -6px; border-radius: var(--radius-sm); color: inherit; text-align: left; transition: background var(--t-fast); }
@@ -567,6 +573,7 @@ h2 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
 /* ---------------------------------------------------------------- tables */
 .comparison-section { margin-top: var(--gap); min-height: 0; }
 .fleet-total td { color: var(--muted); }
+#repository-comparison .repository-cell-label { display: none; }
 .table-hint { color: var(--muted); font-size: var(--fs-xs); white-space: normal; }
 /* Positioned so visually hidden (absolute) text in a cell stays inside the scroll area instead of widening the page. */
 .table-wrap {
@@ -714,6 +721,17 @@ tbody tr:first-child th { border-top: 0; }
 .cost-model-meta { grid-column: 2 / -1; font-size: var(--fs-xs); }
 .cost-model-track { height: 8px; border-radius: var(--radius-bar); background: var(--surface-3); overflow: hidden; }
 .cost-model-track i { display: block; height: 100%; border-radius: 0 var(--radius-bar) var(--radius-bar) 0; transition: width var(--t-slow) var(--ease); }
+.counterfactual-panel { margin-bottom: 24px; }
+.counterfactual-note { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
+.counterfactual-label { color: var(--muted); font-size: var(--fs-xs); font-weight: 500; }
+#counterfactual-pricing { display: grid; gap: 16px; }
+#counterfactual-pricing .field { align-items: start; }
+#counterfactual-pricing select { width: 100%; max-width: 100%; min-width: 0; }
+.counterfactual-result { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 40px; }
+.counterfactual-amount { display: grid; gap: 6px; }
+.counterfactual-amount > strong { font: 500 var(--fs-figure) var(--font-mono); }
+.counterfactual-coverage { flex: 1 1 220px; font-size: var(--fs-sm); }
+.counterfactual-limits, .counterfactual-vendor, .counterfactual-freshness { flex-basis: 100%; }
 
 .detail-panel { min-height: 260px; margin-top: var(--gap); }
 
@@ -757,6 +775,7 @@ dialog::backdrop { background: var(--backdrop); }
 .palette-field { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--line); }
 .palette-field svg { width: 16px; height: 16px; color: var(--muted); flex: 0 0 auto; }
 .palette-field input { flex: 1; min-width: 0; height: 48px; border: 0; background: none; outline: none; font-size: var(--fs-md); color: var(--text); }
+.palette-field:focus-within { outline: 2px solid var(--focus); outline-offset: -3px; }
 .palette-field input::placeholder { color: var(--muted); }
 .palette-list { max-height: min(60vh, 440px); overflow: auto; padding: 6px; }
 .palette-group { padding: 10px 10px 4px; color: var(--muted); }
@@ -886,6 +905,12 @@ dialog::backdrop { background: var(--backdrop); }
 .date-range-note { color: var(--muted); font-size: var(--fs-xs); }
 #generated-at[data-stale="true"] { color: var(--warn-text); }
 .view-status { margin-bottom: var(--gap); }
+.view-status .empty-state { gap: 12px; padding: 28px 20px; }
+.view-status .empty-state > span, .view-status .empty-state > p, .first-run-checks { max-width: 64ch; margin: 0; }
+.first-run-checks { text-align: left; }
+.first-run-checks p { margin: 8px 0; }
+.source-checks { padding-left: 20px; margin: 8px 0; }
+.source-checks li { margin: 4px 0; }
 .view-status .status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 
 /* Summary is a workspace: charts lead, totals stay in a narrow reading rail.
@@ -955,6 +980,30 @@ dialog::backdrop { background: var(--backdrop); }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpi .spark { width: 84px; }
   main { padding: 16px 16px 40px; }
+}
+
+/* Keep one semantic, sortable table; only its narrow-screen presentation becomes cards. */
+@media (max-width: 800px) {
+  :is(#repository-spend, #repository-tokens, #repository-subagent-spend), :is(#repository-spend, #repository-tokens, #repository-subagent-spend) .bar-row { grid-template-columns: minmax(0, 1fr); }
+  #repository-comparison .table-wrap { overflow: visible; max-height: none; border: 0; border-radius: 0; background: none; }
+  #repository-comparison table { display: block; min-width: 0; }
+  #repository-comparison :is(thead, tbody, tfoot) { display: block; }
+  #repository-comparison thead tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 12px; }
+  #repository-comparison thead th { position: static; height: auto; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-xs); letter-spacing: 0; text-transform: none; }
+  #repository-comparison th .sort { justify-content: space-between; min-height: 44px; padding: 6px 10px; white-space: normal; text-align: left; }
+  #repository-comparison th[aria-sort] { border-color: var(--line-strong); background: var(--surface-3); }
+  #repository-comparison :is(tbody, tfoot) tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+  #repository-comparison td { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; padding: 10px; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  #repository-comparison :is(th, td):first-child { position: static; z-index: auto; }
+  #repository-comparison td:first-child { grid-column: 1 / -1; width: auto; max-width: none; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+  #repository-comparison .row-link { width: 100%; min-height: 44px; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+  #repository-comparison .repository-cell-label { display: block; order: -1; margin-bottom: 4px; color: var(--muted); font: 500 var(--fs-xs) var(--font-sans); }
+  #repository-comparison td:last-child { grid-column: 1 / -1; }
+  #repository-comparison td > small { white-space: normal; }
+  #repository-comparison td[colspan] { grid-column: 1 / -1; border: 0; }
+  #repository-comparison :is(td[colspan], .table-hint) .button { min-height: 44px; }
+  #repository-comparison tr[aria-current="true"] td { background: var(--accent-soft); }
+  #repository-comparison tr:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 }
 
 @media (max-width: 760px) {

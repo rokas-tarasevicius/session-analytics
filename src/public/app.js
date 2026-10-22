@@ -3,16 +3,19 @@ import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
+import { quietRepositories } from "./quiet-repositories.js";
 import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
-  groupByRepository, heatLegend, heatLevel, isTextEntryTarget, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
+  groupByRepository, heatLegend, heatLevel, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
   providerOrder, providerShortcutTarget, rankPaletteItems, repositoryDisplaySnapshot, repositoryKey, resolveCustomWindow, sessionStartDay, sessionsInRange, shortMoney, singleFlight,
   sortRepositories, sparklineSummary, summarize, tickScale, unknownStartsInRange, validDay, windowStartFor,
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
-import { providerMark, renderProviderEvidence, metricCoverage } from "./providers.js";
+import { matchShortcut, shortcutHint, shortcutRegistry } from "./shortcuts.js";
+import { providerMark, renderProviderEvidence, metricCoverage, sourceCheckNotes } from "./providers.js";
 
-import { renderPricingPanel } from "./pricing.js";
+import { pricingFreshness, renderPricingPanel } from "./pricing.js";
+import { counterfactualValue } from "./counterfactual-data.js";
 import { renderToolsView } from "./tools.js";
 import { renderSubscription, subscriptionRefreshMilliseconds } from "./subscription.js";
 import { sessionMachines, valuedMachines, zonedDayStart } from "./subscription-data.js";
@@ -25,7 +28,7 @@ import { localMachine, machineAge, machineNote, machineReasons, machineTally, ma
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
-import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize } from "./ui.js";
+import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize, selectField } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -33,6 +36,7 @@ const writePreference = (key, value) => { try { localStorage.setItem(key, value)
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
   activityRepositories: $("#activity-repositories"), activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
+  snapshotAnnouncer: $("#snapshot-announcer"), viewAnnouncer: $("#view-announcer"),
   cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
   costApiTotal: $("#cost-api-total"), costApiNote: $("#cost-api-note"), costCoverage: $("#cost-coverage"), costCoverageNote: $("#cost-coverage-note"),
@@ -89,7 +93,7 @@ const viewOrder = ["summary", "velocity", "costs", "pricing", "subscription", "t
 const viewLabels = { summary: "Summary", velocity: "Velocity", costs: "Costs", pricing: "Pricing", subscription: "Subscription", tools: "Tools", activity: "Activity" };
 // Retired view names that old links and saved preferences may still carry.
 const viewAliases = { models: "costs" };
-const viewChords = { s: "summary", v: "velocity", c: "costs", p: "pricing", u: "subscription", t: "tools", a: "activity" };
+const viewChords = Object.fromEntries(shortcutRegistry.filter((item) => item.action === "view").map((item) => [item.bindings[0].keys[1], item.bindings[0].value]));
 const providerScopedViews = ["activity", "tools", "velocity"];
 const shortProviderLabels = { copilot: "Copilot", gemini: "Gemini", opencode: "OpenCode", unsupported: "Other" };
 const windowPresets = ["7", "30", "90", "all", "custom"];
@@ -181,10 +185,10 @@ function selectedWindow() {
 
 function clear(element) { element.replaceChildren(); }
 
-function emptyState(container, message, title = null) {
+function emptyState(container, message, title = null, titleTag = "strong") {
   const box = node("div", null, "empty-state");
   box.append(icon("summary"));
-  if (title) box.append(node("strong", title));
+  if (title) box.append(node(titleTag, title));
   box.append(node("span", message));
   container.append(box);
   return box;
@@ -236,7 +240,22 @@ function sessionsForProviders(sessions, scope) {
   return sessions.filter(({ provider }) => selected.has(provider));
 }
 
+let activeViewCache = null;
+
 function activeView() {
+  // Provider chips and view switches only change presentation. Keep one model until its data or scope changes.
+  // Use object identity, not generatedAt: a refreshed or machine-filtered snapshot can have the same timestamp.
+  // Stale/reading machine warnings include relative ages, which can change without a new snapshot.
+  const inputs = [snapshot, fullSnapshot, sessionsByRepository, elements.repositoryFilter.value, windowPreset,
+    elements.windowStart.value, elements.windowEnd.value, elements.windowStart.min, elements.windowEnd.max,
+    machineWarnings(fullSnapshot?.machines, []).join("\n")];
+  if (activeViewCache && inputs.every((value, index) => value === activeViewCache.inputs[index])) return activeViewCache.view;
+  const view = buildActiveView();
+  activeViewCache = { inputs, view };
+  return view;
+}
+
+function buildActiveView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
@@ -324,7 +343,7 @@ function restoreUrlState() {
 /** Shows only the active view's panel, or none when there is no snapshot or the window is empty. */
 function showActivePanel() {
   const name = currentViewName();
-  const blocked = Boolean(sharedSnapshot) || (!snapshot && loadFailed) || (windowEmpty && name !== "pricing");
+  const blocked = Boolean(sharedSnapshot) || (!snapshot && (loadFailed || name !== "subscription")) || (windowEmpty && name !== "pricing");
   for (const panel of viewPanels) panel.hidden = blocked || panel.dataset.viewPanel !== name;
 }
 
@@ -712,7 +731,61 @@ function ledgerExclusions(ledger) {
   ].filter(Boolean);
 }
 
-/** Costs reads the same activity ledger as the Summary KPI and Velocity for the window: totals, providers and models agree. */
+let counterfactualModel = null;
+function renderCounterfactual(sessions, range) {
+  const container = $("#counterfactual-pricing");
+  clear(container);
+  const models = (snapshot.rateCard?.models ?? []).filter(({ rate }) => rate).slice().sort((a, b) => a.model.localeCompare(b.model));
+  if (!models.length) { container.append(node("p", "No model rates in this snapshot. Hypothetical API-equivalent value is unavailable.", "counterfactual-note")); return; }
+  if (!models.some(({ model }) => model === counterfactualModel)) counterfactualModel = models[0].model;
+  const result = node("div", null, "counterfactual-result");
+  result.setAttribute("role", "status");
+  const update = () => {
+    const target = models.find(({ model }) => model === counterfactualModel);
+    const data = counterfactualValue(sessions, target?.rate, range, snapshot.rateCard.models);
+    clear(result);
+    const amount = node("div", null, "counterfactual-amount");
+    amount.append(node("span", "Hypothetical API-equivalent value", "counterfactual-label"), node("strong", data.valueUsd === null ? DASH : money(data.valueUsd)));
+    const coverage = node("div", null, "counterfactual-coverage");
+    coverage.append(node("strong", data.coverage === null ? "No dated tokens to re-price" : `${integer(data.unrepricedTokens)} of ${integer(data.tokens)} tokens not re-priced`));
+    // Round the excluded share upward: a small omitted class must never read as 0%.
+    if (data.coverage !== null) coverage.append(node("p", `${percent(Math.ceil(data.unrepricedTokens / data.tokens * 1000) / 1000)} not re-priced · ${integer(data.repricedTokens)} tokens re-priced`, "counterfactual-note"));
+    result.append(amount, coverage);
+    const freshness = pricingFreshness(snapshot.rateCard, { pricingUpdate, timeZone: snapshotTimeZone() });
+    if (!freshness) result.append(node("p", "Pricing source details are unavailable for this snapshot.", "counterfactual-note"));
+    else {
+      if (snapshot.rateCard.pricing.offline || snapshot.rateCard.pricing.policy === "reviewed-only") result.append(node("p", freshness.mode, "counterfactual-note counterfactual-limits"));
+      if (freshness.title) {
+        const notice = node("div", null, "counterfactual-freshness");
+        notice.append(node("strong", freshness.title), node("p", freshness.detail, "counterfactual-note"));
+        result.append(notice);
+      }
+    }
+    for (const row of data.vendors) {
+      const source = providerLabels[row.vendor] ?? "Unknown vendor", targetVendor = providerLabels[target?.rate?.provider] ?? "Unknown vendor";
+      const text = row.vendor === null
+        ? `Source vendor unavailable: ${money(row.valueUsd)} · ${integer(row.tokens)} re-priced tokens; cross-vendor share cannot be determined.`
+        : row.crossVendor
+        ? `Cross-vendor comparison: ${source} tokens re-priced at a ${targetVendor} model's rates: ${money(row.valueUsd)} · ${integer(row.tokens)} tokens.`
+        : `${source} tokens re-priced: ${money(row.valueUsd)} · ${integer(row.tokens)} tokens.`;
+      result.append(node("p", text, "counterfactual-note counterfactual-vendor"));
+    }
+    const reasons = [
+      data.excluded.cacheWrite ? `${integer(data.excluded.cacheWrite)} cache-write tokens (TTL unavailable)` : null,
+      data.excluded.inputSplit ? `${integer(data.excluded.inputSplit)} input tokens without an evidenced cache split` : null,
+      data.excluded.missingRate ? `${integer(data.excluded.missingRate)} tokens without a target class rate` : null,
+      data.excluded.providerReported ? `${integer(data.excluded.providerReported)} provider-reported tokens` : null,
+    ].filter(Boolean);
+    if (reasons.length) result.append(node("p", `Not re-priced: ${reasons.join("; ")}.`, "counterfactual-note counterfactual-limits"));
+    if (data.undatedTokens || data.unledgeredSessions) result.append(node("p", `Outside this dated denominator (all time in scope): ${integer(data.undatedTokens)} undated tokens; ${integer(data.unledgeredSessions)} sessions without an activity ledger.`, "counterfactual-note counterfactual-limits"));
+  };
+  const { wrapper } = selectField("counterfactual-model", "Hypothetical rate-card model", models.map(({ model }) => [model, model]), counterfactualModel,
+    (value) => { counterfactualModel = value; update(); });
+  container.append(wrapper, result);
+  update();
+}
+
+/** Costs reads the same activity ledger as Summary and Velocity; hypothetical value stays separate. */
 function renderCosts(view) {
   const range = velocityContext(), ledger = ledgerMoney(view.scopeSessions, range);
   const unavailable = ledgerAvailability(view.scopeSessions).eligible === 0;
@@ -728,6 +801,7 @@ function renderCosts(view) {
   elements.coverageCostNote.hidden = false;
   elements.coverageCostNote.textContent = `${ledgerAmount(ledger.total, ledger.evidence)} usage value = ${ledgerAmount(ledger.api, ledger.evidence)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${dateRange(range.start, range.end)} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
   elements.costReconciliation.textContent = `${ledgerAmount(ledger.total, ledger.evidence)} usage value = ${ledgerAmount(ledger.api, ledger.evidence)} API-equivalent + ${money(ledger.reported)} reported`;
+  renderCounterfactual(view.scopeSessions, range);
   renderCostRows(elements.providerCostModels, ledger);
   renderModelCosts(elements.costModels, ledger);
 }
@@ -997,6 +1071,7 @@ function renderRepositoryTable(repositories) {
   clear(footer);
   if (quiet.length && !tableExpansion.showEmpty) {
     const row = node("tr"), cell = node("td", null, "empty-line"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell");
     const button = statusAction("Show them", () => {
       tableExpansion.showEmpty = true;
       renderRepositoryTable(repositories);
@@ -1014,6 +1089,7 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
+    row.setAttribute("role", "row");
     const comparator = item.repository.id === null;
     const repositoryDetails = comparator ? item.repository.name : `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
     if (comparator) row.className = "fleet-total";
@@ -1037,10 +1113,22 @@ function renderRepositoryTable(repositories) {
     if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
     else value.append(node("span", money(item.usage.value)));
     row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    // Reuse the column names for visual card labels; headers remain the accessible labels.
+    // Explicit roles preserve the table structure when narrow-screen CSS changes its display.
+    [...row.children].forEach((cell, index) => {
+      const button = sortButtons[index];
+      cell.setAttribute("role", "cell");
+      cell.setAttribute("headers", button.closest("th").id);
+      if (index === 0) return;
+      const label = node("span", button.textContent, "repository-cell-label");
+      label.setAttribute("aria-hidden", "true");
+      cell.append(label);
+    });
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
-    const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
+    const row = node("tr"); const cell = node("td"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell"); emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
   }
   restoreFocus();
 }
@@ -1055,6 +1143,8 @@ function renderWarnings(warnings) {
 
 /** Selection explanations live in Coverage; chart and KPI notes stay short. */
 function renderCoverageSummary(view) {
+  const discovery = $("#coverage-source-checks");
+  clear(discovery); appendSourceChecks(discovery);
   elements.coverageCostNote.hidden = true;
   const summary = view.summary, activity = view.activity, context = velocityContext();
   const excluded = [`${money(activity.undated[0])} undated`, ...(activity.unledgered.sessions ? [`${money(activity.unledgered.value)} in ${activity.unledgered.sessions} older-snapshot session${activity.unledgered.sessions === 1 ? "" : "s"} without activity dates (refresh to include)`] : [])];
@@ -1064,7 +1154,14 @@ function renderCoverageSummary(view) {
   elements.coverageSessionNote.textContent = `${executionBreakdown(summary)}${view.undatedStarts ? ` · ${view.undatedStarts} unknown starts${windowPreset === "all" ? " included" : " excluded"}` : ""}`;
 
   const sessions = view.sessions.length;
-  if (!sessions) { elements.coverageSummary.textContent = "No sessions in this selection. Widen the window or clear the repository focus."; return; }
+  if (!sessions) {
+    elements.coverageSummary.textContent = fullSnapshot?.machines?.some(({ state }) => state === "reading") && !(fullSnapshot ?? snapshot).sessions.length
+      ? "Machine history is still being read. Session evidence will appear as each machine finishes."
+      : (fullSnapshot ?? snapshot).sessions.length
+      ? "No sessions started in this selection. Widen the window or clear the repository focus; activity from earlier starts can still appear."
+      : "No saved agent sessions were found in this snapshot. Complete a session in a supported agent, then refresh. If you expected history, check provider setup and the source checks below.";
+    return;
+  }
   const part = (metric, what) => { const { eligible } = metricCoverage(view.sessions, metric); return `${eligible} ${what}`; };
   elements.coverageSummary.textContent = `${sessions} selected session${sessions === 1 ? "" : "s"} across ${view.summary.repositoriesWithSessions} repositor${view.summary.repositoriesWithSessions === 1 ? "y" : "ies"}: ${part("tokens", "carry token evidence")}, ${part("tools", "tool evidence")}, ${part("cost", "priced or reported value")}. Every number is a lower bound from local evidence; badges on the dashboard show the eligible share behind each figure.`;
 }
@@ -1222,7 +1319,7 @@ async function pollPricingUpdate() {
     const next = pricing ? { updateAvailable: pricing.updateAvailable === true, fetchedAt: pricing.fetchedAt ?? null } : null;
     if (JSON.stringify(pricingUpdate) === JSON.stringify(next)) return;
     pricingUpdate = next;
-    if (snapshot && currentViewName() === "pricing") renderActiveAnalyticsView(activeView());
+    if (snapshot && ["pricing", "costs"].includes(currentViewName())) renderActiveAnalyticsView(activeView());
   } catch { /* The snapshot stays usable; the next poll asks again. */ }
 }
 
@@ -1347,7 +1444,13 @@ function renderSharedView(view) {
     : name === "summary" ? `Usage value by activity date; sessions, tokens and tools for sessions started during ${windowCaption()} (${timeZone}).`
     : name === "costs" || name === "pricing" ? `Usage value by activity date during ${windowCaption()} (${timeZone}).`
     : `Sessions started during ${windowCaption()} (${timeZone}); whole-session totals.`;
-  if (name === "summary" && selected) {
+  if (!snapshot.sessions.length) {
+    elements.scope.textContent = (fullSnapshot ?? snapshot).sessions.length
+      ? "No sessions from the selected machines. Change the Machines selection to include history."
+      : fullSnapshot?.machines?.some(({ state }) => state === "reading")
+        ? "Waiting for machine history. Results appear as each machine finishes."
+        : "Scan complete · no saved sessions found. Coverage explains the reported source checks.";
+  } else if (name === "summary" && selected) {
     elements.scope.textContent = `${selected.repository.name} · ${integer(view.sessions.length)} session${view.sessions.length === 1 ? "" : "s"} · ${dateRange(elements.windowStart.value, elements.windowEnd.value)} (${timeZone})`;
   } else if (name === "summary" && view.sessions.length === 1 && soleContributor(view, view.sessions[0])) {
     const session = view.sessions[0];
@@ -1391,6 +1494,39 @@ function soleContributor(view, session) {
 
 function subagentValue(sessions, { start, end }) {
   return buildVelocity(sessions, { start, end, group: "execution", metric: "value" }).allSeries.find(({ id }) => id === "subagent")?.total ?? 0;
+}
+
+function renderQuietRepositories(view, context) {
+  const panel = $("#quiet-repositories");
+  const list = $("#quiet-repository-list");
+  const more = $("#quiet-repository-more");
+  const overflow = $("#quiet-repository-overflow");
+  clear(list);
+  clear(overflow);
+  more.open = false;
+  more.hidden = true;
+  panel.hidden = windowPreset === "all" || currentViewName() !== "summary" || Boolean(sharedSnapshot);
+  if (panel.hidden) return;
+  const rows = quietRepositories(view.repositories, view.scopeSessions, context);
+  $("#quiet-repository-context").textContent = `Activity before ${dateLabel(context.start)}, with none observed during ${dateRange(context.start, context.end)} (${context.timeZone}).`;
+  $("#quiet-repository-count").textContent = `(${integer(rows.length)})`;
+  if (!rows.length) {
+    panel.hidden = true;
+    return;
+  }
+  const visibleLimit = 5;
+  more.hidden = rows.length <= visibleLimit;
+  $("#quiet-repository-remaining").textContent = `+${integer(Math.max(0, rows.length - visibleLimit))} more`;
+  for (const [index, row] of rows.entries()) {
+    const item = node("li");
+    const button = node("button", null, "quiet-repository-link");
+    button.type = "button";
+    button.dataset.focusKey = `quiet:${row.id}`;
+    button.append(node("span", row.name), node("span", `Last observed ${dateLabel(row.lastActiveDay)}`, "quiet-repository-date"));
+    button.setAttribute("aria-label", `Focus ${row.name}, last observed active ${dateLabel(row.lastActiveDay)}`);
+    button.addEventListener("click", () => selectRepository(row.id));
+    item.append(button); (index < visibleLimit ? list : overflow).append(item);
+  }
 }
 
 function renderSummary(view) {
@@ -1520,27 +1656,76 @@ function renderProviderEmptyState(container, scope, eligibleCount, windowCount) 
   return true;
 }
 
-/** The view-level status in place of the panels: no snapshot, or nothing in the selected window. */
+const providerSetupGuide = "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/providers.md";
+$("#coverage-setup-link").href = providerSetupGuide;
+
+function setupLink() {
+  const link = node("a", "Provider setup guide ↗", "button");
+  link.href = providerSetupGuide; link.target = "_blank"; link.rel = "noreferrer";
+  return link;
+}
+
+/** Discovery is independent of the selected window. Only reported checks are named. */
+function appendSourceChecks(container) {
+  const notes = sourceCheckNotes(snapshot?.mcpSourceHealth);
+  container.append(node("p", "Supported providers: Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI and Antigravity."));
+  if (notes.length) {
+    container.append(node("p", "Reported source checks (readable history may still be empty or incomplete):"));
+    const list = node("ul", null, "source-checks");
+    for (const note of notes) list.append(node("li", note));
+    container.append(list);
+    container.append(node("p", "Discovery details for other providers are not reported here. Missing history does not establish whether an agent is installed."));
+  } else container.append(node("p", "Source discovery details are unavailable in this snapshot. Refresh to check local history again."));
+}
+
+/** The same guidance in every view, while Pricing keeps its usable catalog. */
 function renderViewStatus(view) {
   const target = elements.viewStatus;
   if (!target) return;
+  const announce = (text) => { if (elements.viewAnnouncer.textContent !== text) elements.viewAnnouncer.textContent = text; };
   clear(target);
   if (!snapshot && loadFailed) {
-    emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
+    const box = emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot", "h2");
+    const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
+    announce(""); // The error alert owns the failure announcement.
     target.hidden = false;
     return;
   }
-  if (!view || !windowEmpty) { target.hidden = true; return; }
+  if (!snapshot && elements.main.dataset.state === "loading") {
+    const box = emptyState(target, "The first scan may take a few minutes. Results appear when the scan finishes; progress is shown above.", "Reading local history", "h2");
+    const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
+    announce(""); // The snapshot announcer owns loading progress.
+    target.hidden = false; return;
+  }
+  if (!view || !windowEmpty) { target.hidden = true; announce(""); return; }
   const selected = selectedRepository();
   const scope = selected ? ` for ${selected.repository.name}` : "";
-  const message = !snapshot.sessions.length ? "No local agent sessions were found in this snapshot."
+  const firstRun = !(fullSnapshot ?? snapshot).sessions.length;
+  const readingMachines = firstRun && fullSnapshot?.machines?.some(({ state }) => state === "reading");
+  const machinesEmpty = !firstRun && !snapshot.sessions.length;
+  const message = readingMachines ? "No sessions are available yet. Another machine is still being read; results will appear when it finishes."
+    : firstRun ? "No saved agent sessions were found. Complete a session in a supported agent on this machine, then refresh. If you expected history, check provider setup."
+    : machinesEmpty ? "Saved sessions exist, but none are from the selected machines. Choose a machine with history to see its sessions."
     : windowPreset === "all" ? `No sessions${scope} in the observed history.`
       : `No sessions${scope} started or were active during ${windowCaption()}.`;
-  const box = emptyState(target, message, "Nothing in this window");
+  announce(readingMachines ? "Reading machine history. No sessions are available yet."
+    : firstRun ? "No saved agent sessions were found."
+    : machinesEmpty ? "No sessions from selected machines."
+    : `Nothing in this window. ${message}`);
+  const box = emptyState(target, message, readingMachines ? "Reading machine history" : firstRun ? "No saved sessions found" : machinesEmpty ? "No sessions from selected machines" : "Nothing in this window", "h2");
+  if (firstRun && !readingMachines) {
+    const checks = node("div", null, "first-run-checks"); appendSourceChecks(checks); box.append(checks);
+  }
+  if (snapshot.rateCard?.pricing?.offline) box.append(node("p", "Pricing is offline: cached and reviewed rates remain available. Offline pricing does not prevent local history scans."));
   const actions = node("div", null, "status-actions");
+  if (firstRun && !readingMachines) {
+    const refresh = statusAction("Refresh snapshot", () => load(true));
+    refresh.dataset.focusKey = "first-run:refresh"; actions.append(refresh);
+  }
+  if (machinesEmpty || readingMachines) actions.append(statusAction("Choose machines", openMachines));
   if (windowPreset !== "all" && snapshot.sessions.length) actions.append(statusAction("Show all time", () => applyWindowPreset("all")));
   if (selected) actions.append(statusAction("Clear repository focus", () => selectRepository("all", { scroll: false })));
-  if (actions.childElementCount) box.append(actions);
+  actions.append(setupLink()); box.append(actions);
   target.hidden = false;
 }
 
@@ -1557,6 +1742,8 @@ function renderView() {
   renderStripMeta();
   renderProviderEvidence($("#provider-evidence-rows"), view.sessions);
   renderCoverageSummary(view);
+  // This insight remains useful when the selected repository or entire window is quiet.
+  renderQuietRepositories(view, velocityContext());
   if (windowEmpty && currentViewName() !== "pricing") {
     clearInactiveAnalyticsViews(null);
   } else if (currentViewName() === "summary") {
@@ -1744,8 +1931,7 @@ function paletteItems() {
   const items = [];
   const selectedId = elements.repositoryFilter.value;
   for (const name of sharedSnapshot ? [] : viewOrder) {
-    const chord = Object.entries(viewChords).find(([, view]) => view === name)?.[0] || "";
-    items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? `g ${chord}` : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
+    items.push({ group: "Views", icon: name, label: `Go to ${viewLabels[name]}`, hint: shortcutsEnabled ? shortcutHint(`view-${name}`) : "", keywords: `view ${name}`, state: currentViewName() === name, run: () => switchView(name) });
   }
   if (snapshot) {
     items.push({ group: "Repositories", icon: "repo", label: "All repositories", keywords: "repo clear focus everything", state: selectedId === "all", run: () => selectRepository("all") });
@@ -1757,23 +1943,23 @@ function paletteItems() {
       const where = scope === "chart" ? "in the daily chart" : `in ${viewLabels[scope]}`;
       for (const [index, provider] of snapshotProviders().entries()) {
         const on = providerShown(scope, provider);
-        items.push({ group: "Providers", icon: "models", label: `${on ? "Hide" : "Show"} ${providerLabels[provider]} ${where}`, hint: shortcutsEnabled && index < 9 ? `p ${index + 1}` : "", keywords: `provider toggle ${provider} filter`, state: on, run: () => toggleProvider(provider) });
+        items.push({ group: "Providers", icon: "models", label: `${on ? "Hide" : "Show"} ${providerLabels[provider]} ${where}`, hint: shortcutsEnabled && index < 9 ? shortcutHint("provider", String(index + 1)) : "", keywords: `provider toggle ${provider} filter`, state: on, run: () => toggleProvider(provider) });
       }
     }
     for (const preset of ["7", "30", "90", "all"]) {
-      items.push({ group: "Time window", icon: "activity", label: windowLabels[preset], hint: shortcutsEnabled ? String(["7", "30", "90", "all"].indexOf(preset) + 1) : "", keywords: `window days range ${preset}`, state: windowPreset === preset, run: () => applyWindowPreset(preset) });
+      items.push({ group: "Time window", icon: "activity", label: windowLabels[preset], hint: shortcutsEnabled ? shortcutHint("window", preset) : "", keywords: `window days range ${preset}`, state: windowPreset === preset, run: () => applyWindowPreset(preset) });
     }
     items.push({ group: "Time window", icon: "activity", label: "Custom range", keywords: "window custom dates", state: windowPreset === "custom", run: () => { applyWindowPreset("custom"); elements.windowStart.focus(); } });
   }
   const dark = document.documentElement.dataset.theme === "dark";
-  items.push({ group: "Display", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: shortcutsEnabled ? "t" : "", keywords: "theme dark light mode appearance", run: toggleTheme });
+  items.push({ group: "Display", icon: dark ? "sun" : "moon", label: `Switch to ${dark ? "light" : "dark"} theme`, hint: shortcutsEnabled ? shortcutHint("theme") : "", keywords: "theme dark light mode appearance", run: toggleTheme });
   const comfortable = document.documentElement.dataset.density === "comfortable";
-  items.push({ group: "Display", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? "d" : "", keywords: "density spacing compact comfortable", run: toggleDensity });
+  items.push({ group: "Display", icon: "density", label: `Switch to ${comfortable ? "compact" : "comfortable"} density`, hint: shortcutsEnabled ? shortcutHint("density") : "", keywords: "density spacing compact comfortable", run: toggleDensity });
   items.push({ group: "Keyboard", icon: "help", label: `${shortcutsEnabled ? "Disable" : "Enable"} single-key shortcuts`, keywords: "keyboard shortcuts keys toggle character", state: shortcutsEnabled, run: () => setShortcuts(!shortcutsEnabled) });
-  items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? "?" : "", keywords: "help keys shortcuts", run: openHelp });
-  items.push({ group: "Snapshot", icon: "coverage", label: "Data coverage", hint: shortcutsEnabled ? "e" : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
+  items.push({ group: "Keyboard", icon: "help", label: "Keyboard shortcuts", hint: shortcutsEnabled ? shortcutHint("help") : "", keywords: "help keys shortcuts", run: openHelp });
+  items.push({ group: "Snapshot", icon: "coverage", label: "Data coverage", hint: shortcutsEnabled ? shortcutHint("coverage") : "", keywords: "coverage evidence warnings notes denominators guardrails", run: openCoverage });
   if ((fullSnapshot?.machines?.length ?? 0) > 1) items.push({ group: "Snapshot", icon: "coverage", label: "Machine details", keywords: "machines remote ssh server status stale failed fix", run: openMachines });
-  items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? "r" : "", keywords: "reload rescan refresh", run: () => load(true) });
+  items.push({ group: "Snapshot", icon: "refresh", label: "Refresh snapshot", hint: shortcutsEnabled ? shortcutHint("refresh") : "", keywords: "reload rescan refresh", run: () => load(true) });
   items.push({ group: "Snapshot", icon: "export", label: "Export view…", keywords: "export download save csv json snapshot", run: () => openExportMenu() });
   return items;
 }
@@ -1835,13 +2021,34 @@ function closePalette() { if (elements.palette.open) elements.palette.close(); s
 
 function togglePalette() { if (elements.palette.open) closePalette(); else openPalette(); }
 
-function openHelp() { closePalette(); closeCoverage(); closeMachines(); if (!elements.help.open) elements.help.showModal(); }
+function renderShortcutHelp() {
+  const grid = $("#shortcut-list");
+  clear(grid);
+  for (const group of ["Navigate", "Control"]) {
+    const section = node("section"), list = node("dl");
+    section.append(node("h3", group), list);
+    for (const item of shortcutRegistry.filter((item) => item.group === group)) {
+      const row = node("div"), keys = node("dd");
+      const bindings = item.id === "provider" ? [item.bindings[0], item.bindings.at(-1)] : item.bindings;
+      bindings.forEach((binding, index) => {
+        if (index) keys.append(node("span", item.id === "provider" ? "–" : " or "));
+        for (const key of (item.id === "provider" && index ? binding.keys.slice(1) : binding.keys)) keys.append(node("kbd", key === "Mod+k" ? (/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K") : key === "Escape" ? "esc" : key));
+      });
+      row.dataset.shortcutId = item.id;
+      row.append(node("dt", item.label), keys); list.append(row);
+    }
+    grid.append(section);
+  }
+}
+
+function openHelp() { closePalette(); closeCoverage(); closeMachines(); renderShortcutHelp(); if (!elements.help.open) elements.help.showModal(); }
 
 function closeHelp() { if (elements.help.open) elements.help.close(); }
 
 elements.palette.addEventListener("close", syncPaletteExpanded);
 elements.commandInput.addEventListener("input", () => renderPalette(elements.commandInput.value));
 elements.commandInput.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229 || (event.repeat && event.key === "Enter")) return;
   if (event.key === "ArrowDown") { event.preventDefault(); setPaletteActive(paletteActive + 1); }
   else if (event.key === "ArrowUp") { event.preventDefault(); setPaletteActive(paletteActive - 1); }
   else if (event.key === "Home") { event.preventDefault(); setPaletteActive(0); }
@@ -1877,39 +2084,29 @@ function armChord(key) {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { pendingChord = null; window.clearTimeout(chordTimer); }
-  if (event.defaultPrevented) return;
-  const key = event.key;
-  if ((event.metaKey || event.ctrlKey) && key.toLowerCase() === "k") { event.preventDefault(); togglePalette(); return; }
+  const match = matchShortcut(event, { enabled: shortcutsEnabled, pending: pendingChord });
+  pendingChord = null; window.clearTimeout(chordTimer);
+  if (!match) return;
+  if (match.action === "palette" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); togglePalette(); return; }
   if (elements.palette.open || elements.help.open || elements.coverageDialog.open || elements.machinesDialog.open) return;
-  if (event.metaKey || event.ctrlKey || event.altKey) return;
-  // Only text entry swallows shortcuts; a focused checkbox, radio or button still lets them through.
-  if (isTextEntryTarget(event.target)) return;
-  if (key === "Escape") {
+  if (match.prefix) { armChord(match.prefix); return; }
+  const { action, value } = match;
+  if (action === "palette") { event.preventDefault(); togglePalette(); return; }
+  if (action === "clear") {
     if (snapshot && elements.repositoryFilter.value !== "all") selectRepository("all", { scroll: false });
     return;
   }
-  if (!shortcutsEnabled) return;
-  if (pendingChord) {
-    const chord = pendingChord; pendingChord = null; window.clearTimeout(chordTimer);
-    if (chord === "g" && viewChords[key]) { event.preventDefault(); switchView(viewChords[key]); }
-    if (chord === "p") {
-      const provider = providerScope() ? providerShortcutTarget(key, snapshotProviders()) : null;
-      if (provider) { event.preventDefault(); toggleProvider(provider); }
-    }
-    return;
-  }
-  if (key === "g" || key === "p") { armChord(key); return; }
-  const presets = { 1: "7", 2: "30", 3: "90", 4: "all" };
-  if (presets[key]) { applyWindowPreset(presets[key]); return; }
-  if (key === "?") { event.preventDefault(); openHelp(); return; }
-  if (key === "e") { openCoverage(); return; }
-  if (key === "/") { event.preventDefault(); openPalette(); return; }
-  if (key === "t") { toggleTheme(); return; }
-  if (key === "d") { toggleDensity(); return; }
-  if (key === "r") { load(true); return; }
-  if (key === "[") { stepView(-1); return; }
-  if (key === "]") stepView(1);
+  if (action === "view") { event.preventDefault(); switchView(value); }
+  else if (action === "provider") {
+    const provider = providerScope() ? providerShortcutTarget(value, snapshotProviders()) : null;
+    if (provider) { event.preventDefault(); toggleProvider(provider); }
+  } else if (action === "window") applyWindowPreset(value);
+  else if (action === "help") { event.preventDefault(); openHelp(); }
+  else if (action === "coverage") openCoverage();
+  else if (action === "theme") toggleTheme();
+  else if (action === "density") toggleDensity();
+  else if (action === "refresh") load(true);
+  else if (action === "step") stepView(Number(value));
 });
 
 // --------------------------------------------------------------------- loading
@@ -2043,7 +2240,7 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; activeViewCache = null; sharedSnapshot = data; loadFailed = false; clear(elements.viewStatus); elements.viewStatus.hidden = true; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
   elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");
@@ -2083,14 +2280,18 @@ const quietLoad = singleFlight(loadQuietly);
 
 async function loadSnapshot(refresh = false) {
   const previous = snapshot ?? sharedSnapshot;
+  const refreshFocusKey = document.activeElement?.dataset?.focusKey;
+  const refreshHadFocus = document.activeElement === elements.refresh || refreshFocusKey === "first-run:refresh";
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
+  elements.snapshotAnnouncer.textContent = previous || refresh ? "Refreshing snapshot." : "Building snapshot.";
   beginScanProgress(Boolean(previous || refresh));
   describeSyncStatus();
   elements.main.dataset.state = previous ? "refreshing" : "loading";
   if (!previous) {
     loadFailed = false; renderViewStatus(null); showActivePanel();
+    elements.scope.textContent = "Reading saved local agent history. Results appear when the scan finishes.";
     elements.generated.textContent = "Building snapshot…";
     if (!elements.repositoryList.childElementCount) for (let index = 0; index < 5; index += 1) elements.repositoryList.append(node("div", null, "repo-skeleton"));
   }
@@ -2098,7 +2299,9 @@ async function loadSnapshot(refresh = false) {
     render(await fetchAnalytics(refresh && previous));
     watchPricingUpdates();
     showReady(snapshot ? activeView() : null);
+    elements.snapshotAnnouncer.textContent = previous || refresh ? "Snapshot refreshed." : "Snapshot ready.";
   } catch (error) {
+    elements.snapshotAnnouncer.textContent = ""; // The error alert owns the failure announcement.
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;
     if (previous) {
@@ -2112,6 +2315,7 @@ async function loadSnapshot(refresh = false) {
       loadFailed = true;
       clear(elements.repositoryList);
       elements.generated.textContent = "No snapshot";
+      elements.scope.textContent = "No snapshot yet. Retry the scan to read local history.";
       showError(`The local analysis did not finish. ${describeLoadError(error)} Retry, or check the terminal running the dashboard.`, "No snapshot yet");
       showActivePanel(); renderViewStatus(null);
     }
@@ -2119,6 +2323,10 @@ async function loadSnapshot(refresh = false) {
     endScanProgress();
     describeSyncStatus();
     elements.refresh.disabled = false;
+    if (refreshHadFocus && document.activeElement === document.body) {
+      const control = refreshFocusKey ? document.querySelector(`[data-focus-key="${CSS.escape(refreshFocusKey)}"]`) : elements.refresh;
+      (control ?? elements.pageTitle).focus({ preventScroll: true });
+    }
   }
 }
 

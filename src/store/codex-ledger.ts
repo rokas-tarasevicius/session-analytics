@@ -73,7 +73,7 @@ export async function readCodexLedger(
   let unownedCounters = appended ? old?.unownedCounters ?? false : false;
   const unownedFingerprints = new Set<string>(appended ? old?.unownedFingerprints : []);
   const input = createReadStream(path, { encoding: "utf8", start: appended ? old?.bytes ?? 0 : 0 });
-  const lines = readJsonLines(input);
+  const lines = readJsonLines(input, !appended);
   try {
     for await (const line of lines) {
       let value: RecordValue | null;
