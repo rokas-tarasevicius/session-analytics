@@ -817,3 +817,119 @@ test("past 5-hour lockouts are watched, never acted on, ordered by time locked o
   assert.match(entries[0]!.title, /3 times in 7 days \(7h 24m locked out\)$/);
   assert.match(entries[1]!.detail, /^The weekly allowance is the tighter limit this week/, "an account on extra usage is weekly-bound");
 });
+
+test("Codex calibrates each reported plan separately and prorates the observed plan periods", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", owner = account("codex", key, { plan: "pro" });
+  const change = start + 2 * WEEK, now = start + 4 * WEEK;
+  const observations = Array.from({ length: 4 }, (_, index) => ({
+    ...reading("codex", "seven_day", start + (index + 1) * WEEK, start + index * WEEK, 0, "allowed", key),
+    planType: index < 2 ? "plus" as const : "pro" as const,
+  })).flatMap((row) => [row, { ...row, observedAt: row.resetsAt - HOUR, usedPercent: row.planType === "plus" ? 50 : 10 }]);
+  const session = spending("codex", start, now, 1);
+  const item = utilization(owner, observations, now, [session], { basis: "provider", range: { from: start, to: now } });
+  const plusRate = (WEEK - HOUR) / HOUR / 50, proRate = (WEEK - HOUR) / HOUR / 10;
+  assert.equal(item.calibration.perPercent, proRate, "current capacity uses Pro cycles alone");
+  assert.equal(item.calibration.cycles, 2);
+  assert.deepEqual(item.economicPeriods!.map((period) => period.plan!.id), ["plus", "pro"]);
+  assert.equal(item.economics.price, (20 * 14 + 200 * 14) / MONTH_DAYS);
+  assert.ok(Math.abs(item.economics.potential! - (plusRate + proRate) * 100 * 2) < 1e-9);
+  assert.equal(item.history[0]!.expiredUsd, 50 * plusRate, "old closes use their own tier's calibration");
+  assert.equal(item.history[2]!.expiredUsd, 90 * proRate);
+  const partial = utilization(owner, observations, now, [session], { basis: "provider", range: { from: change - DAY / 2, to: change + DAY / 2 } });
+  assert.equal(partial.economics.price, (20 + 200) / 2 / MONTH_DAYS, "partial days straddle the exact observed boundary");
+  const override = utilization(owner, observations, now, [session], { basis: "provider", planId: "pro-500", planOverride: true });
+  assert.equal(override.economics.price, 500 * 28 / MONTH_DAYS, "explicit browser plan overrides the counted price periods");
+  assert.equal(override.calibration.perPercent, proRate, "manual pricing never pools calibration across tiers");
+});
+
+test("a Codex plan change in one reset window is no evidence of a reset or a calibration baseline", () => {
+  const rows = [
+    { ...reading("codex", "seven_day", start + WEEK, start + DAY, 70), planType: "plus" as const },
+    { ...reading("codex", "seven_day", start + WEEK, start + 2 * DAY, 10), planType: "pro" as const },
+    { ...reading("codex", "seven_day", start + WEEK, start + 3 * DAY, 20), planType: "pro" as const },
+  ];
+  const meter = buildMeters(rows, start + 3 * DAY)[0]!;
+  assert.equal(calibrate(meter, { between: () => 100 }, "pro").perPercent, null);
+  assert.equal(calibrate(meter, { between: () => 100 }, "pro").cycles, 0, "mixed-plan cycles are excluded, even after the change");
+  assert.deepEqual(inPlaceResets(meter, meter.cycles[0]!), [], "changing tiers did not prove a banked reset");
+  const live = liveMeter(meter, start + 3 * DAY);
+  assert.equal(live.rate, 10 / DAY, "pace uses movement since the first new-plan reading");
+});
+
+test("old Codex ledgers remain readable without retroactively assigning a new tier to their value", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", owner = account("codex", key, { plan: "pro" });
+  const change = start + WEEK, now = start + 2 * WEEK;
+  const old = reading("codex", "seven_day", change, start, 20, "allowed", key);
+  const next = { ...reading("codex", "seven_day", now, change, 10, "allowed", key), planType: "pro" as const };
+  const session = spending("codex", start, now, 1);
+  const legacyOnly = utilization(owner, [old], change, [session], { basis: "provider" });
+  assert.equal(legacyOnly.economics.price, 200 * 7 / MONTH_DAYS, "a completely untagged legacy ledger keeps the previous fallback");
+  const item = utilization(owner, [old, next], now, [session], { basis: "provider" });
+  assert.equal(item.economics.extracted, 336, "value used is unchanged");
+  assert.equal(item.economics.price, null, "the legacy prefix has no proved historical price");
+  const totals = subscriptionTotals([item]);
+  assert.equal(totals.priced.extracted, 168, "the multiple counts only value in the known paid period");
+  assert.equal(totals.priced.price, 200 * 7 / MONTH_DAYS);
+  assert.equal(totals.unpriced.extracted, 168);
+});
+
+test("plan periods pair personal price only with personal value when an account becomes employer-paid", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", owner = account("codex", key, { plan: "business" });
+  const now = start + 2 * DAY;
+  const rows = [
+    { ...reading("codex", "seven_day", start + WEEK, start, 20, "allowed", key), planType: "plus" as const },
+    { ...reading("codex", "seven_day", start + WEEK, start + DAY, 10, "allowed", key), planType: "business" as const },
+  ];
+  const item = utilization(owner, rows, now, [spending("codex", start, now, 1)], { basis: "provider" });
+  const totals = subscriptionTotals([item]);
+  assert.equal(totals.priced.extracted, 24);
+  assert.equal(totals.priced.price, 20 / MONTH_DAYS);
+  assert.equal(totals.organization.extracted, 24);
+  assert.equal(totals.extracted, 48);
+});
+
+test("Codex period prices use elapsed seconds across DST and do not invent changes from missing evidence", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", owner = account("codex", key, { plan: "pro" });
+  const from = at("2026-10-23T23:00:00Z"), change = at("2026-10-24T23:00:00Z"), now = at("2026-10-26T00:00:00Z");
+  const rows = [
+    { ...reading("codex", "seven_day", from + WEEK, from, 10, "allowed", key), planType: "plus" as const },
+    { ...reading("codex", "seven_day", from + WEEK, change, 20, "allowed", key), planType: "pro" as const },
+    reading("codex", "seven_day", from + WEEK, change + HOUR, 21, "allowed", key),
+  ];
+  const item = utilization(owner, rows, now, [], { timeZone: "Europe/London", range: { from, to: now } });
+  assert.equal(item.economics.price, (20 + 200 * 25 / 24) / MONTH_DAYS, "London's 25-hour day costs 25 elapsed hours");
+  assert.equal(item.economicPeriods!.length, 2, "a missing plan reading is no tier change");
+  const downgraded = utilization({ ...owner, plan: "plus" }, rows.map((row) => ({ ...row, planType: row.planType === "plus" ? "pro" : row.planType === "pro" ? "plus" : null })), now,
+    [], { timeZone: "Europe/London", range: { from, to: now } });
+  assert.equal(downgraded.economics.price, (200 + 20 * 25 / 24) / MONTH_DAYS, "a downgrade preserves the earlier expensive period");
+});
+
+test("a selected window before tagged Codex evidence stays unpriced instead of falling back to the latest tier", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", owner = account("codex", key, { plan: "pro" }), now = start + 2 * WEEK;
+  const rows = [reading("codex", "seven_day", start + WEEK, start, 10, "allowed", key),
+    { ...reading("codex", "seven_day", now, start + WEEK, 20, "allowed", key), planType: "pro" as const }];
+  const item = utilization(owner, rows, now, [spending("codex", start, now, 1)], { basis: "provider", range: { from: start, to: start + 3 * DAY } });
+  assert.equal(item.economics.extracted, 72);
+  assert.equal(item.economics.price, null);
+  assert.equal(subscriptionTotals([item]).priced.accounts, 0);
+  assert.equal(subscriptionTotals([item]).unpriced.extracted, 72);
+});
+
+test("simultaneous v2 and v3 copies keep their known tier while genuinely different tiers remain ambiguous", () => {
+  const rows = [1, 2].flatMap((week) => {
+    const row = reading("codex", "seven_day", start + week * WEEK, start + week * WEEK - HOUR, 20);
+    return [row, { ...row, planType: "pro" as const }];
+  });
+  for (const order of [rows, [...rows].reverse()]) {
+    const meter = buildMeters(order, start + 2 * WEEK)[0]!;
+    assert.equal(calibrate(meter, { between: () => 100 }, "pro").cycles, 2);
+    assert.equal(calibrate(meter, { between: () => 100 }, "pro").perPercent, 5);
+  }
+  const conflicted = buildMeters([...rows, { ...rows[0]!, planType: "plus" }], start + 2 * WEEK)[0]!;
+  assert.equal(calibrate(conflicted, { between: () => 100 }, "pro").cycles, 1);
+});
+
+test("different unrecognised tiers collapsed to other never establish one shared capacity", () => {
+  const rows = [1, 2].map((week) => ({ ...reading("codex", "seven_day", start + week * WEEK, start + week * WEEK - HOUR, 20), planType: "other" as const }));
+  assert.equal(calibrate(buildMeters(rows, start + 2 * WEEK)[0]!, { between: () => 100 }, "other").perPercent, null);
+});

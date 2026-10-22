@@ -4,20 +4,20 @@ import { join } from "node:path";
 
 import { INDEX_UNAVAILABLE, secureDirectory, secureFile } from "../store/database.ts";
 import { acquireWriterGate } from "../store/writer-gate.ts";
-import { accountAttribution, codexPlan, enumValue, identified, nextWeeklyReset, validAccount, weeklyPhase } from "./accounts.ts";
+import { accountAttribution, codexPlan, codexReadingPlan, enumValue, identified, nextWeeklyReset, validAccount, weeklyPhase } from "./accounts.ts";
 import { limitName } from "./sources.ts";
 import {
   claudePlans,
-  type ClaudeAccountSummary, type ClaudePlan, type CodexAccountSummary, type CodexPlan, type LimitObservation, type LimitProvider,
+  type ClaudeAccountSummary, type ClaudePlan, type CodexReadingPlan, type CodexAccountSummary, type CodexPlan, type LimitObservation, type LimitProvider,
   type LimitSource, type LimitStatus, type PlanEvidence, type PlanSource, type ResetCredit,
 } from "./types.ts";
 
 /**
  * Private, content-free meter history. Provider logs rotate quickly; this ledger is what makes reset history possible.
- * Version 2 lives in its own file: version 1 binaries (still run by cron or other checkouts) would read a version 2
- * `limits.json` as empty and replace it, so `limits.json` is now only read, as import input.
+ * Version 3 adds a plan column. Earlier binaries reject these rows, so it lives in a separate file; version 2 is read
+ * and merged on every harvest without rewriting it, including any readings an older installation continues to add.
  */
-export const ledgerName = "limits-v2.json";
+export const ledgerName = "limits-v3.json";
 export const inboxName = "limits-inbox-v2.jsonl";
 export const legacyLedgerName = "limits.json";
 /** Ledger writers in every process take turns through their own gate, so a long index ingest never holds one up. */
@@ -36,8 +36,8 @@ const cursorRetentionSeconds = 7 * 86_400;
 const maximumCursors = 4096;
 const maximumCreators = 16;
 
-/** [provider, account, meter, windowMinutes, resetsAt, observedAt, usedPercent, status, source] */
-export type LedgerRow = [LimitProvider, string, string, number | null, number, number, number, LimitStatus, LimitSource];
+/** [provider, account, meter, windowMinutes, resetsAt, observedAt, usedPercent, status, source, planType?] */
+export type LedgerRow = [LimitProvider, string, string, number | null, number, number, number, LimitStatus, LimitSource, (CodexReadingPlan | null)?];
 
 /** Byte offset of the last complete line read, with a hash of the bytes before it; `account` is a Codex rollout's creator. */
 export interface Cursor { offset: number; fingerprint: string; seen: number; account?: string; retry?: boolean }
@@ -55,7 +55,7 @@ export interface LedgerAccount {
 }
 
 export interface Ledger {
-  version: 2;
+  version: 3;
   /** Provider files modified before this Unix time were already harvested. */
   harvestedThrough: number | null;
   /** Newest `limits.json` (version 1) reading already imported; older binaries may still append to that file. */
@@ -87,7 +87,7 @@ export interface Ledger {
 }
 
 export const emptyLedger = (): Ledger => ({
-  version: 2, harvestedThrough: null, importedV1Through: null, cursors: {}, accounts: {}, profiles: {}, aliases: {}, creators: {}, limitNames: {}, rows: [],
+  version: 3, harvestedThrough: null, importedV1Through: null, cursors: {}, accounts: {}, profiles: {}, aliases: {}, creators: {}, limitNames: {}, rows: [],
   resetCreditHistory: [], codexAccountReadAt: null, sourceLatest: {},
 });
 
@@ -211,14 +211,18 @@ export function validObservation(value: LimitObservation): LimitObservation | nu
     resetsAt: Math.round(value.resetsAt), observedAt: Math.floor(value.observedAt),
     usedPercent: Math.round(Math.min(1000, Math.max(0, value.usedPercent)) * 10) / 10,
     status: value.status, source: value.source,
+    ...(value.provider === "codex" && codexReadingPlan(value.planType) !== null ? { planType: codexReadingPlan(value.planType) } : {}),
   };
 }
 
-export const toRow = (value: LimitObservation): LedgerRow =>
-  [value.provider, value.account, value.meter, value.windowMinutes, value.resetsAt, value.observedAt, value.usedPercent, value.status, value.source];
+export function toRow(value: LimitObservation): LedgerRow {
+  const row: LedgerRow = [value.provider, value.account, value.meter, value.windowMinutes, value.resetsAt, value.observedAt, value.usedPercent, value.status, value.source];
+  if (value.planType !== undefined) row.push(value.planType);
+  return row;
+}
 
-export const fromRow = (row: LedgerRow): LimitObservation | null => Array.isArray(row) && row.length === 9
-  ? validObservation({ provider: row[0], account: row[1], meter: row[2], windowMinutes: row[3], resetsAt: row[4], observedAt: row[5], usedPercent: row[6], status: row[7], source: row[8] })
+export const fromRow = (row: LedgerRow): LimitObservation | null => Array.isArray(row) && (row.length === 9 || row.length === 10)
+  ? validObservation({ provider: row[0], account: row[1], meter: row[2], windowMinutes: row[3], resetsAt: row[4], observedAt: row[5], usedPercent: row[6], status: row[7], source: row[8], ...(row.length === 10 ? { planType: row[9] ?? null } : {}) })
   : null;
 
 const seriesKey = (observation: LimitObservation): string => `${observation.provider}|${observation.account}|${observation.meter}`;
@@ -311,11 +315,12 @@ function clusterResets(series: LimitObservation[]): void {
  */
 function quarantineInterleaved(series: LimitObservation[]): void {
   if (series[0]?.provider !== "codex" || series[0].account === "") return;
-  const cycles = [...groupBy(series.filter((item) => item.status !== "idle"), (item) => String(item.resetsAt)).values()].map((items) => ({
+  const cycles = [...groupBy(series.filter((item) => item.status !== "idle"), (item) => `${item.resetsAt}|${item.planType ?? ""}`).values()].map((items) => ({
     items, first: items.reduce((value, item) => Math.min(value, item.observedAt), Infinity), last: items.reduce((value, item) => Math.max(value, item.observedAt), 0),
   }));
   for (const cycle of cycles) {
-    if (cycles.some((other) => other !== cycle && other.first < cycle.first && other.last > cycle.last && other.items.length > cycle.items.length)) {
+    if (cycles.some((other) => other !== cycle && (Math.abs(other.items[0]!.resetsAt - cycle.items[0]!.resetsAt) > resetToleranceSeconds || (other.items[0]!.planType && cycle.items[0]!.planType)) &&
+      other.first < cycle.first && other.last > cycle.last && other.items.length > cycle.items.length)) {
       for (const item of cycle.items) item.account = "";
     }
   }
@@ -329,7 +334,7 @@ const resetDrop = 5;
  * that must never share a bucket with the higher readings before it. Same rule as the view's `segmentsOf`.
  */
 function segmentOrdinals(series: LimitObservation[], ordinals: Map<LimitObservation, number>): void {
-  for (const cycle of groupBy(series.filter((item) => item.status !== "idle"), (item) => String(item.resetsAt)).values()) {
+  for (const cycle of groupBy(series.filter((item) => item.status !== "idle"), (item) => `${item.resetsAt}|${item.planType ?? ""}`).values()) {
     const sorted = [...cycle].sort((left, right) => left.observedAt - right.observedAt);
     let ordinal = 0, top = -Infinity;
     sorted.forEach((item, index) => {
@@ -344,18 +349,28 @@ function segmentOrdinals(series: LimitObservation[], ordinals: Map<LimitObservat
 /** A total order, so the latest reading of a series is the same whatever order ledgers are merged in. */
 const laterReading = (left: LimitObservation, right: LimitObservation): boolean =>
   (left.observedAt - right.observedAt || left.usedPercent - right.usedPercent || statusRank[left.status] - statusRank[right.status] ||
-    (left.source > right.source ? 1 : left.source < right.source ? -1 : 0)) > 0;
+    (left.source > right.source ? 1 : left.source < right.source ? -1 : String(left.planType ?? "").localeCompare(String(right.planType ?? "")))) > 0;
 
 /** Several sources can report one instant; their order is not evidence of an in-place reset. */
 function simultaneousReadings(series: LimitObservation[]): LimitObservation[] {
   const readings = new Map<string, LimitObservation>();
   for (const item of series) {
-    const key = `${seriesKey(item)}|${item.resetsAt}|${item.observedAt}`, current = readings.get(key);
+    const key = `${seriesKey(item)}|${item.planType ?? ""}|${item.resetsAt}|${item.observedAt}`, current = readings.get(key);
     if (!current) { readings.set(key, item); continue; }
     const kept = laterReading(item, current) ? item : current;
     readings.set(key, { ...kept, status: statusRank[item.status] > statusRank[current.status] ? item.status : current.status });
   }
   return [...readings.values()];
+}
+
+/** The first evidence of each tier period, before idle pruning or bucket compaction can move it later. */
+function planBoundaries(series: LimitObservation[]): LimitObservation[] {
+  const starts: LimitObservation[] = [];
+  let plan: string | null = null;
+  for (const row of [...series].sort((a, b) => a.observedAt - b.observedAt || String(a.planType).localeCompare(String(b.planType)))) {
+    if (row.planType && row.planType !== plan) { starts.push(row); plan = row.planType; }
+  }
+  return starts;
 }
 
 /**
@@ -375,13 +390,23 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
   const normalized: LimitObservation[] = [];
   const ordinals = new Map<LimitObservation, number>();
   for (const series of groupBy(valid, seriesKey).values()) {
-    const kept = markIdle(series);
-    clusterResets(kept);
+    const starts = planBoundaries(series);
+    const kept = [...groupBy(series, (item) => item.planType ?? "").values()].flatMap((context) => {
+      const rows = markIdle(context);
+      // An unstarted window is not an active cycle, but it still proves the tier at this instant.
+      for (const first of starts) if (first.account !== "" && first.planType === context[0]?.planType &&
+        !rows.some((row) => row.observedAt === first.observedAt && row.resetsAt === first.resetsAt)) rows.push({ ...first, status: "idle" });
+      clusterResets(rows);
+      return rows;
+    });
     quarantineInterleaved(kept);
     const distinct = simultaneousReadings(kept);
     segmentOrdinals(distinct, ordinals);
     normalized.push(...distinct);
   }
+  // Keep the first evidence of each plan period, even when a later high level shares its bucket.
+  const boundaries = new Set<LimitObservation>();
+  for (const series of groupBy(normalized, seriesKey).values()) for (const row of planBoundaries(series)) boundaries.add(row);
   const latest = new Map<string, LimitObservation>();
   for (const observation of normalized) {
     const current = latest.get(seriesKey(observation));
@@ -391,10 +416,10 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
   for (const observation of normalized) {
     const last = latest.get(seriesKey(observation));
     // An identical copy of the latest reading (the same ledger merged twice) is that reading.
-    if (last && last !== observation && last.observedAt === observation.observedAt && last.usedPercent === observation.usedPercent && last.resetsAt === observation.resetsAt && last.status === observation.status) continue;
+    if (last && last !== observation && last.observedAt === observation.observedAt && last.usedPercent === observation.usedPercent && last.resetsAt === observation.resetsAt && last.status === observation.status && last.planType === observation.planType) continue;
     const size = observation.resetsAt < now - archiveAfterSeconds ? archiveBucketSeconds : recentBucketSeconds;
-    const kind = observation.status === "rejected" ? "rejected" : observation.status === "idle" ? "idle" : last === observation ? "latest" : "";
-    const key = `${seriesKey(observation)}|${observation.resetsAt}|${ordinals.get(observation) ?? 0}|${Math.floor(observation.observedAt / size)}|${kind}`;
+    const kind = boundaries.has(observation) ? `plan-${observation.observedAt}` : observation.status === "rejected" ? "rejected" : observation.status === "idle" ? "idle" : last === observation ? "latest" : "";
+    const key = `${seriesKey(observation)}|${observation.planType ?? ""}|${observation.resetsAt}|${ordinals.get(observation) ?? 0}|${Math.floor(observation.observedAt / size)}|${kind}`;
     const current = buckets.get(key);
     if (!current) { buckets.set(key, observation); continue; }
     if (kind === "rejected") { if (observation.observedAt < current.observedAt) buckets.set(key, observation); continue; }
@@ -407,7 +432,7 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
   }
   return [...buckets.values()].sort((left, right) =>
     left.provider.localeCompare(right.provider) || left.account.localeCompare(right.account) || left.meter.localeCompare(right.meter) ||
-    left.resetsAt - right.resetsAt || left.observedAt - right.observedAt);
+    left.resetsAt - right.resetsAt || left.observedAt - right.observedAt || String(left.planType ?? "").localeCompare(String(right.planType ?? "")));
 }
 
 export const ledgerPath = (directory: string): string => join(directory, ledgerName);
@@ -439,14 +464,23 @@ function readPrivate(path: string, limit: number): string | "oversize" | null {
 export type LedgerRead = { status: "missing" | "ok"; ledger: Ledger } | { status: "corrupt" | "foreign"; ledger: null };
 
 export function readLedger(directory: string, now = Date.now() / 1000): LedgerRead {
+  const current = readLedgerFile(directory, now, ledgerName, 3);
+  if (!current.ledger) return current;
+  const previous = readLedgerFile(directory, now, "limits-v2.json", 2);
+  return previous.ledger && previous.status === "ok"
+    ? { status: "ok", ledger: mergeLedgers(previous.ledger, current.ledger, now) }
+    : current;
+}
+
+function readLedgerFile(directory: string, now: number, name: string, version: number): LedgerRead {
   let text: string | "oversize" | null;
-  try { text = readPrivate(ledgerPath(directory), maximumLedgerBytes); } catch { return { status: "foreign", ledger: null }; }
+  try { text = readPrivate(join(directory, name), maximumLedgerBytes); } catch { return { status: "foreign", ledger: null }; }
   if (text === null) return { status: "missing", ledger: emptyLedger() };
   if (text === "oversize") return { status: "corrupt", ledger: null };
   let value: Record<string, unknown> | null;
   try { value = record(JSON.parse(text)); } catch { return { status: "corrupt", ledger: null }; }
   if (!value || !Array.isArray(value["rows"])) return { status: "corrupt", ledger: null };
-  if (value["version"] !== 2) return { status: "foreign", ledger: null };
+  if (value["version"] !== version) return { status: "foreign", ledger: null };
   const accounts: Record<string, LedgerAccount> = {};
   for (const [key, account] of Object.entries(record(value["accounts"]) ?? {})) { const valid = ledgerAccount(key, account); if (valid) accounts[key] = valid; }
   const cursors: Record<string, Cursor> = {};
@@ -469,7 +503,7 @@ export function readLedger(directory: string, now = Date.now() / 1000): LedgerRe
   return {
     status: "ok",
     ledger: {
-      version: 2, harvestedThrough: time(value["harvestedThrough"]), importedV1Through: time(value["importedV1Through"]),
+      version: 3, harvestedThrough: time(value["harvestedThrough"]), importedV1Through: time(value["importedV1Through"]),
       cursors: pruneCursors(cursors, now), accounts, profiles, aliases, creators, limitNames, rows: rows.map(toRow),
       resetCreditHistory: resetCreditHistory(value["resetCreditHistory"]),
       codexAccountReadAt: time(value["codexAccountReadAt"]), sourceLatest: latest ? sourceLatest : advanceSources({}, rows),
@@ -540,7 +574,7 @@ export function mergeLedgers(left: Ledger, right: Ledger, now: number): Ledger {
   for (const [key, account] of Object.entries(second.accounts)) accounts[key] = mergeAccount(accounts[key], account);
   const max = (a: number | null, b: number | null) => a === null ? b : b === null ? a : Math.max(a, b);
   return {
-    version: 2, harvestedThrough: max(left.harvestedThrough, right.harvestedThrough), importedV1Through: max(left.importedV1Through, right.importedV1Through),
+    version: 3, harvestedThrough: max(left.harvestedThrough, right.harvestedThrough), importedV1Through: max(left.importedV1Through, right.importedV1Through),
     cursors: pruneCursors(cursors, now), accounts, profiles: { ...left.profiles, ...right.profiles }, aliases, creators, limitNames: { ...left.limitNames, ...right.limitNames },
     rows: compactObservations([...first.rows, ...second.rows].map(fromRow).filter((row): row is LimitObservation => row !== null), now).map(toRow),
     resetCreditHistory: resetCreditHistory([...first.resetCreditHistory, ...second.resetCreditHistory]),

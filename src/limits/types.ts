@@ -16,6 +16,9 @@ export const codexPlans = ["free", "go", "plus", "prolite", "pro", "team", "busi
 export type ClaudePlan = typeof claudePlans[number];
 export type CodexPlan = typeof codexPlans[number];
 
+/** Closed projection of Codex plan_type: unrecognised tiers never carry provider text. */
+export type CodexReadingPlan = CodexPlan | "promax" | "other";
+
 export interface LimitObservation {
   provider: LimitProvider;
   /** Pseudonymous account key (`LimitAccount.key`); `""` when the reading could not be attributed to an account. */
@@ -32,6 +35,8 @@ export interface LimitObservation {
   usedPercent: number;
   status: LimitStatus;
   source: LimitSource;
+  /** Codex only: plan reported with this reading; null/absent means no evidence (including old ledgers). */
+  planType?: CodexReadingPlan | null;
 }
 
 /** A banked reset: redeeming it restarts the provider's windows at 0%. Opaque IDs and backend text are never kept. */

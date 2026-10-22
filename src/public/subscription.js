@@ -347,7 +347,7 @@ function burnChart(container, item, fmt, now) {
     root.append(svg("text", { x: Math.max(left, Math.min(width - right, x(t))), y: height - 6, "text-anchor": x(t) - left < 20 ? "start" : width - right - x(t) < 20 ? "end" : "middle", class: "axis-label" }, fmt.day(t)));
   });
   const segment = live.segment;
-  if (!live.stale) root.append(svg("line", { x1: x(segment.start), y1: y(0), x2: x(cycle.resetsAt), y2: y(100), class: "pace-line" }));
+  if (!live.stale) root.append(svg("line", { x1: x(segment.start), y1: y(segment.baseline?.used ?? 0), x2: x(cycle.resetsAt), y2: y(100), class: "pace-line" }));
   for (const part of cycle.segments) {
     const shown = part.samples.filter((sample) => sample.t <= now);
     if (part.before) {
@@ -370,17 +370,17 @@ function burnChart(container, item, fmt, now) {
     const part = segmentOf(cycle, sample);
     return [
       `${fmt.time(sample.t)} · ${percentText(sample.used)} used`,
-      `Even pace by then: ${Math.round(Math.min(1, Math.max(0, (sample.t - part.start) / (cycle.resetsAt - part.start))) * 100)}%`,
+      `Even pace by then: ${Math.round((part.baseline?.used ?? 0) + (100 - (part.baseline?.used ?? 0)) * Math.min(1, Math.max(0, (sample.t - part.start) / (cycle.resetsAt - part.start))))}%`,
       sample.status === "rejected" ? "Requests refused on this meter" : sample.status === "overage" ? "On paid extra usage" : "",
     ].filter(Boolean);
   }, { x: (sample) => x(sample.t), marker });
   const key = el("p", null, "chart-key");
   key.append(el("span", "Used", "key-used"), el("span", "Projection", "key-projection"), el("span", "Even pace", "key-pace"), el("span", "Now", "key-now"));
-  if (cycle.segments.length > 1) key.append(el("span", "In-place reset", "key-reset"));
+  if (cycle.segments.some((part) => part.before)) key.append(el("span", "In-place reset", "key-reset"));
   key.style.setProperty("--meter-color", color);
   const pace = meterPace(live, now);
   const paceText = live.stale || live.state !== "active" || !pace ? null
-    : `Pace ≈ ${rate(pace.segment)}${cycle.segments.length > 1 ? ` since the reset ${fmt.when(segment.start)}, ${rate(pace.cycle)} across the week` : " this week"}${pace.budget !== null ? `; up to ${rate(pace.budget)} lasts until the reset.` : "."}`;
+    : `Pace ≈ ${rate(pace.segment)}${segment.baseline ? ` since the tier change ${fmt.when(segment.start)}` : segment.before ? ` since the reset ${fmt.when(segment.start)}, ${rate(pace.cycle)} across the week` : " this week"}${pace.budget !== null ? `; up to ${rate(pace.budget)} lasts until the reset.` : "."}`;
   container.append(root, key, readout);
   if (paceText) container.append(note(paceText, "subscription-note chart-pace"));
 }
@@ -534,7 +534,7 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide, sco
   const totalsList = el("dl", null, "worth-totals");
   const total = (term, value, detail) => { const row = el("div"); row.append(el("dt", term), el("dd", value), el("small", detail)); totalsList.append(row); };
   const counted = accounts.filter((item) => !item.excluded && item.economics.extracted !== null && item.period.days > 0);
-  const pricedNames = counted.filter((item) => item.economics.price !== null && item.economics.monthlyPrice > 0).map((item) => item.label);
+  const pricedNames = counted.filter((item) => (item.economicPeriods ?? [item.economics]).some((period) => period.price > 0)).map((item) => item.label);
   total("Value used", usd(totals.extracted), [
     `${periodText(counted, fmt, now)}, matched to accounts`,
     totals.capacityUsed !== null ? `${percentText(totals.capacityUsed * 100)} of one full week every week${totals.capacityUsed > 1 ? " (early resets and extra usage add more)" : ""}` : "",
@@ -561,13 +561,13 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide, sco
     return [
       { text: item.label, detail: empty ? `First reading ${period.firstReading !== null ? fmt.date(period.firstReading) : "not yet"} · no days in these dates` : `Since ${fmt.date(period.from)}${firstReadingStart(item) ? " (first reading)" : ""} · ${Math.round(period.days * 10) / 10} days${item.excluded ? " · excluded" : ""}` },
       payerControl(item, onPlanChange),
-      calibration.perPercent !== null ? { text: money(calibration.perPercent), detail: `median of ${plural(calibration.cycles, "cycle")}` }
+      calibration.perPercent !== null ? { text: money(calibration.perPercent), detail: `median of ${plural(calibration.cycles, "cycle")}${item.provider === "codex" && item.meters.some((meter) => meter.planReadings?.length) ? " on this tier" : ""}` }
         : { text: DASH, detail: `needs ${calibrationMinimum} cycles (${calibration.cycles} so far)` },
       { text: usd(value.weeklyCapacity), detail: value.weeklyCapacity !== null ? "a full week" : "" },
       empty ? { text: DASH, detail: "no meter readings in these dates" }
         : value.extracted !== null ? { text: usd(value.extracted), detail: valueScope(item, scope) } : { text: "Unknown", detail: valueScope(item, scope) },
       value.multiple !== null ? { text: times(value.multiple), detail: `for ${usd(value.price)} of plan price` }
-        : { text: DASH, detail: empty ? "no meter readings in these dates" : value.payer === "organization" ? "employer pays: value only" : value.monthlyPrice === 0 ? "free plan" : value.plan?.monthlyUsd === null ? "no list price" : value.plan ? "no matched value" : "choose a plan" },
+        : { text: DASH, detail: empty ? "no meter readings in these dates" : item.economicPeriods?.some((period) => period.days > 0 && !(period.price > 0)) && value.payer !== "organization" && value.monthlyPrice !== 0 ? "some periods have no personal price" : value.payer === "organization" ? "employer pays: value only" : value.monthlyPrice === 0 ? "free plan" : value.plan?.monthlyUsd === null ? "no list price" : value.plan ? "no matched value" : "choose a plan" },
     ];
   });
   details.append(dataTable([
@@ -579,7 +579,7 @@ function worthSection(model, items, fmt, now, { pending, onPlanChange, wide, sco
   ].filter(Boolean);
   const excluded = items.filter((item) => item.excluded).map((item) => item.label);
   details.append(note([
-    "The value multiple divides only the value of plans you pay for by their price, prorated from each account's first reading to now.",
+    "The value multiple pairs each paid period's value with its price, prorated from each account's first reading to now. Codex plan changes start at their first observed reading; periods without a known personal price stay outside the multiple.",
     aside.length ? `Not in the multiple: ${aside.join(" and ")}.` : "",
     excluded.length ? `Excluded from totals: ${excluded.join(", ")}.` : "",
     "Value before an account's first meter reading is not counted, because no price or capacity can be prorated over it.",
@@ -757,6 +757,7 @@ function sourcesSection(limits, items, fmt, scope) {
     "For the interactive Claude Code CLI, set the status line command to `session-analytics limits statusline` in each profile's settings.json. It records the documented rate_limits field for that profile's account and prints the meters.",
     scope.limits ? "Value per 1% divides the API-equivalent value of an account's own sessions on every machine whose limits are read (matched through each machine's Claude profiles, or every Codex session on a machine with one Codex account) by the meter's reading."
       : "Value per 1% divides the API-equivalent value of an account's own sessions on this machine (matched through its Claude profiles, or every Codex session when there is one Codex account) by the meter's reading.",
+    "Codex value per 1% uses only cycles on the same reported tier; a cycle spanning a tier change cannot calibrate capacity. A manual plan prices all selected dates but keeps tier calibrations separate. Older untagged history has no proved tier once tagged readings arrive; Claude and wholly untagged Codex histories use the current-plan fallback.",
     `Plan prices were reviewed on ${plansReviewedAt}. Team, Enterprise and Business seats are treated as paid by the employer: they show API value without a personal multiple unless you say you pay. Plan and payer choices stay in this browser.`,
   ]) list.append(el("li", text));
   details.append(list);

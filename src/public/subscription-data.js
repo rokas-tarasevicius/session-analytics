@@ -80,11 +80,12 @@ export function buildMeters(observations, now, infos = []) {
       const info = labels.get(key);
       meter = {
         key, provider: observation.provider, account, meter: observation.meter, label: info?.label ?? meterLabel(observation.meter),
-        windowMinutes: observation.windowMinutes, retired: info?.retired ?? false, readings: [],
+        windowMinutes: observation.windowMinutes, retired: info?.retired ?? false, readings: [], planReadings: [],
       };
       meters.set(key, meter);
     }
     meter.windowMinutes ??= observation.windowMinutes;
+    if (observation.planType) meter.planReadings.push({ t: observation.observedAt, planType: observation.planType });
     if (observation.status !== "idle") meter.readings.push(observation);
     else meter.idleAt = Math.max(meter.idleAt ?? 0, observation.observedAt);
   }
@@ -114,6 +115,8 @@ function cyclesOf(readings, window, now) {
       const previous = instants.get(reading.observedAt);
       instants.set(reading.observedAt, {
         t: reading.observedAt, used: Math.max(previous?.used ?? 0, reading.usedPercent),
+        planType: previous?.planType && reading.planType && previous.planType !== reading.planType
+          ? "other" : previous?.planType ?? reading.planType ?? null,
         status: previous && statusRank[previous.status] > statusRank[reading.status] ? previous.status : reading.status,
       });
     }
@@ -151,13 +154,17 @@ function cyclesOf(readings, window, now) {
  * readings on either side of it.
  */
 function segmentsOf(samples, start, end) {
-  const groups = [{ start, before: null, samples: [] }];
+  const groups = [{ start, before: null, baseline: null, samples: [] }];
   let top = -Infinity;
   samples.forEach((sample, index) => {
     const group = groups.at(-1), next = samples[index + 1], floor = top - resetDrop;
-    if (group.samples.length && sample.used <= floor && (next ? next.used <= floor : sample.used <= top / 2)) {
+    if (group.samples.length && sample.planType !== group.samples.at(-1).planType) {
+      // A tier change is no evidence of a redeemed reset. Pace starts at the first reading of the new context.
+      groups.push({ start: sample.t, before: null, baseline: sample, samples: [] });
+      top = -Infinity;
+    } else if (group.samples.length && sample.used <= floor && (next ? next.used <= floor : sample.used <= top / 2)) {
       const before = group.samples.at(-1);
-      groups.push({ start: (before.t + sample.t) / 2, before, samples: [] });
+      groups.push({ start: (before.t + sample.t) / 2, before, baseline: null, samples: [] });
       top = -Infinity;
     }
     groups.at(-1).samples.push(sample);
@@ -166,7 +173,7 @@ function segmentsOf(samples, start, end) {
   return groups.map((group, index) => {
     const close = groups[index + 1]?.start ?? end;
     return {
-      start: group.start, end: close, before: group.before, samples: group.samples,
+      start: group.start, end: close, before: group.before, baseline: group.baseline, samples: group.samples,
       peak: Math.max(...group.samples.map((sample) => sample.used)), last: group.samples.at(-1),
       cappedAt: group.samples.find(isCapped)?.t ?? null, lockouts: lockoutsOf(group.samples, close),
     };
@@ -226,7 +233,8 @@ export function liveMeter(meter, now, reportedUntil = null, { project = true } =
   const unreported = reportedUntil !== null && last.t < reportedUntil - 2 * HOUR;
   const state = unreported ? "unreported" : last.status === "overage" ? "overage" : isCapped(last) ? "capped" : "active";
   const minimum = window > 0 && window <= 6 * HOUR ? 5 * 60 : HOUR;
-  const rate = used / Math.max(minimum, now - segment.start); // percent per second
+  const movement = Math.max(0, used - (segment.baseline?.used ?? 0));
+  const rate = movement / Math.max(minimum, now - segment.start); // percent per second
   const stale = unreported || now - last.t > Math.max(HOUR, window * 0.1);
   // A burst extrapolated across a week is noise: project once two readings and a tenth of the window are behind us.
   const tooEarly = segment.samples.length < 2 || (window > 0 && now - segment.start < window * 0.1);
@@ -234,7 +242,7 @@ export function liveMeter(meter, now, reportedUntil = null, { project = true } =
   const projected = project && !tooEarly && !stale ? used + rate * remaining : null;
   const capAt = levelsOnly ? null : state === "capped" ? segment.cappedAt ?? last.t
     : state === "active" && projected !== null && projected > 100 && rate > 0 ? now + Math.max(0, 100 - used) / rate : null;
-  const lastRate = used / Math.max(minimum, last.t - segment.start);
+  const lastRate = movement / Math.max(minimum, last.t - segment.start);
   // The same evidence a projection needs, measured up to the last reading: a burst right after a reset says nothing.
   const evidenced = segment.samples.length >= 2 && last.t - segment.start >= Math.max(HOUR, window * 0.1);
   // Too early to project, but already used up fast: half of it, or 15% (a day's even share of a week) at three times the even pace.
@@ -245,7 +253,7 @@ export function liveMeter(meter, now, reportedUntil = null, { project = true } =
   const burnAt = runsOut !== null && runsOut < resetsAt - 15 * 60 ? runsOut : null;
   return {
     meter, cycle, segment, state, used, rate, remaining, projected, tooEarly, stale, capAt, burnAt, levelsOnly, confirmedIdle: false, lastResetAt: null,
-    elapsed: Math.min(1, Math.max(0, (now - segment.start) / Math.max(1, resetsAt - segment.start))),
+    elapsed: ((segment.baseline?.used ?? 0) + (100 - (segment.baseline?.used ?? 0)) * Math.min(1, Math.max(0, (now - segment.start) / Math.max(1, resetsAt - segment.start)))) / 100,
     capsEarly: state === "active" && capAt !== null && capAt < resetsAt - 15 * 60,
     // No recent reading, but the pace before the last one would have used the allowance up by now.
     mayBeUsedUp: project && state === "active" && stale && evidenced && used + lastRate * (Math.min(now, resetsAt) - last.t) >= 100,
@@ -420,9 +428,13 @@ function calibrationSample({ samples }) {
  * the segment start to that reading. Segments whose value explains almost none of the movement are dropped as outliers,
  * and the median of the rest needs `calibrationMinimum` segments.
  */
-export function calibrate(meter, value) {
+export function calibrate(meter, value, planType = undefined) {
+  if (planType === "other") return emptyCalibration();
   const candidates = [];
   for (const cycle of meter?.cycles ?? []) {
+    // A cycle spanning tiers has no reliable zero baseline for either allowance.
+    const plans = new Set(cycle.samples.map((sample) => sample.planType ?? null));
+    if (plans.size > 1 || (planType !== undefined && !plans.has(planType))) continue;
     for (const segment of cycle.segments) {
       const sample = calibrationSample(segment);
       if (!sample) continue;
@@ -448,8 +460,9 @@ const emptyCalibration = () => ({ perPercent: null, cycles: 0, excluded: 0, poin
  * account's banked count across an early reset attributes it to a redeemed credit.
  */
 export function resetHistory(meter, perPercent = null, creditHistory = []) {
-  const { redeemed, worth, limit } = resetContext(meter, perPercent, creditHistory);
   return (meter?.cycles ?? []).filter((cycle) => cycle.closed).map((cycle) => {
+    const rate = typeof perPercent === "function" ? perPercent(cycle) : perPercent;
+    const { redeemed, worth, limit } = resetContext(meter, rate, creditHistory);
     const closing = cycle.segments.at(-1);
     const lowerBound = closing.peak < 100 && cycle.end - closing.last.t > limit;
     const restored = cycle.endedEarly && !lowerBound ? Math.min(100, closing.last.used) : null;
@@ -457,7 +470,7 @@ export function resetHistory(meter, perPercent = null, creditHistory = []) {
     return {
       resetsAt: cycle.resetsAt, start: cycle.start, end: cycle.end, peak: Math.min(100, closing.peak), lowerBound, endedEarly: cycle.endedEarly,
       cause: cycle.endedEarly ? (redeemed(closing.last.t, cycle.end) ? "credit" : "unknown") : null,
-      restored, restoredUsd: worth(restored), inPlace: inPlaceResets(meter, cycle, perPercent, creditHistory),
+      restored, restoredUsd: worth(restored), inPlace: inPlaceResets(meter, cycle, rate, creditHistory),
       capped: cycle.cappedAt !== null, lockedSeconds: lockedSeconds(cycle),
       expired, expiredUsd: worth(expired),
     };
@@ -476,7 +489,7 @@ function resetContext(meter, perPercent, creditHistory) {
 /** In-place resets inside a cycle, live or closed. Each restores the level before the fall, never counted as waste. */
 export function inPlaceResets(meter, cycle, perPercent = null, creditHistory = []) {
   const { redeemed, worth, limit } = resetContext(meter, perPercent, creditHistory);
-  return cycle.segments.slice(1).map((segment) => {
+  return cycle.segments.slice(1).filter((segment) => segment.before).map((segment) => {
     const level = segment.before.used >= 100 || segment.samples[0].t - segment.before.t <= limit ? Math.min(100, segment.before.used) : null;
     return { at: segment.start, restored: level, restoredUsd: worth(level), cause: redeemed(segment.before.t, segment.samples[0].t) ? "credit" : "provider" };
   });
@@ -609,7 +622,7 @@ export const compareUrgency = (left, right) => left.rank - right.rank || (left.a
 export function meterPace(live, now) {
   if (!live?.cycle) return null;
   const { cycle } = live;
-  const spent = cycle.segments.slice(1).reduce((total, segment) => total + Math.min(100, segment.before.used), 0) + Math.min(100, live.used);
+  const spent = cycle.segments.slice(1).filter((segment) => segment.before).reduce((total, segment) => total + Math.min(100, segment.before.used), 0) + Math.min(100, live.used);
   return {
     segment: (live.rate ?? 0) * HOUR,
     cycle: spent / Math.max(1, (Math.min(now, cycle.resetsAt) - cycle.start) / HOUR),
@@ -635,6 +648,29 @@ const duration = (seconds) => {
 };
 export { duration as formatDuration };
 
+function readingPlanPeriods(meters, from, to) {
+  const instants = new Map();
+  for (const meter of meters) for (const row of meter.planReadings ?? []) {
+    const previous = instants.get(row.t);
+    instants.set(row.t, previous && previous !== row.planType ? "other" : row.planType);
+  }
+  const changes = [];
+  for (const [at, planType] of [...instants].sort((a, b) => a[0] - b[0])) {
+    if (at > to) continue;
+    if (changes.at(-1)?.planType !== planType) changes.push({ at, planType });
+  }
+  if (!changes.length) return [{ from, to, planType: null }];
+  const periods = [];
+  let start = from, planType = null;
+  for (const change of changes) {
+    if (change.at <= from) { planType = change.planType; continue; }
+    periods.push({ from: start, to: change.at, planType });
+    start = change.at; planType = change.planType;
+  }
+  periods.push({ from: start, to, planType });
+  return periods;
+}
+
 /**
  * Everything the Subscription view and `limits` report show for one account. `sessions` are the account's own sessions
  * (`attributeSessions`); `range` is the selected period in Unix seconds, clamped here to the account's first reading and to
@@ -642,22 +678,47 @@ export { duration as formatDuration };
  * account's value in the range before its first reading, which is therefore not counted; `value.sessions` counts the
  * sessions active in the counted period.
  */
-export function accountUtilization({ account, meters, sessions = [], timeZone = "UTC", now, range, planId = account.plan, payer = null, creditHistory = [], basis = "none" }) {
+export function accountUtilization({ account, meters, sessions = [], timeZone = "UTC", now, range, planId = account.plan, planOverride = false, payer = null, creditHistory = [], basis = "none" }) {
   const own = meters.filter((meter) => meter.provider === account.provider && meter.account === account.key);
   const real = identified(account.key);
   const weekly_ = own.find((meter) => meter.meter === weeklyMeter) ?? null;
   const session_ = own.find((meter) => meter.meter === sessionMeter) ?? null;
   const value = hourlyValue(real ? sessions : [], timeZone);
-  const calibration = real && weekly_ ? calibrate(weekly_, value) : emptyCalibration();
-  const sessionCalibration = real && session_ ? calibrate(session_, value) : null;
+  const tagged = account.provider === "codex" && own.some((meter) => meter.planReadings?.length);
+  const currentType = tagged ? readingPlanPeriods(own, 0, now)?.at(-1)?.planType ?? null : undefined;
+  const byPlan = new Map();
+  const forPlan = (type) => {
+    if (!byPlan.has(type)) byPlan.set(type, real && weekly_ ? calibrate(weekly_, value, type) : emptyCalibration());
+    return byPlan.get(type);
+  };
+  const calibration = forPlan(currentType);
+  const sessionCalibration = real && session_ ? calibrate(session_, value, currentType) : null;
   const reportedUntil = latestReading(own);
   const live = own.map((meter) => liveMeter(meter, now, reportedUntil, { project: real }));
   const weekly = weekly_ ? live[own.indexOf(weekly_)] : null, session = session_ ? live[own.indexOf(session_)] : null;
-  const history = weekly_ ? resetHistory(weekly_, calibration.perPercent, creditHistory) : [];
+  const cycleRate = (cycle) => {
+    const types = new Set(cycle.samples.map((sample) => sample.planType ?? null));
+    return types.size === 1 ? forPlan(tagged ? cycle.samples[0].planType ?? null : undefined).perPercent : null;
+  };
+  const history = weekly_ ? resetHistory(weekly_, cycleRate, creditHistory) : [];
   const first = firstReading(own);
   const from = Math.max(range.from, first ?? range.to), to = Math.max(from, Math.min(range.to, now));
   const days = (to - from) / DAY;
   const measured = real && basis !== "none";
+  const periods = tagged ? readingPlanPeriods(own, from, to) : null;
+  const periodEconomics = (period) => economics({
+    provider: account.provider, planId: planOverride ? planId : period.planType, payer,
+    perPercent: forPlan(period.planType).perPercent,
+    extracted: measured ? value.between(period.from, period.to) : null, days: (period.to - period.from) / DAY,
+  });
+  const money = economics({ provider: account.provider, planId, payer, perPercent: calibration.perPercent, extracted: measured ? value.between(from, to) : null, days });
+  const economicPeriods = periods?.map(periodEconomics) ?? [money];
+  if (periods) {
+    money.price = economicPeriods.every((period) => period.price !== null) ? economicPeriods.reduce((sum, period) => sum + period.price, 0) : null;
+    money.potential = economicPeriods.every((period) => period.potential !== null) ? economicPeriods.reduce((sum, period) => sum + period.potential, 0) : null;
+    money.multiple = economicPeriods.every((period) => period.price > 0) && money.extracted !== null ? money.extracted / money.price : null;
+    money.utilization = money.potential > 0 && money.extracted !== null ? money.extracted / money.potential : null;
+  }
   return {
     account, key: account.key, provider: account.provider, label: account.label, identified: real, planId,
     meters: own, weeklyMeter: weekly_, sessionMeter: session_, weekly, session, live, history,
@@ -665,7 +726,7 @@ export function accountUtilization({ account, meters, sessions = [], timeZone = 
     windows: session_ ? sessionWindows(session_, now) : null,
     calibration, sessionCalibration,
     resets: bankedResets({ provider: account.provider, summary: account.codex, weekly, session, perPercent: calibration.perPercent, sessionPerPercent: sessionCalibration?.perPercent ?? null, now }),
-    economics: economics({ provider: account.provider, planId, payer, perPercent: calibration.perPercent, extracted: measured ? value.between(from, to) : null, days }),
+    economics: money, ...(periods ? { economicPeriods } : {}),
     period: { from, to, days, firstReading: first },
     value: {
       basis: real ? basis : "none", sessions: measured ? activeSessions(sessions, from, to, timeZone) : 0,
@@ -686,13 +747,17 @@ export function subscriptionTotals(items, unattributed = { claude: 0, codex: 0 }
   const measured = items.filter((item) => item.identified && !item.excluded && item.economics.extracted !== null);
   const included = measured.filter((item) => item.period.days > 0);
   const sum = (list, pick) => list.reduce((total, item) => total + (pick(item) ?? 0), 0);
-  const priced = included.filter((item) => item.economics.price !== null && item.economics.monthlyPrice > 0);
   const calibrated = included.filter((item) => item.economics.potential !== null);
-  const pricedPotential = priced.filter((item) => item.economics.monthlyPotential !== null);
-  const otherPotential = calibrated.filter((item) => !pricedPotential.includes(item));
-  const organization = included.filter((item) => item.economics.payer === "organization");
-  const unpriced = included.filter((item) => !priced.includes(item) && item.economics.payer !== "organization");
-  const price = sum(priced, (item) => item.economics.price), pricedValue = sum(priced, (item) => item.economics.extracted);
+  const currentCalibrated = included.filter((item) => item.economics.monthlyPotential !== null);
+  const pricedPotential = currentCalibrated.filter((item) => item.economics.monthlyPrice > 0);
+  const otherPotential = currentCalibrated.filter((item) => !pricedPotential.includes(item));
+  const organization = included.filter((item) => (item.economicPeriods ?? [item.economics]).some((period) => period.payer === "organization"));
+  const unpriced = included.filter((item) => (item.economicPeriods ?? [item.economics]).some((period) => period.payer !== "organization" && !(period.price > 0)));
+  const allPeriods = included.flatMap((item) => item.economicPeriods ?? [item.economics]);
+  const paidPeriods = allPeriods.filter((period) => period.price > 0 && period.extracted !== null);
+  const price = paidPeriods.reduce((total, period) => total + period.price, 0), pricedValue = paidPeriods.reduce((total, period) => total + period.extracted, 0);
+  const paidAccounts = included.filter((item) => (item.economicPeriods ?? [item.economics]).some((period) => paidPeriods.includes(period))).length;
+  const periodValue = (test) => allPeriods.filter(test).reduce((total, period) => total + (period.extracted ?? 0), 0);
   const potential = sum(calibrated, (item) => item.economics.potential);
   const monthlyPrice = sum(pricedPotential, (item) => item.economics.monthlyPrice);
   const reset = included.filter((item) => item.utilization);
@@ -700,9 +765,9 @@ export function subscriptionTotals(items, unattributed = { claude: 0, codex: 0 }
     extracted: sum(included, (item) => item.economics.extracted),
     unattributed: (unattributed.claude ?? 0) + (unattributed.codex ?? 0),
     beforeReadings: sum(measured, (item) => item.value.before),
-    priced: { accounts: priced.length, extracted: pricedValue, price, multiple: price > 0 ? pricedValue / price : null },
-    organization: { accounts: organization.length, extracted: sum(organization, (item) => item.economics.extracted) },
-    unpriced: { accounts: unpriced.length, extracted: sum(unpriced, (item) => item.economics.extracted) },
+    priced: { accounts: paidAccounts, extracted: pricedValue, price, multiple: price > 0 ? pricedValue / price : null },
+    organization: { accounts: organization.length, extracted: periodValue((period) => period.payer === "organization") },
+    unpriced: { accounts: unpriced.length, extracted: periodValue((period) => period.payer !== "organization" && !(period.price > 0)) },
     monthlyPotential: pricedPotential.length ? sum(pricedPotential, (item) => item.economics.monthlyPotential) : null, monthlyPrice,
     potentialMultiple: monthlyPrice > 0 ? sum(pricedPotential, (item) => item.economics.monthlyPotential) / monthlyPrice : null,
     otherMonthlyPotential: otherPotential.length ? sum(otherPotential, (item) => item.economics.monthlyPotential) : null,
@@ -730,7 +795,7 @@ export function subscriptionModel({ limits, sessions, timeZone = "UTC", now, ran
     return {
       ...accountUtilization({
         account, meters, sessions: own, timeZone, now, range, planId: override === "none" ? null : override || account.plan,
-        payer: payers[account.key] ?? null, creditHistory: limits?.resetCreditHistory ?? [], basis,
+        planOverride: Boolean(override && override !== "none"), payer: payers[account.key] ?? null, creditHistory: limits?.resetCreditHistory ?? [], basis,
       }),
       excluded: override === "none",
     };

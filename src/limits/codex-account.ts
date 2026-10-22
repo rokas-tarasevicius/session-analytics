@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import { codexAccountKey, codexPlan, enumValue } from "./accounts.ts";
+import { codexAccountKey, codexPlan, codexReadingPlan, enumValue } from "./accounts.ts";
 import { codexLimitId, codexMeter, limitName } from "./sources.ts";
 import type { CodexAccountState, CodexPlan, LimitObservation } from "./types.ts";
 
@@ -32,7 +32,7 @@ export function codexAccountState(value: unknown, observedAt: number): CodexAcco
       if (used === null || resetsAt === null) continue;
       observations.push({
         provider: "codex", account: "", meter: codexMeter(limitId, minutes), windowMinutes: minutes !== null && minutes > 0 ? Math.round(minutes) : null,
-        resetsAt, observedAt, usedPercent: used, status: used >= 100 ? "rejected" : "allowed", source: "codex-account",
+        resetsAt, observedAt, usedPercent: used, status: used >= 100 ? "rejected" : "allowed", source: "codex-account", planType: codexReadingPlan(limits["planType"]),
       });
     }
     plan = codexPlan(limits["planType"]) ?? plan;

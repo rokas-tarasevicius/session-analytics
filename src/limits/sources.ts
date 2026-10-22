@@ -3,7 +3,7 @@ import { createReadStream, type Stats } from "node:fs";
 import { open, opendir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { codexPlan, enumValue } from "./accounts.ts";
+import { codexPlan, codexReadingPlan, enumValue } from "./accounts.ts";
 import type { Cursor } from "./ledger.ts";
 import type { ClaudeAccountSummary, CodexAccountState, CodexPlan, LimitObservation, LimitStatus } from "./types.ts";
 
@@ -63,7 +63,7 @@ export function codexLimitRecord(value: unknown): CodexLimitRecord | null {
     if (resetsAt === null) continue;
     observations.push({
       provider: "codex", account: "", meter: codexMeter(limits["limit_id"], windowMinutes), windowMinutes, resetsAt, observedAt,
-      usedPercent: used, status: used >= 100 || (reached && used >= 99.5) ? "rejected" : "allowed", source: "codex-session",
+      usedPercent: used, status: used >= 100 || (reached && used >= 99.5) ? "rejected" : "allowed", source: "codex-session", planType: codexReadingPlan(limits["plan_type"]),
     });
   }
   const plan = codexPlan(limits["plan_type"]);

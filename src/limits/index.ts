@@ -260,7 +260,7 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   for (const key of Object.keys(accounts)) if (!live.has(key) && !Object.values(profiles).includes(key) && ![...claudeAccounts.values()].includes(key)) delete accounts[key];
   const homes = Object.fromEntries([...creators].filter(([, seen]) => seen.size).map(([key, seen]) => [key, [...seen].sort()]));
   const next: Ledger = {
-    version: 2, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases,
+    version: 3, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases,
     creators: { ...base.creators, ...homes }, limitNames,
     rows: rows.map(toRow), resetCreditHistory: resetCreditHistory(history.map((row) => [row[0], rekey(row[1]), row[2], row[3]])), codexAccountReadAt,
     sourceLatest: advanceSources(base.sourceLatest, [...fresh, ...imported]),

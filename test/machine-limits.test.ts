@@ -195,7 +195,7 @@ test("limits reads every saved machine: one account across machines is one accou
   for (const file of ["agentbox.limits.json", "box2.limits.json"]) assert.equal(statSync(join(dir, "machines", file)).mode & 0o777, 0o600);
   const cached = JSON.parse(readFileSync(join(dir, "machines", "agentbox.limits.json"), "utf8")) as { limits: LimitsSnapshot };
   assert.ok(cached.limits.accounts.every((item) => !item.profileNames.length && !/ · (?:default|fluxary)$/.test(item.label)), "profile names are never stored");
-  const everything = JSON.stringify(merged) + readFileSync(join(dir, "limits-v2.json"), "utf8") + readFileSync(join(dir, "machines", "agentbox.limits.json"), "utf8");
+  const everything = JSON.stringify(merged) + readFileSync(join(dir, "limits-v3.json"), "utf8") + readFileSync(join(dir, "machines", "agentbox.limits.json"), "utf8");
   for (const secret of ["SECRET", "example.com", localHome, agentHome, session(1), session(11)]) assert.equal(everything.includes(secret), false, secret);
 
   const text = cli(["limits", "--data-dir", dir]);
@@ -446,7 +446,7 @@ test("Sources describe this machine: readings folded in from another machine nev
   const bare = await codexSource("sources-bare", now, join(home, "no-codex", "sessions"));
   assert.deepEqual([bare.status, bare.latest], ["unavailable", null]);
   // A ledger from before other machines were folded in holds only this machine's readings, so they are its sources' too.
-  const path = join(data("sources-old"), "limits-v2.json");
+  const path = join(data("sources-old"), "limits-v3.json");
   await collectLimits(options("sources-old"), { HOME: home }, now - 60);
   const { sourceLatest: _, ...older } = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   writeFileSync(path, JSON.stringify(older));
@@ -468,4 +468,16 @@ test("a machine reached twice, or this machine reached as another, counts once",
   const own = cli(["limits", "--json", "--no-remote", "--identify-machine", "--data-dir", dir], { SESSION_ANALYTICS_MACHINE_ID: "fixture-machine" });
   assert.match(JSON.parse(own.stdout).machines[0].identity, /^[0-9a-f]{16}$/);
   assert.match(cli(["limits", "--json", "--identify-machine", "--data-dir", dir]).stderr, /--identify-machine describes this machine's own readings; use it with --json --no-remote/);
+});
+
+test("remote per-reading plan evidence is revalidated before API output and ledger storage", () => {
+  const sentinel = "private_sentinel_content";
+  const snapshot = emptyLimitsSnapshot("live", now);
+  const row: LimitObservation = { provider: "codex", account: keys.codex, meter: "seven_day", windowMinutes: 10_080,
+    resetsAt: now + 86_400, observedAt: now, usedPercent: 20, status: "allowed", source: "codex-session", planType: "plus" };
+  const valid = validateLimitsSnapshot({ ...snapshot, observations: [row] });
+  assert.equal(valid.observations[0]!.planType, "plus");
+  const unsafe = validateLimitsSnapshot({ ...snapshot, observations: [{ ...row, planType: sentinel, prompt: sentinel }] });
+  assert.equal(unsafe.observations[0]!.planType, "other");
+  assert.doesNotMatch(JSON.stringify(unsafe), /private_sentinel_content/);
 });

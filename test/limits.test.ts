@@ -139,7 +139,7 @@ test("harvest is incremental, persists a private ledger, and returns no paths, i
   assert.equal(first.persisted, true);
   assert.equal(first.plans.codex, "plus");
   assert.deepEqual(first.observations.map((item) => `${item.provider}:${item.meter}:${item.usedPercent}`).sort(), ["claude:five_hour:30", "codex:seven_day:50"]);
-  assert.equal(statSync(join(dataDir, "limits-v2.json")).mode & 0o777, 0o600);
+  assert.equal(statSync(join(dataDir, "limits-v3.json")).mode & 0o777, 0o600);
   const serialized = JSON.stringify(first) + JSON.stringify(readLedger(dataDir));
   for (const secret of ["SECRET", home, "rollout", "session_id"]) assert.equal(serialized.includes(secret), false, secret);
 
@@ -258,4 +258,21 @@ process.stdin.on("data", (chunk) => {
   assert.equal(codex(second)?.codex?.resetCredits?.available, 2, "throttled reads keep the last account state");
   const sent = readFileSync(methods, "utf8").trim().split("\n");
   assert.deepEqual(sent, ["initialize", "initialized", "account/rateLimits/read"], "one read, and never account/rateLimitResetCredit/consume");
+});
+
+test("per-reading Codex plans are a closed allowlist in sources, ledger, and remote output", () => {
+  const sentinel = "private_sentinel_branch_and_prompt";
+  const session = codexLimitRecord(JSON.parse(codexLine(new Date(now * 1000).toISOString(), {
+    primary: { used_percent: 20, window_minutes: 10080, resets_at: now + 86_400 }, plan_type: sentinel,
+  })))!;
+  const rows = compactObservations(session.observations, now);
+  assert.equal(rows[0]!.planType, "other");
+  assert.doesNotMatch(JSON.stringify(rows), /private_sentinel/);
+  const account = codexAccountState({ rateLimits: { planType: sentinel, primary: { usedPercent: 30, windowDurationMins: 10080, resetsAt: now + 86_400 } } }, now)!;
+  assert.equal(account.observations[0]!.planType, "other");
+  assert.doesNotMatch(JSON.stringify(account.observations), /private_sentinel/);
+  assert.equal(compactObservations([{ ...rows[0]!, planType: sentinel } as unknown as LimitObservation], now)[0]!.planType, "other");
+  assert.equal(codexLimitRecord(JSON.parse(codexLine(new Date(now * 1000).toISOString(), {
+    primary: { used_percent: 20, window_minutes: 10080, resets_at: now + 86_400 }, plan_type: "pro",
+  })))!.observations[0]!.planType, "pro");
 });
