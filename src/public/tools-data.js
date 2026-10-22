@@ -19,12 +19,14 @@ export function buildToolOrigins(sessions) {
     for (const [name, value] of Object.entries(session.tools)) {
       const count = callCount(value);
       if (!count) continue;
-      const match = /^mcp__([^\s]+?)__(\S+)$/.exec(name);
-      const origin = match ? mcp : other;
+      const separator = name.startsWith("mcp__") ? name.indexOf("__", 5) : -1;
+      const serverName = separator > 5 && separator + 2 < name.length && !/\s/.test(name)
+        ? name.slice(5, separator) : null;
+      const origin = serverName ? mcp : other;
       origin.calls += count; used.add(origin);
-      if (match) {
-        const server = servers.get(match[1]) ?? group(match[1]);
-        server.calls += count; used.add(server); servers.set(match[1], server);
+      if (serverName) {
+        const server = servers.get(serverName) ?? group(serverName);
+        server.calls += count; used.add(server); servers.set(serverName, server);
       }
     }
     for (const row of used) { row.sessions++; row.repositories.add(session.repositoryId); }

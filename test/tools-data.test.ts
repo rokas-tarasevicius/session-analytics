@@ -66,6 +66,28 @@ test("MCP origins require a complete case-sensitive prefix, ignore invalid count
   assert.equal(result.groups[1]!.calls, 5);
 });
 
+test("MCP origins split at the first separator and leave incomplete names in Other tool names", () => {
+  const malformed = ["mcp____read", "mcp____read__extra", "mcp______run", "mcp__server", "mcp__server__"];
+  for (const name of malformed) {
+    const result = buildToolOrigins([session({ [name]: 1 })]);
+    assert.deepEqual(result.servers, [], name);
+    assert.equal(result.groups[0]!.calls, 0, name);
+    assert.equal(result.groups[1]!.calls, 1, name);
+  }
+  // Extra separators belong to the tool suffix; single underscores belong to the server.
+  const valid = buildToolOrigins([session({ mcp__a__b__c: 2, mcp__a_b__c: 1 })]);
+  assert.deepEqual(valid.servers.map(({ name, calls }) => [name, calls]), [["a", 2], ["a_b", 1]]);
+});
+
+test("MCP origin splitting handles long and non-ASCII names without reading past the first separator", () => {
+  // Direct helper inputs exercise splitting; public source projections already bound tool names.
+  const suffix = "x".repeat(10_000);
+  const result = buildToolOrigins([session({ [`mcp__long__${suffix}`]: 2, "mcp__資料__read": 1,
+    [`mcp____${suffix}__read`]: 3 })]);
+  assert.deepEqual(result.servers.map(({ name, calls }) => [name, calls]), [["long", 2], ["資料", 1]]);
+  assert.equal(result.groups[1]!.calls, 3);
+});
+
 test("MCP rendering uses names and counters only, with explicit denominators and no transcript content", async () => {
   const input = session({ mcp__github__read: 3 });
   Object.assign(input, { arguments: "PRIVATE_TOOL_ARGUMENT_SENTINEL", result: "PRIVATE_TOOL_RESULT_SENTINEL" });
