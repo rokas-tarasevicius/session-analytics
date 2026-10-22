@@ -32,6 +32,22 @@ const warningLabels = {
   "rejected-models": "Some source entries failed price validation.",
 };
 
+/** Shared freshness copy for the Pricing view and hypothetical Costs estimate. */
+export function pricingFreshness(rateCard, options = {}) {
+  const status = rateCard?.pricing;
+  if (!status) return null;
+  const mode = status.policy === "reviewed-only" ? "Reviewed card only; public sources bypassed"
+    : status.offline ? "Cached prices only; no public price requests" : "Checked at startup, every 6 hours and on refresh";
+  const updateAvailable = options.pricingUpdate?.updateAvailable === true && !status.offline && status.policy !== "reviewed-only";
+  const title = status.stale || updateAvailable ? "Pricing evidence needs a refresh"
+    : status.warnings.length ? "Pricing evidence has warnings" : null;
+  const detail = updateAvailable
+    ? `New prices were cached${options.pricingUpdate.fetchedAt ? ` ${date(options.pricingUpdate.fetchedAt, options.timeZone)}` : ""}. Refresh snapshot to apply them; displayed totals stay unchanged until then.` : status.stale
+    ? `A source is missing or older than ${status.refreshAfterDays} days. Cached and reviewed rates remain usable.`
+    : status.warnings.length ? "Some fetched rates were rejected or changed substantially. Inspect rates diff for details." : null;
+  return { mode, updateAvailable, title, detail };
+}
+
 function providerHeading(provider) {
   const heading = el("span", null, "pricing-provider");
   heading.append(providerMark(provider), el("span", providerLabels[provider] ?? "Unknown provider"));
@@ -176,18 +192,13 @@ export function renderPricingPanel(container, rateCard, sessions, window = {}, o
   container.replaceChildren();
   const status = rateCard.pricing;
   if (!status) { container.append(note("Pricing source details are unavailable for this snapshot.", "empty-line")); return; }
-  const mode = status.policy === "reviewed-only" ? "Reviewed card only; public sources bypassed"
-    : status.offline ? "Cached prices only; no public price requests" : "Checked at startup, every 6 hours and on refresh";
-  const updateAvailable = options.pricingUpdate?.updateAvailable === true && !status.offline && status.policy !== "reviewed-only";
-  if (status.stale || updateAvailable || status.warnings.length) {
+  const { mode, updateAvailable, title, detail } = pricingFreshness(rateCard, options);
+  if (title) {
     const warning = el("aside", null, "notice pricing-notice");
     warning.setAttribute("role", "status");
     const body = el("div");
-    body.append(el("strong", status.stale || updateAvailable ? "Pricing evidence needs a refresh" : "Pricing evidence has warnings"));
-    body.append(el("p", updateAvailable
-      ? `New prices were cached${options.pricingUpdate.fetchedAt ? ` ${date(options.pricingUpdate.fetchedAt, options.timeZone)}` : ""}. Refresh snapshot to apply them; displayed totals stay unchanged until then.` : status.stale
-      ? `A source is missing or older than ${status.refreshAfterDays} days. Cached and reviewed rates remain usable.`
-      : "Some fetched rates were rejected or changed substantially. Inspect rates diff for details."));
+    body.append(el("strong", title));
+    body.append(el("p", detail));
     const instructions = el("p");
     if (status.policy === "reviewed-only") instructions.textContent = "The reviewed card is pinned; public pricing sources are bypassed.";
     else instructions.append(

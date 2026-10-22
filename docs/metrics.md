@@ -149,6 +149,42 @@ The Claude Opus 5.5 entry prices cache hits at 0.05x base input ($0.20 per milli
 
 Current Cursor builds keep global composer headers in a `composerHeaders` table that maps each composer to its workspace storage ID and marks subagent composers; older builds keep them in `ItemTable`. Both are read. Cursor local composer history exposes modern `bubbleId` token counters and stable `toolFormerData` tool-call IDs. `usageData.costInCents` is a provider-reported local usage value and may be aggregated by session, repository, and model. Bubble token counters are session-level because the local bubble schema does not retain a model identifier that can be joined safely to provider-reported model cost. It is not assigned to a day because the local store does not retain per-call cost timestamps. Relative timing values are not Unix timestamps and must not affect session spans. Cursor composer API rate coverage remains not applicable; the SDK source below has separate semantics.
 
+### Hypothetical model pricing (Costs)
+
+The Costs what-if panel computes a **hypothetical API list-price equivalent**, not a bill, observed usage value,
+or savings forecast. It applies another model's currently resolved ordinary rates from the snapshot's existing
+`rateCard.models` to the selected activity window and repository scope. For each dated or session-dated ledger cell,
+the amount is `(uncached input × input rate + cache reads × cached-input rate + output × output rate) / 1,000,000`.
+`cachedInputPerMillion` takes precedence over `cacheReadPerMillion`, including an explicit zero. Reasoning tokens
+are already included in output and are never added again. Unknown original models can participate when their token
+classes are observed; their original price coverage does not determine hypothetical target-rate coverage.
+
+Input participates only when the ledger's cache-read evidence covers its entire input denominator and its uncached,
+cached and cache-write counters reconcile to total input. Cache writes are always excluded: hourly cells do not
+retain their TTLs. A missing target class rate excludes that class, without substituting the input rate; an explicit
+zero rate is supported. Provider-reported sessions are excluded from the amount. **Not re-priced** counts all dated
+observed input plus output minus the re-priced classes, divided by all dated observed input plus output, including
+provider-reported tokens. The displayed excluded percentage rounds upward to 0.1%; exact token counts accompany it.
+No dated tokens means unavailable coverage; no re-priced tokens means an unavailable amount, never a free estimate.
+Undated tokens and sessions without a ledger are disclosed separately for the whole scope and never assigned to the window.
+
+The panel breaks the re-priced amount and token count down by **source vendor**. A ledger dimension's model is
+matched to `rateCard.models` (or its recorded pricing provenance's latest `rateModel` alias); the matched rate's
+`provider` establishes the vendor. Neither the session's agent/provider nor model-name text establishes a vendor:
+for example, Cursor can use a Claude model. A contribution is labelled **Cross-vendor comparison** when its source
+rate vendor differs from the comparison rate's `provider`. Only actually re-priced classes enter these amounts
+and counts; they sum to the hypothetical total and re-priced denominator. Missing source rate evidence remains
+an explicitly unknown-vendor contribution; it is never silently treated as same-vendor. This comparison holds the
+recorded tokens constant across vendors and does not establish what another vendor would have billed.
+
+Request context sizes are unavailable in the ledger, so long-context and tier premiums are omitted, rather than
+applied to an aggregate as if it were one request. Token counts and cache behavior are held constant; models can
+tokenize differently and have different capabilities. Current target rates do not reproduce historical tariffs.
+The selection lives only in browser memory. No snapshot field, accounting total, projection, or export changes.
+The estimate shares Pricing's freshness wording and state from `rateCard.pricing` and the existing `/api/health`
+pricing-update poll. Offline mode discloses that only cached prices are used; stale or newly cached prices carry
+the same refresh notice as Pricing. The hypothetical calculation stays available without presenting those rates as fresh.
+
 ## Additional provider evidence
 
 New sources populate the optional `evidence` namespace. `source` identifies the store; `fidelity` distinguishes message, summary, and activity-only evidence. `tokens` is reported/unavailable; `tools` and `turns` are observed/unavailable. `timing` distinguishes provider timestamps from file modification times. `usageUnit` describes request/run/session granularity, or unavailable. Original native-provider outputs keep their previous shape. Availability labels apply to existing numeric fields: an unavailable numeric placeholder is not an observation of zero activity. The terminal and dashboard share metric-specific eligibility: invalid/missing transcripts are ineligible; tools, compactions, tokens, requests, durations, and costs have separate coverage. Totals with no eligible sessions display N/A; partial totals carry eligible/selected counts. Only eligible values enter rankings. Successful parsing does not imply complete metric coverage. `evidence.accounting` is an optional complete/partial label for retained accounting, independent of parser success.
