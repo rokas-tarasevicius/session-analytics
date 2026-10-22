@@ -1845,7 +1845,7 @@ function renderShortcutHelp() {
       const row = node("div"), keys = node("dd");
       const bindings = item.id === "provider" ? [item.bindings[0], item.bindings.at(-1)] : item.bindings;
       bindings.forEach((binding, index) => {
-        if (index) keys.append(node("span", item.id === "provider" ? "–" : " / "));
+        if (index) keys.append(node("span", item.id === "provider" ? "–" : " or "));
         for (const key of (item.id === "provider" && index ? binding.keys.slice(1) : binding.keys)) keys.append(node("kbd", key === "Mod+k" ? (/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K") : key === "Escape" ? "esc" : key));
       });
       row.dataset.shortcutId = item.id;

@@ -33,7 +33,7 @@ function validateRegistry(registry) {
 export function shortcutHint(id, value = null) {
   const item = shortcutRegistry.find((item) => item.id === id);
   return item?.bindings.filter((binding) => value === null || binding.value === value)
-    .map((binding) => binding.keys.join(" ")).join(" / ") ?? "";
+    .map((binding) => binding.keys.map((key) => key === "Mod+k" ? "Mod+K" : key).join(" ")).join(" or ") ?? "";
 }
 
 /** Resolves an eligible global shortcut or chord prefix, without touching the DOM or app state. */

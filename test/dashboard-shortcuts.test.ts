@@ -20,7 +20,7 @@ test("every registry binding dispatches uniquely and supplies its palette hint",
       if (match.prefix) pending = match.prefix;
       else assert.deepEqual(match, { action: item.action, value: binding.value });
     }
-    assert.ok(shortcutHint(item.id, binding.value).includes(sequence), sequence);
+    assert.ok(shortcutHint(item.id, binding.value).includes(sequence.replace("Mod+k", "Mod+K")), sequence);
     const finalKey = binding.keys.at(-1)!;
     const event = finalKey === "Mod+k" ? { ...keyEvent("k"), metaKey: true } : keyEvent(finalKey);
     assert.equal(Boolean(matchShortcut(event, { enabled: false, pending })), binding.always, sequence);
@@ -55,6 +55,7 @@ test("typing, composition, held keys, and browser modifiers cannot fire characte
 test("documented global shortcuts exactly match the registry", async () => {
   const docs = await readFile(new URL("../docs/dashboard.md", import.meta.url), "utf8");
   const block = docs.split("<!-- global-shortcuts:start -->")[1]!.split("<!-- global-shortcuts:end -->")[0]!;
+  assert.equal(shortcutHint("palette"), "Mod+K or /");
   const rows = block.trim().split("\n").slice(2);
   assert.deepEqual(rows, shortcutRegistry.map((item) => `| \`${shortcutHint(item.id)}\` | ${item.label} |`));
 });
@@ -64,6 +65,8 @@ test("the help overlay and palette use registry labels and bindings", async () =
   run("renderShortcutHelp()");
   const rows = document.querySelector("#shortcut-list")!.querySelectorAll("dt");
   assert.deepEqual(rows.map((row) => row.textContent), shortcutRegistry.map((item) => item.label));
+  const paletteRow = rows.find((row) => row.textContent === "Command palette")?.parentElement;
+  assert.equal(paletteRow?.querySelector("dd")?.textContent.trim().replace(/\s+/g, " "), "Ctrl K or /");
   const views = run("paletteItems().filter(item => item.group === 'Views')");
   for (const item of views) {
     const view = item.keywords.split(" ")[1];

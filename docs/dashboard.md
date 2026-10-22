@@ -209,10 +209,10 @@ Press `?` or choose **Keyboard shortcuts** in the palette to open help. Its list
 | `g u` | Subscription |
 | `g t` | Tools |
 | `g a` | Activity |
-| `[ / ]` | Previous / next view |
-| `Mod+k / /` | Command palette |
-| `1 / 2 / 3 / 4` | Last 7 · 30 · 90 days · all |
-| `p 1 / p 2 / p 3 / p 4 / p 5 / p 6 / p 7 / p 8` | Toggle provider chips in order (Summary chart, Velocity, Tools, Activity) |
+| `[ or ]` | Previous / next view |
+| `Mod+K or /` | Command palette |
+| `1 or 2 or 3 or 4` | Last 7 · 30 · 90 days · all |
+| `p 1 or p 2 or p 3 or p 4 or p 5 or p 6 or p 7 or p 8` | Toggle provider chips in order (Summary chart, Velocity, Tools, Activity) |
 | `e` | Data coverage |
 | `Escape` | Clear repository focus / close dialog |
 | `t` | Switch theme |
