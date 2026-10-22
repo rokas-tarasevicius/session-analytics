@@ -170,9 +170,32 @@ test("refresh announces lifecycle outcomes and restores displaced focus without 
   assert.equal(focused, 1);
   context["fetchAnalytics"] = async () => { throw new Error("synthetic failure"); };
   await run("loadSnapshot(true)");
-  assert.equal(announcer.textContent, "Couldn't refresh. The previous snapshot is still displayed.");
-  assert.doesNotMatch(announcer.textContent, /synthetic failure/);
+  assert.equal(announcer.textContent, "");
   run("snapshot = null; sharedSnapshot = null");
   await run("loadSnapshot()");
-  assert.equal(announcer.textContent, "Analysis failed. No snapshot is available.");
+  assert.equal(announcer.textContent, "");
+});
+
+
+test("the error alert alone owns failed initial-load and refresh announcements", async () => {
+  for (const initial of [false, true]) {
+    const { document, context, run } = await harness([sample()]);
+    if (initial) run("snapshot = null; sharedSnapshot = null");
+    const statusWrites: string[] = [];
+    for (const id of ["snapshot-announcer", "view-announcer"]) {
+      let text = "";
+      Object.defineProperty(document.querySelector(`#${id}`)!, "textContent", {
+        get: () => text, set: (value: string) => { text = value; if (value) statusWrites.push(value); },
+      });
+    }
+    context["fetchAnalytics"] = async () => { throw new Error("HTTP 503"); };
+    await run("loadSnapshot(!" + initial + ")");
+    const alert = document.querySelector("#error-banner")!;
+    assert.equal(alert.getAttribute("role"), "alert");
+    assert.equal(alert.hidden, false);
+    assert.match(document.querySelector("#error-message")!.textContent, /HTTP 503/);
+    assert.deepEqual(statusWrites, [initial ? "Building snapshot." : "Refreshing snapshot."], "polite regions never duplicate the alert's failure");
+    assert.equal(document.querySelector("#snapshot-announcer")!.textContent, "");
+    assert.equal(document.querySelector("#view-announcer")!.textContent, "");
+  }
 });

@@ -1529,7 +1529,7 @@ function renderViewStatus(view) {
   clear(target);
   if (!snapshot && loadFailed) {
     emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
-    announce("No snapshot. The local analysis did not finish. Use Retry above.");
+    announce(""); // The error alert owns the failure announcement.
     target.hidden = false;
     return;
   }
@@ -2106,7 +2106,7 @@ async function loadSnapshot(refresh = false) {
     showReady(snapshot ? activeView() : null);
     elements.snapshotAnnouncer.textContent = previous || refresh ? "Snapshot refreshed." : "Snapshot ready.";
   } catch (error) {
-    elements.snapshotAnnouncer.textContent = previous ? "Couldn't refresh. The previous snapshot is still displayed." : "Analysis failed. No snapshot is available.";
+    elements.snapshotAnnouncer.textContent = ""; // The error alert owns the failure announcement.
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;
     if (previous) {
