@@ -150,7 +150,7 @@ async function connect(port: number, log: () => string = () => ""): Promise<{ br
   return { browser, close: () => socket.close() };
 }
 
-test("laptop tables fit and registry provider chips wrap within their header in both densities", { skip: browserSkip }, async (t) => {
+test("laptop tables and mobile fleet cards fit in both themes and densities", { skip: browserSkip }, async (t) => {
   assert.ok(existsSync(chromePath), `Required browser is missing: ${chromePath}`);
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-layout-"));
   let server: ChildProcess | null = null, chrome: ChildProcess | null = null;
@@ -223,6 +223,61 @@ test("laptop tables fit and registry provider chips wrap within their header in 
           assert.equal(chips.belowTitle, true, label);
         }
       }
+    }
+    // One table becomes cards only on narrow screens; keep every column, native sort control and row action.
+    await browser.evaluate(`document.querySelector('[data-view-button="summary"]').click()`);
+    for (const theme of ["light", "dark"]) for (const density of ["compact", "comfortable"]) for (const width of [375, 414, 768]) {
+      const label = `${width}px (${theme}, ${density})`;
+      await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.dataset.density = '${density}'`);
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1024, mobile: false, width });
+      await browser.until(`innerWidth`, width);
+      const layout = await browser.evaluate<{ scroll: number; client: number; pageFits: boolean; cards: boolean; fits: boolean; labels: string[]; targets: boolean; text: boolean }>(`(() => {
+        const panel = document.querySelector('#repository-comparison'), wrap = panel.querySelector('.table-wrap');
+        const rows = [...panel.querySelectorAll('tbody tr')], cells = rows.flatMap(row => [...row.cells]);
+        const rect = wrap.getBoundingClientRect();
+        return { scroll: wrap.scrollWidth, client: wrap.clientWidth, pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          cards: rows.every(row => getComputedStyle(row).display === 'grid'),
+          fits: cells.every(cell => { const r = cell.getBoundingClientRect(); return r.left >= rect.left && r.right <= rect.right && cell.scrollWidth <= cell.clientWidth; }),
+          labels: [...rows[0].querySelectorAll('.repository-cell-label')].map(label => label.textContent),
+          targets: [...panel.querySelectorAll('button')].every(button => button.getBoundingClientRect().height >= 44),
+          text: [...panel.querySelectorAll('.repository-cell-label, .sort')].every(el => parseFloat(getComputedStyle(el).fontSize) >= 12) };
+      })()`);
+      assert.ok(layout.scroll <= layout.client && layout.pageFits, `No fleet or page overflow at ${label}: ${JSON.stringify(layout)}`);
+      assert.ok(layout.cards && layout.fits && layout.targets && layout.text, `Readable cards, complete long names and touch targets at ${label}: ${JSON.stringify(layout)}`);
+      assert.deepEqual(layout.labels, ["Sessions", "Usage value", "Input", "Output", "Tools", "Cache", "Priced"], label);
+    }
+    // Keyboard sorting uses the same header buttons and updates their existing aria-sort.
+    await browser.evaluate(`document.querySelector('#repository-comparison [data-sort="name"]').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    assert.equal(await browser.evaluate(`document.activeElement.dataset.sort`), "name");
+    await browser.until(`document.activeElement.closest('th').getAttribute('aria-sort')`, "ascending");
+    const ascending = await browser.evaluate<string[]>(`[...document.querySelectorAll('#repository-rows .row-link')].map(button => button.textContent)`);
+    await browser.key("Enter", { text: "\r" });
+    assert.deepEqual(await browser.evaluate<string[]>(`[...document.querySelectorAll('#repository-rows .row-link')].map(button => button.textContent)`), ascending.toReversed());
+    const repository = await browser.evaluate<string>(`document.querySelector('#repository-rows .row-link').dataset.focusKey`);
+    await browser.evaluate(`document.querySelector('#repository-rows .row-link').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    assert.equal(await browser.evaluate(`document.activeElement.dataset.focusKey`), repository);
+    await browser.until(`document.activeElement.getAttribute('aria-current')`, "true");
+    assert.equal(await browser.evaluate(`document.querySelectorAll('#repository-rows .fleet-total td').length`), 8);
+    // CSS grid must keep table roles in the actual accessibility tree, not only in the DOM.
+    const accessibility = await browser.send("Accessibility.getFullAXTree");
+    const axNodes = accessibility["result"]["nodes"] as Array<{ nodeId: string; parentId?: string; ignored: boolean; role?: { value: string }; name?: { value: string } }>;
+    const fleetTable = axNodes.find(node => !node.ignored && node.role?.value === "table" && node.name?.value.endsWith(" vs fleet"));
+    assert.ok(fleetTable, "the focused fleet remains a named table");
+    const byId = new Map(axNodes.map(node => [node.nodeId, node]));
+    const fleetNodes = axNodes.filter(node => {
+      for (let parent = node.parentId; parent; parent = byId.get(parent)?.parentId) if (parent === fleetTable.nodeId) return !node.ignored;
+      return false;
+    });
+    assert.equal(fleetNodes.filter(node => node.role?.value === "columnheader").length, 8);
+    assert.equal(fleetNodes.filter(node => node.role?.value === "cell").length, 16);
+    assert.equal(fleetNodes.filter(node => node.role?.value === "row").length, 3);
+    await browser.evaluate(`document.querySelector('#repository-table-hint button').click()`);
+    for (const width of [820, 1440]) {
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 900, mobile: false, width });
+      assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('#repository-rows tr')).display`), "table-row", `${width}px keeps the desktop table`);
+      assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.repository-cell-label')).display`), "none");
     }
     // Both shared breakpoints must beat per-view defaults, including the later Pricing stylesheet.
     for (const width of [820, 520, 375]) {
@@ -325,7 +380,7 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.deepEqual(tabbed.slice(3), navOrder);
     // Legends are not tab stops; the fleet table offers a real button per repository.
     assert.equal(await browser.evaluate(`document.querySelectorAll('button.chart-legend-item, .chart-legend-item[tabindex]').length`), 0);
-    assert.equal(await browser.evaluate(`document.querySelectorAll('#repository-rows tr[role], #repository-rows tr[tabindex]').length`), 0);
+    assert.equal(await browser.evaluate(`document.querySelectorAll('#repository-rows tr[role=link], #repository-rows tr[role=button], #repository-rows tr[tabindex]').length`), 0);
     assert.ok((await browser.evaluate<number>(`document.querySelectorAll('#repository-rows button.row-link').length`)) > 0);
 
     // Palette: opens from its trigger with Enter, traps focus in the input, closes on Escape, restores focus to the trigger.
@@ -383,6 +438,12 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#export-menu').open`, true);
     await browser.until(`document.activeElement?.dataset.export`, "json");
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#export-menu').open`, false);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#export-menu > summary')`), true);
+    assert.match(await browser.evaluate<string>(`document.querySelector('#export-status').textContent`), /Download prepared locally/);
+    await browser.evaluate(`document.querySelector('#export-menu summary').click()`);
+    await browser.until(`document.querySelector('#export-menu').open`, true);
     await browser.key("Escape");
     await browser.until(`document.querySelector('#export-menu').open`, false);
 
@@ -475,6 +536,42 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.evaluate(`document.documentElement.dataset.theme = 'dark'; document.querySelector('[data-view-button="velocity"]').click()`);
     await browser.until(`document.querySelector('#velocity-view')?.firstElementChild?.classList.contains('velocity-lead')`, true);
     assert.equal(await browser.evaluate(`document.querySelector('.velocity-lead article:last-child strong').textContent`), headline);
+    await browser.evaluate(`document.querySelector('.velocity-chart > svg').focus()`);
+    await browser.key("Home");
+    const inspected = await browser.evaluate<string>(`document.querySelector('#chart-announcer').textContent`);
+    assert.ok(inspected.length > 0);
+    await browser.evaluate(`window.auditChartMutations = 0; window.auditObserver = new MutationObserver(() => window.auditChartMutations++); window.auditObserver.observe(document.querySelector('#chart-announcer'), {childList:true,subtree:true,characterData:true})`);
+    await browser.evaluate(`for (let i=0;i<30;i++) document.querySelector('.velocity-chart > svg').dispatchEvent(new PointerEvent('pointermove', {clientX:800+i}))`);
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.key("Home");
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1200 });
+    await delay(250);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('.velocity-chart > svg')`), true);
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.key("Escape");
+    assert.equal(await browser.evaluate(`document.querySelector('.velocity-inspection').hidden`), true);
+    await browser.evaluate(`window.auditObserver.disconnect()`);
+    // Native touch focus must announce the tapped bucket, including successive taps.
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 812, mobile: true, width: 375 });
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await browser.until(`innerWidth`, 375);
+    const touchDates: string[] = [];
+    for (const fraction of [0.35, 0.7, 0.45]) {
+      if (fraction !== 0.45) await browser.evaluate(`document.activeElement?.blur()`);
+      const point = await browser.evaluate<{ x: number; y: number }>(`(() => {
+        const svg = document.querySelector('.velocity-chart > svg'); svg.scrollIntoView({block:'center'});
+        const r = svg.getBoundingClientRect(); return { x:r.left+r.width*${fraction}, y:r.top+r.height/2 };
+      })()`);
+      await browser.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+      await browser.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await browser.until(`document.querySelector('#chart-announcer').textContent.startsWith(document.querySelector('.velocity-inspection strong').textContent.split(' · ')[0])`, true);
+      touchDates.push(await browser.evaluate<string>(`document.querySelector('.velocity-inspection strong').textContent.split(' · ')[0]`));
+    }
+    assert.notEqual(touchDates[0], touchDates[1], "tap A then B selects distinct buckets");
+    assert.notEqual(touchDates[1], touchDates[2], "already focused tap also selects another bucket");
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
     // Velocity chips list the snapshot's providers, and p 1 toggles the first of them.
     assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('#velocity-view .provider-key .chip')].map((chip) => chip.dataset.provider)`), ["codex", "claude", "cursor"]);
     await browser.evaluate(`document.activeElement?.blur()`);

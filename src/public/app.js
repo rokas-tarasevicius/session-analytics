@@ -34,6 +34,7 @@ const writePreference = (key, value) => { try { localStorage.setItem(key, value)
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
   activityRepositories: $("#activity-repositories"), activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
+  snapshotAnnouncer: $("#snapshot-announcer"), viewAnnouncer: $("#view-announcer"),
   cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
   costApiTotal: $("#cost-api-total"), costApiNote: $("#cost-api-note"), costCoverage: $("#cost-coverage"), costCoverageNote: $("#cost-coverage-note"),
@@ -237,7 +238,22 @@ function sessionsForProviders(sessions, scope) {
   return sessions.filter(({ provider }) => selected.has(provider));
 }
 
+let activeViewCache = null;
+
 function activeView() {
+  // Provider chips and view switches only change presentation. Keep one model until its data or scope changes.
+  // Use object identity, not generatedAt: a refreshed or machine-filtered snapshot can have the same timestamp.
+  // Stale/reading machine warnings include relative ages, which can change without a new snapshot.
+  const inputs = [snapshot, fullSnapshot, sessionsByRepository, elements.repositoryFilter.value, windowPreset,
+    elements.windowStart.value, elements.windowEnd.value, elements.windowStart.min, elements.windowEnd.max,
+    machineWarnings(fullSnapshot?.machines, []).join("\n")];
+  if (activeViewCache && inputs.every((value, index) => value === activeViewCache.inputs[index])) return activeViewCache.view;
+  const view = buildActiveView();
+  activeViewCache = { inputs, view };
+  return view;
+}
+
+function buildActiveView() {
   const selected = selectedRepository();
   const scopeSessions = selected ? repositorySessions(selected.repository.id) : snapshot.sessions;
   const windowSessions = sessionsInWindow(scopeSessions);
@@ -998,6 +1014,7 @@ function renderRepositoryTable(repositories) {
   clear(footer);
   if (quiet.length && !tableExpansion.showEmpty) {
     const row = node("tr"), cell = node("td", null, "empty-line"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell");
     const button = statusAction("Show them", () => {
       tableExpansion.showEmpty = true;
       renderRepositoryTable(repositories);
@@ -1015,6 +1032,7 @@ function renderRepositoryTable(repositories) {
   const selectedId = elements.repositoryFilter.value;
   for (const item of sorted) {
     const row = node("tr"); const summary = item.summary;
+    row.setAttribute("role", "row");
     const comparator = item.repository.id === null;
     const repositoryDetails = comparator ? item.repository.name : `${item.repository.name} · ID ${repositoryKey(item.repository.id)}`;
     if (comparator) row.className = "fleet-total";
@@ -1038,10 +1056,22 @@ function renderRepositoryTable(repositories) {
     if (item.usage.available === false) { const dash = node("span", DASH, "unavailable"); dash.title = "No session in this repository has activity dates"; value.append(dash); }
     else value.append(node("span", money(item.usage.value)));
     row.append(repositoryCell, sessionsCell, value, covered(summary.totalInputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.outputTokens, summary.coverage.tokens, (v) => compact(v), "token evidence"), covered(summary.toolCalls, summary.coverage.tools, (v) => compact(v), "tool evidence"), covered(summary.cacheReadRatio, summary.coverage.tokens, percent, "token evidence"), tableCell(pricedShare(item.usage.evidence) === null ? DASH : pricedPercent(item.usage.evidence), `${summary.analyzedSessions}/${summary.sessions} parsed`));
+    // Reuse the column names for visual card labels; headers remain the accessible labels.
+    // Explicit roles preserve the table structure when narrow-screen CSS changes its display.
+    [...row.children].forEach((cell, index) => {
+      const button = sortButtons[index];
+      cell.setAttribute("role", "cell");
+      cell.setAttribute("headers", button.closest("th").id);
+      if (index === 0) return;
+      const label = node("span", button.textContent, "repository-cell-label");
+      label.setAttribute("aria-hidden", "true");
+      cell.append(label);
+    });
     elements.repositoryRows.append(row);
   }
   if (sorted.length === 0) {
-    const row = node("tr"); const cell = node("td"); cell.colSpan = 8; emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
+    const row = node("tr"); const cell = node("td"); cell.colSpan = 8;
+    row.setAttribute("role", "row"); cell.setAttribute("role", "cell"); emptyState(cell, "No repositories with sessions in this window."); row.append(cell); elements.repositoryRows.append(row);
   }
   restoreFocus();
 }
@@ -1525,19 +1555,22 @@ function renderProviderEmptyState(container, scope, eligibleCount, windowCount) 
 function renderViewStatus(view) {
   const target = elements.viewStatus;
   if (!target) return;
+  const announce = (text) => { if (elements.viewAnnouncer.textContent !== text) elements.viewAnnouncer.textContent = text; };
   clear(target);
   if (!snapshot && loadFailed) {
     emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
+    announce(""); // The error alert owns the failure announcement.
     target.hidden = false;
     return;
   }
-  if (!view || !windowEmpty) { target.hidden = true; return; }
+  if (!view || !windowEmpty) { target.hidden = true; announce(""); return; }
   const selected = selectedRepository();
   const scope = selected ? ` for ${selected.repository.name}` : "";
   const message = !snapshot.sessions.length ? "No local agent sessions were found in this snapshot."
     : windowPreset === "all" ? `No sessions${scope} in the observed history.`
       : `No sessions${scope} started or were active during ${windowCaption()}.`;
   const box = emptyState(target, message, "Nothing in this window");
+  announce(`Nothing in this window. ${message}`);
   const actions = node("div", null, "status-actions");
   if (windowPreset !== "all" && snapshot.sessions.length) actions.append(statusAction("Show all time", () => applyWindowPreset("all")));
   if (selected) actions.append(statusAction("Clear repository focus", () => selectRepository("all", { scroll: false })));
@@ -2054,7 +2087,7 @@ function finishUrlStartup() {
 
 function render(data) {
   resetExportMenu();
-  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
+  if (data.kind === "shared") { snapshot = null; fullSnapshot = null; activeViewCache = null; sharedSnapshot = data; loadFailed = false; renderMachines(); renderSharedSnapshot(data); delete elements.main.dataset.state; return; }
   $("#shared-snapshot").hidden = true;
   for (const selector of sharedHiddenSelectors) $(selector).hidden = false;
   elements.wordmark.href = "?view=summary"; elements.wordmark.setAttribute("aria-label", "Session Analytics, Summary");
@@ -2094,9 +2127,11 @@ const quietLoad = singleFlight(loadQuietly);
 
 async function loadSnapshot(refresh = false) {
   const previous = snapshot ?? sharedSnapshot;
+  const refreshHadFocus = document.activeElement === elements.refresh;
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
+  elements.snapshotAnnouncer.textContent = previous || refresh ? "Refreshing snapshot." : "Building snapshot.";
   beginScanProgress(Boolean(previous || refresh));
   describeSyncStatus();
   elements.main.dataset.state = previous ? "refreshing" : "loading";
@@ -2109,7 +2144,9 @@ async function loadSnapshot(refresh = false) {
     render(await fetchAnalytics(refresh && previous));
     watchPricingUpdates();
     showReady(snapshot ? activeView() : null);
+    elements.snapshotAnnouncer.textContent = previous || refresh ? "Snapshot refreshed." : "Snapshot ready.";
   } catch (error) {
+    elements.snapshotAnnouncer.textContent = ""; // The error alert owns the failure announcement.
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;
     if (previous) {
@@ -2130,6 +2167,7 @@ async function loadSnapshot(refresh = false) {
     endScanProgress();
     describeSyncStatus();
     elements.refresh.disabled = false;
+    if (refreshHadFocus && document.activeElement === document.body) elements.refresh.focus({ preventScroll: true });
   }
 }
 
