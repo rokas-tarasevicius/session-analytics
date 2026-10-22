@@ -363,6 +363,15 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.key("Escape");
     await browser.until(`document.querySelector('#help-overlay').open`, false);
     assert.equal(await browser.evaluate(`document.activeElement.id`), "help-button");
+    // Bare slash stays within modal boundaries; the explicit modifier shortcut remains available.
+    for (const [button, dialog] of [["help-button", "help-overlay"], ["coverage-button", "coverage-dialog"], ["machine-details", "machines-dialog"]]) {
+      await browser.evaluate(`document.querySelector('#${button}').click()`);
+      await browser.key("/", { code: "Slash", text: "/" });
+      assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('dialog[open]')].map(dialog => dialog.id)`), [dialog]);
+      await browser.key("k", { code: "KeyK", modifiers: 4 });
+      await browser.until(`document.querySelector('#command-palette').open`, true);
+      await browser.evaluate(`document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close())`);
+    }
     const originalTheme = await browser.evaluate(`document.documentElement.dataset.theme`);
     await browser.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', repeat: true, bubbles: true })); document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', isComposing: true, bubbles: true }));`);
     assert.equal(await browser.evaluate(`document.documentElement.dataset.theme`), originalTheme);

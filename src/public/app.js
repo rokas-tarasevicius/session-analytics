@@ -1901,10 +1901,11 @@ document.addEventListener("keydown", (event) => {
   const match = matchShortcut(event, { enabled: shortcutsEnabled, pending: pendingChord });
   pendingChord = null; window.clearTimeout(chordTimer);
   if (!match) return;
-  if (match.action === "palette") { event.preventDefault(); togglePalette(); return; }
+  if (match.action === "palette" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); togglePalette(); return; }
   if (elements.palette.open || elements.help.open || elements.coverageDialog.open || elements.machinesDialog.open) return;
   if (match.prefix) { armChord(match.prefix); return; }
   const { action, value } = match;
+  if (action === "palette") { event.preventDefault(); togglePalette(); return; }
   if (action === "clear") {
     if (snapshot && elements.repositoryFilter.value !== "all") selectRepository("all", { scroll: false });
     return;

@@ -105,3 +105,16 @@ test("composing or held Enter in the palette cannot run a command", async () => 
   assert.equal(document.querySelector("#command-palette")!.open, false);
 });
 
+
+test("bare slash respects open dialogs and only opens the palette outside them", async () => {
+  const { document, run, fireKey } = await harness([sample()]);
+  for (const [open, id] of [["openHelp", "help-overlay"], ["openCoverage", "coverage-dialog"], ["openMachines", "machines-dialog"]]) {
+    run(`${open}()`);
+    fireKey("/", document.querySelector(`#${id}`)!);
+    assert.equal(document.querySelector(`#${id}`)!.open, true, `${id} stays open`);
+    assert.equal(document.querySelector("#command-palette")!.open, false, `${id} blocks slash`);
+    document.querySelector(`#${id}`)!.close();
+  }
+  fireKey("/");
+  assert.equal(document.querySelector("#command-palette")!.open, true);
+});
