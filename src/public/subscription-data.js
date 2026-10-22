@@ -86,8 +86,8 @@ export function buildMeters(observations, now, infos = []) {
     }
     meter.windowMinutes ??= observation.windowMinutes;
     if (observation.planType) meter.planReadings.push({ t: observation.observedAt, planType: observation.planType });
-    if (observation.status !== "idle") meter.readings.push(observation);
-    else meter.idleAt = Math.max(meter.idleAt ?? 0, observation.observedAt);
+    meter.readings.push(observation);
+    if (observation.status === "idle") meter.idleAt = Math.max(meter.idleAt ?? 0, observation.observedAt);
   }
   return [...meters.values()].map(({ readings, ...meter }) => ({ ...meter, idleAt: meter.idleAt ?? null, cycles: cyclesOf(readings, meter.windowMinutes ? meter.windowMinutes * 60 : 0, now) }))
     .sort((left, right) => left.provider.localeCompare(right.provider) || left.account.localeCompare(right.account) ||
@@ -113,7 +113,7 @@ function cyclesOf(readings, window, now) {
     return reading.planType ? reading : { ...reading, planType };
   });
   const groups = [];
-  for (const reading of contextual.sort((left, right) => left.resetsAt - right.resetsAt)) {
+  for (const reading of contextual.filter((reading) => reading.status !== "idle").sort((left, right) => left.resetsAt - right.resetsAt)) {
     const group = groups.at(-1);
     if (group && reading.resetsAt - group.first <= resetDrift) group.readings.push(reading);
     else groups.push({ first: reading.resetsAt, readings: [reading] });

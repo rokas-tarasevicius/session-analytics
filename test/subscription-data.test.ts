@@ -959,3 +959,16 @@ test("missing Codex plan evidence carries the last observed tier without inventi
   assert.equal(calibrate(meter, { between: () => 100 }, "pro").perPercent, 5);
   assert.equal(liveMeter(meter, start + WEEK + 2 * DAY).rate, 10 / DAY);
 });
+
+test("a tier first observed while idle also supplies subsequent missing active evidence", () => {
+  const rows = [
+    { ...reading("codex", "seven_day", start + WEEK - HOUR, start - HOUR, 0, "idle"), planType: "pro" as const },
+    ...[0, 1].flatMap((week) => [
+      reading("codex", "seven_day", start + (week + 1) * WEEK, start + week * WEEK, 0),
+      reading("codex", "seven_day", start + (week + 1) * WEEK, start + week * WEEK + 2 * DAY, 20),
+    ]),
+  ];
+  const meter = buildMeters(rows, start + WEEK + 2 * DAY)[0]!;
+  assert.equal(meter.cycles.length, 2, "the idle tier reading is not an extra active cycle");
+  assert.equal(calibrate(meter, { between: () => 100 }, "pro").perPercent, 5);
+});
