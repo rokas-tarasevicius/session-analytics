@@ -11,7 +11,7 @@ import { InteropError } from "./interop/error.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
-import { localMachine, machineAge, machineReasons, machineTally, machineWarningSources } from "./public/machines.js";
+import { localMachine, machineAge, machineNote, machineReasons, machineTally, machineWarningSources } from "./public/machines.js";
 import type { MachineAnalytics, MachineStatus } from "./types.ts";
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, ...shareValueFlags]);
@@ -142,7 +142,7 @@ function machineLines(list: MachineStatus[]): string {
   const width = Math.max(...list.map(({ label }) => label.length)), { ok, stale, reading, total } = machineTally(list);
   const lines = [`Machines: ${ok} of ${total} read now${stale ? `, ${stale} from a last good snapshot` : ""}${reading ? `, ${reading} still reading when this snapshot was made` : ""}`];
   for (const machine of list) {
-    const reason = machine.reason ? machineReasons[machine.reason] : "", counts = `${machine.sessions} sessions, ${machine.repositories} repositories`;
+    const reason = machine.state === "ok" ? machineNote(machine) : machine.reason ? machineReasons[machine.reason] : "", counts = `${machine.sessions} sessions, ${machine.repositories} repositories`;
     lines.push(`  ${machine.label.padEnd(width)}  ${machine.state === "failed" ? `not read: ${reason}`
       : machine.state === "stale" ? `${reason}; its last good snapshot from ${machineAge(machine.readAt) ?? "an earlier read"} (${counts})`
       : machine.state === "reading" ? (machine.readAt ? `still reading; its last good snapshot from ${machineAge(machine.readAt) ?? "an earlier read"} (${counts})` : "still reading; not included")

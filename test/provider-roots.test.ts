@@ -9,8 +9,10 @@ import test from "node:test";
 import { snapshotSchemas } from "../scripts/snapshot-schema.ts";
 import { validateSnapshot } from "../src/interop/snapshot.ts";
 import { matchesSchema } from "../src/interop/schema.ts";
+import { sourceHealthNotes, sourceDiscoveryNotes } from "../src/public/evidence.js";
 import { harness } from "./validation/aggregation-ui-harness.ts";
-import { discoverProviderRoots } from "../src/analyzer.ts";
+import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { analyzeMachineSessions, discoverProviderRoots } from "../src/analyzer.ts";
 import { buildPayload } from "../src/mcp/metrics.ts";
 import { antigravityAdapter } from "../src/providers/antigravity.ts";
 import { copilotAdapter } from "../src/providers/copilot.ts";
@@ -147,7 +149,7 @@ async function report(home: string, flags: string[] = []): Promise<MachineAnalyt
 test("an absent default provider is unavailable with zero missing sources in the report", async () => {
   await fixture(async (home) => {
     const empty = await report(home);
-    assert.deepEqual(empty.warnings, []);
+    assert.deepEqual(empty.warnings, sourceHealthNotes(empty.mcpSourceHealth ?? []));
     assert.equal(empty.mcpSourceHealth?.length, 7);
     for (const health of empty.mcpSourceHealth ?? []) assert.deepEqual(health, {
       provider: health.provider, status: "unavailable", sourcesRead: 0, missingSources: 0, unreadableSources: 0,
@@ -160,7 +162,7 @@ test("an absent default provider is unavailable with zero missing sources in the
     db.exec("CREATE TABLE cursorDiskKV (key TEXT, value TEXT); CREATE TABLE ItemTable (key TEXT, value TEXT)");
     db.close();
     const installed = await report(home);
-    assert.deepEqual(installed.warnings, []);
+    assert.deepEqual(installed.warnings, sourceHealthNotes(installed.mcpSourceHealth ?? []));
     for (const provider of ["codex", "cursor"]) assert.deepEqual(installed.mcpSourceHealth?.find((health) => health.provider === provider), {
       provider, status: "available", sourcesRead: 1, missingSources: 0, unreadableSources: 0,
     });
@@ -197,9 +199,14 @@ test("mixed native-root failures remain separate schema-valid Coverage notes", a
     await writeFile(unreadable, "not a directory");
     const snapshot = await report(home, ["--codex-root", join(home, "absent"), "--codex-archive-root", unreadable]);
     const warnings = ["A provider transcript root is missing.", "A provider transcript root could not be read."];
-    assert.deepEqual(snapshot.warnings, warnings);
+    assert.deepEqual(snapshot.warnings.filter((warning) => !sourceDiscoveryNotes.includes(warning)), warnings);
     assert.equal(matchesSchema(snapshot, snapshotSchemas()["snapshot.v1.schema.json"]!), true);
     assert.deepEqual(validateSnapshot(JSON.parse(JSON.stringify(snapshot))), snapshot);
+    const options = await createSessionAnalyticsFixture(join(home, "evidence"));
+    const withRepository = await analyzeMachineSessions({ ...options, codexRoot: join(home, "absent"), codexArchiveRoot: unreadable });
+    assert.ok(withRepository.repositories.length);
+    assert.deepEqual(validateSnapshot(JSON.parse(JSON.stringify(withRepository))), withRepository);
+    for (const repository of withRepository.repositories) for (const warning of warnings) assert.ok(repository.warnings.includes(warning));
     const { document, run } = await harness([]);
     run(`render(${JSON.stringify(snapshot)}); openCoverage()`);
     assert.equal(document.querySelector("#coverage-dialog")!.open, true);
@@ -254,5 +261,27 @@ test("Antigravity health validates explicit conversations and malformed default 
     assert.deepEqual(partial.mcpSourceHealth?.find((row) => row.provider === "antigravity"), {
       provider: "antigravity", status: "incomplete", sourcesRead: 1, missingSources: 0, unreadableSources: 1,
     });
+  });
+});
+
+
+test("source-health vocabulary distinguishes known zero, selected missing and partial reads", async () => {
+  await fixture(async (home) => {
+    const zero = await report(home);
+    assert.ok(zero.warnings.includes("Codex: no sources discovered or selected."));
+    const missing = await report(home, ["--codex-root", join(home, "absent")]);
+    assert.ok(missing.warnings.includes("Codex: missing sources."));
+    const readable = join(home, "readable");
+    await mkdir(readable);
+    const incomplete = await report(home, ["--codex-root", join(home, "absent"), "--codex-archive-root", readable]);
+    assert.ok(incomplete.warnings.includes("Codex: incomplete sources: missing."));
+    for (const snapshot of [zero, missing, incomplete]) {
+      const payload = buildPayload({ analytics: snapshot }, "usage_summary", { provider: "codex", window: "all" }, Date.now(), 60);
+      assert.ok(payload.notes.includes(snapshot.warnings.find((note) => note.startsWith("Codex:"))!));
+      assert.doesNotMatch(JSON.stringify(payload.notes), /installed|PRIVATE-SOURCE-SENTINEL|ENOENT/);
+      const { document, run } = await harness([]);
+      run(`render(${JSON.stringify(snapshot)}); openCoverage()`);
+      assert.ok(document.querySelector("#warning-list")!.textContent.includes(snapshot.warnings.find((note) => note.startsWith("Codex:"))!));
+    }
   });
 });

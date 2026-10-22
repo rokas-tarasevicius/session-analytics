@@ -381,7 +381,7 @@ test("machines add, list, set, rename and remove keep a valid private file", asy
   const data = dataDir("cli");
   const added = cli(["machines", "add", "server", "--user", "agents", "--data-dir", data, "--remote-timeout", "60"]);
   assert.equal(added.status, 0, added.stderr);
-  assert.match(added.stdout, /^server {2}\(ssh server, as agents, bundled runtime\)\n {2}✓ ssh .*\n {2}✓ sudo .*\n {2}✓ node .*\n {2}✓ machine .*\n {2}✓ runtime .*installed now.*\n {2}✓ history {3}5 sessions, 3 repositories in \d+\.\d s\n/);
+  assert.match(added.stdout, /^server {2}\(ssh server, as agents, bundled runtime\)\n {2}✓ ssh .*\n {2}✓ sudo .*\n {2}✓ node .*\n {2}✓ machine .*\n {2}✓ runtime .*installed now.*\n {2}✓ history {3}5 sessions, 3 repositories in \d+\.\d s\. Copilot CLI: no sources discovered or selected\. OpenCode: no sources discovered or selected\. Gemini CLI: no sources discovered or selected\. Antigravity: no sources discovered or selected\.\n/);
   assert.match(added.stdout, /bundled runtime is this session-analytics .* agents's ~\/\.cache\/session-analytics\/runtime on server/);
   assert.match(added.stdout, /Saved server\. A plain session-analytics now reads this machine and server\./);
   let config = readMachines({ dataDir: data })!;
@@ -405,8 +405,8 @@ test("machines add, list, set, rename and remove keep a valid private file", asy
   // Read as the SSH account with no history: saved, and the closing line names the accounts that have some.
   const empty = cli(["machines", "add", "empty", "--data-dir", data]);
   assert.equal(empty.status, 0, empty.stderr);
-  assert.match(empty.stdout, /! history {3}no agent history for ssh-user \(0 sessions in \d+\.\d s\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user ACCOUNT, where ACCOUNT is one of agents, svc\n/);
-  assert.match(empty.stdout, /\nSaved empty\. A plain session-analytics now reads this machine and server, empty\.\nIt has no agent history for that account yet; if agents run as another account there: session-analytics machines set empty --user ACCOUNT/);
+  assert.match(empty.stdout, /! history {3}no sessions observed for ssh-user \(0 sessions in \d+\.\d s\)\. Claude: missing sources\. Codex: missing sources\. Cursor: missing sources\. Copilot CLI: no sources discovered or selected\. OpenCode: no sources discovered or selected\. Gemini CLI: no sources discovered or selected\. Antigravity: no sources discovered or selected\.\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user ACCOUNT, where ACCOUNT is one of agents, svc\n/);
+  assert.match(empty.stdout, /\nSaved empty\. A plain session-analytics now reads this machine and server, empty\.\nNo sessions were observed for that account; if agents run as another account there: session-analytics machines set empty --user ACCOUNT/);
   assert.equal(cli(["machines", "remove", "empty", "--data-dir", data]).status, 0);
   // A service account's nologin shell refuses sudo -i: saved with the fix, and read without a login shell after it.
   const service = cli(["machines", "add", "server", "--user", "svc", "--name", "svcbox", "--data-dir", data]);
@@ -466,7 +466,7 @@ test("machines check is a doctor: each failure names its fix, and --find-users l
   ] });
   const checked = cli(["machines", "check", "--data-dir", data, "--find-users"]);
   assert.equal(checked.status, 1);
-  assert.match(checked.stdout, /server {2}\(ssh server, as agents, bundled runtime\)\n(?: {2}✓ .*\n)+ {2}✓ history {3}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}✓ accounts {2}agent history found for agents, svc \(no login shell\)\n(?! {4}Fix)/);
+  assert.match(checked.stdout, /server {2}\(ssh server, as agents, bundled runtime\)\n(?: {2}✓ .*\n)+ {2}✓ history {3}\d+ sessions, \d+ repositories in \d+\.\d s\. Copilot CLI: no sources discovered or selected\. OpenCode: no sources discovered or selected\. Gemini CLI: no sources discovered or selected\. Antigravity: no sources discovered or selected\.\n {2}✓ accounts {2}agent history found for agents, svc \(no login shell\)\n(?! {4}Fix)/);
   assert.match(checked.stdout, /locked .*\n {2}✓ ssh .*\n {2}✗ sudo {6}sudo -n could not run commands as locked without a password\. sudo: a password is required\n {4}Fix: on that machine run: echo "\$USER ALL=\(locked\) NOPASSWD: ALL"/);
   assert.match(checked.stdout, /locked[\s\S]*✓ accounts {2}agent history found for agents, svc \(no login shell\)\n {4}Fix: session-analytics machines set locked --user ACCOUNT, where ACCOUNT is one of agents, svc\n/);
   // A login that works only through a shared connection someone else opened is a warning with its fix, not a pass.
@@ -499,10 +499,10 @@ test("a plain report reads saved machines with the bundled runtime: install once
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /^Session Analytics · laptop, server and empty \(not read: down\)\n/);
   assert.match(first.stderr, /Read 5 sessions across 3 repositories from server in \d+\.\d s\./);
-  assert.match(first.stderr, /empty: no agent history for this account \(0 sessions read\)\.\n {2}Fix: if agents run as another account there: session-analytics machines set empty --user NAME/);
+  assert.match(first.stderr, /empty: no sessions observed for this account \(0 sessions read\)\.\n {2}Fix: if agents run as another account there: session-analytics machines set empty --user NAME/);
   assert.match(first.stderr, /Could not read down: SSH could not connect/);
   // The header lists what was read, with counts and timing, and each machine not read with its reason and fix.
-  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(no history for this account\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: run session-analytics machines check down/);
+  assert.match(first.stdout, /\nMachines: 3 of 4 read now\n {2}laptop {2}\d+ sessions, \d+ repositories in \d+\.\d s\n {2}server {2}5 sessions, 3 repositories in \d+\.\d s\n {2}empty {3}0 sessions, 0 repositories in \d+\.\d s \(missing sources\)\n {4}Fix: if agents run as another account there: session-analytics machines set empty --user NAME.*\n {2}down {4}not read: unreachable\n {4}Fix: run session-analytics machines check down/);
   assert.deepEqual((await calls()).filter(({ destination }) => destination === "server").map(({ words }) => words[7]), ["run", "install"]);
   assert.deepEqual((await calls()).find(({ destination }) => destination === "server")!.words.slice(0, 6), ["sudo", "-n", "-iu", "agents", "node", "-"]);
   await rm(sshLog, { force: true });
@@ -601,7 +601,7 @@ test("a plain launch reuses the dashboard started with the same saved machines",
     assert.equal(added.status, 0, added.stderr);
     assert.match(added.stdout, /already running/);
     let statuses = await get<{ machines: MachineAnalytics["machines"] }>("/api/machines");
-    for (let attempt = 0; attempt < 400 && (statuses.machines!.some(({ state }) => state === "reading") || !/empty: no agent history/.test(stderr)); attempt++) { await delay(25); statuses = await get("/api/machines"); }
+    for (let attempt = 0; attempt < 400 && (statuses.machines!.some(({ state }) => state === "reading") || !/empty: no sessions observed/.test(stderr)); attempt++) { await delay(25); statuses = await get("/api/machines"); }
     assert.deepEqual(statuses.machines!.map(({ key }) => key), ["local", "server", "empty"]);
     assert.match(stdout, /Saved machines changed; now reading this machine and server, empty\./);
     const combined = validateSnapshot(await get("/api/analytics"));

@@ -1,3 +1,4 @@
+import { sourceDiscoveryNotes, sourceHealthNotes } from "../public/evidence.js";
 import type { ModelUsage, SessionAnalytics, SessionProvider } from "../types.ts";
 import type {
   McpActivityState, McpArguments, McpBudget, McpBudgetPeriod, McpDistribution, McpNamedCount, McpPayload,
@@ -184,9 +185,10 @@ export function buildPayload(
   });
   // Absent defaults are optional; "unsupported" has no provider store to discover.
   const incompleteSources = sourceHealth.some((source) => source.status === "incomplete" || source.missingSources > 0 || source.unreadableSources > 0 || (source.status === "unknown" && source.provider !== "unsupported"));
-  if (incompleteSources || snapshot.analytics.warnings.length || snapshot.analytics.repositories.some((repo) => repo.warnings.length)) {
+  if (incompleteSources || snapshot.analytics.warnings.some((warning) => !sourceDiscoveryNotes.includes(warning)) || snapshot.analytics.repositories.some((repo) => repo.warnings.some((warning) => !sourceDiscoveryNotes.includes(warning)))) {
     notes.push("Some evidence sources are incomplete or have coverage notes; empty results do not establish no usage. Source health describes discovery independently of the selected sessions.");
   }
+  notes.push(...sourceHealthNotes(sourceHealth));
   if (sessions.some((s) => s.transcript.warnings.length)) notes.push("Some sessions have parser coverage notes; observed history may be incomplete.");
   let data: McpPayload["data"];
   if (tool === "usage_summary") {

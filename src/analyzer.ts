@@ -24,7 +24,7 @@ import { publicModel } from "./public-model.ts";
 
 import { aggregateSessions } from "./public/export-data.js";
 import { normalizeTimestamp, timestampMilliseconds } from "./public/timestamps.js";
-import { modelPattern, metadataPattern, sessionStatuses, scanWarnings, indexParityWarning } from "./public/evidence.js";
+import { modelPattern, metadataPattern, sessionStatuses, scanWarnings, indexParityWarning, sourceHealthNotes } from "./public/evidence.js";
 import { McpEvidenceCollector } from "./mcp/evidence.ts";
 import { sourceHealth } from "./mcp/source-health.ts";
 
@@ -2627,21 +2627,23 @@ async function analyzeSelectedRepositories(
       }
       repositoriesForOutput.set(id, output);
     }
+    const mcpSourceHealth = [sourceHealth("claude", claudeIndexes.map((item) => item.warning)),
+      sourceHealth("codex", codexIndexes.map((item) => item.warning)),
+      sourceHealth("cursor", [...cursorRoots.map(() => cursorResult.warning), ...(additional.sources.get("cursor") ?? [])]),
+      ...(["copilot", "opencode", "gemini", "antigravity"] as const).map((provider) => sourceHealth(provider, additional.sources.get(provider) ?? []))];
     return {
       ...(!explicitRepositoryFilter ? { historyCoverage: {
         ...await collectHistoryCoverage(claudeRoots, [...outputSessions.values()], rateCard, options.claudeRoot ? undefined : { home: homedir(), override: process.env["CLAUDE_CONFIG_DIR"] }),
         recoveryCalibration: calibrateRecovery([...outputSessions.values()], pairedRecovery),
       } } : {}),
       ...(mcpContext ? { mcpContext } : {}),
-      mcpSourceHealth: [sourceHealth("claude", claudeIndexes.map((item) => item.warning)),
-        sourceHealth("codex", codexIndexes.map((item) => item.warning)),
-        sourceHealth("cursor", [...cursorRoots.map(() => cursorResult.warning), ...(additional.sources.get("cursor") ?? [])]),
-        ...(["copilot", "opencode", "gemini", "antigravity"] as const).map((provider) => sourceHealth(provider, additional.sources.get(provider) ?? []))],
+      mcpSourceHealth,
       rateCard,
-      providerWarnings: [...new Set([...codexIndexes.map(({ warning }) => warning), ...claudeIndexes.map(({ warning }) => warning), cursorResult.warning, ...additional.warnings].filter((warning): warning is string => Boolean(warning)))],
+      providerWarnings: [...sourceHealthNotes(mcpSourceHealth), ...new Set([...codexIndexes.map(({ warning }) => warning), ...claudeIndexes.map(({ warning }) => warning), cursorResult.warning, ...additional.warnings].filter((warning): warning is string => Boolean(warning)))],
       repositories: [...repositoriesForOutput.values()].map(({ repository, sessions: repositorySessions }) => {
         const result = aggregate(repository, repositorySessions, rateCard);
         result.warnings.push(
+          ...sourceHealthNotes(mcpSourceHealth),
           ...[...codexIndexes.map(({ warning }) => warning), ...claudeIndexes.map(({ warning }) => warning), cursorResult.warning, ...additional.warnings].filter(
             (warning): warning is string => Boolean(warning),
           ),

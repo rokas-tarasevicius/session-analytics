@@ -367,7 +367,7 @@ export function machineReadLines(machine: RemoteMachine, status: MachineStatus, 
     const stale = status.state === "stale" ? `\n  Using its last good snapshot from ${machineAge(status.readAt) ?? "an earlier read"} (${status.sessions} sessions).` : "";
     return `Could not read ${machine.name}: ${error.message}.${error.detail ? ` ${error.detail}` : ""}${error.fix ? `\n  Fix: ${error.fix}` : ""}${stale}`;
   }
-  if (!status.sessions) return `${machine.name}: no agent history for this account (0 sessions read).\n  Fix: ${noHistoryFix(machine)}`;
+  if (!status.sessions) return `${machine.name}: no sessions observed for this account (0 sessions read).\n  Fix: ${noHistoryFix(machine)}`;
   return `Read ${status.sessions} sessions across ${status.repositories} repositories from ${machine.name} in ${((status.durationMs ?? 0) / 1000).toFixed(1)} s.`;
 }
 

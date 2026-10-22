@@ -2556,6 +2556,174 @@
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
               },
               {
+                "const": "Codex: no sources discovered or selected."
+              },
+              {
+                "const": "Codex: missing sources."
+              },
+              {
+                "const": "Codex: unreadable sources."
+              },
+              {
+                "const": "Codex: missing and unreadable sources."
+              },
+              {
+                "const": "Codex: incomplete sources: missing."
+              },
+              {
+                "const": "Codex: incomplete sources: unreadable."
+              },
+              {
+                "const": "Codex: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Codex: discovery details unavailable."
+              },
+              {
+                "const": "Claude: no sources discovered or selected."
+              },
+              {
+                "const": "Claude: missing sources."
+              },
+              {
+                "const": "Claude: unreadable sources."
+              },
+              {
+                "const": "Claude: missing and unreadable sources."
+              },
+              {
+                "const": "Claude: incomplete sources: missing."
+              },
+              {
+                "const": "Claude: incomplete sources: unreadable."
+              },
+              {
+                "const": "Claude: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Claude: discovery details unavailable."
+              },
+              {
+                "const": "Cursor: no sources discovered or selected."
+              },
+              {
+                "const": "Cursor: missing sources."
+              },
+              {
+                "const": "Cursor: unreadable sources."
+              },
+              {
+                "const": "Cursor: missing and unreadable sources."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing."
+              },
+              {
+                "const": "Cursor: incomplete sources: unreadable."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Cursor: discovery details unavailable."
+              },
+              {
+                "const": "Copilot CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Copilot CLI: missing sources."
+              },
+              {
+                "const": "Copilot CLI: unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Copilot CLI: discovery details unavailable."
+              },
+              {
+                "const": "OpenCode: no sources discovered or selected."
+              },
+              {
+                "const": "OpenCode: missing sources."
+              },
+              {
+                "const": "OpenCode: unreadable sources."
+              },
+              {
+                "const": "OpenCode: missing and unreadable sources."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing."
+              },
+              {
+                "const": "OpenCode: incomplete sources: unreadable."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "OpenCode: discovery details unavailable."
+              },
+              {
+                "const": "Gemini CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Gemini CLI: missing sources."
+              },
+              {
+                "const": "Gemini CLI: unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Gemini CLI: discovery details unavailable."
+              },
+              {
+                "const": "Antigravity: no sources discovered or selected."
+              },
+              {
+                "const": "Antigravity: missing sources."
+              },
+              {
+                "const": "Antigravity: unreadable sources."
+              },
+              {
+                "const": "Antigravity: missing and unreadable sources."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing."
+              },
+              {
+                "const": "Antigravity: incomplete sources: unreadable."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Antigravity: discovery details unavailable."
+              },
+              {
                 "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
               },
               {
@@ -3348,6 +3516,174 @@
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
               },
               {
+                "const": "Codex: no sources discovered or selected."
+              },
+              {
+                "const": "Codex: missing sources."
+              },
+              {
+                "const": "Codex: unreadable sources."
+              },
+              {
+                "const": "Codex: missing and unreadable sources."
+              },
+              {
+                "const": "Codex: incomplete sources: missing."
+              },
+              {
+                "const": "Codex: incomplete sources: unreadable."
+              },
+              {
+                "const": "Codex: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Codex: discovery details unavailable."
+              },
+              {
+                "const": "Claude: no sources discovered or selected."
+              },
+              {
+                "const": "Claude: missing sources."
+              },
+              {
+                "const": "Claude: unreadable sources."
+              },
+              {
+                "const": "Claude: missing and unreadable sources."
+              },
+              {
+                "const": "Claude: incomplete sources: missing."
+              },
+              {
+                "const": "Claude: incomplete sources: unreadable."
+              },
+              {
+                "const": "Claude: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Claude: discovery details unavailable."
+              },
+              {
+                "const": "Cursor: no sources discovered or selected."
+              },
+              {
+                "const": "Cursor: missing sources."
+              },
+              {
+                "const": "Cursor: unreadable sources."
+              },
+              {
+                "const": "Cursor: missing and unreadable sources."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing."
+              },
+              {
+                "const": "Cursor: incomplete sources: unreadable."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Cursor: discovery details unavailable."
+              },
+              {
+                "const": "Copilot CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Copilot CLI: missing sources."
+              },
+              {
+                "const": "Copilot CLI: unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Copilot CLI: discovery details unavailable."
+              },
+              {
+                "const": "OpenCode: no sources discovered or selected."
+              },
+              {
+                "const": "OpenCode: missing sources."
+              },
+              {
+                "const": "OpenCode: unreadable sources."
+              },
+              {
+                "const": "OpenCode: missing and unreadable sources."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing."
+              },
+              {
+                "const": "OpenCode: incomplete sources: unreadable."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "OpenCode: discovery details unavailable."
+              },
+              {
+                "const": "Gemini CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Gemini CLI: missing sources."
+              },
+              {
+                "const": "Gemini CLI: unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Gemini CLI: discovery details unavailable."
+              },
+              {
+                "const": "Antigravity: no sources discovered or selected."
+              },
+              {
+                "const": "Antigravity: missing sources."
+              },
+              {
+                "const": "Antigravity: unreadable sources."
+              },
+              {
+                "const": "Antigravity: missing and unreadable sources."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing."
+              },
+              {
+                "const": "Antigravity: incomplete sources: unreadable."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Antigravity: discovery details unavailable."
+              },
+              {
                 "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
               },
               {
@@ -3721,6 +4057,174 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "Codex: no sources discovered or selected."
+              },
+              {
+                "const": "Codex: missing sources."
+              },
+              {
+                "const": "Codex: unreadable sources."
+              },
+              {
+                "const": "Codex: missing and unreadable sources."
+              },
+              {
+                "const": "Codex: incomplete sources: missing."
+              },
+              {
+                "const": "Codex: incomplete sources: unreadable."
+              },
+              {
+                "const": "Codex: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Codex: discovery details unavailable."
+              },
+              {
+                "const": "Claude: no sources discovered or selected."
+              },
+              {
+                "const": "Claude: missing sources."
+              },
+              {
+                "const": "Claude: unreadable sources."
+              },
+              {
+                "const": "Claude: missing and unreadable sources."
+              },
+              {
+                "const": "Claude: incomplete sources: missing."
+              },
+              {
+                "const": "Claude: incomplete sources: unreadable."
+              },
+              {
+                "const": "Claude: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Claude: discovery details unavailable."
+              },
+              {
+                "const": "Cursor: no sources discovered or selected."
+              },
+              {
+                "const": "Cursor: missing sources."
+              },
+              {
+                "const": "Cursor: unreadable sources."
+              },
+              {
+                "const": "Cursor: missing and unreadable sources."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing."
+              },
+              {
+                "const": "Cursor: incomplete sources: unreadable."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Cursor: discovery details unavailable."
+              },
+              {
+                "const": "Copilot CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Copilot CLI: missing sources."
+              },
+              {
+                "const": "Copilot CLI: unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Copilot CLI: discovery details unavailable."
+              },
+              {
+                "const": "OpenCode: no sources discovered or selected."
+              },
+              {
+                "const": "OpenCode: missing sources."
+              },
+              {
+                "const": "OpenCode: unreadable sources."
+              },
+              {
+                "const": "OpenCode: missing and unreadable sources."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing."
+              },
+              {
+                "const": "OpenCode: incomplete sources: unreadable."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "OpenCode: discovery details unavailable."
+              },
+              {
+                "const": "Gemini CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Gemini CLI: missing sources."
+              },
+              {
+                "const": "Gemini CLI: unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Gemini CLI: discovery details unavailable."
+              },
+              {
+                "const": "Antigravity: no sources discovered or selected."
+              },
+              {
+                "const": "Antigravity: missing sources."
+              },
+              {
+                "const": "Antigravity: unreadable sources."
+              },
+              {
+                "const": "Antigravity: missing and unreadable sources."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing."
+              },
+              {
+                "const": "Antigravity: incomplete sources: unreadable."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Antigravity: discovery details unavailable."
               },
               {
                 "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
@@ -4112,6 +4616,174 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "Codex: no sources discovered or selected."
+              },
+              {
+                "const": "Codex: missing sources."
+              },
+              {
+                "const": "Codex: unreadable sources."
+              },
+              {
+                "const": "Codex: missing and unreadable sources."
+              },
+              {
+                "const": "Codex: incomplete sources: missing."
+              },
+              {
+                "const": "Codex: incomplete sources: unreadable."
+              },
+              {
+                "const": "Codex: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Codex: discovery details unavailable."
+              },
+              {
+                "const": "Claude: no sources discovered or selected."
+              },
+              {
+                "const": "Claude: missing sources."
+              },
+              {
+                "const": "Claude: unreadable sources."
+              },
+              {
+                "const": "Claude: missing and unreadable sources."
+              },
+              {
+                "const": "Claude: incomplete sources: missing."
+              },
+              {
+                "const": "Claude: incomplete sources: unreadable."
+              },
+              {
+                "const": "Claude: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Claude: discovery details unavailable."
+              },
+              {
+                "const": "Cursor: no sources discovered or selected."
+              },
+              {
+                "const": "Cursor: missing sources."
+              },
+              {
+                "const": "Cursor: unreadable sources."
+              },
+              {
+                "const": "Cursor: missing and unreadable sources."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing."
+              },
+              {
+                "const": "Cursor: incomplete sources: unreadable."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Cursor: discovery details unavailable."
+              },
+              {
+                "const": "Copilot CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Copilot CLI: missing sources."
+              },
+              {
+                "const": "Copilot CLI: unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Copilot CLI: discovery details unavailable."
+              },
+              {
+                "const": "OpenCode: no sources discovered or selected."
+              },
+              {
+                "const": "OpenCode: missing sources."
+              },
+              {
+                "const": "OpenCode: unreadable sources."
+              },
+              {
+                "const": "OpenCode: missing and unreadable sources."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing."
+              },
+              {
+                "const": "OpenCode: incomplete sources: unreadable."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "OpenCode: discovery details unavailable."
+              },
+              {
+                "const": "Gemini CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Gemini CLI: missing sources."
+              },
+              {
+                "const": "Gemini CLI: unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Gemini CLI: discovery details unavailable."
+              },
+              {
+                "const": "Antigravity: no sources discovered or selected."
+              },
+              {
+                "const": "Antigravity: missing sources."
+              },
+              {
+                "const": "Antigravity: unreadable sources."
+              },
+              {
+                "const": "Antigravity: missing and unreadable sources."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing."
+              },
+              {
+                "const": "Antigravity: incomplete sources: unreadable."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Antigravity: discovery details unavailable."
               },
               {
                 "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
@@ -4666,6 +5338,174 @@
               },
               {
                 "const": "Some recovered assistant records lack response IDs. Matching input counters within each agent are grouped conservatively; indistinguishable requests may be omitted. Message counts, accounting, and receipt agreement are partial."
+              },
+              {
+                "const": "Codex: no sources discovered or selected."
+              },
+              {
+                "const": "Codex: missing sources."
+              },
+              {
+                "const": "Codex: unreadable sources."
+              },
+              {
+                "const": "Codex: missing and unreadable sources."
+              },
+              {
+                "const": "Codex: incomplete sources: missing."
+              },
+              {
+                "const": "Codex: incomplete sources: unreadable."
+              },
+              {
+                "const": "Codex: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Codex: discovery details unavailable."
+              },
+              {
+                "const": "Claude: no sources discovered or selected."
+              },
+              {
+                "const": "Claude: missing sources."
+              },
+              {
+                "const": "Claude: unreadable sources."
+              },
+              {
+                "const": "Claude: missing and unreadable sources."
+              },
+              {
+                "const": "Claude: incomplete sources: missing."
+              },
+              {
+                "const": "Claude: incomplete sources: unreadable."
+              },
+              {
+                "const": "Claude: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Claude: discovery details unavailable."
+              },
+              {
+                "const": "Cursor: no sources discovered or selected."
+              },
+              {
+                "const": "Cursor: missing sources."
+              },
+              {
+                "const": "Cursor: unreadable sources."
+              },
+              {
+                "const": "Cursor: missing and unreadable sources."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing."
+              },
+              {
+                "const": "Cursor: incomplete sources: unreadable."
+              },
+              {
+                "const": "Cursor: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Cursor: discovery details unavailable."
+              },
+              {
+                "const": "Copilot CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Copilot CLI: missing sources."
+              },
+              {
+                "const": "Copilot CLI: unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Copilot CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Copilot CLI: discovery details unavailable."
+              },
+              {
+                "const": "OpenCode: no sources discovered or selected."
+              },
+              {
+                "const": "OpenCode: missing sources."
+              },
+              {
+                "const": "OpenCode: unreadable sources."
+              },
+              {
+                "const": "OpenCode: missing and unreadable sources."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing."
+              },
+              {
+                "const": "OpenCode: incomplete sources: unreadable."
+              },
+              {
+                "const": "OpenCode: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "OpenCode: discovery details unavailable."
+              },
+              {
+                "const": "Gemini CLI: no sources discovered or selected."
+              },
+              {
+                "const": "Gemini CLI: missing sources."
+              },
+              {
+                "const": "Gemini CLI: unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: missing and unreadable sources."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: unreadable."
+              },
+              {
+                "const": "Gemini CLI: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Gemini CLI: discovery details unavailable."
+              },
+              {
+                "const": "Antigravity: no sources discovered or selected."
+              },
+              {
+                "const": "Antigravity: missing sources."
+              },
+              {
+                "const": "Antigravity: unreadable sources."
+              },
+              {
+                "const": "Antigravity: missing and unreadable sources."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing."
+              },
+              {
+                "const": "Antigravity: incomplete sources: unreadable."
+              },
+              {
+                "const": "Antigravity: incomplete sources: missing and unreadable."
+              },
+              {
+                "const": "Antigravity: discovery details unavailable."
               },
               {
                 "const": "An Antigravity conversation could not be read or has an unsupported schema; sibling conversations were retained."
