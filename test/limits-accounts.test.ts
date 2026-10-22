@@ -10,9 +10,9 @@ import { claudeAccountKey, codexAccountKey, readClaudeProfile, weeklyPhaseKey } 
 import { collectLimits, resolveCaps, statuslineAccount } from "../src/limits/index.ts";
 import { appendInbox, compactObservations, emptyLedger, mergeAccount, mergeLedgers, readLedger, toRow, writeLedger, type Ledger, type LedgerAccount } from "../src/limits/ledger.ts";
 import { claudeSdkEvent, statuslineObservations } from "../src/limits/sources.ts";
-import type { LimitObservation, LimitsSnapshot } from "../src/limits/types.ts";
+import type { LimitAccount, LimitObservation, LimitsSnapshot } from "../src/limits/types.ts";
 import { profileKeyFor } from "../src/metrics/history-coverage.ts";
-import { buildMeters, liveMeter } from "../src/public/subscription-data.js";
+import { accountUtilization, buildMeters, liveMeter, MONTH_DAYS } from "../src/public/subscription-data.js";
 
 const at = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 // Before the files these tests write, so every file counts as modified since the previous harvest unless dated otherwise.
@@ -618,7 +618,7 @@ test("plan contexts survive compaction and keep the first plan-change timestamp"
     { ...base, observedAt: now - 3600 }, { ...base, observedAt: now - 1800 }, { ...base, observedAt: now, usedPercent: 90 },
     { ...base, observedAt: now - 600, planType: "pro" },
   ], now);
-  assert.equal(conflicting.find((row) => row.planType === "pro")?.account, "", "an interleaved tier is a separate context even at the same reset");
+  assert.equal(conflicting.find((row) => row.planType === "pro")?.account, key, "a tier reversal at the same reset keeps its account");
 });
 
 test("v2 readings without plan evidence cannot quarantine v3 tier attribution at the same reset", () => {
@@ -643,4 +643,22 @@ test("idle pruning preserves the first observed tier boundary without inventing 
   assert.ok(merged.some((row) => row.observedAt === first && row.status === "idle"));
   assert.equal(buildMeters(merged, now)[0]!.cycles.length, 1);
   assert.deepEqual(compactObservations([...merged, ...compact], now), merged);
+});
+
+
+test("compaction preserves adjacent Plus to Pro to Plus runs and their prorated price", () => {
+  const key = codexAccountKey("synthetic-tier-reversal");
+  for (const step of [3600, 60]) {
+    const rows = ["plus", "plus", "pro", "plus"].map((planType, index): LimitObservation => ({ provider: "codex", account: key,
+      meter: "seven_day", windowMinutes: 10080, resetsAt: now + 86400, observedAt: now - (4 - index) * step,
+      usedPercent: 10 + index, status: "allowed", source: "codex-session", planType: planType as "plus" | "pro" }));
+    const compact = compactObservations(rows, now);
+    assert.ok(compact.every((row) => row.account === key), "a tier change is not evidence of another account");
+    assert.deepEqual(compactObservations([...compact, ...rows], now), compact, "tier runs stay stable across repeated harvests");
+    const owner: LimitAccount = { key, provider: "codex", attribution: "account", label: "Codex Plus", profileNames: [], profileKeys: [], plan: "plus", planSource: null,
+      planEvidence: null, planObservedAt: null, extraUsage: null, codex: null, weeklyAnchor: null, lastSeen: now };
+    const item = accountUtilization({ account: owner, meters: buildMeters(compact, now), now, range: { from: now - 4 * step, to: now } });
+    assert.deepEqual(item.economicPeriods!.map((period) => period.plan!.id), ["plus", "pro", "plus"]);
+    assert.ok(Math.abs(item.economics.price! - (20 * 3 + 200) * step / (86400 * MONTH_DAYS)) < 1e-12);
+  }
 });

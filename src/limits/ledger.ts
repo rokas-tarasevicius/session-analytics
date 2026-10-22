@@ -315,11 +315,11 @@ function clusterResets(series: LimitObservation[]): void {
  */
 function quarantineInterleaved(series: LimitObservation[]): void {
   if (series[0]?.provider !== "codex" || series[0].account === "") return;
-  const cycles = [...groupBy(series.filter((item) => item.status !== "idle"), (item) => `${item.resetsAt}|${item.planType ?? ""}`).values()].map((items) => ({
+  const cycles = [...groupBy(series.filter((item) => item.status !== "idle"), (item) => String(item.resetsAt)).values()].map((items) => ({
     items, first: items.reduce((value, item) => Math.min(value, item.observedAt), Infinity), last: items.reduce((value, item) => Math.max(value, item.observedAt), 0),
   }));
   for (const cycle of cycles) {
-    if (cycles.some((other) => other !== cycle && (Math.abs(other.items[0]!.resetsAt - cycle.items[0]!.resetsAt) > resetToleranceSeconds || (other.items[0]!.planType && cycle.items[0]!.planType)) &&
+    if (cycles.some((other) => other !== cycle && Math.abs(other.items[0]!.resetsAt - cycle.items[0]!.resetsAt) > resetToleranceSeconds &&
       other.first < cycle.first && other.last > cycle.last && other.items.length > cycle.items.length)) {
       for (const item of cycle.items) item.account = "";
     }
@@ -334,7 +334,7 @@ const resetDrop = 5;
  * that must never share a bucket with the higher readings before it. Same rule as the view's `segmentsOf`.
  */
 function segmentOrdinals(series: LimitObservation[], ordinals: Map<LimitObservation, number>): void {
-  for (const cycle of groupBy(series.filter((item) => item.status !== "idle"), (item) => `${item.resetsAt}|${item.planType ?? ""}`).values()) {
+  for (const run of planRuns(series)) for (const cycle of groupBy(run.filter((item) => item.status !== "idle"), (item) => String(item.resetsAt)).values()) {
     const sorted = [...cycle].sort((left, right) => left.observedAt - right.observedAt);
     let ordinal = 0, top = -Infinity;
     sorted.forEach((item, index) => {
@@ -361,6 +361,17 @@ function simultaneousReadings(series: LimitObservation[]): LimitObservation[] {
     readings.set(key, { ...kept, status: statusRank[item.status] > statusRank[current.status] ? item.status : current.status });
   }
   return [...readings.values()];
+}
+
+/** Temporal tier runs: returning to a tier never joins its earlier, nonadjacent readings. */
+function planRuns(series: LimitObservation[]): LimitObservation[][] {
+  const runs: LimitObservation[][] = [];
+  for (const item of [...series].sort((a, b) => a.observedAt - b.observedAt || String(a.planType ?? "").localeCompare(String(b.planType ?? "")))) {
+    const last = runs.at(-1);
+    if (last && last[0]!.planType === item.planType) last.push(item);
+    else runs.push([item]);
+  }
+  return runs;
 }
 
 /** The first evidence of each tier period, before idle pruning or bucket compaction can move it later. */
@@ -391,10 +402,10 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
   const ordinals = new Map<LimitObservation, number>();
   for (const series of groupBy(valid, seriesKey).values()) {
     const starts = planBoundaries(series);
-    const kept = [...groupBy(series, (item) => item.planType ?? "").values()].flatMap((context) => {
+    const kept = planRuns(series).flatMap((context) => {
       const rows = markIdle(context);
       // An unstarted window is not an active cycle, but it still proves the tier at this instant.
-      for (const first of starts) if (first.account !== "" && first.planType === context[0]?.planType &&
+      for (const first of starts) if (first.account !== "" && context.includes(first) &&
         !rows.some((row) => row.observedAt === first.observedAt && row.resetsAt === first.resetsAt)) rows.push({ ...first, status: "idle" });
       clusterResets(rows);
       return rows;
@@ -406,7 +417,11 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
   }
   // Keep the first evidence of each plan period, even when a later high level shares its bucket.
   const boundaries = new Set<LimitObservation>();
-  for (const series of groupBy(normalized, seriesKey).values()) for (const row of planBoundaries(series)) boundaries.add(row);
+  const runs = new Map<LimitObservation, number>();
+  for (const series of groupBy(normalized, seriesKey).values()) {
+    for (const row of planBoundaries(series)) boundaries.add(row);
+    planRuns(series).forEach((run, index) => { for (const row of run) runs.set(row, index); });
+  }
   const latest = new Map<string, LimitObservation>();
   for (const observation of normalized) {
     const current = latest.get(seriesKey(observation));
@@ -419,7 +434,7 @@ export function compactObservations(observations: Iterable<LimitObservation>, no
     if (last && last !== observation && last.observedAt === observation.observedAt && last.usedPercent === observation.usedPercent && last.resetsAt === observation.resetsAt && last.status === observation.status && last.planType === observation.planType) continue;
     const size = observation.resetsAt < now - archiveAfterSeconds ? archiveBucketSeconds : recentBucketSeconds;
     const kind = boundaries.has(observation) ? `plan-${observation.observedAt}` : observation.status === "rejected" ? "rejected" : observation.status === "idle" ? "idle" : last === observation ? "latest" : "";
-    const key = `${seriesKey(observation)}|${observation.planType ?? ""}|${observation.resetsAt}|${ordinals.get(observation) ?? 0}|${Math.floor(observation.observedAt / size)}|${kind}`;
+    const key = `${seriesKey(observation)}|${observation.planType ?? ""}|${runs.get(observation)}|${observation.resetsAt}|${ordinals.get(observation) ?? 0}|${Math.floor(observation.observedAt / size)}|${kind}`;
     const current = buckets.get(key);
     if (!current) { buckets.set(key, observation); continue; }
     if (kind === "rejected") { if (observation.observedAt < current.observedAt) buckets.set(key, observation); continue; }
