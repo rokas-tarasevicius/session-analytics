@@ -526,6 +526,7 @@ function renderActivity(view) {
   const { grid, counted, maximum } = activityGrid(eligible, snapshotTimeZone());
   const insights = $("#activity-insights");
   clear(insights); insights.hidden = !counted;
+  $("#activity-insights-note").hidden = !counted;
   if (counted) {
     const rhythm = activityInsights(eligible, snapshotTimeZone());
     const card = (label, value, note) => {

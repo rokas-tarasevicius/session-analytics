@@ -646,6 +646,7 @@ tbody tr:first-child th { border-top: 0; }
 /* heatmap */
 .activity-insights { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--gap); }
 .activity-insights .kpi strong { font-size: var(--fs-lg); }
+.activity-insights-note { margin: 0 0 var(--gap); }
 .activity-panel { min-width: 0; min-height: auto; margin-top: 0; overflow-x: auto; }
 .activity-heatmap-scroll { max-width: 100%; overflow-x: auto; }
 .activity-heatmap { display: grid; grid-template-columns: 64px repeat(24, minmax(16px, 1fr)); gap: 3px; align-items: center; min-width: 720px; }
