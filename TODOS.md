@@ -27,6 +27,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
+| P3 | Make provider digit chords work on AZERTY layouts: after `p`, the Shift keydown needed to type `1` currently cancels the chord and the digit changes the time window instead of toggling provider 1. Preserve the chord across modifier keydowns and verify shifted digits without changing the chord deadline or browser modifier behavior. | #107 accessibility review (pre-existing) |
 | P3 | Announce refresh and empty-window status through live regions. | §2 P3, Accessibility; §6 optional PR-B1 work |
 | P3 | Restore keyboard focus after export disables the activated download button. | §2 P3, Accessibility |
 | P3 | Avoid repeated Velocity live-region announcements during pointer movement and resize. | §2 P3, Accessibility |
