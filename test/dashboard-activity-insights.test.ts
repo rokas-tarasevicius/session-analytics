@@ -16,7 +16,7 @@ test("Activity insights follow repository, provider and window selection and lab
   const values = () => insights.querySelectorAll("strong").map((element) => element.textContent);
   assert.equal(insights.hidden, false);
   assert.equal(document.querySelector("#activity-insights-note")!.hidden, false);
-  assert.match(readFileSync(new URL("../src/public/index.html", import.meta.url), "utf8"), /id="activity-insights-note" hidden>Streaks count known start dates, not continuous work or a current streak/);
+  assert.match(readFileSync(new URL("../src/public/index.html", import.meta.url), "utf8"), /id="activity-insights-note" hidden>Known session-start dates; not continuous work or a current streak/);
   assert.match(readFileSync(new URL("../src/public/index.html", import.meta.url), "utf8"), /Activity streaks count known session-start dates in the selected window, not continuous work or a current streak/);
   assert.deepEqual(values(), ["3 days", "09:00–09:59", "Monday"]);
   assert.match(insights.textContent, /2 hours tied/);
@@ -26,10 +26,10 @@ test("Activity insights follow repository, provider and window selection and lab
   assert.match(insights.textContent, /3 weekdays tied/);
   run("viewProviderFilters.activity = new Set(['claude']); renderActivity(activeView())");
   assert.deepEqual(values(), ["1 day", "09:00–09:59", "Monday"]);
-  assert.match(insights.textContent, /2 active days in this window/);
+  assert.match(insights.textContent, /2 active days/);
   run("elements.windowStart.value = elements.windowEnd.value = '2026-09-30'; renderActivity(activeView())");
   assert.deepEqual(values(), ["1 day", "17:00–17:59", "Wednesday"]);
-  assert.match(insights.textContent, /1 active day in this window/);
+  assert.match(insights.textContent, /1 active day/);
 });
 
 test("Activity clears and hides insights when all providers are switched off", async () => {
@@ -69,12 +69,12 @@ test("Activity KPIs and both peak tie sets follow the machine toggle", async () 
   const insights = document.querySelector("#activity-insights")!;
   const values = () => insights.querySelectorAll("strong").map((element) => element.textContent);
   assert.deepEqual(values(), ["3 days", "17:00–17:59", "Monday"]);
-  assert.match(insights.textContent, /3 active days in this window/);
+  assert.match(insights.textContent, /3 active days/);
   assert.match(insights.textContent, /3 weekdays tied/);
   assert.match(insights.textContent, /Tied: Monday, Tuesday, Wednesday/);
   run("setMachine('remote', false)");
   assert.deepEqual(values(), ["1 day", "09:00–09:59", "Monday"]);
-  assert.match(insights.textContent, /2 active days in this window/);
+  assert.match(insights.textContent, /2 active days/);
   assert.match(insights.textContent, /2 weekdays tied/);
   assert.match(insights.textContent, /Tied: Monday, Wednesday/);
   assert.match(insights.textContent, /2 hours tied/);
@@ -85,7 +85,7 @@ test("Activity KPIs and both peak tie sets follow the machine toggle", async () 
   assert.deepEqual(values(), ["1 day", "17:00–17:59", "Tuesday"]);
   run("setMachine('local', true)");
   assert.deepEqual(values(), ["3 days", "17:00–17:59", "Monday"]);
-  assert.match(insights.textContent, /3 active days in this window/);
+  assert.match(insights.textContent, /3 active days/);
 });
 
 test("no start today leaves the historical longest streak intact before and after day end", async () => {
@@ -97,7 +97,7 @@ test("no start today leaves the historical longest streak intact before and afte
   const insights = document.querySelector("#activity-insights")!;
   const assertHistoricalRun = () => {
     assert.equal(insights.querySelector("strong")!.textContent, "3 days");
-    assert.match(insights.textContent, /3 active days in this window/);
+    assert.match(insights.textContent, /3 active days/);
     assert.equal(document.querySelector("#activity-insights-note")!.hidden, false);
   };
   assertHistoricalRun();

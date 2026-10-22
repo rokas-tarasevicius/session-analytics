@@ -40,7 +40,7 @@ test('time-ui: Activity excludes unknown starts and does not create a Unix-epoch
   assert.equal(elements.activityHeatmap.children.reduce((sum,e)=>sum+Number(e.dataset.value??0),0),1);
   assert.match(evidence.textContent,/1\/4 sessions/);
   assert.equal(insights.children[0]!.querySelector('strong')!.textContent, '1 day');
-  assert.match(insights.textContent, /1 active day in this window/);
+  assert.match(insights.textContent, /1 active day/);
   assert.equal(key.children[1]!.textContent.trim(), '0');
   assert.equal(key.children.at(-2)!.textContent.trim(), '1');
   assert.deepEqual(key.children.filter(e => e.tagName === 'i').map(e => e.dataset.level), ['0', '7']);

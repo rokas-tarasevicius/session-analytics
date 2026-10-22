@@ -529,7 +529,7 @@ function renderActivity(view) {
   $("#activity-insights-note").hidden = !counted;
   if (counted) {
     const rhythm = activityInsights(eligible, snapshotTimeZone());
-    insights.append(kpi({ label: "Longest start-day streak", value: `${integer(rhythm.longestStreak)} ${rhythm.longestStreak === 1 ? "day" : "days"}`, note: `${integer(rhythm.activeDays)} active ${rhythm.activeDays === 1 ? "day" : "days"} in this window` }));
+    insights.append(kpi({ label: "Longest streak", value: `${integer(rhythm.longestStreak)} ${rhythm.longestStreak === 1 ? "day" : "days"}`, note: `${integer(rhythm.activeDays)} active ${rhythm.activeDays === 1 ? "day" : "days"}` }));
     const peak = (label, result, labels, unit) => {
       const winners = result.indexes.map((index) => labels[index]);
       const item = kpi({ label, value: winners[0], note: `${integer(result.starts)} ${result.starts === 1 ? "start" : "starts"}${winners.length > 1 ? ` · ${integer(winners.length)} ${unit} tied` : ""}` });
