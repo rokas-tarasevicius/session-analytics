@@ -6,7 +6,13 @@ All screenshots use synthetic demo data from all seven providers, including Anti
 
 The dashboard runs on `127.0.0.1` and has seven views in three groups: **Overview** (Summary, Velocity), **Economics** (Costs, Pricing, Subscription) and **Usage** (Tools, Activity). A window selector at the top switches between the last 7, 30 or 90 days, all history, or a custom range. The sidebar lists every repository with a sparkline and its value, and clicking one focuses every view on that repository except Subscription, whose limits are account-wide. A command palette (<kbd>⌘K</kbd>), `g`-prefixed shortcuts, light and dark themes, two densities and an address bar that follows the view, window and focus make it quick to move around and to share a link to exactly what you are looking at.
 
-Each view’s screen-reader region is named “Summary overview”, “Velocity overview”, and so on, distinct from its page heading.
+Each view’s screen-reader region is named “Summary overview”, “Velocity overview”, and so on, distinct from its page heading. Export downloads return keyboard focus to the Export view control before their menu closes; a scope change that invalidates a focused download does the same.
+
+### When there is nothing to show
+
+All seven views share a guided empty state. With no sessions in the snapshot, it explains that the scan found no saved history, lists supported providers, and offers **Refresh snapshot** and the [provider setup guide](providers.md). Reported source checks name providers only: readable history does not prove completeness, and missing history does not prove an agent is uninstalled. Coverage repeats these checks independently of the current selection; older snapshots without discovery details say so. Other providers' discovery details are not yet reported here.
+
+With history outside the selected dates or repository, **Show all time** and **Clear repository focus** recover the selection. Pricing keeps its catalog available beneath the explanation and identifies offline pricing separately from missing history. First scans explain that results are pending; a failed first scan offers Retry and a setup link. A failed refresh keeps the previous snapshot and marks it stale.
 
 ### While a scan runs
 
@@ -25,11 +31,14 @@ The dashboard polls `/api/analytics?wait=10`. A scan still running after ten sec
 `phase` is `discover`, `parse`, or `combine`; `total` is null before enumeration. `startedAt` and `fullParse` reset
 for each scan. Progress is null when no scan is running. A ready scan answers HTTP 200 with the normal snapshot.
 Only the first request of a manual refresh uses `?refresh=1&wait=10`; subsequent polls join that scan. The client
-updates elapsed time locally every second and limits status announcements to one change per two seconds.
+updates elapsed time locally every second and visual progress text at most once per two seconds.
+Screen readers receive a polite announcement when a scan starts, completes or fails, without repeated elapsed-time
+announcements. An empty date window is announced once when selected, with its scope and dates. Keyboard focus returns
+to Refresh snapshot after completion if disabling the button displaced it and focus is still on the page body.
 
 ### Summary: the state of the machine
 
-On narrow screens, repository and time-window selectors share the header, and metrics stack into one column below 400 pixels. Custom ranges keep the native date inputs.
+On narrow screens, repository and time-window selectors share the header, and metrics stack into one column below 400 pixels. Custom ranges keep the native date inputs. At widths up to 800 pixels, the repository fleet table shows each row as a card with labeled figures and wrapping repository names. The column buttons above the cards still sort all eight columns; activating a repository focuses it, and Clear focus restores the fleet. The same table and native buttons preserve keyboard and screen-reader navigation. Wider screens keep the table layout.
 
 <details>
 <summary>Phone layout</summary>
@@ -42,6 +51,8 @@ On narrow screens, repository and time-window selectors share the header, and me
 </details>
 
 Summary answers "what happened in this window?" Six metrics show usage value, sessions analyzed, request input processed, output tokens, effective tool calls and compactions. Each metric shows how many of the selected sessions carry the evidence behind the number, the change against the previous window, and a sparkline. On wide desktops, the metrics form a totals rail beside the daily usage chart and session mix; narrower layouts put totals first. Repository and model breakdowns, top tools, sub-agent value and a sortable fleet table follow below.
+
+**Quiet repositories** lists repositories with dated activity before the selected window and none observed inside it, most recently active first. Each entry shows its last observed active day; click it to focus that repository. The panel follows all primary Summary content, including the totals, daily chart, session mix, breakdowns and repository table, and remains available when the selected repository or entire window has no activity. Its heading shows the total quiet count; the five most recently active repositories appear first, with a keyboard-accessible “+N more” disclosure for the rest. Expansion is temporary and resets when the view rerenders. It follows repository focus and selected machines, covers all providers (Summary's provider chips filter only the daily chart), and is hidden for all history or when there are no matches. Dates combine occupied activity-ledger cells (including zero-value, unpriced and session-dated activity) with known session starts in the snapshot timezone. Undated activity and unknown or file-mtime starts do not establish an active day. Local history may be incomplete, so quiet means no **observed dated activity**, not proof of inactivity, quality or outcomes.
 
 Changes share arrow marks and one decimal place for percentages; ratios above 10× use a multiple of the prior value, such as `▲ 156×`. Adjacent equal-length windows say “vs previous Nd”; calendar week/month comparisons retain their named weekday/month periods.
 
@@ -76,6 +87,10 @@ The dashboard shows this machine's sessions as soon as its own scan is done, rat
 Velocity answers "is this going up, and what is driving it?" It opens grouped by model, with shades of each provider's colour. You can also group by provider, agent, repository, execution kind or reasoning effort; plot usage value, any token class, model calls, tool calls or sessions started; by day, week or month, or as an hour-of-day profile; as a stacked area, lines or a cumulative curve, with an optional 7-day average. Below the chart, week-to-date, month-to-date and today-versus-median comparisons show the evidence on both sides of every change, and a **Top increases** table ranks positive absolute increases by repository, model and agent over the last seven completed days versus the preceding seven. Evidence cells use compact counts, such as `13.8M priced (100%) → 9.3M priced (100%)`; exact known/eligible counts stay in the tooltip and accessible name. When enough complete history exists, a projection band shows the month's likely range as a workload scenario, never as a forecast of your bill.
 
 Daily chart ticks use equal calendar steps, labelling every day in windows up to 14 days when the labels fit. Hour profiles use 00:00, 06:00, 12:00 and 18:00, with fewer equally spaced ticks on narrow charts.
+
+Focus the Velocity chart and use Left/Right arrows or Home/End to inspect and announce a bucket. Pointer hover updates
+the visible readout quietly; repeated movement within a bucket and resize redraws do not repeat announcements. Escape
+dismisses the readout before the dashboard's separate shortcut to clear repository focus.
 
 Velocity’s “Average per active day” is usage value divided by days with positive usage value in the selected window, independent of the plotted metric.
 
@@ -196,3 +211,33 @@ The command palette jumps to any view or repository, toggles provider chips and 
 </p>
 
 Repositories with the same display name keep that name for the first hashed repository ID and use ` · 2`, ` · 3`, and so on for later IDs. These dashboard-only labels stay stable across usage sorting and machine filters; their tooltips explain “another checkout with the same name”. No paths are shown. Links still accept a hashed ID or the original plain name (the first match wins); exports retain the original names.
+
+### Keyboard shortcuts
+
+Press `?` or choose **Keyboard shortcuts** in the palette to open help. Its list and the palette hints come from the same registry as global key handling. `Mod+k` means ⌘K on macOS or Ctrl+K elsewhere; a space means press keys in sequence, within 1.5 seconds. Provider numbers follow the chips present in the snapshot; absent numbers do nothing.
+
+<!-- global-shortcuts:start -->
+| Shortcut | Action |
+| --- | --- |
+| `g s` | Summary |
+| `g v` | Velocity |
+| `g c` | Costs |
+| `g p` | Pricing |
+| `g u` | Subscription |
+| `g t` | Tools |
+| `g a` | Activity |
+| `[ or ]` | Previous / next view |
+| `Mod+K or /` | Command palette |
+| `1 or 2 or 3 or 4` | Last 7 · 30 · 90 days · all |
+| `p 1 or p 2 or p 3 or p 4 or p 5 or p 6 or p 7 or p 8` | Toggle provider chips in order (Summary chart, Velocity, Tools, Activity) |
+| `e` | Data coverage |
+| `Escape` | Clear repository focus / close dialog |
+| `t` | Switch theme |
+| `d` | Switch density |
+| `r` | Refresh snapshot |
+| `?` | Keyboard shortcuts |
+<!-- global-shortcuts:end -->
+
+Single-key shortcuts work in every view where their action applies. Provider shortcuts apply to Summary’s daily chart, Velocity, Tools and Activity. Text inputs, selects and editable content suppress character shortcuts; ⌘K / Ctrl+K can still open the palette while editing. Held keys and input composition do not run shortcuts. Escape cancels an unfinished chord, closes the top dialog or export menu, or clears repository focus when no overlay is open. Closing a dialog returns focus to its opener. Switch off **Single-key shortcuts** in help to retain only the modifier palette shortcut, Escape and buttons.
+
+Links restore view, time window, repository focus and active-view provider chips, including through Back/Forward. Unknown repositories fall back to all repositories; unknown provider names are ignored, with all providers selected if none are recognized. `theme`, `density` and `open` are one-visit overrides removed after load; theme and density buttons remember preferences on this browser.

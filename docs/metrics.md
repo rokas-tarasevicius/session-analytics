@@ -267,6 +267,23 @@ states one calendar; unknown starts and file-modification fallbacks are excluded
 exports are whole sessions started in the window; only the daily CSV is ledger-dated (see
 [interchange](#interchange-metrics-schema-version-1)).
 
+## Quiet repositories
+
+Summary derives this insight locally from existing public fields; snapshots and accounting totals are unchanged.
+For each repository in the selected machine/repository scope, take the union of known session-start days in the
+snapshot timezone and occupied `velocity.buckets` / `velocity.sessionDated` days. A zero-value or wholly unpriced
+cell still establishes activity. A repository is quiet when at least one such day precedes the window's start
+and none falls within its inclusive start/end dates. Its last observed active day is the maximum day strictly
+before the start. Dates after the window's end do not affect historical results; repositories first observed
+after the window or without earlier dated evidence are omitted. Results sort by last day descending, name,
+then opaque repository key, using the dashboard's existing disambiguated display names.
+
+Undated cells, unknown starts and file-mtime fallbacks cannot establish an active day. Sessions without a ledger
+can contribute a known start only. The panel explicitly qualifies this as observed dated activity and discloses
+that undated activity is excluded and local history may be incomplete. All history has no preceding window,
+so the panel is hidden; it is also hidden when there are no matches or another view is open. Empty windows retain
+the insight even while Summary's charts are hidden. No ratio, prior-period comparison, quality or outcome claim is calculated.
+
 ## Costs
 
 Costs reads the same activity ledger as the Summary KPI and Velocity, over the same selected dates, repository
@@ -585,6 +602,7 @@ The six [MCP tools](mcp.md) return `McpPayload` (schema version 1). The public t
 - `window.name`, `since`, `until`, `timezone`, `basis`: UTC bounds, with a null lower bound for `all`. Day windows include the current UTC date; week starts Monday. Session metrics select sessions by `createdAt` (falling back to `firstEventAt`), include the lower bound, and exclude future starts. Untimed sessions can only enter `all`. Whole-session counters are never divided among days. `budget_status` alone uses the activity-day ledger for its period values.
 - `notes[]`: fixed interpretation and evidence caveats, never copied provider warnings. Parser-warning presence adds a fixed coverage note.
 - `sourceHealth[]`: provider discovery health independent of repository, window, and selected session counts. Each row contains `provider`, `status` (`available`, `incomplete`, `unavailable`, or `unknown` for older snapshots), `sourcesRead`, `missingSources`, and `unreadableSources`. It is collected before repository selection as `MachineAnalytics.mcpSourceHealth`, so unavailable providers remain visible even when the entire machine has no sessions. A provider filter selects health rows, not their denominators. Available means configured/discovered sources were readable, not that retained history is complete. Aggregate coverage warnings add a fixed note without forwarding their text.
+  The dashboard also uses these existing discovery counts for its first-run state and Coverage source checks. Only known provider labels and fixed outcomes are shown. Checks currently cover Claude Code, Codex and Cursor; other supported providers are listed separately, without inferring their discovery state. Missing history does not establish installation status. Older snapshots without these rows show an explicit unavailable explanation.
 
 ### Totals and grouping
 

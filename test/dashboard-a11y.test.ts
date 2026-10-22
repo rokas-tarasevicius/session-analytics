@@ -16,9 +16,25 @@ test("fleet rows expose a native repository button and select once when its clic
   assert.equal(button.textContent, "Synthetic");
   assert.equal(button.dataset["focusKey"], "table:synthetic");
   assert.equal(cell.querySelector("small"), null);
+  const columns = ["name", "sessions", "value", "input", "output", "tools", "cache", "coverage"];
+  for (const [index, cell] of row.children.entries()) {
+    assert.equal(cell.getAttribute("role"), "cell");
+    const header = document.querySelector(`#${cell.getAttribute("headers")}`)!;
+    assert.ok(header);
+    assert.equal(header.getAttribute("scope"), "col");
+    assert.equal(header.getAttribute("role"), "columnheader");
+    assert.equal(cell.getAttribute("headers"), `repository-column-${columns[index]}`);
+    const label = cell.querySelector(".repository-cell-label");
+    if (index === 0) assert.equal(label, null);
+    else {
+      assert.equal(label!.textContent, header.querySelector("button")!.textContent);
+      assert.equal(label!.getAttribute("aria-hidden"), "true", "visual labels do not duplicate table headers for screen readers");
+    }
+  }
+
   assert.match((button as any).title, /^Synthetic · ID [a-z0-9]{8}$/i);
   assert.equal(button.getAttribute("aria-label"), (button as any).title);
-  assert.equal(row.getAttribute("role"), null);
+  assert.equal(row.getAttribute("role"), "row");
   assert.equal(row.getAttribute("tabindex"), null);
   assert.equal("tabIndex" in row, false);
   assert.match(row.getAttribute("aria-label")!, /^Synthetic · ID [a-z0-9]{8} · 1 session · .*top-level/i);
@@ -127,5 +143,75 @@ test("view regions retain distinct overview names instead of repeating the page 
   for (const view of ["Summary", "Velocity", "Costs", "Tools", "Activity", "Pricing", "Subscription"]) {
     assert.ok(html.includes(`id="${view.toLowerCase()}-title">${view} overview</h2>`));
     assert.ok(html.includes(`aria-labelledby="${view.toLowerCase()}-title"`));
+  }
+});
+
+test("empty-window announcements only change with the status and clear when activity returns", async () => {
+  const { document, run } = await harness([sample()]);
+  const announcer = document.querySelector("#view-announcer")!;
+  const writes: string[] = [];
+  Object.defineProperty(announcer, "textContent", { get: () => writes.at(-1) ?? "", set: (text: string) => writes.push(text) });
+  run('windowEmpty = true; renderViewStatus(activeView())');
+  assert.match(writes[0]!, /^Nothing in this window\. No sessions/);
+  run('renderViewStatus(activeView())');
+  assert.equal(writes.length, 1, "rerendering an empty window is silent");
+  run('windowEmpty = false; renderViewStatus(activeView())');
+  assert.equal(announcer.textContent, "");
+  run('windowEmpty = true; renderViewStatus(activeView())');
+  assert.equal(writes.length, 3, "returning to the same empty selection announces it again");
+});
+
+test("refresh announces lifecycle outcomes and restores displaced focus without stealing it", async () => {
+  const { document, context, run } = await harness([sample()]);
+  const refresh = document.querySelector("#refresh-button")!;
+  // The native disabled button drops focus to body. Simulate that while the
+  // request is pending, without claiming layout or browser focus behavior here.
+  let focused = 0;
+  refresh.focus = () => { focused++; document.activeElement = refresh; };
+  const announcer = document.querySelector("#snapshot-announcer")!;
+  context["render"] = () => {};
+  context["watchPricingUpdates"] = () => {};
+  context["fetchAnalytics"] = async () => { document.activeElement = document.body; return {}; };
+  document.activeElement = refresh;
+  const pending = run("loadSnapshot(true)");
+  assert.equal(announcer.textContent, "Refreshing snapshot.");
+  await pending;
+  assert.equal(announcer.textContent, "Snapshot refreshed.");
+  assert.equal(focused, 1);
+  const outside = document.querySelector("#command-button")!;
+  context["fetchAnalytics"] = async () => { document.activeElement = outside; return {}; };
+  document.activeElement = refresh;
+  await run("loadSnapshot(true)");
+  assert.equal(document.activeElement, outside);
+  assert.equal(focused, 1);
+  context["fetchAnalytics"] = async () => { throw new Error("synthetic failure"); };
+  await run("loadSnapshot(true)");
+  assert.equal(announcer.textContent, "");
+  run("snapshot = null; sharedSnapshot = null");
+  await run("loadSnapshot()");
+  assert.equal(announcer.textContent, "");
+});
+
+
+test("the error alert alone owns failed initial-load and refresh announcements", async () => {
+  for (const initial of [false, true]) {
+    const { document, context, run } = await harness([sample()]);
+    if (initial) run("snapshot = null; sharedSnapshot = null");
+    const statusWrites: string[] = [];
+    for (const id of ["snapshot-announcer", "view-announcer"]) {
+      let text = "";
+      Object.defineProperty(document.querySelector(`#${id}`)!, "textContent", {
+        get: () => text, set: (value: string) => { text = value; if (value) statusWrites.push(value); },
+      });
+    }
+    context["fetchAnalytics"] = async () => { throw new Error("HTTP 503"); };
+    await run("loadSnapshot(!" + initial + ")");
+    const alert = document.querySelector("#error-banner")!;
+    assert.equal(alert.getAttribute("role"), "alert");
+    assert.equal(alert.hidden, false);
+    assert.match(document.querySelector("#error-message")!.textContent, /HTTP 503/);
+    assert.deepEqual(statusWrites, [initial ? "Building snapshot." : "Refreshing snapshot."], "polite regions never duplicate the alert's failure");
+    assert.equal(document.querySelector("#snapshot-announcer")!.textContent, "");
+    assert.equal(document.querySelector("#view-announcer")!.textContent, "");
   }
 });

@@ -50,6 +50,8 @@ session-analytics             # opens http://127.0.0.1:4174
 session-analytics --offline   # disables public pricing refreshes
 ```
 
+No sessions yet? Complete a session in a [supported agent](docs/providers.md), then choose **Refresh snapshot**. The dashboard's guided empty state and **Coverage** explain missing history without exposing source paths. If your history lives elsewhere, the [provider setup guide](docs/providers.md) lists the source override options. [Dashboard tour](docs/dashboard.md#when-there-is-nothing-to-show).
+
 To explore synthetic data or contribute, use a source checkout. Node runs its TypeScript directly, so there is no install step:
 
 ```bash
