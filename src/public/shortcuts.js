@@ -5,7 +5,7 @@ import { providerIds } from "./providers.js";
 
 const binding = (keys, value = null, always = false) => ({ keys, value, always });
 const view = (label, key, value) => ({ id: `view-${value}`, group: "Navigate", label, action: "view", bindings: [binding(["g", key], value)] });
-export const shortcutRegistry = [
+export const shortcutRegistry = validateRegistry([
   view("Summary", "s", "summary"), view("Velocity", "v", "velocity"), view("Costs", "c", "costs"),
   view("Pricing", "p", "pricing"), view("Subscription", "u", "subscription"), view("Tools", "t", "tools"), view("Activity", "a", "activity"),
   { id: "step", group: "Navigate", label: "Previous / next view", action: "step", bindings: [binding(["["], "-1"), binding(["]"], "1")] },
@@ -18,7 +18,17 @@ export const shortcutRegistry = [
   { id: "density", group: "Control", label: "Switch density", action: "density", bindings: [binding(["d"])] },
   { id: "refresh", group: "Control", label: "Refresh snapshot", action: "refresh", bindings: [binding(["r"])] },
   { id: "help", group: "Control", label: "Keyboard shortcuts", action: "help", bindings: [binding(["?"])] },
-];
+]);
+
+function validateRegistry(registry) {
+  const seen = new Map();
+  for (const item of registry) for (const binding of item.bindings) {
+    const sequence = binding.keys.join(" ");
+    if (seen.has(sequence)) throw new Error(`Duplicate shortcut binding "${sequence}": ${seen.get(sequence)} and ${item.id}`);
+    seen.set(sequence, item.id);
+  }
+  return registry;
+}
 
 export function shortcutHint(id, value = null) {
   const item = shortcutRegistry.find((item) => item.id === id);

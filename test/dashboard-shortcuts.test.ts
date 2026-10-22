@@ -28,6 +28,15 @@ test("every registry binding dispatches uniquely and supplies its palette hint",
   assert.equal(shortcutRegistry.find((item) => item.id === "provider")!.bindings.length, Math.min(providerIds.length, 9));
 });
 
+test("duplicate bindings fail at module load and identify both shortcuts", async () => {
+  const moduleUrl = new URL("../src/public/shortcuts.js", import.meta.url);
+  const source = await readFile(moduleUrl, "utf8");
+  const duplicate = source.replace('view("Summary", "s", "summary"),', 'view("Summary", "s", "summary"), view("Conflicting", "s", "conflicting"),');
+  assert.notEqual(duplicate, source, "the duplicate fixture must change the module");
+  const standalone = duplicate.replace(/from "(\.\/[^"]+)"/g, (_, path: string) => `from "${new URL(path, moduleUrl).href}"`);
+  await assert.rejects(import(`data:text/javascript,${encodeURIComponent(standalone)}`), /Duplicate shortcut binding "g s": view-summary and view-conflicting/);
+});
+
 test("typing, composition, held keys, and browser modifiers cannot fire character shortcuts", () => {
   for (const key of ["g", "p", "1", "t", "d", "r", "?", "/", "Escape", "["]) {
     for (const target of [{ tagName: "INPUT", type: "text" }, { tagName: "TEXTAREA" }, { tagName: "SELECT" }, { tagName: "DIV", isContentEditable: true }]) {
@@ -95,3 +104,4 @@ test("composing or held Enter in the palette cannot run a command", async () => 
   assert.equal(run("currentViewName()"), "tools");
   assert.equal(document.querySelector("#command-palette")!.open, false);
 });
+
