@@ -633,6 +633,18 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
             return values.top >= plot.bottom && values.left >= 0 && values.right <= innerWidth
               && [...readout.querySelectorAll('.tip-row')].every(row => row.scrollWidth <= row.clientWidth);
           })()`), true, `daily values stay below the plot and inside ${width}px (${theme}, ${density})`);
+          if (width === 375) {
+            assert.equal(await browser.evaluate(`(() => {
+              const readout = document.querySelector('#daily-spend .chart-readout');
+              return !readout || readout.getBoundingClientRect().height <= 2 * parseFloat(getComputedStyle(readout).lineHeight);
+            })()`), true, `phone readout fits two lines (${theme}, ${density})`);
+            await browser.evaluate(`document.querySelector('#daily-spend details')?.setAttribute('open', '')`);
+            assert.equal(await browser.evaluate(`(() => {
+              const body = document.querySelector('#daily-spend .evidence-body');
+              return !body || (body.getBoundingClientRect().height > 0 && [...body.querySelectorAll('.tip-row')].every(row => row.scrollWidth <= row.clientWidth));
+            })()`), true, `phone disclosure exposes exact provider values (${theme}, ${density})`);
+            await browser.evaluate(`document.querySelector('#daily-spend details')?.removeAttribute('open')`);
+          }
         }
         if (width >= 1280) {
           assert.equal(await browser.evaluate(`(() => {

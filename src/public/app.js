@@ -404,7 +404,7 @@ function renderSparkline(svg, rawValues, days, { width = 84, height = 30, label 
 
 // --------------------------------------------------------------------- crosshair + daily readout
 
-function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, plotRight, title, rows, onIndex = null, label, initialIndex = xs.length - 1 }) {
+function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, plotRight, title, rows, summary, onIndex = null, label, initialIndex = xs.length - 1 }) {
   const viewBox = svg.viewBox.baseVal;
   const crosshair = svgNode("line", { class: "crosshair", y1: plotTop, y2: plotBottom, x1: 0, x2: 0 });
   crosshair.style.display = "none";
@@ -424,13 +424,24 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
     if (index === current) return;
     current = inspected = index;
     crosshair.style.display = ""; crosshair.setAttribute("x1", xs[index]); crosshair.setAttribute("x2", xs[index]);
+    const expanded = readout.querySelector("details")?.open || false;
     clear(readout); readout.hidden = false;
-    readout.append(node("div", title(index), "tip-title"));
-    for (const row of rows(index)) {
+    const heading = node("div", null, "readout-heading");
+    const detail = summary(index);
+    heading.append(node("div", title(index), "tip-title"), node("span", detail.value, "readout-total"));
+    const values = node("div", null, "readout-values");
+    const mobileValues = node("div", null, "evidence-body");
+    for (const target of [values, mobileValues]) for (const row of rows(index)) {
       const line = node("div", null, `tip-row${row.dim ? " dim" : ""}`);
       const key = node("i"); key.style.setProperty("--key-color", row.color);
-      line.append(key, node("span", row.label), node("strong", row.value)); readout.append(line);
+      line.append(key, node("span", row.label), node("strong", row.value)); target.append(line);
     }
+    const meta = node("div", null, "readout-meta");
+    const disclosure = node("details", null, "evidence readout-providers");
+    disclosure.open = expanded;
+    disclosure.append(node("summary", "By provider"), mobileValues);
+    meta.append(node("span", detail.sessions, "readout-sessions"), disclosure);
+    readout.append(heading, values, meta);
     if (onIndex) onIndex(index);
     if (announce) elements.announcer.textContent = `${title(index)}: ${rows(index).map((row) => `${row.label} ${row.value}`).join(", ")}`;
   };
@@ -842,9 +853,11 @@ function renderActiveAnalyticsView(view) {
 }
 
 function dailyProviderSpend(sessions) {
-  const days = new Map(daysBetween(elements.windowStart.value, elements.windowEnd.value).map((name) => [name, { name, ...Object.fromEntries(providerOrder.map((provider) => [provider, 0])) }]));
+  const days = new Map(daysBetween(elements.windowStart.value, elements.windowEnd.value).map((name) => [name, { name, starts: Object.fromEntries(providerOrder.map((provider) => [provider, 0])), ...Object.fromEntries(providerOrder.map((provider) => [provider, 0])) }]));
   for (const session of sessions) {
     if (!providerOrder.includes(session.provider)) continue;
+    const start = days.get(sessionStartDay(session, snapshotTimeZone()));
+    if (start) start.starts[session.provider] += 1;
     // The cells buildVelocity sums: in-window days with a known dimension.
     for (const [day, , dimension, values] of ledgerCells(session.velocity)) {
       const row = days.get(day);
@@ -918,6 +931,10 @@ function renderLine(items, inspectedDay = null) {
     initialIndex: remembered >= 0 ? remembered : items.length - 1,
     xs, plotTop: top, plotBottom: baseline, plotLeft: left, plotRight: width - right, label: "Daily usage value in US dollars by provider",
     title: (index) => fullDate(items[index].name),
+    summary: (index) => {
+      const starts = selectedProviders.reduce((sum, provider) => sum + (items[index].starts?.[provider] || 0), 0);
+      return { value: money(providers.reduce((sum, provider) => sum + items[index][provider], 0)), sessions: `${integer(starts)} session${starts === 1 ? "" : "s"} started` };
+    },
     rows: (index) => providers.map((provider) => ({ label: providerLabels[provider], color: providerColor(provider), value: money(items[index][provider]), dim: items[index][provider] <= 0 })),
     onIndex: (index) => {
       if (index !== null) inspectedDay = items[index].name;

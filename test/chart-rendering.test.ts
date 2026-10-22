@@ -167,8 +167,12 @@ test("daily readout exposes exact day values without hover and retains inspectio
   assert.equal(svg.getAttribute("aria-describedby"), readout.id);
   assert.match(svg.getAttribute("aria-label")!, /Home and End/);
   assert.equal(readout.hidden, false);
+  assert.equal(readout.querySelector(".readout-total")!.textContent, "$33.78");
+  assert.equal(readout.querySelector(".readout-sessions")!.textContent, "0 sessions started");
+  assert.equal(readout.querySelector("details")!.open, false);
+  assert.deepEqual(readout.querySelector(".evidence-body")!.querySelectorAll("strong").map((value) => value.textContent), ["$30.75", "$3.03"]);
   assert.match(title(), /2 January 2026/);
-  assert.deepEqual(readout.querySelectorAll("strong").map((value) => value.textContent), ["$30.75", "$3.03"]);
+  assert.deepEqual(readout.querySelector(".readout-values")!.querySelectorAll("strong").map((value) => value.textContent), ["$30.75", "$3.03"]);
   const key = (name: string) => {
     let prevented = false, stopped = false;
     svg.listeners.get("keydown")!({ key: name, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
@@ -178,7 +182,7 @@ test("daily readout exposes exact day values without hover and retains inspectio
   assert.match(title(), /30 December 2025/);
   key("ArrowLeft"); assert.match(title(), /30 December 2025/);
   key("ArrowRight"); assert.match(title(), /31 December 2025/);
-  assert.deepEqual(readout.querySelectorAll("strong").map((value) => value.textContent), ["$0.00", "$0.00"]);
+  assert.deepEqual(readout.querySelector(".readout-values")!.querySelectorAll("strong").map((value) => value.textContent), ["$0.00", "$0.00"]);
   assert.match(document.querySelector("#chart-announcer")!.textContent, /31 December 2025.*Claude.*\$0.00/);
   // Leaving the plot or moving focus to the legend does not take away the values.
   svg.listeners.get("pointerleave")?.(); svg.listeners.get("blur")?.();
@@ -218,4 +222,16 @@ test("legend keeps safe wrapping text and order, drops only numeric zero and res
   entries[0]!.listeners.get("pointerenter")!(); assert.equal(target.getAttribute("data-highlight"), "unsafe");
   renderLegend(container, [], { target });
   assert.equal(target.getAttribute("data-highlight"), null); assert.equal(mark.getAttribute("data-series-active"), null);
+});
+
+test("daily readout counts known session starts in the snapshot timezone separately from daily value", async () => {
+  const session = withLedger(sample(), [["model-synthetic", 10]], { day: "2026-10-02" });
+  const unknown = sample(); unknown.transcript!.startTimeKnown = false;
+  const { document, run } = await harness([session, unknown]);
+  run("renderLine(dailyProviderSpend(snapshot.sessions))");
+  // Use three active dates so this exercises the trend readout rather than the sparse summary.
+  run(`const daily = dailyProviderSpend(snapshot.sessions); for (const day of daily) day.claude += 1; renderLine(daily, "2026-10-01")`);
+  const chart = document.querySelector("#daily-spend")!;
+  assert.equal(chart.querySelector(".readout-sessions")!.textContent, "1 session started");
+  assert.equal(chart.querySelector(".readout-total")!.textContent, "$1.00");
 });
