@@ -518,7 +518,8 @@ h2 { font-size: var(--fs-title); font-weight: 600; letter-spacing: -0.01em; }
 .trend-point { fill: var(--series-color); stroke: var(--surface); stroke-width: 2; }
 .hit-layer { fill: transparent; cursor: crosshair; }
 .chart-readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 6px 24px; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); font-size: var(--fs-sm); }
-.chart-readout[hidden] { display: none; }
+/* Override the global hidden rule while keeping dismissed values out of the accessibility tree. */
+.chart-readout[hidden] { display: grid !important; visibility: hidden; }
 .chart-readout .tip-title { grid-column: 1 / -1; color: var(--muted); font: 500 var(--fs-xs) var(--font-sans); font-variant-numeric: tabular-nums; }
 .chart-readout .tip-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
 .chart-readout .tip-row i { width: 12px; height: 2px; border-radius: var(--radius-line); background: var(--key-color); }

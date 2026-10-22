@@ -616,6 +616,17 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
         await browser.until(chartAtContainerWidth, true);
         if (view === "summary") {
           assert.equal(await browser.evaluate(`(() => {
+            const svg = document.querySelector('#daily-spend svg');
+            if (!svg) return true;
+            svg.focus();
+            const top = () => document.querySelector('#provider-donut').getBoundingClientRect().top;
+            const before = top();
+            svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            const dismissed = top();
+            svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+            return before === dismissed && before === top();
+          })()`), true, `readout dismissal and restoration reserve height at ${width}px (${theme}, ${density})`);
+          assert.equal(await browser.evaluate(`(() => {
             const svg = document.querySelector('#daily-spend svg'), readout = document.querySelector('#daily-spend .chart-readout');
             if (!svg || !readout || readout.hidden) return true;
             const plot = svg.getBoundingClientRect(), values = readout.getBoundingClientRect();
