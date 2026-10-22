@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-22
+
 ### Fixed
 
 - Sessions recorded by Windows agents (`D:\GIT\repo`) and read from WSL resolve through the drive mount (`/mnt/d/GIT/repo`) and are attributed to their repository instead of "No repository detected". Outside WSL, and for UNC or drive-relative paths, a Windows path is no longer resolved against the directory the tool was started in, which could credit those sessions to an unrelated repository. Totals are unchanged. Usage moves between repositories.
@@ -672,7 +674,8 @@ First standalone release.
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
 
-[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.3...v0.11.0
 [0.10.3]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.10.2...v0.10.3
