@@ -1,4 +1,6 @@
 import type { SessionAnalytics, SessionProvider } from "../types.ts";
+import type { McpSourceHealth } from "../mcp/types.ts";
+export function sourceCheckNotes(health?: McpSourceHealth[]): string[];
 export const providerLabels: Record<SessionProvider, string>;
 export const providerIds: SessionProvider[];
 export const providerColors: Record<SessionProvider, string>;

@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { installExportMenu, openExportMenu } from "../src/public/export-menu.js";
+import { sourceCheckNotes } from "../src/public/providers.js";
 import { parseUrlState, serializeUrlState } from "../src/public/url-state.js";
 import {
   clampWindow, isTextEntryTarget, presentProviders, providerShortcutTarget, rankPaletteItems, resolveCustomWindow, singleFlight, validDay,
@@ -15,6 +16,107 @@ import { harness, sample, withLedger } from "./validation/aggregation-ui-harness
 
 const views = ["summary", "velocity", "costs", "pricing", "tools", "activity"];
 const presets = ["7", "30", "90", "all", "custom"];
+
+test("source checks project fixed provider labels and outcomes without forwarding private fields", () => {
+  const sentinel = "/private/SOURCE-SECRET raw error";
+  const health = [
+    { provider: "claude" as const, status: "available" as const, sourcesRead: 1, missingSources: 0, unreadableSources: 0, path: sentinel },
+    { provider: "codex" as const, status: "incomplete" as const, sourcesRead: 1, missingSources: 1, unreadableSources: 1, error: sentinel },
+    { provider: "cursor" as const, status: "unavailable" as const, sourcesRead: 0, missingSources: 1, unreadableSources: 0 },
+    { provider: "gemini" as const, status: "unknown" as const, sourcesRead: 0, missingSources: 0, unreadableSources: 0 },
+  ];
+  assert.deepEqual(sourceCheckNotes(health), [
+    "Codex: history readable; history missing; history could not be read.",
+    "Claude Code: history readable.", "Cursor: history missing.", "Gemini CLI: discovery details unavailable.",
+  ]);
+  assert.deepEqual(sourceCheckNotes(), []);
+  assert.doesNotMatch(JSON.stringify(sourceCheckNotes(health)), /SOURCE-SECRET|private|raw error/);
+  assert.deepEqual(sourceCheckNotes([{ ...health[0]!, provider: sentinel as never }]), []);
+});
+
+test("first-run guidance and reported checks stay consistent across all seven views and Coverage", async () => {
+  const { document, run } = await harness([]);
+  run(`fixture.mcpSourceHealth = [
+    { provider: 'claude', sourcesRead: 1, missingSources: 0, unreadableSources: 0 },
+    { provider: 'cursor', sourcesRead: 0, missingSources: 1, unreadableSources: 0 }
+  ]; fixture.rateCard = { effectiveDate: '2026-10-01', models: [], pricing: { offline: true, warnings: [], sources: [], stale: false } }`);
+  for (const view of [...views, "subscription"]) {
+    run(`switchView('${view}')`);
+    const status = document.querySelector("#view-status")!;
+    assert.equal(status.hidden, false, view);
+    assert.equal(status.querySelector("h2")?.textContent, "No saved sessions found", view);
+    assert.match(status.textContent, /Claude Code: history readable/);
+    assert.match(status.textContent, /Cursor: history missing/);
+    assert.match(status.textContent, /Offline pricing does not prevent local history scans/);
+    assert.equal(status.querySelectorAll("button").find((b) => b.textContent === "Refresh snapshot")!.dataset.focusKey, "first-run:refresh");
+    assert.equal((status.querySelector("a") as Element & { href: string }).href, "https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/providers.md");
+    assert.equal(document.querySelector(`[data-view-panel="${view}"]`)!.hidden, view !== "pricing");
+    assert.match(document.querySelector("#coverage-summary")!.textContent, /No saved agent sessions/);
+    assert.match(document.querySelector("#coverage-source-checks")!.textContent, /Cursor: history missing/);
+    assert.doesNotMatch(status.textContent, /Show all time|Clear repository focus/);
+  }
+  run("delete fixture.mcpSourceHealth; renderView()");
+  assert.match(document.querySelector("#view-status")!.textContent, /Source discovery details are unavailable/);
+  assert.match(document.querySelector("#coverage-source-checks")!.textContent, /Source discovery details are unavailable/);
+  assert.match(document.querySelector("#provider-evidence-rows")!.textContent, /No session evidence/);
+});
+
+test("a pending first scan and a failed first scan explain their state in every view", async () => {
+  const { document, run } = await harness([]);
+  run("snapshot = null; elements.main.dataset.state = 'loading'; loadFailed = false");
+  for (const view of [...views, "subscription"]) {
+    run(`switchView('${view}'); renderViewStatus(null)`);
+    assert.equal(document.querySelector("#view-status h2")?.textContent, "Reading local history");
+    assert.match(document.querySelector("#view-status")!.textContent, /Results appear when the scan finishes/);
+    assert.ok(document.querySelector("#view-status")!.querySelector("a"));
+    assert.equal(document.querySelector(`[data-view-panel="${view}"]`)!.hidden, view !== "subscription");
+  }
+  run("loadFailed = true; renderViewStatus(null); showActivePanel()");
+  assert.equal(document.querySelector("#view-status h2")?.textContent, "No snapshot");
+  assert.ok(document.querySelector("#view-status")!.querySelector("a"));
+  assert.ok(document.querySelectorAll("[data-view-panel]").every((p) => p.hidden));
+});
+
+test("empty machine selections and machines still reading do not claim there is no saved history", async () => {
+  const { document, run } = await harness([sample()]);
+  run(`fullSnapshot = fixture; snapshot = { ...fixture, sessions: [] }; sessionsByRepository = groupByRepository([]); renderView()`);
+  assert.equal(document.querySelector("#view-status h2")?.textContent, "No sessions from selected machines");
+  assert.equal(document.querySelector("#view-announcer")!.textContent, "No sessions from selected machines.");
+  assert.match(document.querySelector("#view-status")!.textContent, /Choose machines/);
+  assert.doesNotMatch(document.querySelector("#view-status")!.textContent, /Your first session|Complete a session/);
+  assert.match(document.querySelector("#scope-description")!.textContent, /selected machines/);
+  run(`fullSnapshot = snapshot; fullSnapshot.machines = [{ key: 'remote', state: 'reading' }]; renderView()`);
+  assert.equal(document.querySelector("#view-status h2")?.textContent, "Reading machine history");
+  assert.equal(document.querySelector("#view-announcer")!.textContent, "Reading machine history. No sessions are available yet.");
+  assert.doesNotMatch(document.querySelector("#scope-description")!.textContent, /Scan complete/);
+});
+
+test("view announcements change only with the situation and exclude static guidance and controls", async () => {
+  const { document, run } = await harness([]);
+  run(`let announcementWrites = 0, announcementText = '';
+    Object.defineProperty(elements.viewAnnouncer, 'textContent', {
+      get: () => announcementText,
+      set: value => { announcementWrites++; announcementText = value; }
+    }); renderView()`);
+  const announcer = document.querySelector("#view-announcer")!;
+  assert.match(announcer.textContent, /No saved agent sessions were found/);
+  assert.doesNotMatch(announcer.textContent, /Supported providers|Refresh snapshot|Provider setup guide|Pricing is offline/);
+  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "off");
+  assert.equal(announcer.getAttribute("aria-live"), "polite");
+  assert.equal(announcer.getAttribute("aria-atomic"), "true");
+  assert.equal(run("announcementWrites"), 1);
+  run("renderView(); renderView()");
+  assert.equal(run("announcementWrites"), 1, "unchanged snapshot polls do not rewrite the announcer");
+  run("snapshot = null; elements.main.dataset.state = 'loading'; renderViewStatus(null); renderViewStatus(null)");
+  assert.equal(announcer.textContent, "", "the snapshot announcer owns loading progress");
+  assert.equal(run("announcementWrites"), 2);
+  run("loadFailed = true; renderViewStatus(null); renderViewStatus(null)");
+  assert.equal(announcer.textContent, "", "the error alert owns failure announcements");
+  assert.equal(run("announcementWrites"), 2);
+  run("snapshot = fixture; loadFailed = false; windowEmpty = false; renderViewStatus(activeView()); renderViewStatus(activeView())");
+  assert.equal(announcer.textContent, "");
+  assert.equal(run("announcementWrites"), 2);
+});
 
 test("pricing health polling adds the refresh notice without fetching analytics or mutating displayed totals", async () => {
   const { context, document, run } = await harness([withLedger(sample(), [["synthetic", 2]])]);
@@ -39,6 +141,26 @@ test("the harness fires g v through the dashboard keydown handler", async () => 
   assert.equal(run("currentViewName()"), "velocity");
 });
 
+test("Velocity Escape cancels g and p chords while retaining repository focus", async () => {
+  const { document, run, fireKey } = await harness([withLedger(sample(), [["synthetic", 3]])]);
+  run("populateRepositories(); selectRepository('synthetic', { scroll: false }); switchView('velocity')");
+  const svg = document.querySelector(".velocity-chart svg")!;
+  fireKey("g", svg);
+  assert.equal(fireKey("Escape", svg).defaultPrevented, true);
+  assert.equal(run("pendingChord"), null);
+  fireKey("c", svg);
+  assert.equal(run("currentViewName()"), "velocity");
+  assert.equal(document.querySelector("#repository-filter")!.value, "synthetic");
+  fireKey("Home", svg);
+  fireKey("p", svg);
+  fireKey("Escape", svg);
+  assert.equal(run("pendingChord"), null);
+  fireKey("1", svg);
+  assert.equal(run("windowPreset"), "7");
+  assert.equal(document.querySelector("#repository-filter")!.value, "synthetic");
+  assert.equal(run("viewProviderFilters.velocity.has('claude')"), true);
+});
+
 test("fleet row tooltips retain repository IDs and execution counts for screen readers", async () => {
   const { document, run } = await harness([withLedger(sample(), [["model-synthetic", 10]])]);
   run("renderRepositoryTable(activeView().repositories)");
@@ -61,7 +183,11 @@ test("shared snapshot ignores view, window and provider shortcuts", async () => 
   context["sharedFixture"] = { kind: "shared", sources: [], minimumSessions: 5,
     summary: { sessions: 5 }, repositories: [{ repository: "repo-synthetic", sessions: 5, apiEquivalentSpendUsd: 1,
       providerReportedSpendUsd: 0, inputTokens: 100, outputTokens: 20, priceableTokens: 120, pricedTokens: 120 }] };
+  run("snapshot = null; elements.main.dataset.state = 'loading'; renderViewStatus(null)");
+  assert.equal(document.querySelector("#view-status")!.hidden, false);
   run("render(sharedFixture); elements.windowStart.value = elements.windowEnd.value = elements.windowStart.min = elements.windowEnd.max = ''");
+  assert.equal(document.querySelector("#view-status")!.hidden, true);
+  assert.equal(document.querySelector("#view-status")!.textContent, "");
   assert.equal(run("snapshot"), null);
   assert.equal(run("exportSelection() === sharedFixture"), true);
   const assertHidden = () => {
@@ -180,7 +306,11 @@ test("Escape cancels an armed g chord and dashboard statuses are live regions", 
   assert.equal(fireKey("Escape").defaultPrevented, true);
   assert.equal(run("pendingChord"), null);
   assert.equal(document.querySelector("#sync-context")!.getAttribute("role"), "status");
-  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "polite");
+  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "off");
+  for (const selector of ["#view-announcer", "#snapshot-announcer"]) {
+    assert.equal(document.querySelector(selector)!.getAttribute("aria-live"), "polite");
+    assert.equal(document.querySelector(selector)!.getAttribute("aria-atomic"), "true");
+  }
 });
 
 test("palette ranks exact, prefix, word-start, substring, then subsequence matches and drops weak fuzzy matches", async () => {

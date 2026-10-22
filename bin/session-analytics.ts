@@ -38,6 +38,10 @@ Usage:
   ${brand.command} upgrade [--check]      Upgrade with the package manager that installed it (Homebrew or npm)
   ${brand.command} <command> --help       Show options for a command
   ${brand.command} --version              Print the version
+
+No sessions found? Complete a supported agent session, then Refresh snapshot.
+Provider setup: https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/providers.md
+Dashboard tour: https://github.com/rokas-tarasevicius/session-analytics/blob/master/docs/dashboard.md
 `);
 } else if (command === "--version" || command === "-v") {
   process.stdout.write(`${version}\n`);

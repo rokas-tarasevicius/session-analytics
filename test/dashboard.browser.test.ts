@@ -150,7 +150,7 @@ async function connect(port: number, log: () => string = () => ""): Promise<{ br
   return { browser, close: () => socket.close() };
 }
 
-test("laptop tables fit and registry provider chips wrap within their header in both densities", { skip: browserSkip }, async (t) => {
+test("laptop tables and mobile fleet cards fit in both themes and densities", { skip: browserSkip }, async (t) => {
   assert.ok(existsSync(chromePath), `Required browser is missing: ${chromePath}`);
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "session-analytics-layout-"));
   let server: ChildProcess | null = null, chrome: ChildProcess | null = null;
@@ -223,6 +223,61 @@ test("laptop tables fit and registry provider chips wrap within their header in 
           assert.equal(chips.belowTitle, true, label);
         }
       }
+    }
+    // One table becomes cards only on narrow screens; keep every column, native sort control and row action.
+    await browser.evaluate(`document.querySelector('[data-view-button="summary"]').click()`);
+    for (const theme of ["light", "dark"]) for (const density of ["compact", "comfortable"]) for (const width of [375, 414, 768]) {
+      const label = `${width}px (${theme}, ${density})`;
+      await browser.evaluate(`document.documentElement.dataset.theme = '${theme}'; document.documentElement.dataset.density = '${density}'`);
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1024, mobile: false, width });
+      await browser.until(`innerWidth`, width);
+      const layout = await browser.evaluate<{ scroll: number; client: number; pageFits: boolean; cards: boolean; fits: boolean; labels: string[]; targets: boolean; text: boolean }>(`(() => {
+        const panel = document.querySelector('#repository-comparison'), wrap = panel.querySelector('.table-wrap');
+        const rows = [...panel.querySelectorAll('tbody tr')], cells = rows.flatMap(row => [...row.cells]);
+        const rect = wrap.getBoundingClientRect();
+        return { scroll: wrap.scrollWidth, client: wrap.clientWidth, pageFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          cards: rows.every(row => getComputedStyle(row).display === 'grid'),
+          fits: cells.every(cell => { const r = cell.getBoundingClientRect(); return r.left >= rect.left && r.right <= rect.right && cell.scrollWidth <= cell.clientWidth; }),
+          labels: [...rows[0].querySelectorAll('.repository-cell-label')].map(label => label.textContent),
+          targets: [...panel.querySelectorAll('button')].every(button => Math.round(button.getBoundingClientRect().height) >= 44),
+          text: [...panel.querySelectorAll('.repository-cell-label, .sort')].every(el => parseFloat(getComputedStyle(el).fontSize) >= 12) };
+      })()`);
+      assert.ok(layout.scroll <= layout.client && layout.pageFits, `No fleet or page overflow at ${label}: ${JSON.stringify(layout)}`);
+      assert.ok(layout.cards && layout.fits && layout.targets && layout.text, `Readable cards, complete long names and touch targets at ${label}: ${JSON.stringify(layout)}`);
+      assert.deepEqual(layout.labels, ["Sessions", "Usage value", "Input", "Output", "Tools", "Cache", "Priced"], label);
+    }
+    // Keyboard sorting uses the same header buttons and updates their existing aria-sort.
+    await browser.evaluate(`document.querySelector('#repository-comparison [data-sort="name"]').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    assert.equal(await browser.evaluate(`document.activeElement.dataset.sort`), "name");
+    await browser.until(`document.activeElement.closest('th').getAttribute('aria-sort')`, "ascending");
+    const ascending = await browser.evaluate<string[]>(`[...document.querySelectorAll('#repository-rows .row-link')].map(button => button.textContent)`);
+    await browser.key("Enter", { text: "\r" });
+    assert.deepEqual(await browser.evaluate<string[]>(`[...document.querySelectorAll('#repository-rows .row-link')].map(button => button.textContent)`), ascending.toReversed());
+    const repository = await browser.evaluate<string>(`document.querySelector('#repository-rows .row-link').dataset.focusKey`);
+    await browser.evaluate(`document.querySelector('#repository-rows .row-link').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    assert.equal(await browser.evaluate(`document.activeElement.dataset.focusKey`), repository);
+    await browser.until(`document.activeElement.getAttribute('aria-current')`, "true");
+    assert.equal(await browser.evaluate(`document.querySelectorAll('#repository-rows .fleet-total td').length`), 8);
+    // CSS grid must keep table roles in the actual accessibility tree, not only in the DOM.
+    const accessibility = await browser.send("Accessibility.getFullAXTree");
+    const axNodes = accessibility["result"]["nodes"] as Array<{ nodeId: string; parentId?: string; ignored: boolean; role?: { value: string }; name?: { value: string } }>;
+    const fleetTable = axNodes.find(node => !node.ignored && node.role?.value === "table" && node.name?.value.endsWith(" vs fleet"));
+    assert.ok(fleetTable, "the focused fleet remains a named table");
+    const byId = new Map(axNodes.map(node => [node.nodeId, node]));
+    const fleetNodes = axNodes.filter(node => {
+      for (let parent = node.parentId; parent; parent = byId.get(parent)?.parentId) if (parent === fleetTable.nodeId) return !node.ignored;
+      return false;
+    });
+    assert.equal(fleetNodes.filter(node => node.role?.value === "columnheader").length, 8);
+    assert.equal(fleetNodes.filter(node => node.role?.value === "cell").length, 16);
+    assert.equal(fleetNodes.filter(node => node.role?.value === "row").length, 3);
+    await browser.evaluate(`document.querySelector('#repository-table-hint button').click()`);
+    for (const width of [820, 1440]) {
+      await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 900, mobile: false, width });
+      assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('#repository-rows tr')).display`), "table-row", `${width}px keeps the desktop table`);
+      assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.repository-cell-label')).display`), "none");
     }
     // Both shared breakpoints must beat per-view defaults, including the later Pricing stylesheet.
     for (const width of [820, 520, 375]) {
@@ -325,7 +380,7 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.deepEqual(tabbed.slice(3), navOrder);
     // Legends are not tab stops; the fleet table offers a real button per repository.
     assert.equal(await browser.evaluate(`document.querySelectorAll('button.chart-legend-item, .chart-legend-item[tabindex]').length`), 0);
-    assert.equal(await browser.evaluate(`document.querySelectorAll('#repository-rows tr[role], #repository-rows tr[tabindex]').length`), 0);
+    assert.equal(await browser.evaluate(`document.querySelectorAll('#repository-rows tr[role=link], #repository-rows tr[role=button], #repository-rows tr[tabindex]').length`), 0);
     assert.ok((await browser.evaluate<number>(`document.querySelectorAll('#repository-rows button.row-link').length`)) > 0);
 
     // Palette: opens from its trigger with Enter, traps focus in the input, closes on Escape, restores focus to the trigger.
@@ -336,12 +391,45 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-label')`), "Search views, repositories and commands");
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-expanded')`), "true");
     assert.equal(await browser.evaluate(`document.querySelector('#command-input').getAttribute('aria-activedescendant')`), "command-option-0");
+    // IME Enter, including the commit boundary, cannot execute the focused command.
+    for (const isComposing of [true, false]) {
+      assert.deepEqual(await browser.evaluate(`(() => {
+        const input = document.querySelector('#command-input');
+        input.value = 'Go to Tools'; input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: ${isComposing}, bubbles: true }));
+        return { paletteOpen: document.querySelector('#command-palette').open, view: document.querySelector('[data-view-button][aria-current=page]').dataset.viewButton };
+      })()`), { paletteOpen: true, view: "summary" });
+    }
+    await browser.evaluate(`const input = document.querySelector('#command-input'); input.value = ''; input.dispatchEvent(new Event('input'));`);
     // Ranking: the closest match comes first and weak fuzzy matches drop out.
     await browser.send("Input.insertText", { text: "help" });
     assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('#command-list .option-label')].map((label) => label.textContent)`), ["Keyboard shortcuts"]);
     await browser.key("Escape");
     await browser.until(`document.querySelector('#command-palette').open`, false);
     assert.equal(await browser.evaluate(`document.activeElement.id`), "command-button");
+    // Shortcut help is generated from the dispatch registry and native dialog closing restores its opener.
+    await browser.evaluate(`document.querySelector('#help-button').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#help-overlay').open`, true);
+    assert.equal(await browser.evaluate(`(async () => {
+      const { shortcutRegistry } = await import('/shortcuts.js');
+      return JSON.stringify([...document.querySelectorAll('#shortcut-list dt')].map(row => row.textContent)) === JSON.stringify(shortcutRegistry.map(item => item.label));
+    })()`), true);
+    await browser.key("Escape");
+    await browser.until(`document.querySelector('#help-overlay').open`, false);
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "help-button");
+    // Bare slash stays within modal boundaries; the explicit modifier shortcut remains available.
+    for (const [button, dialog] of [["help-button", "help-overlay"], ["coverage-button", "coverage-dialog"], ["machine-details", "machines-dialog"]]) {
+      await browser.evaluate(`document.querySelector('#${button}').click()`);
+      await browser.key("/", { code: "Slash", text: "/" });
+      assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('dialog[open]')].map(dialog => dialog.id)`), [dialog]);
+      await browser.key("k", { code: "KeyK", modifiers: 4 });
+      await browser.until(`document.querySelector('#command-palette').open`, true);
+      await browser.evaluate(`document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close())`);
+    }
+    const originalTheme = await browser.evaluate(`document.documentElement.dataset.theme`);
+    await browser.evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', repeat: true, bubbles: true })); document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 't', isComposing: true, bubbles: true }));`);
+    assert.equal(await browser.evaluate(`document.documentElement.dataset.theme`), originalTheme);
     // Meta/Ctrl+K toggles it from anywhere; "export" runs the Export entry, which opens the menu on its first download.
     await browser.key("k", { code: "KeyK", modifiers: 4 });
     await browser.until(`document.querySelector('#command-palette').open`, true);
@@ -350,6 +438,12 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#export-menu').open`, true);
     await browser.until(`document.activeElement?.dataset.export`, "json");
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#export-menu').open`, false);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#export-menu > summary')`), true);
+    assert.match(await browser.evaluate<string>(`document.querySelector('#export-status').textContent`), /Download prepared locally/);
+    await browser.evaluate(`document.querySelector('#export-menu summary').click()`);
+    await browser.until(`document.querySelector('#export-menu').open`, true);
     await browser.key("Escape");
     await browser.until(`document.querySelector('#export-menu').open`, false);
 
@@ -442,6 +536,42 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.evaluate(`document.documentElement.dataset.theme = 'dark'; document.querySelector('[data-view-button="velocity"]').click()`);
     await browser.until(`document.querySelector('#velocity-view')?.firstElementChild?.classList.contains('velocity-lead')`, true);
     assert.equal(await browser.evaluate(`document.querySelector('.velocity-lead article:last-child strong').textContent`), headline);
+    await browser.evaluate(`document.querySelector('.velocity-chart > svg').focus()`);
+    await browser.key("Home");
+    const inspected = await browser.evaluate<string>(`document.querySelector('#chart-announcer').textContent`);
+    assert.ok(inspected.length > 0);
+    await browser.evaluate(`window.auditChartMutations = 0; window.auditObserver = new MutationObserver(() => window.auditChartMutations++); window.auditObserver.observe(document.querySelector('#chart-announcer'), {childList:true,subtree:true,characterData:true})`);
+    await browser.evaluate(`for (let i=0;i<30;i++) document.querySelector('.velocity-chart > svg').dispatchEvent(new PointerEvent('pointermove', {clientX:800+i}))`);
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.key("Home");
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1200 });
+    await delay(250);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('.velocity-chart > svg')`), true);
+    assert.equal(await browser.evaluate(`window.auditChartMutations`), 0);
+    await browser.key("Escape");
+    assert.equal(await browser.evaluate(`document.querySelector('.velocity-inspection').hidden`), true);
+    await browser.evaluate(`window.auditObserver.disconnect()`);
+    // Native touch focus must announce the tapped bucket, including successive taps.
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 812, mobile: true, width: 375 });
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await browser.until(`innerWidth`, 375);
+    const touchDates: string[] = [];
+    for (const fraction of [0.35, 0.7, 0.45]) {
+      if (fraction !== 0.45) await browser.evaluate(`document.activeElement?.blur()`);
+      const point = await browser.evaluate<{ x: number; y: number }>(`(() => {
+        const svg = document.querySelector('.velocity-chart > svg'); svg.scrollIntoView({block:'center'});
+        const r = svg.getBoundingClientRect(); return { x:r.left+r.width*${fraction}, y:r.top+r.height/2 };
+      })()`);
+      await browser.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
+      await browser.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await browser.until(`document.querySelector('#chart-announcer').textContent.startsWith(document.querySelector('.velocity-inspection strong').textContent.split(' · ')[0])`, true);
+      touchDates.push(await browser.evaluate<string>(`document.querySelector('.velocity-inspection strong').textContent.split(' · ')[0]`));
+    }
+    assert.notEqual(touchDates[0], touchDates[1], "tap A then B selects distinct buckets");
+    assert.notEqual(touchDates[1], touchDates[2], "already focused tap also selects another bucket");
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
     // Velocity chips list the snapshot's providers, and p 1 toggles the first of them.
     assert.deepEqual(await browser.evaluate(`[...document.querySelectorAll('#velocity-view .provider-key .chip')].map((chip) => chip.dataset.provider)`), ["codex", "claude", "cursor"]);
     await browser.evaluate(`document.activeElement?.blur()`);
@@ -703,6 +833,60 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('[data-view-button="costs"]'), '::after').content`), '"Costs"');
     assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.repository-select-wrap')).display`), "block");
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
+
+    // Refresh from a first-run card keeps focus on its replacement, or the heading once history appears.
+    await browser.open(`${origin}/?view=summary&window=all`);
+    await browser.evaluate(`(() => {
+      const original = window.fetch; window.__firstRunEmpty = true;
+      window.__restoreFirstRunFetch = () => { window.fetch = original; };
+      window.fetch = async (url, ...args) => {
+        const response = await original(url, ...args);
+        if (!window.__firstRunEmpty || !String(url).startsWith('/api/analytics')) return response;
+        const data = await response.json(); data.sessions = []; data.repositories = []; data.warnings = [];
+        return new Response(JSON.stringify(data), { headers: { 'content-type': 'application/json' } });
+      };
+      document.querySelector('#refresh-button').click();
+    })()`);
+    await browser.until(`document.querySelector('[data-focus-key="first-run:refresh"]')`);
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    await browser.evaluate(`(() => {
+      window.__viewAnnouncementMutations = 0;
+      const observer = new MutationObserver(records => { window.__viewAnnouncementMutations += records.length; });
+      observer.observe(document.querySelector('#view-announcer'), { childList: true, subtree: true, characterData: true });
+      window.__stopViewAnnouncementObserver = () => observer.disconnect();
+      document.querySelector('[data-focus-key="first-run:refresh"]').focus();
+    })()`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.dataset.focusKey`), "first-run:refresh");
+    assert.equal(await browser.evaluate(`window.__viewAnnouncementMutations`), 0, "unchanged empty Refresh does not announce the same guidance");
+    await browser.evaluate(`window.__firstRunEmpty = false`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#view-status').hidden`, true);
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "page-title");
+    assert.equal(await browser.evaluate(`document.querySelector('#view-announcer').textContent`), "");
+    assert.equal(await browser.evaluate(`window.__viewAnnouncementMutations`), 1, "history appearing clears the old announcement once");
+    await browser.evaluate(`window.__stopViewAnnouncementObserver()`);
+    await browser.evaluate(`window.__restoreFirstRunFetch(); document.querySelector('#refresh-button').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "refresh-button");
+    // A user who moves to another control during a refresh keeps that control focused.
+    await browser.evaluate(`(() => {
+      const original = window.fetch;
+      window.fetch = async (url, ...args) => {
+        if (String(url).startsWith('/api/analytics')) await new Promise(resolve => { window.__releaseFirstRunRefresh = resolve; });
+        return original(url, ...args);
+      };
+      window.__restoreFirstRunFetch = () => { window.fetch = original; };
+      document.querySelector('#refresh-button').click();
+    })()`);
+    await browser.until(`typeof window.__releaseFirstRunRefresh === 'function'`, true);
+    await browser.evaluate(`document.querySelector('#command-button').focus(); window.__releaseFirstRunRefresh()`);
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "command-button");
+    await browser.evaluate(`window.__restoreFirstRunFetch()`);
 
     // A failed first load shows a "No snapshot" state with Retry, and the export menu says why nothing exports.
     const badSnapshot = join(temporaryDirectory, "bad-snapshot.json");

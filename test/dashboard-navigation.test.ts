@@ -26,8 +26,8 @@ test("dashboard navigation, stepping, palette and shortcut help share the seven-
   run("stepView(-1)");
   assert.equal(run("currentViewName()"), "activity");
   const html = await readFile(new URL("../src/public/index.html", import.meta.url), "utf8");
-  const help = html.slice(html.indexOf('<dialog class="help"'));
-  assert.deepEqual([...help.matchAll(/<dt>([^<]+)<\/dt>/g)].slice(0, views.length).map((match) => match[1]!.toLowerCase()), views);
+  run("renderShortcutHelp()");
+  assert.deepEqual(document.querySelector("#shortcut-list")!.querySelectorAll("dt").slice(0, views.length).map((item) => item.textContent.toLowerCase()), views);
   assert.equal(document.querySelectorAll("[data-view-panel]").length, views.length);
   const icons = new Set([...html.matchAll(/<symbol id="i-([^"]+)"/g)].map((match) => match[1]));
   assert.ok(icons.has("models"));
