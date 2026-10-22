@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Terminal reports wrap prose to the terminal width (or `COLUMNS`, defaulting to 80 when piped), align repository columns including evidence labels, and use labeled rows when a table cannot fit. Shortened model lists now show an ellipsis. Accounting totals and JSON snapshots are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

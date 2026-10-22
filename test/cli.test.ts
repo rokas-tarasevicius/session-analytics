@@ -65,6 +65,55 @@ test("report and dashboard entrypoints keep deterministic contracts", () => {
   assert.match(unknown.stderr, /Unknown session analytics argument/);
 });
 
+test("report rejects malformed arguments before analysis, with diagnostics only on stderr", () => {
+  for (const args of [
+    ["--unknown"], ["unexpected"], ["--repo-name"], ["--repo-name", "--json"],
+    ["--repo-name", "one", "--repo-name", "two"], ["--time-zone", "invalid"],
+    ["--no-remote", "--remote", "example"],
+  ]) {
+    const result = run(bin, ["report", ...args]);
+    assert.equal(result.status, 2, args.join(" "));
+    assert.equal(result.stdout, "");
+    assert.ok(result.stderr.trim().length > 0);
+    assert.doesNotMatch(result.stderr, /\bat file:|Error:|unexpected|--unknown|\bone\b|\btwo\b/);
+  }
+});
+
+test("terminal reports fit piped widths without color and JSON stays a complete snapshot", async () => {
+  const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { createSessionAnalyticsFixture } = await import("./fixtures.ts");
+  const { analyzeMachineSessions } = await import("../src/analyzer.ts");
+  const { textWidth } = await import("../src/report/format.ts");
+  const directory = await mkdtemp(resolve(tmpdir(), "session-analytics-report-format-"));
+  try {
+    const snapshot = await analyzeMachineSessions({ ...await createSessionAnalyticsFixture(directory), offline: true });
+    const path = resolve(directory, "snapshot.json");
+    await writeFile(path, JSON.stringify(snapshot));
+    for (const columns of ["20", "80", "120", "invalid"]) {
+      for (const color of [{ NO_COLOR: "1", FORCE_COLOR: undefined }, { NO_COLOR: undefined, FORCE_COLOR: "1" }]) {
+        const result = spawnSync(process.execPath, [bin, "report", "--snapshot", path], {
+          encoding: "utf8", env: { ...process.env, ...color, COLUMNS: columns },
+        });
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(result.stderr, "");
+        assert.doesNotMatch(result.stdout, /\u001b\[/);
+        assert.ok(result.stdout.split("\n").every((line) => textWidth(line) <= (Number(columns) || 80)));
+        assert.match(result.stdout, /Repository\s+comparison/);
+        if (columns !== "20") assert.match(result.stdout, /not an invoice/);
+      }
+    }
+    for (const columns of ["20", "80", "120"]) {
+      const json = spawnSync(process.execPath, [bin, "report", "--json", "--snapshot", path], {
+        encoding: "utf8", env: { ...process.env, COLUMNS: columns },
+      });
+      assert.equal(json.status, 0, json.stderr);
+      assert.equal(json.stderr, "");
+      assert.deepEqual(JSON.parse(json.stdout), snapshot);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test("report reads SESSION_ANALYTICS_* settings and returns only fixture evidence", async () => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
