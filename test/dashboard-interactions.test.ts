@@ -39,6 +39,26 @@ test("the harness fires g v through the dashboard keydown handler", async () => 
   assert.equal(run("currentViewName()"), "velocity");
 });
 
+test("Velocity Escape cancels g and p chords while retaining repository focus", async () => {
+  const { document, run, fireKey } = await harness([withLedger(sample(), [["synthetic", 3]])]);
+  run("populateRepositories(); selectRepository('synthetic', { scroll: false }); switchView('velocity')");
+  const svg = document.querySelector(".velocity-chart svg")!;
+  fireKey("g", svg);
+  assert.equal(fireKey("Escape", svg).defaultPrevented, true);
+  assert.equal(run("pendingChord"), null);
+  fireKey("c", svg);
+  assert.equal(run("currentViewName()"), "velocity");
+  assert.equal(document.querySelector("#repository-filter")!.value, "synthetic");
+  fireKey("Home", svg);
+  fireKey("p", svg);
+  fireKey("Escape", svg);
+  assert.equal(run("pendingChord"), null);
+  fireKey("1", svg);
+  assert.equal(run("windowPreset"), "7");
+  assert.equal(document.querySelector("#repository-filter")!.value, "synthetic");
+  assert.equal(run("viewProviderFilters.velocity.has('claude')"), true);
+});
+
 test("fleet row tooltips retain repository IDs and execution counts for screen readers", async () => {
   const { document, run } = await harness([withLedger(sample(), [["model-synthetic", 10]])]);
   run("renderRepositoryTable(activeView().repositories)");
@@ -180,7 +200,11 @@ test("Escape cancels an armed g chord and dashboard statuses are live regions", 
   assert.equal(fireKey("Escape").defaultPrevented, true);
   assert.equal(run("pendingChord"), null);
   assert.equal(document.querySelector("#sync-context")!.getAttribute("role"), "status");
-  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "polite");
+  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "off");
+  for (const selector of ["#view-announcer", "#snapshot-announcer"]) {
+    assert.equal(document.querySelector(selector)!.getAttribute("aria-live"), "polite");
+    assert.equal(document.querySelector(selector)!.getAttribute("aria-atomic"), "true");
+  }
 });
 
 test("palette ranks exact, prefix, word-start, substring, then subsequence matches and drops weak fuzzy matches", async () => {

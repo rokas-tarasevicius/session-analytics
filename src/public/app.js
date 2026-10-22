@@ -33,6 +33,7 @@ const writePreference = (key, value) => { try { localStorage.setItem(key, value)
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
   activityRepositories: $("#activity-repositories"), activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
+  snapshotAnnouncer: $("#snapshot-announcer"), viewAnnouncer: $("#view-announcer"),
   cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
   costApiTotal: $("#cost-api-total"), costApiNote: $("#cost-api-note"), costCoverage: $("#cost-coverage"), costCoverageNote: $("#cost-coverage-note"),
@@ -1553,19 +1554,22 @@ function renderProviderEmptyState(container, scope, eligibleCount, windowCount) 
 function renderViewStatus(view) {
   const target = elements.viewStatus;
   if (!target) return;
+  const announce = (text) => { if (elements.viewAnnouncer.textContent !== text) elements.viewAnnouncer.textContent = text; };
   clear(target);
   if (!snapshot && loadFailed) {
     emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
+    announce(""); // The error alert owns the failure announcement.
     target.hidden = false;
     return;
   }
-  if (!view || !windowEmpty) { target.hidden = true; return; }
+  if (!view || !windowEmpty) { target.hidden = true; announce(""); return; }
   const selected = selectedRepository();
   const scope = selected ? ` for ${selected.repository.name}` : "";
   const message = !snapshot.sessions.length ? "No local agent sessions were found in this snapshot."
     : windowPreset === "all" ? `No sessions${scope} in the observed history.`
       : `No sessions${scope} started or were active during ${windowCaption()}.`;
   const box = emptyState(target, message, "Nothing in this window");
+  announce(`Nothing in this window. ${message}`);
   const actions = node("div", null, "status-actions");
   if (windowPreset !== "all" && snapshot.sessions.length) actions.append(statusAction("Show all time", () => applyWindowPreset("all")));
   if (selected) actions.append(statusAction("Clear repository focus", () => selectRepository("all", { scroll: false })));
@@ -2112,9 +2116,11 @@ const quietLoad = singleFlight(loadQuietly);
 
 async function loadSnapshot(refresh = false) {
   const previous = snapshot ?? sharedSnapshot;
+  const refreshHadFocus = document.activeElement === elements.refresh;
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
+  elements.snapshotAnnouncer.textContent = previous || refresh ? "Refreshing snapshot." : "Building snapshot.";
   beginScanProgress(Boolean(previous || refresh));
   describeSyncStatus();
   elements.main.dataset.state = previous ? "refreshing" : "loading";
@@ -2127,7 +2133,9 @@ async function loadSnapshot(refresh = false) {
     render(await fetchAnalytics(refresh && previous));
     watchPricingUpdates();
     showReady(snapshot ? activeView() : null);
+    elements.snapshotAnnouncer.textContent = previous || refresh ? "Snapshot refreshed." : "Snapshot ready.";
   } catch (error) {
+    elements.snapshotAnnouncer.textContent = ""; // The error alert owns the failure announcement.
     elements.sync.dataset.state = "error";
     delete elements.main.dataset.state;
     if (previous) {
@@ -2148,6 +2156,7 @@ async function loadSnapshot(refresh = false) {
     endScanProgress();
     describeSyncStatus();
     elements.refresh.disabled = false;
+    if (refreshHadFocus && document.activeElement === document.body) elements.refresh.focus({ preventScroll: true });
   }
 }
 

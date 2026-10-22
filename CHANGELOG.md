@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Dashboard screen readers receive refresh outcomes and empty-window status without repeated Velocity hover or resize announcements. Downloads and refreshes restore displaced keyboard focus, Velocity Escape dismisses its readout, and command-palette search has a visible focus ring in both themes.
 - The Summary repository table becomes labeled cards on phone and portrait-tablet screens, keeping every metric, column sorting and keyboard repository focus without horizontal scrolling. Long repository names also stay within Summary’s repository breakdown charts on these screens. Desktop layouts and totals are unchanged.
 - Terminal reports wrap prose to the terminal width (or `COLUMNS`, defaulting to 80 when piped), align repository columns including evidence labels, and use labeled rows when a table cannot fit. Shortened model lists now show an ellipsis. Accounting totals and JSON snapshots are unchanged.
 - The loopback dashboard validates the complete HTTP Origin, rejects GET bodies before refresh work and limits request targets to 8 KiB; HTTP parser errors now retain private no-store and security headers. Analytics totals are unchanged.

@@ -758,6 +758,7 @@ dialog::backdrop { background: var(--backdrop); }
 .palette-field { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--line); }
 .palette-field svg { width: 16px; height: 16px; color: var(--muted); flex: 0 0 auto; }
 .palette-field input { flex: 1; min-width: 0; height: 48px; border: 0; background: none; outline: none; font-size: var(--fs-md); color: var(--text); }
+.palette-field:focus-within { outline: 2px solid var(--focus); outline-offset: -3px; }
 .palette-field input::placeholder { color: var(--muted); }
 .palette-list { max-height: min(60vh, 440px); overflow: auto; padding: 6px; }
 .palette-group { padding: 10px 10px 4px; color: var(--muted); }
