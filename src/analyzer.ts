@@ -2638,11 +2638,11 @@ async function analyzeSelectedRepositories(
         sourceHealth("cursor", [...cursorRoots.map(() => cursorResult.warning), ...(additional.sources.get("cursor") ?? [])]),
         ...(["copilot", "opencode", "gemini", "antigravity"] as const).map((provider) => sourceHealth(provider, additional.sources.get(provider) ?? []))],
       rateCard,
-      providerWarnings: [...new Set([codexIndex.warning, claudeIndex.warning, cursorResult.warning, ...additional.warnings].filter((warning): warning is string => Boolean(warning)))],
+      providerWarnings: [...new Set([...codexIndexes.map(({ warning }) => warning), ...claudeIndexes.map(({ warning }) => warning), cursorResult.warning, ...additional.warnings].filter((warning): warning is string => Boolean(warning)))],
       repositories: [...repositoriesForOutput.values()].map(({ repository, sessions: repositorySessions }) => {
         const result = aggregate(repository, repositorySessions, rateCard);
         result.warnings.push(
-          ...[codexIndex.warning, claudeIndex.warning, cursorResult.warning, ...additional.warnings].filter(
+          ...[...codexIndexes.map(({ warning }) => warning), ...claudeIndexes.map(({ warning }) => warning), cursorResult.warning, ...additional.warnings].filter(
             (warning): warning is string => Boolean(warning),
           ),
         );

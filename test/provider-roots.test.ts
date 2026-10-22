@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import test from "node:test";
+import { snapshotSchemas } from "../scripts/snapshot-schema.ts";
+import { validateSnapshot } from "../src/interop/snapshot.ts";
+import { matchesSchema } from "../src/interop/schema.ts";
+import { harness } from "./validation/aggregation-ui-harness.ts";
 import { discoverProviderRoots } from "../src/analyzer.ts";
 import { buildPayload } from "../src/mcp/metrics.ts";
 import { antigravityAdapter } from "../src/providers/antigravity.ts";
@@ -183,5 +187,23 @@ test("unreadable native defaults are not treated as uninstalled", async () => {
       provider: "codex", status: "unavailable", sourcesRead: 0, missingSources: 0, unreadableSources: 2,
     });
     assert.ok(snapshot.warnings.includes("A provider transcript root could not be read."));
+  });
+});
+
+
+test("mixed native-root failures remain separate schema-valid Coverage notes", async () => {
+  await fixture(async (home) => {
+    const unreadable = join(home, "PRIVATE-SOURCE-SENTINEL");
+    await writeFile(unreadable, "not a directory");
+    const snapshot = await report(home, ["--codex-root", join(home, "absent"), "--codex-archive-root", unreadable]);
+    const warnings = ["A provider transcript root is missing.", "A provider transcript root could not be read."];
+    assert.deepEqual(snapshot.warnings, warnings);
+    assert.equal(matchesSchema(snapshot, snapshotSchemas()["snapshot.v1.schema.json"]!), true);
+    assert.deepEqual(validateSnapshot(JSON.parse(JSON.stringify(snapshot))), snapshot);
+    const { document, run } = await harness([]);
+    run(`render(${JSON.stringify(snapshot)}); openCoverage()`);
+    assert.equal(document.querySelector("#coverage-dialog")!.open, true);
+    const notes = document.querySelector("#warning-list")!.children.map((item) => item.textContent);
+    for (const warning of warnings) assert.ok(notes.includes(warning), notes.join("\n"));
   });
 });
