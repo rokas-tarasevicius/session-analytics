@@ -157,6 +157,11 @@
           </div>
           <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
           <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
+          <article class="panel quiet-repositories-panel" id="quiet-repositories" aria-labelledby="quiet-repository-title" hidden>
+            <header><div><h2 id="quiet-repository-title">Quiet repositories</h2><p class="chart-note" id="quiet-repository-context"></p></div><span class="table-hint" id="quiet-repository-count"></span></header>
+            <ul class="quiet-repository-list" id="quiet-repository-list"></ul>
+            <p class="chart-note">Known starts and dated activity only · undated activity excluded · local history may be incomplete.</p>
+          </article>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
             <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary overview</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
@@ -317,6 +322,7 @@
             <li>Request input includes repeated context; the cached share measures recorded cache reads.</li>
             <li>Ratios with tiny denominators are withheld; a dash means not applicable, never zero.</li>
             <li>Activity counters do not prove success, quality, or value delivered.</li>
+            <li>Quiet repositories have known session starts or dated ledger activity before the selected window and none observed inside it. Their last observed active day excludes undated activity, unknown starts and file-mtime fallbacks; incomplete local history can hide activity.</li>
             <li id="coverage-machines-note" hidden>Agents on a server or VM too? Run <code>session-analytics machines add HOST</code> in a terminal, and every later scan reads that machine with this one. <a id="coverage-machines-link" target="_blank" rel="noreferrer">Combine machines ↗</a></li>
           </ul>
         </section>

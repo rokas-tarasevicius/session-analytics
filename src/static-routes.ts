@@ -5,6 +5,7 @@ export const staticRoutes: ReadonlyArray<readonly [route: string, file: string]>
   ["/app.js", "app.js"],
   ["/format.js", "format.js"],
   ["/view-model.js", "view-model.js"],
+  ["/quiet-repositories.js", "quiet-repositories.js"],
   ["/url-state.js", "url-state.js"],
   ["/theme-boot.js", "theme-boot.js"],
   ["/ui.js", "ui.js"],
