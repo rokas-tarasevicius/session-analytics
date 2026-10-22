@@ -660,7 +660,7 @@ const duration = (seconds) => {
 };
 export { duration as formatDuration };
 
-function readingPlanPeriods(meters, from, to) {
+function readingPlanChanges(meters, to) {
   const instants = new Map();
   for (const meter of meters) for (const row of meter.planReadings ?? []) {
     const previous = instants.get(row.t);
@@ -671,6 +671,12 @@ function readingPlanPeriods(meters, from, to) {
     if (at > to) continue;
     if (changes.at(-1)?.planType !== planType) changes.push({ at, planType });
   }
+  return changes;
+}
+
+function readingPlanPeriods(meters, from, to) {
+  if (to <= from) return [];
+  const changes = readingPlanChanges(meters, to);
   if (!changes.length) return [{ from, to, planType: null }];
   const periods = [];
   let start = from, planType = null;
@@ -680,7 +686,7 @@ function readingPlanPeriods(meters, from, to) {
     start = change.at; planType = change.planType;
   }
   periods.push({ from: start, to, planType });
-  return periods;
+  return periods.filter((period) => period.to > period.from);
 }
 
 /**
@@ -697,7 +703,7 @@ export function accountUtilization({ account, meters, sessions = [], timeZone = 
   const session_ = own.find((meter) => meter.meter === sessionMeter) ?? null;
   const value = hourlyValue(real ? sessions : [], timeZone);
   const tagged = account.provider === "codex" && own.some((meter) => meter.planReadings?.length);
-  const currentType = tagged ? readingPlanPeriods(own, 0, now)?.at(-1)?.planType ?? null : undefined;
+  const currentType = tagged ? readingPlanChanges(own, now).at(-1)?.planType ?? null : undefined;
   const byPlan = new Map();
   const forPlan = (type) => {
     if (!byPlan.has(type)) byPlan.set(type, real && weekly_ ? calibrate(weekly_, value, type) : emptyCalibration());
@@ -728,7 +734,7 @@ export function accountUtilization({ account, meters, sessions = [], timeZone = 
   if (periods) {
     money.price = economicPeriods.every((period) => period.price !== null) ? economicPeriods.reduce((sum, period) => sum + period.price, 0) : null;
     money.potential = economicPeriods.every((period) => period.potential !== null) ? economicPeriods.reduce((sum, period) => sum + period.potential, 0) : null;
-    money.multiple = economicPeriods.every((period) => period.price > 0) && money.extracted !== null ? money.extracted / money.price : null;
+    money.multiple = money.price > 0 && economicPeriods.every((period) => period.price > 0) && money.extracted !== null ? money.extracted / money.price : null;
     money.utilization = money.potential > 0 && money.extracted !== null ? money.extracted / money.potential : null;
   }
   return {

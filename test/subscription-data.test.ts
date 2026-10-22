@@ -982,3 +982,35 @@ test("simultaneous idle and active tiers remain ambiguous after idle rows leave 
   assert.equal(calibrate(meter, { between: () => 100 }, "plus").cycles, 0);
   assert.ok(meter.cycles.every((cycle) => cycle.samples.every((sample) => sample.planType === "unknown")));
 });
+
+test("a tier change exactly at the inclusive window end adds no empty price period", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", to = start + DAY;
+  for (const tier of ["pro", "free", "unknown", "business"] as const) {
+    const owner = account("codex", key, { plan: tier === "unknown" ? null : tier });
+    const rows = [
+      { ...reading("codex", "seven_day", start + WEEK, start, 20, "allowed", key), planType: "plus" as const },
+      { ...reading("codex", "seven_day", start + WEEK, to, 30, "allowed", key), planType: tier },
+    ];
+    for (const endCopies of [[rows[1]!], [rows[1]!, { ...rows[1]! }]]) {
+      const item = utilization(owner, [rows[0]!, ...endCopies], to, [spending("codex", start, to, 1)], { basis: "provider", range: { from: start, to } });
+      assert.equal(item.economicPeriods!.length, 1, tier);
+      assert.equal(item.economics.price, 20 / MONTH_DAYS, tier);
+      assert.equal(item.economics.multiple, 24 / (20 / MONTH_DAYS), tier);
+      assert.equal(item.weekly!.observedAt, to, "the endpoint reading is still included in the live meter");
+      assert.equal(item.economics.plan?.id ?? null, tier === "unknown" ? null : tier, "current plan still uses the endpoint tier");
+      assert.equal(subscriptionTotals([item]).priced.price, 20 / MONTH_DAYS);
+    }
+  }
+});
+
+test("duplicate tier timestamps cannot create empty historical periods or infinite multiples", () => {
+  const key = "codex-aaaaaaaaaaaaaaaa", owner = account("codex", key, { plan: "pro" }), to = start + 2 * DAY;
+  const plus = { ...reading("codex", "seven_day", start + WEEK, start, 10, "allowed", key), planType: "plus" as const };
+  const pro = { ...plus, observedAt: start + DAY, planType: "pro" as const };
+  const item = utilization(owner, [plus, pro, { ...pro, source: "codex-account" }], to, [], { range: { from: start, to } });
+  assert.deepEqual(item.economicPeriods!.map((period) => period.days), [1, 1]);
+  assert.equal(item.economics.price, 220 / MONTH_DAYS);
+  const empty = utilization(owner, [pro, { ...pro }], pro.observedAt, [], { basis: "provider", range: { from: pro.observedAt, to: pro.observedAt } });
+  assert.deepEqual(empty.economicPeriods, []);
+  assert.equal(empty.economics.multiple, null);
+});
