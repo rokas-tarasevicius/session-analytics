@@ -156,7 +156,8 @@
             <button class="button machine-details-button" id="machine-details" type="button" aria-haspopup="dialog" aria-controls="machines-dialog">Machine details</button>
           </div>
           <p class="scope-line"><span id="scope-description">Reading saved local agent history. Results appear when the scan finishes.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
-          <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
+          <p class="sr-only" id="view-announcer" aria-live="polite" aria-atomic="true"></p>
+          <section class="view-status" id="view-status" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
             <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary overview</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>

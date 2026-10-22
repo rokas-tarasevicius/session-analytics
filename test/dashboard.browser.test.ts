@@ -719,15 +719,25 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     })()`);
     await browser.until(`document.querySelector('[data-focus-key="first-run:refresh"]')`);
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
-    await browser.evaluate(`document.querySelector('[data-focus-key="first-run:refresh"]').focus()`);
+    await browser.evaluate(`(() => {
+      window.__viewAnnouncementMutations = 0;
+      const observer = new MutationObserver(records => { window.__viewAnnouncementMutations += records.length; });
+      observer.observe(document.querySelector('#view-announcer'), { childList: true, subtree: true, characterData: true });
+      window.__stopViewAnnouncementObserver = () => observer.disconnect();
+      document.querySelector('[data-focus-key="first-run:refresh"]').focus();
+    })()`);
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
     assert.equal(await browser.evaluate(`document.activeElement.dataset.focusKey`), "first-run:refresh");
+    assert.equal(await browser.evaluate(`window.__viewAnnouncementMutations`), 0, "unchanged empty Refresh does not announce the same guidance");
     await browser.evaluate(`window.__firstRunEmpty = false`);
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#view-status').hidden`, true);
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
     assert.equal(await browser.evaluate(`document.activeElement.id`), "page-title");
+    assert.equal(await browser.evaluate(`document.querySelector('#view-announcer').textContent`), "");
+    assert.equal(await browser.evaluate(`window.__viewAnnouncementMutations`), 1, "history appearing clears the old announcement once");
+    await browser.evaluate(`window.__stopViewAnnouncementObserver()`);
     await browser.evaluate(`window.__restoreFirstRunFetch(); document.querySelector('#refresh-button').focus()`);
     await browser.key("Enter", { text: "\r" });
     await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");

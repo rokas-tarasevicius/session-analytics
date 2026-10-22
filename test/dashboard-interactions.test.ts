@@ -81,12 +81,41 @@ test("empty machine selections and machines still reading do not claim there is 
   const { document, run } = await harness([sample()]);
   run(`fullSnapshot = fixture; snapshot = { ...fixture, sessions: [] }; sessionsByRepository = groupByRepository([]); renderView()`);
   assert.match(document.querySelector("#view-status")!.textContent, /No sessions from selected machines/);
+  assert.equal(document.querySelector("#view-announcer")!.textContent, "No sessions from selected machines.");
   assert.match(document.querySelector("#view-status")!.textContent, /Choose machines/);
   assert.doesNotMatch(document.querySelector("#view-status")!.textContent, /Your first session|Complete a session/);
   assert.match(document.querySelector("#scope-description")!.textContent, /selected machines/);
   run(`fullSnapshot = snapshot; fullSnapshot.machines = [{ key: 'remote', state: 'reading' }]; renderView()`);
   assert.match(document.querySelector("#view-status")!.textContent, /Reading machine history/);
+  assert.equal(document.querySelector("#view-announcer")!.textContent, "Reading machine history. No sessions are available yet.");
   assert.doesNotMatch(document.querySelector("#scope-description")!.textContent, /Scan complete/);
+});
+
+test("view announcements change only with the situation and exclude static guidance and controls", async () => {
+  const { document, run } = await harness([]);
+  run(`let announcementWrites = 0, announcementText = '';
+    Object.defineProperty(elements.viewAnnouncer, 'textContent', {
+      get: () => announcementText,
+      set: value => { announcementWrites++; announcementText = value; }
+    }); renderView()`);
+  const announcer = document.querySelector("#view-announcer")!;
+  assert.match(announcer.textContent, /No saved agent sessions were found/);
+  assert.doesNotMatch(announcer.textContent, /Supported providers|Refresh snapshot|Provider setup guide|Pricing is offline/);
+  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), null);
+  assert.equal(announcer.getAttribute("aria-live"), "polite");
+  assert.equal(announcer.getAttribute("aria-atomic"), "true");
+  assert.equal(run("announcementWrites"), 1);
+  run("renderView(); renderView()");
+  assert.equal(run("announcementWrites"), 1, "unchanged snapshot polls do not rewrite the announcer");
+  run("snapshot = null; elements.main.dataset.state = 'loading'; renderViewStatus(null); renderViewStatus(null)");
+  assert.match(announcer.textContent, /Reading local history/);
+  assert.equal(run("announcementWrites"), 2);
+  run("loadFailed = true; renderViewStatus(null); renderViewStatus(null)");
+  assert.equal(announcer.textContent, "", "the error alert owns failure announcements");
+  assert.equal(run("announcementWrites"), 3);
+  run("snapshot = fixture; loadFailed = false; windowEmpty = false; renderViewStatus(activeView()); renderViewStatus(activeView())");
+  assert.equal(announcer.textContent, "");
+  assert.equal(run("announcementWrites"), 3);
 });
 
 test("pricing health polling adds the refresh notice without fetching analytics or mutating displayed totals", async () => {
@@ -257,7 +286,8 @@ test("Escape cancels an armed g chord and dashboard statuses are live regions", 
   assert.equal(fireKey("Escape").defaultPrevented, true);
   assert.equal(run("pendingChord"), null);
   assert.equal(document.querySelector("#sync-context")!.getAttribute("role"), "status");
-  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), "polite");
+  assert.equal(document.querySelector("#view-status")!.getAttribute("aria-live"), null);
+  assert.equal(document.querySelector("#view-announcer")!.getAttribute("aria-live"), "polite");
 });
 
 test("palette ranks exact, prefix, word-start, substring, then subsequence matches and drops weak fuzzy matches", async () => {

@@ -33,6 +33,7 @@ const writePreference = (key, value) => { try { localStorage.setItem(key, value)
 const elements = {
   activityHeatmap: $("#activity-heatmap"), activityProviderFilters: $("#activity-provider-filters"),
   activityRepositories: $("#activity-repositories"), activityTooltip: $("#activity-tooltip"), announcer: $("#chart-announcer"),
+  viewAnnouncer: $("#view-announcer"),
   cache: $("#metric-cache"), compactions: $("#metric-compactions"), dailySpend: $("#daily-spend"),
   commandButton: $("#command-button"), commandInput: $("#command-input"), commandList: $("#command-list"),
   costApiTotal: $("#cost-api-total"), costApiNote: $("#cost-api-note"), costCoverage: $("#cost-coverage"), costCoverageNote: $("#cost-coverage-note"),
@@ -1561,19 +1562,22 @@ function appendSourceChecks(container) {
 function renderViewStatus(view) {
   const target = elements.viewStatus;
   if (!target) return;
+  const announce = (text) => { if (elements.viewAnnouncer.textContent !== text) elements.viewAnnouncer.textContent = text; };
   clear(target);
   if (!snapshot && loadFailed) {
     const box = emptyState(target, "The local analysis did not finish, so there is nothing to show yet. Use Retry above, or check the terminal running the dashboard.", "No snapshot");
     const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
+    announce(""); // The error alert owns the failure announcement.
     target.hidden = false;
     return;
   }
   if (!snapshot && elements.main.dataset.state === "loading") {
     const box = emptyState(target, "The first scan may take a few minutes. Results appear when the scan finishes; progress is shown above.", "Reading local history");
     const actions = node("div", null, "status-actions"); actions.append(setupLink()); box.append(actions);
+    announce("Reading local history.");
     target.hidden = false; return;
   }
-  if (!view || !windowEmpty) { target.hidden = true; return; }
+  if (!view || !windowEmpty) { target.hidden = true; announce(""); return; }
   const selected = selectedRepository();
   const scope = selected ? ` for ${selected.repository.name}` : "";
   const firstRun = !(fullSnapshot ?? snapshot).sessions.length;
@@ -1584,6 +1588,10 @@ function renderViewStatus(view) {
     : machinesEmpty ? "Saved sessions exist, but none are from the selected machines. Choose a machine with history to see its sessions."
     : windowPreset === "all" ? `No sessions${scope} in the observed history.`
       : `No sessions${scope} started or were active during ${windowCaption()}.`;
+  announce(readingMachines ? "Reading machine history. No sessions are available yet."
+    : firstRun ? "No saved agent sessions were found."
+    : machinesEmpty ? "No sessions from selected machines."
+    : `Nothing in this window. ${message}`);
   const box = emptyState(target, message, readingMachines ? "Reading machine history" : firstRun ? "Your first session starts here" : machinesEmpty ? "No sessions from selected machines" : "Nothing in this window");
   if (firstRun && !readingMachines) {
     const checks = node("div", null, "first-run-checks"); appendSourceChecks(checks); box.append(checks);
