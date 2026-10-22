@@ -88,6 +88,13 @@ test("terminal reports fit piped widths without color and JSON stays a complete 
   const directory = await mkdtemp(resolve(tmpdir(), "session-analytics-report-format-"));
   try {
     const snapshot = await analyzeMachineSessions({ ...await createSessionAnalyticsFixture(directory), offline: true });
+    const fix = "run session-analytics machines check server-with-a-long-but-valid-name";
+    snapshot.machines = [
+      { key: "local", label: "laptop", state: "ok", sessions: snapshot.summary.sessions,
+        repositories: snapshot.summary.repositories, readAt: snapshot.generatedAt, durationMs: 12, version: manifest.version },
+      { key: "server", label: "build-server", state: "failed", reason: "connection", fix,
+        sessions: 0, repositories: 0, readAt: null, durationMs: null, version: null },
+    ];
     const path = resolve(directory, "snapshot.json");
     await writeFile(path, JSON.stringify(snapshot));
     for (const columns of ["20", "80", "120", "invalid"]) {
@@ -100,6 +107,8 @@ test("terminal reports fit piped widths without color and JSON stays a complete 
         assert.doesNotMatch(result.stdout, /\u001b\[/);
         assert.ok(result.stdout.split("\n").every((line) => textWidth(line) <= (Number(columns) || 80)));
         assert.match(result.stdout, /Repository\s+comparison/);
+        assert.match(result.stdout, /Machines:/);
+        assert.ok(result.stdout.replace(/\s/gu, "").includes(fix.replace(/\s/gu, "")), "wrapped machine fix stays complete");
         if (columns !== "20") assert.match(result.stdout, /not an invoice/);
       }
     }
