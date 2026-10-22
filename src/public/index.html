@@ -244,6 +244,11 @@
               <article class="kpi"><span class="kpi-label">Pricing coverage</span><strong id="cost-coverage">—</strong><small class="kpi-note" id="cost-coverage-note">Share of observed tokens with a rate</small></article>
             </div>
             <p class="chart-note" id="cost-reconciliation"></p>
+            <article class="panel counterfactual-panel" aria-labelledby="counterfactual-title">
+              <header><div><h2 id="counterfactual-title">What if these tokens used another model?</h2><p class="counterfactual-note">Hypothetical API list-price equivalent, not a bill or a savings forecast. Uses this window and repository focus.</p></div></header>
+              <div id="counterfactual-pricing"></div>
+              <p class="counterfactual-note">Current snapshot's ordinary rates only; context premiums omitted. Cache-write TTLs are unavailable, so cache writes are not re-priced. Recorded cache behavior is held constant; model quality and tokenization can differ. Exports and recorded totals are unchanged.</p>
+            </article>
             <div class="view-grid costs-grid">
               <article class="panel"><header><div><h2>Cost by provider</h2></div></header><div class="chart-slot" id="provider-cost-models"></div></article>
               <article class="panel"><header><div><h2>Cost by model</h2></div></header><div class="chart-slot" id="cost-models"></div></article>

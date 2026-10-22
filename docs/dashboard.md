@@ -103,6 +103,8 @@ Costs answers "where does the value go?" The usage value is the sum of an API-eq
 
 Costs shows **—** for wholly unpriced model, provider and total values and model shares; a reviewed zero-rate model can still show $0.00. Pricing coverage and unpriced metadata stay visible.
 
+The **What if these tokens used another model?** panel applies a model from the snapshot's current rate card to the same window and repository focus. Its hypothetical API list-price equivalent holds recorded tokens and cache behavior constant, uses ordinary rates, and omits context premiums. Exact counts and the share **not re-priced** disclose cache writes without TTLs, missing class rates, unavailable cache splits and provider-reported tokens; undated tokens and sessions without a ledger are listed separately. No re-priceable tokens shows **—**, while explicit zero rates can show $0.00. This is not a bill, a quality comparison or a savings forecast. The target selection lasts for the page session; recorded totals, projections and exports stay unchanged. See the [arithmetic and coverage definition](metrics.md#hypothetical-model-pricing-costs).
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/screenshot-costs-dark.webp" />

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Costs can show the selected window's hypothetical API list-price equivalent at another snapshot model's ordinary rates, with exact token counts and the share that could not be re-priced. Cache-write TTL gaps, missing rates and evidence limits remain visible; recorded totals and exports are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

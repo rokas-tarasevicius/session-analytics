@@ -714,6 +714,17 @@ tbody tr:first-child th { border-top: 0; }
 .cost-model-meta { grid-column: 2 / -1; font-size: var(--fs-xs); }
 .cost-model-track { height: 8px; border-radius: var(--radius-bar); background: var(--surface-3); overflow: hidden; }
 .cost-model-track i { display: block; height: 100%; border-radius: 0 var(--radius-bar) var(--radius-bar) 0; transition: width var(--t-slow) var(--ease); }
+.counterfactual-panel { margin-bottom: 24px; }
+.counterfactual-note { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
+.counterfactual-label { color: var(--muted); font-size: var(--fs-xs); font-weight: 500; }
+#counterfactual-pricing { display: grid; gap: 16px; }
+#counterfactual-pricing .field { align-items: start; }
+#counterfactual-pricing select { width: 100%; max-width: 100%; min-width: 0; }
+.counterfactual-result { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 40px; }
+.counterfactual-amount { display: grid; gap: 6px; }
+.counterfactual-amount > strong { font: 500 var(--fs-figure) var(--font-mono); }
+.counterfactual-coverage { flex: 1 1 220px; font-size: var(--fs-sm); }
+.counterfactual-limits { flex-basis: 100%; }
 
 .detail-panel { min-height: 260px; margin-top: var(--gap); }
 

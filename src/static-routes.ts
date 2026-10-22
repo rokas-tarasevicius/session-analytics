@@ -32,6 +32,7 @@ export const staticRoutes: ReadonlyArray<readonly [route: string, file: string]>
 
   ["/pricing.js", "pricing.js"],
   ["/pricing-data.js", "pricing-data.js"],
+  ["/counterfactual-data.js", "counterfactual-data.js"],
   ["/model-id.js", "model-id.js"],
   ["/pricing.css", "pricing.css"],
   ["/export-data.js", "export-data.js"],

@@ -13,6 +13,7 @@ import { parseUrlState, serializeUrlState } from "./url-state.js";
 import { providerMark, renderProviderEvidence, metricCoverage } from "./providers.js";
 
 import { renderPricingPanel } from "./pricing.js";
+import { counterfactualValue } from "./counterfactual-data.js";
 import { renderToolsView } from "./tools.js";
 import { renderSubscription, subscriptionRefreshMilliseconds } from "./subscription.js";
 import { sessionMachines, valuedMachines, zonedDayStart } from "./subscription-data.js";
@@ -25,7 +26,7 @@ import { localMachine, machineAge, machineNote, machineReasons, machineTally, ma
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
-import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize } from "./ui.js";
+import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize, selectField } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -712,7 +713,42 @@ function ledgerExclusions(ledger) {
   ].filter(Boolean);
 }
 
-/** Costs reads the same activity ledger as the Summary KPI and Velocity for the window: totals, providers and models agree. */
+let counterfactualModel = null;
+function renderCounterfactual(sessions, range) {
+  const container = $("#counterfactual-pricing");
+  clear(container);
+  const models = (snapshot.rateCard?.models ?? []).filter(({ rate }) => rate).slice().sort((a, b) => a.model.localeCompare(b.model));
+  if (!models.length) { container.append(node("p", "No model rates in this snapshot. Hypothetical API-equivalent value is unavailable.", "counterfactual-note")); return; }
+  if (!models.some(({ model }) => model === counterfactualModel)) counterfactualModel = models[0].model;
+  const result = node("div", null, "counterfactual-result");
+  result.setAttribute("role", "status");
+  const update = () => {
+    const target = models.find(({ model }) => model === counterfactualModel);
+    const data = counterfactualValue(sessions, target?.rate, range);
+    clear(result);
+    const amount = node("div", null, "counterfactual-amount");
+    amount.append(node("span", "Hypothetical API-equivalent value", "counterfactual-label"), node("strong", data.valueUsd === null ? DASH : money(data.valueUsd)));
+    const coverage = node("div", null, "counterfactual-coverage");
+    coverage.append(node("strong", data.coverage === null ? "No dated tokens to re-price" : `${integer(data.unrepricedTokens)} of ${integer(data.tokens)} tokens not re-priced`));
+    // Round the excluded share upward: a small omitted class must never read as 0%.
+    if (data.coverage !== null) coverage.append(node("p", `${percent(Math.ceil(data.unrepricedTokens / data.tokens * 1000) / 1000)} not re-priced · ${integer(data.repricedTokens)} tokens re-priced`, "counterfactual-note"));
+    result.append(amount, coverage);
+    const reasons = [
+      data.excluded.cacheWrite ? `${integer(data.excluded.cacheWrite)} cache-write tokens (TTL unavailable)` : null,
+      data.excluded.inputSplit ? `${integer(data.excluded.inputSplit)} input tokens without an evidenced cache split` : null,
+      data.excluded.missingRate ? `${integer(data.excluded.missingRate)} tokens without a target class rate` : null,
+      data.excluded.providerReported ? `${integer(data.excluded.providerReported)} provider-reported tokens` : null,
+    ].filter(Boolean);
+    if (reasons.length) result.append(node("p", `Not re-priced: ${reasons.join("; ")}.`, "counterfactual-note counterfactual-limits"));
+    if (data.undatedTokens || data.unledgeredSessions) result.append(node("p", `Outside this dated denominator (all time in scope): ${integer(data.undatedTokens)} undated tokens; ${integer(data.unledgeredSessions)} sessions without an activity ledger.`, "counterfactual-note counterfactual-limits"));
+  };
+  const { wrapper } = selectField("counterfactual-model", "Hypothetical rate-card model", models.map(({ model }) => [model, model]), counterfactualModel,
+    (value) => { counterfactualModel = value; update(); });
+  container.append(wrapper, result);
+  update();
+}
+
+/** Costs reads the same activity ledger as Summary and Velocity; hypothetical value stays separate. */
 function renderCosts(view) {
   const range = velocityContext(), ledger = ledgerMoney(view.scopeSessions, range);
   const unavailable = ledgerAvailability(view.scopeSessions).eligible === 0;
@@ -728,6 +764,7 @@ function renderCosts(view) {
   elements.coverageCostNote.hidden = false;
   elements.coverageCostNote.textContent = `${ledgerAmount(ledger.total, ledger.evidence)} usage value = ${ledgerAmount(ledger.api, ledger.evidence)} API-equivalent + ${money(ledger.reported)} provider-reported · by activity date, ${dateRange(range.start, range.end)} (${range.timeZone})${ledger.sessionDated > 0 ? `, including ${money(ledger.sessionDated)} session-dated` : ""} · the same ledger as Summary and Velocity.${excluded.length ? ` Not in any date window (all time): ${excluded.join(" and ")}.` : ""}${ledger.missingSessions ? ` ${ledger.missingSessions} session${ledger.missingSessions === 1 ? "" : "s"} need a refresh.` : ""}`;
   elements.costReconciliation.textContent = `${ledgerAmount(ledger.total, ledger.evidence)} usage value = ${ledgerAmount(ledger.api, ledger.evidence)} API-equivalent + ${money(ledger.reported)} reported`;
+  renderCounterfactual(view.scopeSessions, range);
   renderCostRows(elements.providerCostModels, ledger);
   renderModelCosts(elements.costModels, ledger);
 }
