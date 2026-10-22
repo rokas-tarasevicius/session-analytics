@@ -2140,6 +2140,8 @@ const quietLoad = singleFlight(loadQuietly);
 
 async function loadSnapshot(refresh = false) {
   const previous = snapshot ?? sharedSnapshot;
+  const refreshFocusKey = document.activeElement?.dataset?.focusKey;
+  const refreshHadFocus = document.activeElement === elements.refresh || refreshFocusKey === "first-run:refresh";
   resetExportMenu();
   hideError();
   elements.sync.dataset.state = "loading"; elements.syncLabel.textContent = previous || refresh ? "Refreshing…" : "Mapping local sessions"; elements.refresh.disabled = true;
@@ -2178,6 +2180,10 @@ async function loadSnapshot(refresh = false) {
     endScanProgress();
     describeSyncStatus();
     elements.refresh.disabled = false;
+    if (refreshHadFocus && document.activeElement === document.body) {
+      const control = refreshFocusKey ? document.querySelector(`[data-focus-key="${CSS.escape(refreshFocusKey)}"]`) : elements.refresh;
+      (control ?? elements.pageTitle).focus({ preventScroll: true });
+    }
   }
 }
 

@@ -704,6 +704,50 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.repository-select-wrap')).display`), "block");
     await browser.send("Emulation.setDeviceMetricsOverride", { deviceScaleFactor: 1, height: 1100, mobile: false, width: 1440 });
 
+    // Refresh from a first-run card keeps focus on its replacement, or the heading once history appears.
+    await browser.open(`${origin}/?view=summary&window=all`);
+    await browser.evaluate(`(() => {
+      const original = window.fetch; window.__firstRunEmpty = true;
+      window.__restoreFirstRunFetch = () => { window.fetch = original; };
+      window.fetch = async (url, ...args) => {
+        const response = await original(url, ...args);
+        if (!window.__firstRunEmpty || !String(url).startsWith('/api/analytics')) return response;
+        const data = await response.json(); data.sessions = []; data.repositories = []; data.warnings = [];
+        return new Response(JSON.stringify(data), { headers: { 'content-type': 'application/json' } });
+      };
+      document.querySelector('#refresh-button').click();
+    })()`);
+    await browser.until(`document.querySelector('[data-focus-key="first-run:refresh"]')`);
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    await browser.evaluate(`document.querySelector('[data-focus-key="first-run:refresh"]').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.dataset.focusKey`), "first-run:refresh");
+    await browser.evaluate(`window.__firstRunEmpty = false`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#view-status').hidden`, true);
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "page-title");
+    await browser.evaluate(`window.__restoreFirstRunFetch(); document.querySelector('#refresh-button').focus()`);
+    await browser.key("Enter", { text: "\r" });
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "refresh-button");
+    // A user who moves to another control during a refresh keeps that control focused.
+    await browser.evaluate(`(() => {
+      const original = window.fetch;
+      window.fetch = async (url, ...args) => {
+        if (String(url).startsWith('/api/analytics')) await new Promise(resolve => { window.__releaseFirstRunRefresh = resolve; });
+        return original(url, ...args);
+      };
+      window.__restoreFirstRunFetch = () => { window.fetch = original; };
+      document.querySelector('#refresh-button').click();
+    })()`);
+    await browser.until(`typeof window.__releaseFirstRunRefresh === 'function'`, true);
+    await browser.evaluate(`document.querySelector('#command-button').focus(); window.__releaseFirstRunRefresh()`);
+    await browser.until(`document.querySelector('#sync-context').dataset.state`, "live");
+    assert.equal(await browser.evaluate(`document.activeElement.id`), "command-button");
+    await browser.evaluate(`window.__restoreFirstRunFetch()`);
+
     // A failed first load shows a "No snapshot" state with Retry, and the export menu says why nothing exports.
     const badSnapshot = join(temporaryDirectory, "bad-snapshot.json");
     await writeFile(badSnapshot, `${JSON.stringify({ schemaVersion: 99 })}\n`);
