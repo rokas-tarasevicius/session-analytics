@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Summary lists quiet repositories with activity before the selected window and none observed inside it, their last observed active day, and a button to focus each repository. Undated activity and incomplete local history remain explicitly qualified; accounting totals are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed
