@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard provider filters and view switches reuse the current window's model, reducing repeated aggregation on larger snapshots. Displayed values and exports are unchanged.
+
 ## [0.12.1] - 2026-10-22
 
 ### Fixed

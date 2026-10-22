@@ -35,7 +35,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Remove unused per-repository tools/warnings, avoid full model rebuilds on chip toggles and reduce repository-by-session activity scans. | §2 P3, Performance and dead code |
+| P3 | Remove unused per-repository tools/warnings and reduce repository-by-session activity scans. | §2 P3, Performance and dead code |
 | P3 | Consolidate element factories and duplicate warning renders; remove unused Summary Velocity code and review test-only exports. | §2 P3, Performance and dead code |
 
 ## Multiple machines
