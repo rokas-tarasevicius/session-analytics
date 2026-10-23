@@ -162,7 +162,7 @@ test("laptop tables and mobile fleet cards fit in both themes and densities", { 
     await mkdir(home); await mkdir(demoTemp);
     // The full demo includes all seven providers, History coverage, and enough repositories for the fleet table.
     const demo = spawnSync(process.execPath, [join(repositoryRoot, "scripts/demo.ts"), "report", "--json"], {
-      cwd: repositoryRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 60_000,
+      cwd: repositoryRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 180_000,
       env: { ...hermeticEnvironment(fixture, home), TMPDIR: demoTemp, TMP: demoTemp, TEMP: demoTemp },
     });
     assert.equal(demo.status, 0, demo.stderr);

@@ -26,7 +26,7 @@ export function generateProviderDemo(root: string, repositories: Array<{ root: s
       db.prepare("INSERT INTO session VALUES (?,?,?,?,?)").run(id, null, repo.root, start, end);
       db.prepare("INSERT INTO message VALUES (?,?,?)").run(`${id}-user`, id, JSON.stringify({ role: "user", time: { created: start }, content: "Synthetic demo message" }));
       for (let turn = 0; turn < 3 + n; turn++) {
-        db.prepare("INSERT INTO message VALUES (?,?,?)").run(`${id}-response-${turn}`, id, JSON.stringify({ role: "assistant", modelID: "claude-sonnet-5", time: { created: start + turn * 30000 }, tokens: { input: 4000 * (i + 1), output: 1800, reasoning: 500, cache: { read: 6000, write: 1200 } } }));
+        db.prepare("INSERT INTO message VALUES (?,?,?)").run(`${id}-response-${turn}`, id, JSON.stringify({ role: "assistant", modelID: "claude-sonnet-5", time: { created: start + turn * 30000 }, tokens: { input: 60000 * (i + 1), output: 4200, reasoning: 1200, cache: { read: 90000, write: 8000 } } }));
         db.prepare("INSERT INTO part (id, session_id, data) VALUES (?,?,?)").run(`${id}-tool-${turn}`, id, JSON.stringify({ type: "tool", tool: ["read", "edit", "bash"][turn % 3], callID: `${id}-call-${turn}`, state: { input: {}, output: "Synthetic output" } }));
       }
       const antigravityId = `e0000000-0000-4000-8000-${String(i * 10 + n).padStart(12, "0")}`;
@@ -39,11 +39,11 @@ export function generateProviderDemo(root: string, repositories: Array<{ root: s
       write(join(copilot, id, "events.jsonl"), jsonl(persisted));
       write(join(gemini, repo.name, "chats", `session-${id}.json`), JSON.stringify({ sessionId: id, projectHash: createHash("sha256").update(repo.root).digest("hex"), startTime: at, lastUpdated: later, kind: "main", messages: [
         { id: `${id}-user`, type: "user", timestamp: at, content: "Synthetic prompt" },
-        { id: `${id}-response`, type: "gemini", timestamp: later, model: "claude-sonnet-5", tokens: { input: 35000 * (n + 1), cached: 12000, output: 4500, thoughts: 2500 }, toolCalls: [{ id: `${id}-read`, name: "read_file", args: {}, result: "Synthetic result" }] },
+        ...Array.from({ length: 40 + n * 8 }, (_, turn) => ({ id: `${id}-response-${turn}`, type: "gemini", timestamp: later, model: "claude-sonnet-5", tokens: { input: 60000 + turn * 4000, cached: 45000 + turn * 3500, output: 4500, thoughts: 2500 }, toolCalls: [{ id: `${id}-read-${turn}`, name: "read_file", args: {}, result: "Synthetic result" }] })),
       ] }));
       const agentId = `c0000000-0000-4000-8000-${String(i * 10 + n).padStart(12, "0")}`, dir = join(sdk, id);
       write(join(dir, "agents.ndjson"), jsonl([{ agentId, cwd: repo.root, createdAt: at, updatedAt: later }]));
-      write(join(dir, "runs.ndjson"), jsonl([{ agentId, runId: id, model: { id: "claude-opus-5" }, status: "finished", createdAt: at, startedAt: at, endedAt: later, usage: { inputTokens: 75000, cacheReadTokens: 120000, cacheWriteTokens: 15000, outputTokens: 8500, reasoningTokens: 3000 } }]));
+      write(join(dir, "runs.ndjson"), jsonl([{ agentId, runId: id, model: { id: "claude-opus-5" }, status: "finished", createdAt: at, startedAt: at, endedAt: later, usage: { inputTokens: 900000, cacheReadTokens: 2400000, cacheWriteTokens: 180000, outputTokens: 110000, reasoningTokens: 36000 } }]));
       write(join(dir, "run_events.ndjson"), jsonl(Array.from({ length: 7 + n }, (_, tool) => ({ payload: { type: "sdk_message", message: { type: "tool_call", agent_id: agentId, run_id: id, call_id: `${id}-${tool}`, name: tool % 2 ? "read_file" : "edit_file", status: "completed" } } }))));
       const transcriptId = `d0000000-0000-4000-8000-${String(i * 10 + n).padStart(12, "0")}`;
       const path = join(transcripts, repo.root.replace(/^\//, "").replace(/[^A-Za-z0-9]/g, "-"), "agent-transcripts", `${transcriptId}.jsonl`);

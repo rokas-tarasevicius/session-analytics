@@ -178,7 +178,7 @@ test("demo sweeps stale temp roots", async () => {
     const old = new Date(Date.now() - 2 * 86_400_000);
     for (const path of [stale, kept, owned, abandoned, unrelated, file]) await utimes(path, old, old);
     const result = spawnSync(process.execPath, [resolve(here, "../scripts/demo.ts"), "report", "--json"], {
-      encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 60_000,
+      encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 180_000,
       env: { ...process.env, TMPDIR: directory, TMP: directory, TEMP: directory },
     });
     assert.equal(result.status, 0, result.stderr);
