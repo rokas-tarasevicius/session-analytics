@@ -150,6 +150,61 @@ test("donut and daily lines draw every provider in legend order, using brand col
   assert.deepEqual(narrow.querySelectorAll(".axis-label").filter((label) => label.getAttribute("y") === "208").map((label) => label.textContent), ["1 Oct", "2 Oct", "3 Oct", "4 Oct", "5 Oct", "6 Oct", "7 Oct"]);
 });
 
+test("daily readout exposes exact day values without hover and retains inspection through keyboard and pointer use", async () => {
+  const { document, run } = await harness([]);
+  run("for (const input of providerFilters) input.closest('.chip').hidden = false");
+  const days = [
+    { name: "2025-12-30", claude: 10.25, codex: 1.01 },
+    { name: "2025-12-31", claude: 0, codex: 0 },
+    { name: "2026-01-01", claude: 20.50, codex: 2.02 },
+    { name: "2026-01-02", claude: 30.75, codex: 3.03 },
+  ];
+  run(`renderLine(${JSON.stringify(days)})`);
+  const chart = document.querySelector("#daily-spend")!;
+  const svg = chart.querySelector("svg")!, readout = chart.querySelector(".chart-readout")!;
+  const title = () => readout.querySelector(".tip-title")!.textContent;
+  assert.equal(svg.getAttribute("role"), "group");
+  assert.equal(svg.getAttribute("aria-describedby"), readout.id);
+  assert.match(svg.getAttribute("aria-label")!, /Home and End/);
+  assert.equal(readout.hidden, false);
+  assert.equal(readout.querySelector(".readout-total")!.textContent, "$33.78");
+  assert.equal(readout.querySelector(".readout-sessions")!.textContent, "0 sessions started");
+  assert.equal(readout.querySelector("details")!.open, false);
+  assert.deepEqual(readout.querySelector(".evidence-body")!.querySelectorAll("strong").map((value) => value.textContent), ["$30.75", "$3.03"]);
+  assert.match(title(), /2 Jan 2026/);
+  assert.deepEqual(readout.querySelector(".readout-values")!.querySelectorAll("strong").map((value) => value.textContent), ["$30.75", "$3.03"]);
+  const key = (name: string) => {
+    let prevented = false, stopped = false;
+    svg.listeners.get("keydown")!({ key: name, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
+    return { prevented, stopped };
+  };
+  assert.equal(key("Home").prevented, true);
+  assert.match(title(), /30 Dec 2025/);
+  key("ArrowLeft"); assert.match(title(), /30 Dec 2025/);
+  key("ArrowRight"); assert.match(title(), /31 Dec 2025/);
+  assert.deepEqual(readout.querySelector(".readout-values")!.querySelectorAll("strong").map((value) => value.textContent), ["$0.00", "$0.00"]);
+  assert.match(document.querySelector("#chart-announcer")!.textContent, /31 Dec 2025.*Claude.*\$0.00/);
+  // Leaving the plot or moving focus to the legend does not take away the values.
+  svg.listeners.get("pointerleave")?.(); svg.listeners.get("blur")?.();
+  assert.equal(readout.hidden, false);
+  assert.deepEqual(key("Escape"), { prevented: true, stopped: true });
+  assert.equal(readout.hidden, true);
+  assert.deepEqual(key("Escape"), { prevented: false, stopped: false });
+  key("ArrowRight"); assert.match(title(), /1 Jan 2026/);
+  key("Escape");
+  svg.listeners.get("focus")!();
+  assert.equal(readout.hidden, false); assert.match(title(), /1 Jan 2026/);
+  svg.listeners.get("pointermove")!({ clientX: 886 }); assert.match(title(), /2 Jan 2026/);
+  svg.listeners.get("pointerup")!({ clientX: 52, button: 0 }); assert.match(title(), /30 Dec 2025/);
+  key("End"); key("ArrowRight"); assert.match(title(), /2 Jan 2026/);
+  // A resize redraw can restore by calendar day, including a zero-activity day.
+  run(`renderLine(${JSON.stringify(days)}, "2025-12-31")`);
+  assert.match(chart.querySelector(".tip-title")!.textContent, /31 Dec 2025/);
+  run("renderLine([])");
+  assert.equal(chart.querySelector(".chart-readout"), null);
+  assert.match(chart.textContent, /Nothing to plot/);
+});
+
 test("legend keeps safe wrapping text and order, drops only numeric zero and resets highlights", async () => {
   await harness([]);
   const target = new Element(), container = new Element(), mark = new Element("path");
@@ -167,4 +222,71 @@ test("legend keeps safe wrapping text and order, drops only numeric zero and res
   entries[0]!.listeners.get("pointerenter")!(); assert.equal(target.getAttribute("data-highlight"), "unsafe");
   renderLegend(container, [], { target });
   assert.equal(target.getAttribute("data-highlight"), null); assert.equal(mark.getAttribute("data-series-active"), null);
+});
+
+test("daily readout counts known session starts in the snapshot timezone separately from daily value", async () => {
+  const session = withLedger(sample(), [["model-synthetic", 10]], { day: "2026-10-02" });
+  const unknown = sample(); unknown.transcript!.startTimeKnown = false;
+  const { document, run } = await harness([session, unknown]);
+  run("renderLine(dailyProviderSpend(snapshot.sessions))");
+  // Use three active dates so this exercises the trend readout rather than the sparse summary.
+  run(`const daily = dailyProviderSpend(snapshot.sessions); for (const day of daily) day.claude += 1; renderLine(daily, "2026-10-01")`);
+  const chart = document.querySelector("#daily-spend")!;
+  assert.equal(chart.querySelector(".readout-sessions")!.textContent, "1 session started");
+  assert.equal(chart.querySelector(".readout-total")!.textContent, "$1.00");
+});
+
+for (const [description, index, coordinate] of [
+  ["inside the final band", 399, 375.9],
+  ["just past a band boundary", 122, 52 + (121.5 / 399) * 324 + 0.0001],
+] as const) test(`400-day pointer selection ${description} uses the same nearest centres as hover`, async () => {
+  const { document, run } = await harness([]);
+  const chart = document.querySelector("#daily-spend")!;
+  Object.assign(chart, { clientWidth: 390 });
+  const days = Array.from({ length: 400 }, (_, i) => ({ name: new Date(Date.UTC(2025, 0, i + 1)).toISOString().slice(0, 10), claude: 1 }));
+  run(`renderLine(${JSON.stringify(days)})`);
+  const svg = chart.querySelector("svg")!;
+  svg.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, width: 390, height: 220 });
+  const title = () => chart.querySelector(".tip-title")!.textContent;
+  const expected = run(`dateLabel(${JSON.stringify(days[index]!.name)})`);
+  svg.listeners.get("pointermove")!({ clientX: coordinate });
+  assert.equal(title(), expected);
+  // Real MouseEvent clicks can round clientX; PointerEvent release retains the hover precision.
+  svg.listeners.get("pointerup")?.({ clientX: coordinate, button: 0 });
+  svg.listeners.get("click")?.({ clientX: Math.floor(coordinate) });
+  assert.equal(title(), expected);
+});
+
+test("daily inspection announces each explicit selection once and leaves pointer exploration quiet", async () => {
+  const { document, run } = await harness([]);
+  run(`renderLine(["2026-01-01", "2026-01-02", "2026-01-03"].map(name => ({ name, claude: 1 })))`);
+  const svg = document.querySelector("#daily-spend")!.querySelector("svg")!;
+  const announcer = document.querySelector("#chart-announcer")!;
+  let message = announcer.textContent;
+  const updates: string[] = [];
+  Object.defineProperty(announcer, "textContent", { get: () => message, set: (value: string) => { message = value; updates.push(value); } });
+  svg.listeners.get("pointermove")!({ clientX: 52 });
+  assert.equal(updates.length, 0);
+  svg.listeners.get("pointerup")!({ clientX: 52, button: 0 });
+  assert.equal(updates.length, 1);
+  assert.match(message, /1 Jan 2026: Claude \$1.00/);
+  svg.listeners.get("pointerup")!({ clientX: 52, button: 0 });
+  svg.listeners.get("focus")!();
+  assert.equal(updates.length, 1);
+  svg.listeners.get("keydown")!({ key: "ArrowRight", preventDefault() {} });
+  assert.equal(updates.length, 2);
+});
+
+test("a dismissed daily readout survives redraw and automatic focus restoration until another inspection", async () => {
+  const { document, run } = await harness([]);
+  const days = ["2026-01-01", "2026-01-02", "2026-01-03"].map((name) => ({ name, claude: 1 }));
+  run(`renderLine(${JSON.stringify(days)}, "2026-01-02", false, true)`);
+  const chart = document.querySelector("#daily-spend")!;
+  const svg = chart.querySelector("svg")!, readout = chart.querySelector(".chart-readout")!;
+  assert.equal(readout.hidden, true);
+  assert.equal(chart.querySelector(".tip-title")!.textContent, "2 Jan 2026");
+  svg.listeners.get("focus")!(); // The resize helper restores focus on the replacement SVG.
+  assert.equal(readout.hidden, true);
+  svg.listeners.get("focus")!(); // A later user focus explicitly restores inspection.
+  assert.equal(readout.hidden, false);
 });

@@ -32,6 +32,7 @@ export interface ProviderAdapter<Session = ProviderSession, Context = ProviderCo
   readonly id: string;
   readonly provider: SessionProvider;
   discoverRoots(environment: ProviderEnvironment): Promise<string[]>;
-  identify(root: string, onWarning?: (warning: string) => void): AsyncIterable<Session>;
+  /** An adapter with several stores may report each store separately for source health. */
+  identify(root: string, onWarning?: (warning: string) => void, onSource?: (warning: string | null) => void): AsyncIterable<Session>;
   analyze(session: Session, context: Context): Promise<SessionAnalytics | null>;
 }

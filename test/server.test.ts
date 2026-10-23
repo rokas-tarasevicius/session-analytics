@@ -11,7 +11,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createSessionAnalyticsFixture } from "./fixtures.ts";
+import { createSessionAnalyticsFixture, plantPrivacySentinels, privacySentinelPattern } from "./fixtures.ts";
 import { addUnsafeVelocityModels } from "./velocity-fixtures.ts";
 
 import { plantMalformedModels } from "./model-privacy-fixture.ts";
@@ -81,6 +81,7 @@ test("serves a localhost-only read-only analytics API and dashboard", { timeout:
   let child: ChildProcess | null = null;
   try {
     const fixture = await createSessionAnalyticsFixture(temporaryDirectory);
+    await plantPrivacySentinels(fixture);
     const secret = "/private/API-STRUCTURED-SECRET command --token=credential";
     const path = join(fixture.claudeRoot, "-fixtures-workspaces-conductor-claude-workspace", "22222222-2222-4222-8222-222222222222.jsonl");
     await appendFile(path, JSON.stringify({ type: "assistant", timestamp: secret, effort: secret, message: { id: "bad-metadata", model: secret, usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: "tool_use", id: "bad-tool", name: secret }] } }) + "\n");
@@ -254,6 +255,7 @@ setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL"));
     assert.match(serialized, /"providerReportedSpendUsd":1\.48/);
     assert.match(serialized, /"repositories":3/);
     for (const removed of ["skills", "skillEvidence", "reliability", "limitsCache", "outcomes", "workflow", "insightSignals"]) assert.doesNotMatch(serialized, new RegExp(`"${removed}":`), removed);
+    assert.doesNotMatch(serialized, privacySentinelPattern);
     assert.doesNotMatch(serialized, /argHash|fileHash|reliability-hmac/);
     assert.doesNotMatch(serialized, /secret-command|secret-path|secret-skill-args|content-is-not-returned/);
     assert.doesNotMatch(serialized, /rollout-|transcriptPath|API-STRUCTURED-SECRET/);
@@ -296,6 +298,10 @@ setTimeout(() => { void Promise.reject(new Error("PRIVATE-REJECTION-SENTINEL"));
       assert.equal(pending.status, 202);
       const body = await pending.json() as import("../src/types.ts").PendingAnalytics;
       assert.equal(body.pending, true);
+      assert.deepEqual(Object.keys(body).sort(), ["pending", "progress"]);
+      assert.deepEqual(Object.keys(body.progress!).sort(), ["done", "fullParse", "phase", "startedAt", "total"]);
+      assert.doesNotMatch(JSON.stringify(body), /secret|sentinel|rollout-|transcriptPath|fixtures/i);
+      assert.equal(pending.headers.get("cache-control"), "no-store");
       assert.ok(body.progress);
       assert.equal(body.progress.phase, "discover");
       assert.equal(body.progress.done, 0);

@@ -1,6 +1,6 @@
 // Machines behind a combined snapshot, shared by the dashboard and the report: short reasons, ages,
 // coverage notes that name the machine, and the machine filter. Content-free: labels, counts and times.
-import { discoveryWarnings, remoteUnavailableWarning, staleMachineWarning } from "./evidence.js";
+import { discoveryWarnings, sourceDiscoveryNotes, remoteUnavailableWarning, staleMachineWarning } from "./evidence.js";
 
 /** This machine's key in a snapshot that combines machines, and in limits read from several machines: the machine that read the others. */
 export const localMachine = "local";
@@ -13,7 +13,7 @@ export const machineReasons = {
   "local-runtime": "runtime incomplete here", runtime: "runtime did not start", "cache-unwritable": "cache not writable or not private",
   corrupted: "runtime damaged in transit", "version-skew": "another version", rejected: "request rejected", busy: "index busy",
   "index-newer": "index from a newer version", analysis: "analysis failed", invalid: "invalid output", "time-zone": "another time zone",
-  timeout: "timed out", "too-large": "snapshot too large", cancelled: "read stopped", "no-history": "no history for this account",
+  timeout: "timed out", "too-large": "snapshot too large", cancelled: "read stopped", "no-history": "no sessions observed",
   "same-machine": "same machine as another",
 };
 
@@ -37,6 +37,11 @@ export function machineNote(machine, now = Date.now()) {
   if (machine.state === "reading") return age ? `reading · showing ${age}` : "reading";
   if (machine.state === "failed") return reason ? `not read: ${reason}` : "not read";
   if (machine.state === "stale") return `${reason ?? "not read"} · showing ${age ?? "an older read"}`;
+  const sources = machine.warnings?.filter((warning) => sourceDiscoveryNotes.includes(warning)) ?? [];
+  if (sources.some((warning) => warning.includes("incomplete sources:")) || (machine.sessions && sources.some((warning) => /: (?:missing|unreadable)/.test(warning)))) return "incomplete sources";
+  const missing = sources.some((warning) => warning.includes(": missing")), unreadable = sources.some((warning) => /: (?:missing and )?unreadable/.test(warning));
+  if (missing || unreadable) return missing && unreadable ? "missing and unreadable sources" : missing ? "missing sources" : "unreadable sources";
+  if (sources.filter((warning) => warning.endsWith(": no sources discovered or selected.")).length === 7) return "no sources discovered or selected";
   return reason ?? "";
 }
 
@@ -62,7 +67,7 @@ export function machineWarnings(machines, warnings, now = Date.now()) {
     else if (machine.state === "failed") notes.push(`${machine.label} could not be read (${reason}); its sessions are missing.`);
     else if (machine.state === "stale") notes.push(`${machine.label} could not be read (${reason}); its last good snapshot from ${age} is used instead.`);
     else if (machine.state === "reading") notes.push(age ? `${machine.label} is still being read; its snapshot from ${age} is shown until it answers.` : `${machine.label} is still being read; its sessions are not included yet.`);
-    else if (machine.reason === "no-history") notes.push(`${machine.label} has no agent history for the account it was read as.`);
+    else if (machine.reason === "no-history") notes.push(`${machine.label}: ${machineNote(machine, now) || "no sessions observed"}.`);
   }
   return [...new Set(notes)];
 }

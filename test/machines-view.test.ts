@@ -44,7 +44,7 @@ test("reasons, ages and notes are short and cover every reason", () => {
   assert.equal(machineNote(agentbox!), "unreachable · showing 2 h ago");
   assert.equal(machineNote(boxa!), "not read: sudo needs a password");
   assert.equal(machineNote({ ...boxa!, state: "reading", reason: undefined }), "reading");
-  assert.equal(machineNote({ ...laptop!, sessions: 0, reason: "no-history" }), "no history for this account");
+  assert.equal(machineNote({ ...laptop!, sessions: 0, reason: "no-history" }), "no sessions observed");
 });
 
 test("coverage notes name the machine; one machine's notes stay as they were", () => {
@@ -225,4 +225,18 @@ test("Read them again re-reads the machines without a full refresh, and a failed
   for (let attempt = 0; attempt < 5; attempt++) await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(requests.slice(3), ["/api/machines", "/api/analytics?wait=10"]);
   assert.equal(document.querySelector("#machines-read")!.hidden, true);
+});
+
+
+test("machine source notes use discovery and readability rather than installation claims", async () => {
+  const base = machines()[0]!;
+  assert.equal(machineNote({ ...base, warnings: ["Codex: missing sources."] }), "incomplete sources");
+  assert.equal(machineNote({ ...base, sessions: 0, warnings: ["Codex: missing sources."] }), "missing sources");
+  const labels = ["Claude", "Codex", "Cursor", "Copilot CLI", "OpenCode", "Gemini CLI", "Antigravity"];
+  const empty = { ...base, sessions: 0, reason: "no-history" as const, warnings: labels.map((label) => `${label}: no sources discovered or selected.`) };
+  assert.equal(machineNote(empty), "no sources discovered or selected");
+  const { document } = await rendered([empty, machines()[1]!]);
+  assert.match(document.querySelector("#machine-chips")!.textContent, /no sources discovered or selected/);
+  assert.match(document.querySelector("#machines-rows")!.textContent, /no sessions observed/);
+  assert.doesNotMatch(document.querySelector("#machine-strip")!.textContent + document.querySelector("#machines-rows")!.textContent, /installed/);
 });

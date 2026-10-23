@@ -1,4 +1,5 @@
 import { historyReport } from "./report/history.ts";
+import { abbreviateLabels, reportTable, reportWidth, wrapReport } from "./report/format.ts";
 import { AnalysisHeapLimitError } from "./analysis-process.ts";
 import { analysisBooleanFlags, analysisValueFlags, analyzeOptionsFrom, assertRemoteAnalysis, machineHelp, OptionError, optionErrorMessage, pricingHelp, sourceHelp, argument, remoteBooleanFlags, remoteHelp, remoteValueFlags, type RemoteOptions } from "./options.ts";
 import { remoteFor } from "./machines/config.ts";
@@ -11,7 +12,7 @@ import { InteropError } from "./interop/error.ts";
 import { brand } from "./brand.ts";
 import { version } from "./version.ts";
 import { coveredValue, metricCoverage, metricEligible, type Metric } from "./public/providers.js";
-import { localMachine, machineAge, machineReasons, machineTally, machineWarningSources } from "./public/machines.js";
+import { localMachine, machineAge, machineNote, machineReasons, machineTally, machineWarningSources } from "./public/machines.js";
 import type { MachineAnalytics, MachineStatus } from "./types.ts";
 
 const valueFlags = new Set([...analysisValueFlags, ...remoteValueFlags, ...shareValueFlags]);
@@ -48,6 +49,8 @@ Usage: ${brand.command} report [options]
 
 By default, unions all local Codex, Claude, and Cursor session evidence across the machine. Conductor metadata is optional enrichment and hidden metadata records are included.
 Also discovers Copilot CLI, OpenCode, Gemini CLI, Cursor SDK/transcript stores, and retained Conductor result summaries. Evidence fidelity is labeled.
+
+Text wraps to the terminal width (COLUMNS overrides it; default 80 when piped).
 
 Options:
   --json                 Print the content-free snapshot as JSON
@@ -142,7 +145,7 @@ function machineLines(list: MachineStatus[]): string {
   const width = Math.max(...list.map(({ label }) => label.length)), { ok, stale, reading, total } = machineTally(list);
   const lines = [`Machines: ${ok} of ${total} read now${stale ? `, ${stale} from a last good snapshot` : ""}${reading ? `, ${reading} still reading when this snapshot was made` : ""}`];
   for (const machine of list) {
-    const reason = machine.reason ? machineReasons[machine.reason] : "", counts = `${machine.sessions} sessions, ${machine.repositories} repositories`;
+    const reason = machine.state === "ok" ? machineNote(machine) : machine.reason ? machineReasons[machine.reason] : "", counts = `${machine.sessions} sessions, ${machine.repositories} repositories`;
     lines.push(`  ${machine.label.padEnd(width)}  ${machine.state === "failed" ? `not read: ${reason}`
       : machine.state === "stale" ? `${reason}; its last good snapshot from ${machineAge(machine.readAt) ?? "an earlier read"} (${counts})`
       : machine.state === "reading" ? (machine.readAt ? `still reading; its last good snapshot from ${machineAge(machine.readAt) ?? "an earlier read"} (${counts})` : "still reading; not included")
@@ -156,67 +159,64 @@ if (analytics && process.argv.includes("--json")) {
   // A reading machine's runtime answers compactly; a person or a file gets the indented form.
   process.stdout.write(`${JSON.stringify(analytics, null, process.argv.includes("--identify-machine") ? undefined : 2)}\n`);
 } else if (analytics) {
+  const width = reportWidth(process.env, process.stdout.columns);
+  const write = (text: string): void => { process.stdout.write(wrapReport(text, width)); };
   // A machine still reading when a saved dashboard snapshot was made counts with its last good snapshot, like a stale one.
   const shown = ({ state, readAt }: MachineStatus): boolean => state === "ok" || state === "stale" || (state === "reading" && readAt !== null);
   const counted = machines?.filter(shown).map(({ label, state }) => state === "ok" ? label : `${label} (${state})`) ?? [];
   const missing = machines?.filter((machine) => !shown(machine)).map(({ label }) => label) ?? [];
   const names = counted.length > 1 ? `${counted.slice(0, -1).join(", ")} and ${counted.at(-1)}` : counted[0];
-  process.stdout.write(`${brand.name} · ${machines ? `${names}${missing.length ? ` (not read: ${missing.join(", ")})` : ""}` : "all locally evidenced repositories"}\n`);
-  process.stdout.write(`Generated: ${analytics.generatedAt}\n`);
-  if (machines) process.stdout.write(machineLines(machines));
-  process.stdout.write(
+  write(`${brand.name} · ${machines ? `${names}${missing.length ? ` (not read: ${missing.join(", ")})` : ""}` : "all locally evidenced repositories"}\n`);
+  write(`Generated: ${analytics.generatedAt}\n`);
+  if (machines) write(machineLines(machines));
+  write(
     `Repositories: ${analytics.summary.repositoriesWithSessions}/${analytics.summary.repositories} with sessions\n`,
   );
-  process.stdout.write(
+  write(
     `Sessions: ${analytics.summary.analyzedSessions}/${analytics.summary.sessions} analyzed\n`,
   );
   const summarySessions = analytics.sessions.filter((session) => session.evidence?.fidelity === "summary").length;
   const activitySessions = analytics.sessions.filter((session) => session.evidence?.fidelity === "activity-only").length;
   const fileDates = analytics.sessions.filter((session) => session.evidence?.timing === "file-mtime").length;
-  if (summarySessions || activitySessions) process.stdout.write(`Evidence: ${summarySessions}/${analytics.summary.sessions} summary-only, ${activitySessions}/${analytics.summary.sessions} activity-only; ${fileDates} file-modification dates (start unknown). Unavailable metrics are N/A.\n`);
+  if (summarySessions || activitySessions) write(`Evidence: ${summarySessions}/${analytics.summary.sessions} summary-only, ${activitySessions}/${analytics.summary.sessions} activity-only; ${fileDates} file-modification dates (start unknown). Unavailable metrics are N/A.\n`);
   const partial = analytics.sessions.filter((session) => session.evidence?.accounting === "partial").length;
-  if (partial) process.stdout.write(`Accounting: ${partial}/${analytics.sessions.length} sessions have partial retained totals.\n`);
-  process.stdout.write("\nRepository comparison\n");
-  for (const repository of [...analytics.repositories].sort(
+  if (partial) write(`Accounting: ${partial}/${analytics.sessions.length} sessions have partial retained totals.\n`);
+  write("\nRepository comparison\n");
+  const repositoryRows = [...analytics.repositories].sort(
     (left, right) => right.summary.estimatedSpendUsd - left.summary.estimatedSpendUsd,
-  )) {
+  ).map((repository) => {
     const sessions = analytics.sessions.filter((s) => s.repositoryId === repository.repository.id);
-    process.stdout.write(
-      `${metricValue(repository.summary.estimatedSpendUsd, "cost", dollars, sessions).padStart(10)}  ` +
-        `${String(repository.summary.sessions).padStart(4)} sessions  ` +
-        `${metricValue(repository.summary.totalInputTokens, "tokens", compactNumber, sessions).padStart(7)} input  ` +
-        `${repository.repository.name}\n`,
-    );
-  }
-  process.stdout.write(
+    return [repository.repository.name, String(repository.summary.sessions),
+      metricValue(repository.summary.estimatedSpendUsd, "cost", dollars, sessions),
+      metricValue(repository.summary.totalInputTokens, "tokens", compactNumber, sessions)];
+  });
+  write(reportTable(["Repository", "Sessions", "Priced value", "Input tokens"], repositoryRows, width, [1, 2, 3]));
+  write(
     `Priced usage value: ${metricValue(analytics.summary.estimatedSpendUsd, "cost", dollars)} (not an invoice)\n` +
       `  API list-price equivalent: ${metricValue(analytics.summary.apiEquivalentSpendUsd, "apiCost", dollars)}\n` +
       `  Provider-reported local value: ${metricValue(analytics.summary.providerReportedSpendUsd, "reportedCost", dollars)}\n` +
       `  Sub-agent contribution: ${metricValue(analytics.summary.subagentSpendUsd, "cost", dollars, analytics.sessions.filter((s) => ["subagent", "mixed"].includes(s.executionKind)))}\n`,
   );
-  process.stdout.write(
+  write(
     `Tokens: ${metricValue(analytics.summary.totalInputTokens, "tokens")} input, ` +
       `${metricValue(analytics.summary.outputTokens, "tokens")} output\n`,
   );
-  process.stdout.write(
+  write(
     `Cache reads: ${analytics.summary.cacheReadRatio !== null ? metricValue(analytics.summary.cacheReadRatio, "tokens", (value) => `${(value * 100).toFixed(1)}%`) : "N/A"}; ` +
       `tools: ${metricValue(analytics.summary.toolCalls, "tools")}; ` +
       `compactions: ${metricValue(analytics.sessions.filter((s) => metricEligible(s, "compactions")).reduce((n, s) => n + s.metrics.compactions, 0), "compactions")}\n`,
   );
-  process.stdout.write(historyReport(analytics));
-  process.stdout.write("\nTop sessions by priced usage value\n");
-  for (const session of analytics.sessions.filter((s) => metricEligible(s, "cost"))
+  write(historyReport(analytics));
+  write("\nTop sessions by priced usage value\n");
+  const topSessions = analytics.sessions.filter((s) => metricEligible(s, "cost"))
     .sort((left, right) => right.cost.totalUsd - left.cost.totalUsd)
-    .slice(0, 15)) {
-    const model = session.models.map(({ model: name }) => name).join(", ") || "unknown model";
-    process.stdout.write(
-      `${dollars(session.cost.totalUsd).padStart(10)}  ${session.provider.padEnd(6)}  ` +
-        `${model.padEnd(20).slice(0, 20)}  Session ${session.sessionKey}\n`,
-    );
-  }
+    .slice(0, 15);
+  const modelLabels = abbreviateLabels(topSessions.map((session) => session.models.map(({ model }) => model).join(", ") || "unknown model"), 20);
+  const sessionRows = topSessions.map((session, index) => [session.sessionKey, dollars(session.cost.totalUsd), session.provider, modelLabels[index]!]);
+  write(reportTable(["Session", "Priced value", "Provider", "Model"], sessionRows, width, [1]));
   if (analytics.warnings.length > 0) {
-    process.stdout.write("\nWarnings\n");
-    for (const warning of machineWarningSources(analytics.machines, analytics.warnings)) process.stdout.write(`- ${warning}\n`);
+    write("\nWarnings\n");
+    for (const warning of machineWarningSources(analytics.machines, analytics.warnings)) write(`- ${warning}\n`);
   }
 }
 const unread = machines?.filter(({ state }) => state !== "ok") ?? [];

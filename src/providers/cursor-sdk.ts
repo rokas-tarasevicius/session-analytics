@@ -1,3 +1,4 @@
+import { providerRoots } from "./roots.ts";
 import { dirname, join } from "node:path";
 import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter, ProviderSession } from "./adapter.ts";
@@ -69,7 +70,7 @@ async function projectStore(path: string, agents: Map<string, ProviderSession>):
 
 export const cursorSdkAdapter: ProviderAdapter = {
   id: "cursor-sdk", provider: "cursor",
-  async discoverRoots({ home, options }) { return [options.cursorSdkRoot ?? join(home, "Library/Application Support/com.conductor.app/cursor-sdk-store")]; },
+  async discoverRoots({ home, options }) { return providerRoots(options.cursorSdkRoot, [join(home, "Library/Application Support/com.conductor.app/cursor-sdk-store")]); },
   async *identify(root, onWarning) {
     const combined = new Map<string, { identity: ProviderSession; projection: Projection }>();
     for await (const path of files(root, (p) => p.endsWith("/agents.ndjson"), 0, onWarning)) {

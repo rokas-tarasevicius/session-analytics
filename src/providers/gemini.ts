@@ -1,3 +1,4 @@
+import { providerRoots } from "./roots.ts";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -57,7 +58,7 @@ async function header(path: string): Promise<RecordValue | null> {
 export function geminiAdapter(knownPaths: string[] = []): ProviderAdapter {
   return {
     id: "gemini-chat", provider: "gemini",
-    async discoverRoots({ home, options }) { return [options.geminiRoot ?? join(home, ".gemini/tmp")]; },
+    async discoverRoots({ home, options }) { return providerRoots(options.geminiRoot, [join(home, ".gemini/tmp")]); },
     async *identify(root, onWarning) {
       let skippedFiles = false;
       const registry = record((await readJson(join(dirname(root), "projects.json")))?.["projects"]);

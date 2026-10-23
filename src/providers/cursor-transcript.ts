@@ -1,3 +1,4 @@
+import { providerRoots } from "./roots.ts";
 import { stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
@@ -10,7 +11,7 @@ const encode = (path: string): string => resolve(path).replace(/^\//, "").replac
 export function cursorTranscriptAdapter(knownPaths: string[] = []): ProviderAdapter {
   return {
     id: "cursor-transcript", provider: "cursor",
-    async discoverRoots({ home, options }) { return [options.cursorTranscriptRoot ?? join(home, ".cursor/projects")]; },
+    async discoverRoots({ home, options }) { return providerRoots(options.cursorTranscriptRoot, [join(home, ".cursor/projects")]); },
     async *identify(root, onWarning) {
       for await (const path of files(root, (p) => p.endsWith(".jsonl") && p.includes("/agent-transcripts/"), 0, onWarning)) {
         try {

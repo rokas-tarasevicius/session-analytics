@@ -208,7 +208,6 @@ test("discovers every Claude and Codex profile once, following symbolic links", 
     ]);
     assert.deepEqual(roots.codex, [
       join(home, ".codex", "sessions"),
-      join(home, ".codex", "archived_sessions"),
       join(home, ".codex-personal", "archived_sessions"),
     ]);
   } finally {

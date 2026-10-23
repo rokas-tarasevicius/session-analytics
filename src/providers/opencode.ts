@@ -1,3 +1,4 @@
+import { providerRoots } from "./roots.ts";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -29,7 +30,7 @@ function indexOwners(database: DatabaseSync): Map<string, string> {
 export const opencodeAdapter: ProviderAdapter = {
   id: "opencode-db", provider: "opencode",
   async discoverRoots({ home, options, environment }) {
-    return [options.opencodeDatabasePath ?? join(environment["XDG_DATA_HOME"] || join(home, ".local/share"), "opencode/opencode.db")];
+    return providerRoots(options.opencodeDatabasePath, [join(environment["XDG_DATA_HOME"] || join(home, ".local/share"), "opencode/opencode.db")]);
   },
   async *identify(path) {
     try { await stat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }

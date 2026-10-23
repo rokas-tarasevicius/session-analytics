@@ -93,6 +93,8 @@ Machine views also include repository count, repositories with selected sessions
 
 Tool names are useful for workload shape. Tool call counts do not prove useful work, failure, or causal responsibility.
 
+The Tools dashboard derives MCP origins from effective names matching `mcp__<server>__<tool>` (case-sensitive, nonempty server and tool components, no whitespace). The first `__` after `mcp__` separates the server from the tool; further separators belong to the tool. Empty server segments and missing/empty tool segments remain in “Other tool names” and are excluded from MCP server rows. Other names remain unclassified; they can include MCP calls recorded without that convention. Group and server call shares divide by all calls in tool-eligible selected sessions. Session reach divides distinct sessions using the group/server by all tool-eligible selected sessions, including observed zero-call sessions. Repository reach divides distinct repositories using it by all distinct repositories with tool-eligible selected sessions. Reach overlaps across rows; server calls sum to the MCP-prefixed group, and the two origin groups sum to the existing tool total. With eligible sessions but no calls, counts are zero and call shares are unavailable; without eligible sessions, the panel is unavailable. These are browser-derived values from existing fields, not new snapshot fields or evidence of server health/configuration.
+
 ### Evidence health
 
 - provider evidence validation status;
@@ -148,6 +150,42 @@ The Claude Fable 5.1 entry prices cache hits at 0.025x base input, the published
 The Claude Opus 5.5 entry prices cache hits at 0.05x base input ($0.20 per million tokens), the published exception for that model; its 5-minute and 1-hour cache writes use the standard 1.25x and 2x multipliers. Claude Haiku 5.5 uses explicit absolute rates above 100K input tokens: input/cache read/5-minute write/1-hour write/output are $0.50/$0.05/$0.625/$1.00/$2.50 per million, versus $0.10/$0.01/$0.125/$0.20/$0.50 through 100K. Other bundled Claude entries carry no long-context modifier. The `gpt-6-sol`, `gpt-6.1-sol`, `gpt-6-luna` and `gpt-5.6-luna` entries apply OpenAI's published 2x input and cache, 1.5x output modifier above 272K input tokens per request.
 
 Current Cursor builds keep global composer headers in a `composerHeaders` table that maps each composer to its workspace storage ID and marks subagent composers; older builds keep them in `ItemTable`. Both are read. Cursor local composer history exposes modern `bubbleId` token counters and stable `toolFormerData` tool-call IDs. `usageData.costInCents` is a provider-reported local usage value and may be aggregated by session, repository, and model. Bubble token counters are session-level because the local bubble schema does not retain a model identifier that can be joined safely to provider-reported model cost. It is not assigned to a day because the local store does not retain per-call cost timestamps. Relative timing values are not Unix timestamps and must not affect session spans. Cursor composer API rate coverage remains not applicable; the SDK source below has separate semantics.
+
+### Hypothetical model pricing (Costs)
+
+The Costs what-if panel computes a **hypothetical API list-price equivalent**, not a bill, observed usage value,
+or savings forecast. It applies another model's currently resolved ordinary rates from the snapshot's existing
+`rateCard.models` to the selected activity window and repository scope. For each dated or session-dated ledger cell,
+the amount is `(uncached input × input rate + cache reads × cached-input rate + output × output rate) / 1,000,000`.
+`cachedInputPerMillion` takes precedence over `cacheReadPerMillion`, including an explicit zero. Reasoning tokens
+are already included in output and are never added again. Unknown original models can participate when their token
+classes are observed; their original price coverage does not determine hypothetical target-rate coverage.
+
+Input participates only when the ledger's cache-read evidence covers its entire input denominator and its uncached,
+cached and cache-write counters reconcile to total input. Cache writes are always excluded: hourly cells do not
+retain their TTLs. A missing target class rate excludes that class, without substituting the input rate; an explicit
+zero rate is supported. Provider-reported sessions are excluded from the amount. **Not re-priced** counts all dated
+observed input plus output minus the re-priced classes, divided by all dated observed input plus output, including
+provider-reported tokens. The displayed excluded percentage rounds upward to 0.1%; exact token counts accompany it.
+No dated tokens means unavailable coverage; no re-priced tokens means an unavailable amount, never a free estimate.
+Undated tokens and sessions without a ledger are disclosed separately for the whole scope and never assigned to the window.
+
+The panel breaks the re-priced amount and token count down by **source vendor**. A ledger dimension's model is
+matched to `rateCard.models` (or its recorded pricing provenance's latest `rateModel` alias); the matched rate's
+`provider` establishes the vendor. Neither the session's agent/provider nor model-name text establishes a vendor:
+for example, Cursor can use a Claude model. A contribution is labelled **Cross-vendor comparison** when its source
+rate vendor differs from the comparison rate's `provider`. Only actually re-priced classes enter these amounts
+and counts; they sum to the hypothetical total and re-priced denominator. Missing source rate evidence remains
+an explicitly unknown-vendor contribution; it is never silently treated as same-vendor. This comparison holds the
+recorded tokens constant across vendors and does not establish what another vendor would have billed.
+
+Request context sizes are unavailable in the ledger, so long-context and tier premiums are omitted, rather than
+applied to an aggregate as if it were one request. Token counts and cache behavior are held constant; models can
+tokenize differently and have different capabilities. Current target rates do not reproduce historical tariffs.
+The selection lives only in browser memory. No snapshot field, accounting total, projection, or export changes.
+The estimate shares Pricing's freshness wording and state from `rateCard.pricing` and the existing `/api/health`
+pricing-update poll. Offline mode discloses that only cached prices are used; stale or newly cached prices carry
+the same refresh notice as Pricing. The hypothetical calculation stays available without presenting those rates as fresh.
 
 ## Additional provider evidence
 
@@ -231,6 +269,23 @@ states one calendar; unknown starts and file-modification fallbacks are excluded
 exports are whole sessions started in the window; only the daily CSV is ledger-dated (see
 [interchange](#interchange-metrics-schema-version-1)).
 
+## Quiet repositories
+
+Summary derives this insight locally from existing public fields; snapshots and accounting totals are unchanged.
+For each repository in the selected machine/repository scope, take the union of known session-start days in the
+snapshot timezone and occupied `velocity.buckets` / `velocity.sessionDated` days. A zero-value or wholly unpriced
+cell still establishes activity. A repository is quiet when at least one such day precedes the window's start
+and none falls within its inclusive start/end dates. Its last observed active day is the maximum day strictly
+before the start. Dates after the window's end do not affect historical results; repositories first observed
+after the window or without earlier dated evidence are omitted. Results sort by last day descending, name,
+then opaque repository key, using the dashboard's existing disambiguated display names.
+
+Undated cells, unknown starts and file-mtime fallbacks cannot establish an active day. Sessions without a ledger
+can contribute a known start only. The panel explicitly qualifies this as observed dated activity and discloses
+that undated activity is excluded and local history may be incomplete. All history has no preceding window,
+so the panel is hidden; it is also hidden when there are no matches or another view is open. Empty windows retain
+the insight even while Summary's charts are hidden. No ratio, prior-period comparison, quality or outcome claim is calculated.
+
 ## Costs
 
 Costs reads the same activity ledger as the Summary KPI and Velocity, over the same selected dates, repository
@@ -265,6 +320,8 @@ days are active. Its note also shows active days out of all calendar days and va
 The chart header shows the selected metric's period total.
 
 ### Calendar and attribution
+
+Activity's rhythm KPIs use the same known session starts as its weekday-hour heatmap, after the selected date window, repository and provider filters. Unknown, invalid and file-mtime starts are excluded. **Active days** count distinct calendar start dates in the snapshot timezone. **Longest start-day streak** is the longest consecutive run of those dates inside the window; gaps break a run, multiple starts on one date count once, and daylight-saving changes do not break adjacent calendar dates. It is not a live/current streak or a duration. **Busiest hour** aggregates starts per local clock hour across weekdays; **Busiest weekday** aggregates starts per weekday across hours. Repeated daylight-saving clock hours share a bucket, as in the heatmap. Ties are retained; the display chooses the earliest hour or Monday-first weekday and labels the tie count. No known starts means unavailable insights, never a zero-day streak or a zero-count winner. These browser-derived aggregates add no snapshot fields and change no accounting totals.
 
 - A velocity cell is one **local calendar date × local clock hour × dimension**. Dimensions
   combine agent, model, execution kind and effort. Provider and repository come from the
@@ -548,7 +605,8 @@ The six [MCP tools](mcp.md) return `McpPayload` (schema version 1). The public t
 - `snapshot.generatedAt`, `ageSeconds`, `ttlSeconds`: generation timestamp, nonnegative age at query time, and configured cache TTL. TTL starts when loading completes; expired requests share one refresh. A refresh failure is an error, never stale success.
 - `window.name`, `since`, `until`, `timezone`, `basis`: UTC bounds, with a null lower bound for `all`. Day windows include the current UTC date; week starts Monday. Session metrics select sessions by `createdAt` (falling back to `firstEventAt`), include the lower bound, and exclude future starts. Untimed sessions can only enter `all`. Whole-session counters are never divided among days. `budget_status` alone uses the activity-day ledger for its period values.
 - `notes[]`: fixed interpretation and evidence caveats, never copied provider warnings. Parser-warning presence adds a fixed coverage note.
-- `sourceHealth[]`: provider discovery health independent of repository, window, and selected session counts. Each row contains `provider`, `status` (`available`, `incomplete`, `unavailable`, or `unknown` for older snapshots), `sourcesRead`, `missingSources`, and `unreadableSources`. It is collected before repository selection as `MachineAnalytics.mcpSourceHealth`, so unavailable providers remain visible even when the entire machine has no sessions. A provider filter selects health rows, not their denominators. Available means configured/discovered sources were readable, not that retained history is complete. Aggregate coverage warnings add a fixed note without forwarding their text.
+- `sourceHealth[]`: provider discovery health independent of repository, window, and selected session counts. Each row contains `provider`, `status` (`available`, `incomplete`, `unavailable`, or `unknown` for older snapshots), `sourcesRead`, `missingSources`, and `unreadableSources`. It is collected for all seven providers before repository selection as `MachineAnalytics.mcpSourceHealth`, so unavailable providers remain visible even when the entire machine has no sessions. Cursor combines its database, SDK and transcript stores. Absent optional defaults do not count as missing: no discovered sources is `unavailable` with zero counts (no sources discovered or selected, including when default discovery is disabled). Explicitly selected absent paths count as missing; unreadable/invalid stores count as unreadable. A provider filter selects health rows, not their denominators. Available means configured/discovered sources were readable, not that retained history is complete. Aggregate coverage warnings add a fixed note without forwarding their text.
+  The dashboard also uses these existing discovery counts for its first-run state and Coverage source checks. Only known provider labels and fixed outcomes are shown. Checks cover every supported provider; a provider whose counts are all zero is reported as having no sources discovered or selected. Missing history does not establish installation status. Older snapshots without these rows show an explicit unavailable explanation.
 
 ### Totals and grouping
 

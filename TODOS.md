@@ -6,7 +6,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Finish the mobile fleet table card layout. | §3.2 deferred mobile pass; §6 |
+| Done | Mobile fleet table cards retain all metrics, sorting, keyboard focus and table semantics at widths up to 800 px. | §3.2 deferred mobile pass; §6 |
 
 ## Dashboard behavior and copy
 
@@ -25,17 +25,19 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Accessibility
 
+- **P3:** Make provider digit chords work on AZERTY layouts: after `p`, the Shift keydown needed to type `1` currently cancels the chord and the digit changes the time window instead of toggling provider 1. Preserve the chord across modifier keydowns and verify shifted digits without changing the chord deadline or browser modifier behavior. (#107 accessibility review; pre-existing.)
+
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Announce refresh and empty-window status through live regions. | §2 P3, Accessibility; §6 optional PR-B1 work |
-| P3 | Restore keyboard focus after export disables the activated download button. | §2 P3, Accessibility |
-| P3 | Avoid repeated Velocity live-region announcements during pointer movement and resize. | §2 P3, Accessibility |
+| P3 | Announce refresh and empty-window status through live regions. Fixed by accessibility audit on `t3/a11y-audit`, 2026-10-22. | §2 P3, Accessibility; §6 optional PR-B1 work |
+| P3 | Restore keyboard focus after export disables the activated download button. Fixed by accessibility audit on `t3/a11y-audit`, 2026-10-22. | §2 P3, Accessibility |
+| P3 | Avoid repeated Velocity live-region announcements during pointer movement and resize. Fixed by accessibility audit on `t3/a11y-audit`, 2026-10-22. | §2 P3, Accessibility |
 
 ## Rendering performance and dead code
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Remove unused per-repository tools/warnings, avoid full model rebuilds on chip toggles and reduce repository-by-session activity scans. | §2 P3, Performance and dead code |
+| P3 | Remove unused per-repository tools/warnings and reduce repository-by-session activity scans. | §2 P3, Performance and dead code |
 | P3 | Consolidate element factories and duplicate warning renders; remove unused Summary Velocity code and review test-only exports. | §2 P3, Performance and dead code |
 
 ## Multiple machines
@@ -47,11 +49,12 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
 | P3 | Compare ad-hoc `--remote` machines, and installed ones without a recorded check, for the same machine twice; needs `--identify-machine` there, which older versions reject. Return compact JSON from installed runtimes for the same reason. | Machines review (same-machine-twice, uncompressed-pretty-json) |
 | P3 | Add a Machines column (or filter chips) to the repository table. | Machines review (no-machine-dimension) |
-| P3 | Stop every saved Linux server from adding "Cursor local session history is missing." and an incomplete Cursor source: the default Cursor database is the macOS path on every platform. Use each platform's default (`~/.config/Cursor` on Linux, `%APPDATA%\Cursor` on Windows), and count an absent default store as not installed rather than missing for every provider's default roots alike, the Codex archive root included, so source health stays consistent. | Machines end-to-end review (cursor-missing-on-every-server) |
 
 ## Subscription limits
 
-No open items. Codex plan history, per-tier calibration and observed-period proration are implemented in `src/limits/ledger.ts` and `src/public/subscription-data.js`; migration and limitations are in `docs/subscription.md`.
+| Priority | Item | Plan reference |
+| --- | --- | --- |
+| P3 | Accept a UTF-8 BOM when attributing Codex limit readings to accounts: `src/limits/accounts.ts` and the private limits inbox parse rollout metadata directly, so a BOM-prefixed rollout caches missing attribution even though the provider-history readers accept a BOM since #99. | #99 review (multi-machine) |
 
 ## Distribution and release metadata
 

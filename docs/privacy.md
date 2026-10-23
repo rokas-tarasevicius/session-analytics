@@ -40,6 +40,16 @@ The content-free contract covers dashboard/API, reports, pricing commands, MCP, 
 
 Raw transcript content is not persisted or logged. Bounded parsing collectors may hold current request/receipt evidence in memory until reconciliation. Public pricing caches contain normalized rates, not raw feed bodies or local inventories.
 
+The dashboard API requires a same-origin fetch context when provided and an exact HTTP Origin
+(scheme, host and port); credentials, paths, queries and fragments are invalid Origin values.
+Requests remain GET-only, with no request body (zero `Content-Length` is allowed; chunked bodies
+are rejected). Body rejections close the connection before any refresh work. Request targets,
+including query strings, are limited to 8 KiB (HTTP 414); Node's header overflow returns HTTP 431.
+Parser failures return fixed HTTP 400/431 errors (408 for a request timeout) with the same no-store and security headers as
+normal responses, without reflecting request bytes. Rejections close the connection instead of
+draining an advertised body, and ignore subsequent requests already buffered on that connection;
+unsupported expectations return a fixed HTTP 417 error.
+
 ## Verification
 
 The local real-machine verification harness also writes audit-only evidence: hashed session keys, metadata signatures and capture timestamps (P1); exclusion counts and independently reconstructed calibration values (P0, with hashed identities and event timestamps treated as P1). Source generations and calibration pairs stay in `.lane/`; they contain no source paths, raw session IDs or transcript content and add no public snapshot fields. Provider histories are read-only throughout verification.

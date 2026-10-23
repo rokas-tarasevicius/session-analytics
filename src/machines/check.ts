@@ -1,3 +1,4 @@
+import { sourceHealthNotes } from "../public/evidence.js";
 import { brand } from "../brand.ts";
 import { accountPattern, type RemoteMachine } from "../options.ts";
 import { stopping } from "../processes.ts";
@@ -189,12 +190,12 @@ export async function checkMachine(
     const snapshot = await fetchRemoteSnapshot(machine, remoteArguments({ timeZone: localTimeZone() }), { timeoutMs });
     const ms = performance.now() - started;
     result.sessions = snapshot.summary.sessions;
-    if (snapshot.summary.sessions) add({ check: "history", status: "ok", text: `${snapshot.summary.sessions} sessions, ${snapshot.summary.repositories} repositories in ${seconds(ms)}`, ms });
+    if (snapshot.summary.sessions) add({ check: "history", status: "ok", text: `${snapshot.summary.sessions} sessions, ${snapshot.summary.repositories} repositories in ${seconds(ms)}`, detail: sourceHealthNotes(snapshot.mcpSourceHealth ?? []).join(" "), ms });
     else {
       // While adding, look for the account the agents run as, so the fix can name it.
       const found = (adding || findUsers) && !stopping() ? await lookup() : undefined;
       const fix = Array.isArray(found) && candidates(found).length ? `if agents run as another account there: ${hint(candidates(found))}` : noHistoryFix(machine);
-      add({ check: "history", status: "warn", text: `no agent history for ${account ?? "this account"} (0 sessions in ${seconds(ms)})`, ms, fix });
+      add({ check: "history", status: "warn", text: `no sessions observed for ${account ?? "this account"} (0 sessions in ${seconds(ms)})`, detail: sourceHealthNotes(snapshot.mcpSourceHealth ?? []).join(" "), ms, fix });
     }
   } catch (error) {
     add(failed("history", error instanceof RemoteError ? error : new RemoteError("analysis", machine), performance.now() - started));
