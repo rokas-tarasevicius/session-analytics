@@ -473,10 +473,18 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     // Escape inside a chart closes the readout without clearing the repository scope; a second Escape clears it.
     await browser.evaluate(`document.querySelector('#daily-spend svg').focus()`);
     await browser.key("ArrowRight");
-    await browser.until(`document.querySelector('#daily-spend .chart-tooltip').hidden`, false);
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, false);
     await browser.key("Escape");
-    await browser.until(`document.querySelector('#daily-spend .chart-tooltip').hidden`, true);
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, true);
     assert.equal(await browser.evaluate(`document.querySelector('#repository-filter').value`), repositoryId);
+    // Focus alone restores the inspected day; pointer leave and blur keep its exact values available.
+    await browser.evaluate(`(() => { const s = document.querySelector('#daily-spend svg'); s.blur(); s.focus(); })()`);
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, false);
+    await browser.evaluate(`(() => { const s = document.querySelector('#daily-spend svg'); s.dispatchEvent(new PointerEvent('pointerleave')); s.blur(); })()`);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .chart-readout').hidden`), false);
+    await browser.evaluate(`document.querySelector('#daily-spend svg').focus()`);
+    await browser.key("Escape");
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, true);
     await browser.key("Escape");
     await browser.until(`document.querySelector('#repository-filter').value`, "all");
     // Back and Forward restore the repository focus from the URL.
@@ -736,6 +744,38 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
         await delay(150);
         assert.equal(await browser.evaluate(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`), true, `${view} at ${width}px (${theme}, ${density})`);
         await browser.until(chartAtContainerWidth, true);
+        if (view === "summary") {
+          assert.equal(await browser.evaluate(`(() => {
+            const svg = document.querySelector('#daily-spend svg');
+            if (!svg) return true;
+            svg.focus();
+            const top = () => document.querySelector('#provider-donut').getBoundingClientRect().top;
+            const before = top();
+            svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            const dismissed = top();
+            svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+            return before === dismissed && before === top();
+          })()`), true, `readout dismissal and restoration reserve height at ${width}px (${theme}, ${density})`);
+          assert.equal(await browser.evaluate(`(() => {
+            const svg = document.querySelector('#daily-spend svg'), readout = document.querySelector('#daily-spend .chart-readout');
+            if (!svg || !readout || readout.hidden) return true;
+            const plot = svg.getBoundingClientRect(), values = readout.getBoundingClientRect();
+            return values.top >= plot.bottom && values.left >= 0 && values.right <= innerWidth
+              && [...readout.querySelectorAll('.tip-row')].every(row => row.scrollWidth <= row.clientWidth);
+          })()`), true, `daily values stay below the plot and inside ${width}px (${theme}, ${density})`);
+          if (width === 375) {
+            assert.equal(await browser.evaluate(`(() => {
+              const readout = document.querySelector('#daily-spend .chart-readout');
+              return !readout || readout.getBoundingClientRect().height <= 2 * parseFloat(getComputedStyle(readout).lineHeight);
+            })()`), true, `phone readout fits two lines (${theme}, ${density})`);
+            await browser.evaluate(`document.querySelector('#daily-spend details')?.setAttribute('open', '')`);
+            assert.equal(await browser.evaluate(`(() => {
+              const body = document.querySelector('#daily-spend .evidence-body');
+              return !body || (body.getBoundingClientRect().height > 0 && [...body.querySelectorAll('.tip-row')].every(row => row.scrollWidth <= row.clientWidth));
+            })()`), true, `phone disclosure exposes exact provider values (${theme}, ${density})`);
+            await browser.evaluate(`document.querySelector('#daily-spend details')?.removeAttribute('open')`);
+          }
+        }
         if (width >= 1280) {
           assert.equal(await browser.evaluate(`(() => {
             const panel = document.querySelector('[data-view-panel]:not([hidden])');
@@ -793,10 +833,28 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     await browser.until(chartAtContainerWidth, true);
     const chartWidthBeforeResize = await browser.evaluate<number>(`document.querySelector('#daily-spend svg').viewBox.baseVal.width`);
     await browser.evaluate(`document.querySelector('#daily-spend svg').focus()`);
+    await browser.evaluate(`document.querySelector('#daily-spend svg').dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))`);
+    const inspectedDateBeforeResize = await browser.evaluate<string>(`document.querySelector('#daily-spend .tip-title').textContent`);
     await setWidth(1024);
     await browser.until(`document.querySelector('#daily-spend svg').viewBox.baseVal.width !== ${chartWidthBeforeResize}`, true);
     await browser.until(chartAtContainerWidth, true);
     assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#daily-spend svg')`), true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .tip-title').textContent`), inspectedDateBeforeResize);
+    // Resize must preserve explicit dismissal even when the redraw restores chart focus.
+    await browser.key("Escape");
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, true);
+    await browser.evaluate(`window.dispatchEvent(new Event('resize'))`);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .chart-readout').hidden`), true);
+    await setWidth(375);
+    await browser.until(chartAtContainerWidth, true);
+    assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('#daily-spend svg')`), true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .chart-readout').hidden`), true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .tip-title').textContent`), inspectedDateBeforeResize);
+    await setWidth(1440);
+    await browser.until(chartAtContainerWidth, true);
+    assert.equal(await browser.evaluate(`document.querySelector('#daily-spend .chart-readout').hidden`), true);
+    await browser.evaluate(`document.activeElement.blur(); document.querySelector('#daily-spend svg').focus()`);
+    await browser.until(`document.querySelector('#daily-spend .chart-readout').hidden`, false);
     await browser.evaluate(`document.activeElement.blur()`);
 
     // The coverage dialog opens on its title (no focus ring on Close), keeps its table scrolling inside it on a phone,

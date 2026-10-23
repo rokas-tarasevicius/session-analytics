@@ -1,4 +1,4 @@
-import { compact, dateLabel, dateRange, dateTime, dayLabel, disjunction, fullDate, integer, money, timeLabel } from "./format.js";
+import { compact, dateLabel, dateRange, dateTime, dayLabel, disjunction, integer, money, timeLabel } from "./format.js";
 import { modelColor, providerColor } from "./chart-colors.js";
 import { renderLegend } from "./chart-legend.js";
 import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
@@ -421,42 +421,56 @@ function renderSparkline(svg, rawValues, days, { width = 84, height = 30, label 
   });
 }
 
-// --------------------------------------------------------------------- crosshair + tooltip
+// --------------------------------------------------------------------- crosshair + daily readout
 
-function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, plotRight, title, rows, onIndex = null, label }) {
+function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, plotRight, title, rows, summary, onIndex = null, label, initialIndex = xs.length - 1, initiallyVisible = true, restoringDismissedFocus = false }) {
   const viewBox = svg.viewBox.baseVal;
   const crosshair = svgNode("line", { class: "crosshair", y1: plotTop, y2: plotBottom, x1: 0, x2: 0 });
   crosshair.style.display = "none";
   const hit = svgNode("rect", { class: "hit-layer", x: plotLeft, y: plotTop - 6, width: plotRight - plotLeft, height: plotBottom - plotTop + 12 });
   svg.append(crosshair); svg.prepend(hit);
-  const tooltip = node("div", null, "chart-tooltip"); tooltip.hidden = true;
-  container.append(tooltip);
+  const readout = node("div", null, "chart-readout"); readout.hidden = true;
+  readout.id = "daily-value-readout";
+  container.append(readout);
   svg.tabIndex = 0;
-  svg.setAttribute("aria-label", `${label}. Use the arrow keys to read each point; Escape dismisses the readout.`);
+  svg.setAttribute("role", "group");
+  svg.setAttribute("aria-describedby", readout.id);
+  svg.setAttribute("aria-label", `${label}. Use Left and Right arrows, Home and End to read each day; Escape dismisses the readout.`);
   let current = null;
-  const show = (index) => {
+  let inspected = initialIndex;
+  const announceSelection = (index) => {
+    const message = `${title(index)}: ${rows(index).map((row) => `${row.label} ${row.value}`).join(", ")}`;
+    if (elements.announcer.textContent !== message) elements.announcer.textContent = message;
+  };
+  const show = (index, announce = true) => {
     if (index === null || index === undefined || xs[index] === undefined) return hide();
     if (index === current) return;
-    current = index;
+    current = inspected = index;
     crosshair.style.display = ""; crosshair.setAttribute("x1", xs[index]); crosshair.setAttribute("x2", xs[index]);
-    clear(tooltip); tooltip.hidden = false;
-    tooltip.append(node("div", title(index), "tip-title"));
-    for (const row of rows(index)) {
+    const expanded = readout.querySelector("details")?.open || false;
+    clear(readout); readout.hidden = false;
+    const heading = node("div", null, "readout-heading");
+    const detail = summary(index);
+    heading.append(node("div", title(index), "tip-title"), node("span", detail.value, "readout-total"));
+    const values = node("div", null, "readout-values");
+    const mobileValues = node("div", null, "evidence-body");
+    for (const target of [values, mobileValues]) for (const row of rows(index)) {
       const line = node("div", null, `tip-row${row.dim ? " dim" : ""}`);
       const key = node("i"); key.style.setProperty("--key-color", row.color);
-      line.append(key, node("span", row.label), node("strong", row.value)); tooltip.append(line);
+      line.append(key, node("span", row.label), node("strong", row.value)); target.append(line);
     }
-    const rect = container.getBoundingClientRect();
-    const x = (xs[index] / viewBox.width) * rect.width;
-    const half = tooltip.offsetWidth / 2 + 4;
-    tooltip.style.left = `${Math.min(rect.width - half, Math.max(half, x))}px`;
-    tooltip.style.top = "0px";
+    const meta = node("div", null, "readout-meta");
+    const disclosure = node("details", null, "evidence readout-providers");
+    disclosure.open = expanded;
+    disclosure.append(node("summary", "By provider"), mobileValues);
+    meta.append(node("span", detail.sessions, "readout-sessions"), disclosure);
+    readout.append(heading, values, meta);
     if (onIndex) onIndex(index);
-    elements.announcer.textContent = `${title(index)}: ${rows(index).map((row) => `${row.label} ${row.value}`).join(", ")}`;
+    if (announce) announceSelection(index);
   };
   const hide = () => {
-    if (current === null && tooltip.hidden) return;
-    current = null; crosshair.style.display = "none"; tooltip.hidden = true;
+    if (current === null && readout.hidden) return;
+    current = null; crosshair.style.display = "none"; readout.hidden = true;
     if (onIndex) onIndex(null);
   };
   const nearest = (clientX) => {
@@ -466,8 +480,19 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
     for (let index = 1; index < xs.length; index += 1) if (Math.abs(xs[index] - x) < Math.abs(xs[best] - x)) best = index;
     return best;
   };
-  svg.addEventListener("pointermove", (event) => show(nearest(event.clientX)));
-  svg.addEventListener("pointerleave", hide);
+  svg.addEventListener("pointermove", (event) => show(nearest(event.clientX), false));
+  // MouseEvent clicks round clientX in dense windows; release uses the same fractional scale as hover.
+  svg.addEventListener("pointerup", (event) => {
+    if (event.button !== 0) return;
+    const index = nearest(event.clientX);
+    show(index, false);
+    announceSelection(index);
+  });
+  svg.addEventListener("focus", () => {
+    // redrawOnResize restores focus automatically; that is not a new inspection.
+    if (restoringDismissedFocus) { restoringDismissedFocus = false; return; }
+    show(inspected);
+  });
   svg.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       // Consume Escape only when a readout is open so the global scope shortcut does not also run.
@@ -479,9 +504,12 @@ function attachCrosshair(container, svg, { xs, plotTop, plotBottom, plotLeft, pl
     if (event.key === "End") { event.preventDefault(); show(xs.length - 1); return; }
     if (!step) return;
     event.preventDefault();
-    show(Math.min(xs.length - 1, Math.max(0, (current ?? (step > 0 ? -1 : xs.length)) + step)));
+    show(Math.min(xs.length - 1, Math.max(0, inspected + step)));
   });
-  svg.addEventListener("blur", hide);
+  // Keep exact figures available while the pointer or keyboard moves to the legend.
+  // The readout stays in the document flow, so it cannot cover the plot or escape the viewport.
+  show(inspected, false);
+  if (!initiallyVisible) hide();
 }
 
 // --------------------------------------------------------------------- views
@@ -914,9 +942,11 @@ function renderActiveAnalyticsView(view) {
 }
 
 function dailyProviderSpend(sessions) {
-  const days = new Map(daysBetween(elements.windowStart.value, elements.windowEnd.value).map((name) => [name, { name, ...Object.fromEntries(providerOrder.map((provider) => [provider, 0])) }]));
+  const days = new Map(daysBetween(elements.windowStart.value, elements.windowEnd.value).map((name) => [name, { name, starts: Object.fromEntries(providerOrder.map((provider) => [provider, 0])), ...Object.fromEntries(providerOrder.map((provider) => [provider, 0])) }]));
   for (const session of sessions) {
     if (!providerOrder.includes(session.provider)) continue;
+    const start = days.get(sessionStartDay(session, snapshotTimeZone()));
+    if (start) start.starts[session.provider] += 1;
     // The cells buildVelocity sums: in-window days with a known dimension.
     for (const [day, , dimension, values] of ledgerCells(session.velocity)) {
       const row = days.get(day);
@@ -926,8 +956,11 @@ function dailyProviderSpend(sessions) {
   return [...days.values()];
 }
 
-function renderLine(items) {
-  redrawOnResize(elements.dailySpend, () => renderLine(items));
+function renderLine(items, inspectedDay = null, readoutActive = true, restoringDismissedFocus = false) {
+  redrawOnResize(elements.dailySpend, () => {
+    const restoreDismissed = !readoutActive && elements.dailySpend.contains(document.activeElement);
+    renderLine(items, inspectedDay, readoutActive, restoreDismissed);
+  });
   clear(elements.dailySpend);
   const selectedProviders = activeProviders();
   const totals = Object.fromEntries(selectedProviders.map((provider) => [provider, items.reduce((sum, item) => sum + item[provider], 0)]));
@@ -985,11 +1018,20 @@ function renderLine(items) {
     dots[provider] = { dot, points }; svg.append(dot);
   }
   elements.dailySpend.append(svg);
+  const remembered = items.findIndex((item) => item.name === inspectedDay);
   attachCrosshair(elements.dailySpend, svg, {
+    initialIndex: remembered >= 0 ? remembered : items.length - 1,
+    initiallyVisible: readoutActive, restoringDismissedFocus,
     xs, plotTop: top, plotBottom: baseline, plotLeft: left, plotRight: width - right, label: "Daily usage value in US dollars by provider",
-    title: (index) => fullDate(items[index].name),
+    title: (index) => dateLabel(items[index].name),
+    summary: (index) => {
+      const starts = selectedProviders.reduce((sum, provider) => sum + (items[index].starts?.[provider] || 0), 0);
+      return { value: money(providers.reduce((sum, provider) => sum + items[index][provider], 0)), sessions: `${integer(starts)} session${starts === 1 ? "" : "s"} started` };
+    },
     rows: (index) => providers.map((provider) => ({ label: providerLabels[provider], color: providerColor(provider), value: money(items[index][provider]), dim: items[index][provider] <= 0 })),
     onIndex: (index) => {
+      readoutActive = index !== null;
+      if (index !== null) inspectedDay = items[index].name;
       for (const provider of providers) {
         const { dot, points } = dots[provider];
         dot.style.display = index === null ? "none" : "";
