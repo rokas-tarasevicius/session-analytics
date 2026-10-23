@@ -197,6 +197,37 @@ const date = (release) =>
     timeZone: "UTC",
   }).format(new Date(release.published_at));
 const latestBadge = '<span class="latest-label">LATEST</span>';
+const homeDescription =
+  "Free, open-source dashboard and CLI for Claude Code, Codex, Cursor and four more coding agents: tokens, cost estimates and subscription limits. Runs locally.";
+
+/** schema.org description of the tool for search engines; `<` is escaped so no value can close the script. */
+export function structuredData(latestTag) {
+  const data = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Session Analytics",
+    description: homeDescription,
+    url: siteUrl,
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "macOS, Linux",
+    softwareVersion: latestTag.replace(/^v/, ""),
+    softwareRequirements: "Node.js 24 or later",
+    downloadUrl: `${repoUrl}/releases/latest`,
+    releaseNotes: `${siteUrl}releases/`,
+    license: "https://opensource.org/licenses/MIT",
+    isAccessibleForFree: true,
+    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    image: `${siteUrl}assets/social-preview.png`,
+    screenshot: `${siteUrl}assets/screenshot-summary.webp`,
+    author: {
+      "@type": "Person",
+      name: "Rokas Tarasevičius",
+      url: "https://github.com/rokas-tarasevicius",
+    },
+    sameAs: [repoUrl],
+  };
+  return `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
+}
 
 export async function buildSite(data, out = join(root, ".site-dist")) {
   const { releases, latestTag } = normalizeReleases(
@@ -204,6 +235,11 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
     data.latestTag,
   );
   const latest = releases[0];
+  // Both pages list releases, so they change when a release is published or edited.
+  const updated = releases
+    .map((release) => release.updated_at)
+    .sort()
+    .at(-1);
   const summary = (release) => {
     const first =
       release.body
@@ -263,23 +299,24 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
     [
       "index.html",
       "index.html",
-      "Session Analytics: see what your coding agents are doing",
-      "A local dashboard and CLI for coding-agent usage, value and subscription limits across every repository. Reads the history your agents already keep. Nothing is uploaded. Open source.",
+      "Session Analytics: Claude Code, Codex & Cursor usage dashboard",
+      homeDescription,
       "./",
     ],
     [
       "releases.html",
       "releases/index.html",
-      "Release notes — Session Analytics",
-      "Every published Session Analytics release: new capabilities, fixes, and the details behind your coding-agent analytics.",
+      "Release notes and changelog — Session Analytics",
+      "Every Session Analytics release: new features, fixes and the details behind your Claude Code, Codex and Cursor usage analytics.",
       "../",
     ],
   ]) {
     const values = {
       ...common,
       ROOT: prefix,
-      TITLE: title,
-      DESCRIPTION: description,
+      TITLE: escapeHtml(title),
+      DESCRIPTION: escapeHtml(description),
+      STRUCTURED_DATA: prefix === "./" ? structuredData(latestTag) : "",
       CANONICAL: siteUrl + (prefix === "../" ? "releases/" : ""),
       RELEASE_CURRENT: prefix === "../" ? 'aria-current="page"' : "",
     };
@@ -323,10 +360,6 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
     join(out, "releases.json"),
     JSON.stringify({ latestTag, releases }, null, 2) + "\n",
   );
-  const updated = releases
-    .map((release) => release.updated_at)
-    .sort()
-    .at(-1);
   await writeFile(
     join(out, "releases.xml"),
     `<?xml version="1.0" encoding="utf-8"?>
@@ -338,7 +371,7 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
   );
   await writeFile(
     join(out, "sitemap.xml"),
-    `<?xml version="1.0" encoding="utf-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${siteUrl}</loc></url><url><loc>${siteUrl}releases/</loc></url></urlset>\n`,
+    `<?xml version="1.0" encoding="utf-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${siteUrl}</loc><lastmod>${updated}</lastmod></url><url><loc>${siteUrl}releases/</loc><lastmod>${updated}</lastmod></url></urlset>\n`,
   );
   return { out, count: releases.length, latestTag };
 }
