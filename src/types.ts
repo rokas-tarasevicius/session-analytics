@@ -1,3 +1,6 @@
+// Live limits share the public privacy contract, separately from saved analytics snapshots.
+export type { CodexReadingPlan, LimitObservation } from "./limits/types.ts";
+
 export type SessionProvider = "claude" | "codex" | "cursor" | "copilot" | "opencode" | "gemini" | "antigravity" | "unsupported";
 
 import type { SessionHistory, HistoryStatistics, HistoryReconciliation, HistoryCoverage, HistoryProfileEvidence } from "./metrics/history-types.ts";

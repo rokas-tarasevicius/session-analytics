@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 
-import { codexAccountKey, codexPlan, enumValue } from "./accounts.ts";
+import { codexAccountKey, codexPlan, codexReadingPlan } from "./accounts.ts";
 import { codexLimitId, codexMeter, limitName } from "./sources.ts";
-import type { CodexAccountState, CodexPlan, LimitObservation } from "./types.ts";
+import type { CodexAccountState, CodexPlan, CodexReadingPlan, LimitObservation } from "./types.ts";
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -21,7 +21,7 @@ export function codexAccountState(value: unknown, observedAt: number): CodexAcco
   if (!response) return null;
   const buckets = record(response["rateLimitsByLimitId"]) ?? { codex: response["rateLimits"] };
   const observations: LimitObservation[] = [];
-  let plan: CodexPlan | null = null, planType: string | null = null, balance: CodexAccountState["credits"] = null;
+  let plan: CodexPlan | null = null, planType: CodexReadingPlan | null = null, balance: CodexAccountState["credits"] = null;
   const limitNames: Record<string, string> = {};
   for (const [limitId, snapshot] of Object.entries(buckets)) {
     const limits = record(snapshot);
@@ -32,11 +32,11 @@ export function codexAccountState(value: unknown, observedAt: number): CodexAcco
       if (used === null || resetsAt === null) continue;
       observations.push({
         provider: "codex", account: "", meter: codexMeter(limitId, minutes), windowMinutes: minutes !== null && minutes > 0 ? Math.round(minutes) : null,
-        resetsAt, observedAt, usedPercent: used, status: used >= 100 ? "rejected" : "allowed", source: "codex-account",
+        resetsAt, observedAt, usedPercent: used, status: used >= 100 ? "rejected" : "allowed", source: "codex-account", planType: codexReadingPlan(limits["planType"]),
       });
     }
     plan = codexPlan(limits["planType"]) ?? plan;
-    planType = enumValue(limits["planType"]) ?? planType;
+    planType = codexReadingPlan(limits["planType"]) ?? planType;
     const name = limitName(limits["limitName"]), id = codexLimitId(limitId);
     if (name && id !== "codex") limitNames[id] = name;
     const credits = record(limits["credits"]);

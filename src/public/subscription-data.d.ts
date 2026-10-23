@@ -1,4 +1,4 @@
-import type { CodexAccountSummary, LimitAccount, LimitMeterInfo, LimitObservation, LimitProvider, LimitSourceHealth, LimitStatus, LimitsSnapshot } from "../limits/types.ts";
+import type { CodexReadingPlan, CodexAccountSummary, LimitAccount, LimitMeterInfo, LimitObservation, LimitProvider, LimitSourceHealth, LimitStatus, LimitsSnapshot } from "../limits/types.ts";
 import type { PlanPayer, SubscriptionPlan } from "./subscription-plans.js";
 
 export const HOUR: number;
@@ -9,10 +9,10 @@ export const calibrationMinimum: number;
 export const providerNames: Record<LimitProvider, string>;
 export function identified(key: string): boolean;
 
-export interface Sample { t: number; used: number; status: LimitStatus }
-/** Part of a cycle between in-place resets. `before` is the last reading before the reset that started it. */
+export interface Sample { t: number; used: number; status: LimitStatus; planType?: CodexReadingPlan | null }
+/** Part of a cycle between in-place resets or tier changes. `before` marks a reset; `baseline` marks the first new-tier reading. */
 /** `lockouts`: [from, to] spans from a capped reading to the next reading on extra usage, else to the segment's end. */
-export interface Segment { start: number; end: number; before: Sample | null; samples: Sample[]; peak: number; last: Sample; cappedAt: number | null; lockouts: Array<[number, number]> }
+export interface Segment { start: number; end: number; before: Sample | null; baseline?: Sample | null; samples: Sample[]; peak: number; last: Sample; cappedAt: number | null; lockouts: Array<[number, number]> }
 export interface Cycle {
   resetsAt: number; start: number; end: number; samples: Sample[]; segments: Segment[];
   /** The closing segment's last reading and highest reading. */
@@ -22,6 +22,7 @@ export interface Cycle {
 export interface Meter {
   key: string; provider: LimitProvider; account: string; meter: string; label: string; windowMinutes: number | null;
   retired: boolean;
+  planReadings?: Array<{ t: number; planType: CodexReadingPlan }>;
   /** Idle markers (an unstarted Codex window) never form a cycle, so a meter with only those has none. */
   cycles: Cycle[];
   /** The latest idle marker: the provider reported the window as not started. */
@@ -72,7 +73,7 @@ export interface AccountUtilization {
   meters: Meter[]; weeklyMeter: Meter | null; sessionMeter: Meter | null; weekly: LiveMeter | null; session: LiveMeter | null; live: LiveMeter[];
   /** In-place resets of the live weekly cycle. */
   history: ResetCycle[]; restarts: InPlaceReset[]; windows: SessionWindows | null; calibration: Calibration; sessionCalibration: Calibration | null;
-  resets: BankedResets; economics: Economics; period: { from: number; to: number; days: number; firstReading: number | null };
+  resets: BankedResets; economics: Economics; economicPeriods?: Economics[]; period: { from: number; to: number; days: number; firstReading: number | null };
   /** `sessions`: sessions active in the counted period; `before`: value in the selected range before the first reading, not counted. */
   value: { basis: ValueBasis; sessions: number; before: number };
   utilization: { mean: number; closed: number; includesProjection: boolean } | null;
@@ -117,8 +118,8 @@ export function valuedMachines(limits: Pick<LimitsSnapshot, "machines"> | null |
 export function attributeSessions<S extends SessionLike>(
   sessions: S[], accounts: LimitAccount[], options?: { read?: Set<string> | null },
 ): { byAccount: Map<string, S[]>; unattributed: { claude: S[]; codex: S[] }; elsewhere: { claude: S[]; codex: S[] } };
-export function calibrate(meter: Meter | null, value: { between(from: number, to: number): number }): Calibration;
-export function resetHistory(meter: Meter | null, perPercent?: number | null, creditHistory?: LimitsSnapshot["resetCreditHistory"]): ResetCycle[];
+export function calibrate(meter: Meter | null, value: { between(from: number, to: number): number }, planType?: CodexReadingPlan | null): Calibration;
+export function resetHistory(meter: Meter | null, perPercent?: number | null | ((cycle: Cycle) => number | null), creditHistory?: LimitsSnapshot["resetCreditHistory"]): ResetCycle[];
 export function inPlaceResets(meter: Meter, cycle: Cycle, perPercent?: number | null, creditHistory?: LimitsSnapshot["resetCreditHistory"]): InPlaceReset[];
 export function exactClose(cycle: ResetCycle): boolean;
 export function sessionWindows(meter: Meter | null, now: number, span?: number): SessionWindows;
@@ -145,7 +146,7 @@ export function meterPace(live: LiveMeter | null, now: number): { segment: numbe
 export function formatDuration(seconds: number): string;
 export function accountUtilization(input: {
   account: LimitAccount; meters: Meter[]; sessions?: unknown[]; timeZone?: string; now: number; range: ValueRange;
-  planId?: string | null; payer?: PlanPayer | null; creditHistory?: LimitsSnapshot["resetCreditHistory"]; basis?: ValueBasis;
+  planId?: string | null; planOverride?: boolean; payer?: PlanPayer | null; creditHistory?: LimitsSnapshot["resetCreditHistory"]; basis?: ValueBasis;
 }): AccountUtilization;
 export function subscriptionTotals(items: Array<AccountUtilization & { excluded?: boolean }>, unattributed?: { claude?: number; codex?: number }): SubscriptionTotals;
 export function subscriptionModel(input: {

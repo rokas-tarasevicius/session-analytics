@@ -10,9 +10,9 @@ import { claudeAccountKey, codexAccountKey, readClaudeProfile, weeklyPhaseKey } 
 import { collectLimits, resolveCaps, statuslineAccount } from "../src/limits/index.ts";
 import { appendInbox, compactObservations, emptyLedger, mergeAccount, mergeLedgers, readLedger, toRow, writeLedger, type Ledger, type LedgerAccount } from "../src/limits/ledger.ts";
 import { claudeSdkEvent, statuslineObservations } from "../src/limits/sources.ts";
-import type { LimitObservation, LimitsSnapshot } from "../src/limits/types.ts";
+import type { LimitAccount, LimitObservation, LimitsSnapshot } from "../src/limits/types.ts";
 import { profileKeyFor } from "../src/metrics/history-coverage.ts";
-import { buildMeters, liveMeter } from "../src/public/subscription-data.js";
+import { accountUtilization, buildMeters, liveMeter, MONTH_DAYS } from "../src/public/subscription-data.js";
 
 const at = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 // Before the files these tests write, so every file counts as modified since the previous harvest unless dated otherwise.
@@ -250,7 +250,7 @@ test("a ledger this version cannot read is never overwritten; an unparseable one
   const dataDir = join(home, "data");
   mkdirSync(dataDir, { mode: 0o700 });
   const path = join(dataDir, "limits-v2.json");
-  const future = JSON.stringify({ version: 3, rows: [["claude", "x", "five_hour"]] });
+  const future = JSON.stringify({ version: 4, rows: [["claude", "x", "five_hour"]] });
   writeFileSync(path, future, { mode: 0o600 });
   const options = { dataDir, codexRoot: join(home, "none") };
   const environment = { ...environmentFor(home), SESSION_ANALYTICS_CLAUDE_EVENT_LOGS: join(home, "none") };
@@ -260,7 +260,7 @@ test("a ledger this version cannot read is never overwritten; an unparseable one
   assert.throws(() => writeLedger(dataDir, emptyLedger(), now), /left untouched/);
   assert.equal(readFileSync(path, "utf8"), future);
 
-  writeFileSync(path, "{\"version\":2,\"rows\":[", { mode: 0o600 });
+  writeFileSync(path, "{\"version\":3,\"rows\":[", { mode: 0o600 });
   const recovered = await collectLimits(options, environment, now);
   assert.deepEqual([recovered.ledger, recovered.persisted], ["ok", true]);
   assert.deepEqual(readdirSync(dataDir).filter((name) => name.includes("unreadable")), [`limits-v2.json.unreadable-${now}`]);
@@ -454,8 +454,8 @@ test("simultaneous readings never create an in-place reset and compact independe
   }
 });
 
-test("the newest plan evidence wins, including a tier this version does not recognise; Codex's 'unknown' plan type is no evidence", async () => {
-  const record = (plan: LedgerAccount["plan"], planType: string | null, planObservedAt: number | null): LedgerAccount => ({
+test("the newest plan evidence wins, including a tier this version does not recognise; unknown never retains a previous known price", async () => {
+  const record = (plan: LedgerAccount["plan"], planType: NonNullable<LedgerAccount["planEvidence"]>["planType"], planObservedAt: number | null): LedgerAccount => ({
     provider: "codex", plan, planSource: plan ? "codex-session" : null, planObservedAt, extraUsage: null, codex: null, profileKeys: [],
     planEvidence: { organizationType: null, organizationRateLimitTier: null, userRateLimitTier: null, seatTier: null, billingType: null, planType },
   });
@@ -472,7 +472,7 @@ test("the newest plan evidence wins, including a tier this version does not reco
   writeFileSync(rollout, [JSON.stringify({ type: "session_meta", payload: { creator_account_id: "SECRET-ACCOUNT" } }), line(now - 7200, "pro"), line(now - 600, "unknown")].join("\n") + "\n");
   const options = { dataDir: join(home, "data") };
   const codex = (snapshot: LimitsSnapshot) => snapshot.accounts.find((account) => account.provider === "codex")!;
-  assert.equal(codex(await collectLimits(options, environmentFor(home), now)).plan, "pro", "a later 'unknown' record keeps the plan");
+  assert.equal(codex(await collectLimits(options, environmentFor(home), now)).plan, null, "a later unknown record has no known price");
   appendFileSync(rollout, `${line(now - 60, "promax")}\n`);
   const upgraded = codex(await collectLimits(options, environmentFor(home), now + 60));
   assert.deepEqual([upgraded.plan, upgraded.planEvidence?.planType], [null, "promax"], "a newer unrecognised tier replaces the old plan");
@@ -582,7 +582,96 @@ test("a status-line claim a stopped harvest left behind is merged by the next on
   assert.deepEqual(readdirSync(dataDir).filter((name) => name.startsWith("limits-inbox")), []);
 
   appendInbox(dataDir, [sample("seven_day_opus")]);
-  writeFileSync(join(dataDir, "limits-v2.json"), JSON.stringify({ version: 3, rows: [] }), { mode: 0o600 });
+  writeFileSync(join(dataDir, "limits-v2.json"), JSON.stringify({ version: 4, rows: [] }), { mode: 0o600 });
   assert.throws(() => writeLedger(dataDir, emptyLedger(), now, { inbox: true }), /left untouched/);
   assert.match(readFileSync(join(dataDir, "limits-inbox-v2.jsonl"), "utf8"), /seven_day_opus/, "the samples wait for a ledger that can be written");
+});
+
+test("v3 upgrades the v2 filename atomically and imports the earlier separate v3 file", () => {
+  const directory = mkdtempSync(join(tmpdir(), "limits-plan-migration-"));
+  const key = codexAccountKey("synthetic-migration");
+  const sample = (observedAt: number, usedPercent: number): LimitObservation => ({ provider: "codex", account: key, meter: "seven_day", windowMinutes: 10_080,
+    resetsAt: now + 3 * 86_400, observedAt, usedPercent, status: "allowed", source: "codex-session" });
+  const path = join(directory, "limits-v2.json"), separate = join(directory, "limits-v3.json");
+  writeFileSync(path, JSON.stringify({ ...emptyLedger(), version: 2, rows: [toRow(sample(now - 3600, 20))] }), { mode: 0o600 });
+  const previous = JSON.stringify({ ...emptyLedger(), rows: [toRow({ ...sample(now, 5), planType: "pro" })] });
+  writeFileSync(separate, previous, { mode: 0o600 });
+  const migrated = writeLedger(directory, emptyLedger(), now).ledger;
+  assert.equal(migrated.version, 3);
+  assert.deepEqual(migrated.rows.map((row) => row[9] ?? null), [null, "pro"]);
+  assert.equal(JSON.parse(readFileSync(path, "utf8")).version, 3, "0.12.1 checks this filename and rejects this version");
+  assert.equal(readFileSync(separate, "utf8"), previous, "pre-review v3 history is imported read-only");
+  assert.deepEqual(readLedger(directory, now).ledger!.rows, migrated.rows);
+});
+
+test("plan contexts survive compaction and keep the first plan-change timestamp", () => {
+  const key = codexAccountKey("synthetic-plan-context");
+  const base: LimitObservation = { provider: "codex", account: key, meter: "seven_day", windowMinutes: 10_080,
+    resetsAt: now + 3 * 86_400, observedAt: now - 600, usedPercent: 80, status: "allowed", source: "codex-session", planType: "plus" };
+  const rows = [base, { ...base, observedAt: now - 500, usedPercent: 10, planType: "pro" as const },
+    { ...base, observedAt: now - 400, usedPercent: 20, planType: "pro" as const }];
+  const compact = compactObservations(rows, now);
+  assert.ok(compact.some((row) => row.observedAt === now - 500 && row.planType === "pro"));
+  assert.ok(compact.some((row) => row.planType === "plus"));
+  assert.deepEqual(compactObservations([...compact, ...rows], now), compact, "merging tagged history is idempotent");
+  const conflicting = compactObservations([
+    { ...base, observedAt: now - 3600 }, { ...base, observedAt: now - 1800 }, { ...base, observedAt: now, usedPercent: 90 },
+    { ...base, observedAt: now - 600, planType: "pro" },
+  ], now);
+  assert.equal(conflicting.find((row) => row.planType === "pro")?.account, key, "a tier reversal at the same reset keeps its account");
+});
+
+test("v2 readings without plan evidence cannot quarantine v3 tier attribution at the same reset", () => {
+  const key = codexAccountKey("synthetic-partial-upgrade");
+  const sample = (t: number, planType?: "pro"): LimitObservation => ({ provider: "codex", account: key, meter: "seven_day", windowMinutes: 10_080,
+    resetsAt: now + 86_400, observedAt: t, usedPercent: 20, status: "allowed", source: "codex-session", ...(planType ? { planType } : {}) });
+  for (const drift of [0, 30, 120]) {
+    const rows = compactObservations([sample(now - 3600), sample(now - 1800), { ...sample(now - 600, "pro"), resetsAt: now + 86_400 + drift }, sample(now)], now);
+    assert.equal(rows.find((row) => row.planType === "pro")!.account, key);
+  }
+});
+
+test("idle pruning preserves the first observed tier boundary without inventing active cycles", () => {
+  const key = codexAccountKey("synthetic-idle-plan-change"), first = now - 3 * 3600;
+  const idle = (t: number): LimitObservation => ({ provider: "codex", account: key, meter: "seven_day", windowMinutes: 10_080,
+    resetsAt: t + 7 * 86_400, observedAt: t, usedPercent: 0, status: "allowed", source: "codex-session", planType: "pro" });
+  const compact = compactObservations([idle(first), idle(first + 2 * 3600)], now);
+  assert.ok(compact.some((row) => row.observedAt === first && row.planType === "pro"));
+  assert.equal(buildMeters(compact, now)[0]!.cycles.length, 0);
+  const active = { ...idle(now), usedPercent: 10 };
+  const merged = compactObservations([...compact, active], now);
+  assert.ok(merged.some((row) => row.observedAt === first && row.status === "idle"));
+  assert.equal(buildMeters(merged, now)[0]!.cycles.length, 1);
+  assert.deepEqual(compactObservations([...merged, ...compact], now), merged);
+});
+
+
+test("compaction preserves adjacent Plus to Pro to Plus runs and their prorated price", () => {
+  const key = codexAccountKey("synthetic-tier-reversal");
+  for (const step of [3600, 60]) {
+    const rows = ["plus", "plus", "pro", "plus"].map((planType, index): LimitObservation => ({ provider: "codex", account: key,
+      meter: "seven_day", windowMinutes: 10080, resetsAt: now + 86400, observedAt: now - (4 - index) * step,
+      usedPercent: 10 + index, status: "allowed", source: "codex-session", planType: planType as "plus" | "pro" }));
+    const compact = compactObservations(rows, now);
+    assert.ok(compact.every((row) => row.account === key), "a tier change is not evidence of another account");
+    assert.deepEqual(compactObservations([...compact, ...rows], now), compact, "tier runs stay stable across repeated harvests");
+    const owner: LimitAccount = { key, provider: "codex", attribution: "account", label: "Codex Plus", profileNames: [], profileKeys: [], plan: "plus", planSource: null,
+      planEvidence: null, planObservedAt: null, extraUsage: null, codex: null, weeklyAnchor: null, lastSeen: now };
+    const item = accountUtilization({ account: owner, meters: buildMeters(compact, now), now, range: { from: now - 4 * step, to: now } });
+    assert.deepEqual(item.economicPeriods!.map((period) => period.plan!.id), ["plus", "pro", "plus"]);
+    assert.ok(Math.abs(item.economics.price! - (20 * 3 + 200) * step / (86400 * MONTH_DAYS)) < 1e-12);
+  }
+});
+
+test("an unreadable separate v3 import cannot quarantine a valid canonical ledger", async () => {
+  const home = mkdtempSync(join(tmpdir(), "limits-import-unreadable-")), dataDir = join(home, "data");
+  writeLedger(dataDir, emptyLedger(), now);
+  const canonical = join(dataDir, "limits-v2.json"), separate = join(dataDir, "limits-v3.json");
+  const bytes = readFileSync(canonical, "utf8");
+  writeFileSync(separate, '{"version":3,"rows":[', { mode: 0o600 });
+  const snapshot = await collectLimits({ dataDir, codexRoot: join(home, "none"), claudeRoot: join(home, "none") }, environmentFor(home), now);
+  assert.deepEqual([snapshot.ledger, snapshot.persisted], ["unreadable", false]);
+  assert.equal(readFileSync(canonical, "utf8"), bytes);
+  assert.equal(readFileSync(separate, "utf8"), '{"version":3,"rows":[');
+  assert.ok(!readdirSync(dataDir).some((name) => name.includes(".unreadable-")));
 });

@@ -469,3 +469,15 @@ test("a machine reached twice, or this machine reached as another, counts once",
   assert.match(JSON.parse(own.stdout).machines[0].identity, /^[0-9a-f]{16}$/);
   assert.match(cli(["limits", "--json", "--identify-machine", "--data-dir", dir]).stderr, /--identify-machine describes this machine's own readings; use it with --json --no-remote/);
 });
+
+test("remote per-reading plan evidence is revalidated before API output and ledger storage", () => {
+  const sentinel = "private_sentinel_content";
+  const snapshot = emptyLimitsSnapshot("live", now);
+  const row: LimitObservation = { provider: "codex", account: keys.codex, meter: "seven_day", windowMinutes: 10_080,
+    resetsAt: now + 86_400, observedAt: now, usedPercent: 20, status: "allowed", source: "codex-session", planType: "plus" };
+  const valid = validateLimitsSnapshot({ ...snapshot, observations: [row] });
+  assert.equal(valid.observations[0]!.planType, "plus");
+  const unsafe = validateLimitsSnapshot({ ...snapshot, observations: [{ ...row, planType: sentinel, prompt: sentinel }] });
+  assert.equal(unsafe.observations[0]!.planType, "unknown");
+  assert.doesNotMatch(JSON.stringify(unsafe), /private_sentinel_content/);
+});

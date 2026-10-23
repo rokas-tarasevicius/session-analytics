@@ -314,3 +314,21 @@ test("pending limit reads show the limits-first skeleton with one screen-reader 
   assert.equal(container.querySelectorAll('[role="status"]').length, 0);
   assert.equal(container.querySelectorAll(".limit-row").length, 3);
 });
+
+test("a Codex tier change within one reset window renders pace without inventing an in-place reset", () => {
+  settings.clear();
+  const container = new Element(), snapshot = limits(), reset = now + 4 * DAY;
+  snapshot.accounts = snapshot.accounts.filter((owner) => owner.key === codex);
+  snapshot.observations = [
+    { ...reading("codex", codex, "seven_day", reset, now - 3 * DAY, 70), planType: "plus" },
+    { ...reading("codex", codex, "seven_day", reset, now - 2 * DAY, 10), planType: "pro" },
+    { ...reading("codex", codex, "seven_day", reset, now - HOUR, 20), planType: "pro" },
+  ];
+  render(container, { limits: snapshot });
+  const card = cardOf(container, codex);
+  assert.match(container.querySelector(".subscription-worth")!.textContent, /Tier boundaries are approximated from readings.*price difference over the gap between readings/);
+  assert.match(container.querySelector(".subscription-sources")!.textContent, /all retained eligible history \(up to 120 days\), independently of the selected value dates/);
+  assert.match(card.querySelector(".chart-pace")!.textContent, /since this tier was observed/);
+  assert.doesNotMatch(card.textContent, /In-place reset|Restarted in place|since the reset/);
+  assert.equal(card.querySelector(".burn-chart")!.querySelector("svg")!.getAttribute("tabindex"), "0");
+});

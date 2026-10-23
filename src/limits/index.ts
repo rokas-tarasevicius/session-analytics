@@ -121,13 +121,13 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
     const seen = creatorsOf(profile);
     return seen.size === 1 ? [...seen][0]! : profile.fallbackKey;
   };
-  type CodexPlanReading = { plan: CodexAccountState["plan"]; planType: string | null; at: number; source: PlanSource };
+  type CodexPlanReading = { plan: CodexAccountState["plan"]; planType: CodexAccountState["planType"]; at: number; source: PlanSource };
   const codexPlans = new Map<string, CodexPlanReading>();
   const codexAccounts = new Map<string, CodexAccountSummary>();
   const limitNames = { ...base.limitNames };
-  // `unknown` (and a missing plan type) is no evidence: Codex writes it in some records of a known plan.
+  // Missing evidence keeps the previous plan; an unrecognised tier explicitly makes it unknown.
   const notePlan = (account: string, reading: CodexPlanReading) => {
-    if ((reading.plan || (reading.planType && reading.planType !== "unknown")) && reading.at >= (codexPlans.get(account)?.at ?? 0)) codexPlans.set(account, reading);
+    if ((reading.plan || reading.planType) && reading.at >= (codexPlans.get(account)?.at ?? 0)) codexPlans.set(account, reading);
   };
   let sessionReads = 0;
   for (const file of codex.files) {
@@ -260,7 +260,7 @@ async function harvest(options: LimitsOptions, environment: NodeJS.ProcessEnv, n
   for (const key of Object.keys(accounts)) if (!live.has(key) && !Object.values(profiles).includes(key) && ![...claudeAccounts.values()].includes(key)) delete accounts[key];
   const homes = Object.fromEntries([...creators].filter(([, seen]) => seen.size).map(([key, seen]) => [key, [...seen].sort()]));
   const next: Ledger = {
-    version: 2, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases,
+    version: 3, harvestedThrough: Math.floor(now), importedV1Through, cursors: Object.fromEntries(cursors), accounts, profiles, aliases,
     creators: { ...base.creators, ...homes }, limitNames,
     rows: rows.map(toRow), resetCreditHistory: resetCreditHistory(history.map((row) => [row[0], rekey(row[1]), row[2], row[3]])), codexAccountReadAt,
     sourceLatest: advanceSources(base.sourceLatest, [...fresh, ...imported]),

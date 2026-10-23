@@ -16,6 +16,9 @@ export const codexPlans = ["free", "go", "plus", "prolite", "pro", "team", "busi
 export type ClaudePlan = typeof claudePlans[number];
 export type CodexPlan = typeof codexPlans[number];
 
+/** Closed projection of Codex plan_type: unrecognised tiers never carry provider text. */
+export type CodexReadingPlan = CodexPlan | "promax" | "unknown";
+
 export interface LimitObservation {
   provider: LimitProvider;
   /** Pseudonymous account key (`LimitAccount.key`); `""` when the reading could not be attributed to an account. */
@@ -32,6 +35,8 @@ export interface LimitObservation {
   usedPercent: number;
   status: LimitStatus;
   source: LimitSource;
+  /** Codex only: plan reported with this reading; null/absent means no evidence (including old ledgers). */
+  planType?: CodexReadingPlan | null;
 }
 
 /** A banked reset: redeeming it restarts the provider's windows at 0%. Opaque IDs and backend text are never kept. */
@@ -48,8 +53,8 @@ export interface CodexAccountState {
   /** Pseudonymous key of the account the app-server answered for; null when it did not say. */
   account: string | null;
   plan: CodexPlan | null;
-  /** Raw `planType` enum, kept when it is not a known plan. */
-  planType: string | null;
+  /** Closed Codex tier vocabulary; unknown never carries provider text. */
+  planType: CodexReadingPlan | null;
   observations: LimitObservation[];
   /** Codex credits pay for usage after the included allowance runs out. `balance` is in Codex credits, not dollars. */
   credits: { hasCredits: boolean; unlimited: boolean; balance: number | null } | null;
@@ -75,15 +80,15 @@ export interface ClaudeAccountSummary {
   disabledReason: string | null;
 }
 
-/** Allowlisted plan enums exactly as the provider stores them; each matches `^[a-z0-9_]{1,48}$` or is null. */
+/** Plan evidence: bounded Claude enum shapes and a closed Codex tier vocabulary. */
 export interface PlanEvidence {
   organizationType: string | null;
   organizationRateLimitTier: string | null;
   userRateLimitTier: string | null;
   seatTier: string | null;
   billingType: string | null;
-  /** Codex `plan_type`, kept when it is not a known plan so an unrecognised tier is visible. */
-  planType: string | null;
+  /** Closed Codex tier vocabulary; unknown never carries provider text. */
+  planType: CodexReadingPlan | null;
 }
 
 /** Where an account's plan came from, most trusted first. */

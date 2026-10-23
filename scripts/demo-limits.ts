@@ -8,7 +8,7 @@ import { emptyLedger, writeLedger } from "../src/limits/ledger.ts";
  * Synthetic subscription limits for the demo, for the setup the Subscription view is built around: two Claude logins in
  * two profiles (a Team seat that resets on Fridays and runs past its weekly allowance onto extra usage, a Max 20x plan
  * without extra usage that resets on Mondays, with one in-place reset and one 5-hour lockout) and one ChatGPT Pro account
- * with a banked reset. Meter levels follow the demo's own synthetic activity, so value per 1% calibrates, and an account
+ * with a banked reset and an observed Plus-to-Pro upgrade. Meter levels follow the demo's own synthetic activity, so value per 1% calibrates, and an account
  * is never shown working while it refuses requests. Every identifier and value here is synthetic.
  */
 
@@ -150,6 +150,7 @@ function codexLimits(files: CodexDemoFile[], now: number): number {
   const tagged = events.map((event) => ({ ...event, ...cycles.of(event.t) }));
   const typical = (scoped: boolean) => typicalWeek(tagged.filter((event) => event.scoped === scoped), tagged[0]?.t ?? now, now);
   const full = { main: typical(false) / 0.65, scoped: typical(true) / 0.3 };
+  const upgraded = nextReset(cycles.redeemed, now) - 2 * WEEK;
   // The redeemed week reached 96% just before the banked reset restarted it.
   const beforeRedemption = new Set(tagged.filter((event) => !event.scoped && event.t < cycles.redeemed && event.reset === cycles.of(cycles.redeemed - 1).reset));
   const redeemedWork = [...beforeRedemption].reduce((total, event) => total + event.work, 0);
@@ -162,7 +163,7 @@ function codexLimits(files: CodexDemoFile[], now: number): number {
     event.record.payload["rate_limits"] = {
       limit_id: event.scoped ? "codex_terra" : "codex", limit_name: event.scoped ? "GPT-5.6-Terra" : null,
       primary: { used_percent: Math.round(Math.min(100, used) * 10) / 10, window_minutes: 10_080, resets_at: event.reset }, secondary: null,
-      credits: { has_credits: true, unlimited: false, balance: "1250" }, plan_type: "pro", rate_limit_reached_type: used >= 100 ? "primary" : null,
+      credits: { has_credits: true, unlimited: false, balance: "1250" }, plan_type: event.t < upgraded ? "plus" : "pro", rate_limit_reached_type: used >= 100 ? "primary" : null,
     };
   }
   return cycles.redeemed;

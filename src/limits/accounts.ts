@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { profileKeyFor } from "../metrics/history-coverage.ts";
 import {
   codexPlans,
+  type CodexReadingPlan,
   type ClaudePlan, type CodexPlan, type LimitAccount, type LimitProvider, type PlanEvidence, type PlanSource,
 } from "./types.ts";
 
@@ -232,5 +233,9 @@ export function accountLabel(provider: LimitProvider, key: string, plan: string 
   if (profileNames.length) return `${title} · default`;
   return weeklyAnchor && provider === "claude" ? `${title} · weekly reset ${weekday(weeklyAnchor)}` : title;
 }
+
+/** Missing is not plan evidence; every unrecognised tier collapses to a fixed enum. */
+export const codexReadingPlan = (value: unknown): CodexReadingPlan | null =>
+  typeof value !== "string" || value === "" ? null : codexPlan(value) ?? (value === "promax" ? "promax" : "unknown");
 
 export const codexPlan = (value: unknown): CodexPlan | null => typeof value === "string" && (codexPlans as readonly string[]).includes(value) ? value as CodexPlan : null;
