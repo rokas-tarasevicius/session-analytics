@@ -1,0 +1,98 @@
+name: Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'site/**'
+      - 'assets/**'
+      - 'src/public/fonts/**'
+      - 'src/public/brands/**'
+      - 'scripts/build-site.mjs'
+      - 'test/site.test.mjs'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'assets/**'
+      - 'src/public/fonts/**'
+      - 'src/public/brands/**'
+      - 'scripts/build-site.mjs'
+      - 'test/site.test.mjs'
+      - '.github/workflows/pages.yml'
+  release:
+    types: [published, edited, deleted, released, unpublished]
+  # Releases published with GITHUB_TOKEN do not emit another workflow run.
+  # Run even if a distribution job fails after the GitHub Release was published.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build website
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted website source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Release events can point to old tags. Never execute code or download
+          # artifacts from the triggering workflow; deploy the current master site.
+          ref: ${{ github.event_name == 'pull_request' && github.ref || 'master' }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      - name: Test website build
+        run: node --test test/site.test.mjs
+
+      - name: Build offline review
+        if: github.event_name == 'pull_request'
+        run: npm run site:build
+
+      - name: Build with published releases
+        if: github.event_name != 'pull_request'
+        run: npm run site:build -- --github
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Upload website
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: .site-dist
+
+  deploy:
+    name: deploy website
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

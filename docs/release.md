@@ -2,6 +2,10 @@
 
 Every release is one compiled package, `session-analytics-X.Y.Z.tgz`, built from the released commit by `scripts/build.ts` and packed from `dist/`. The GitHub Release receives those bytes after the release workflow has installed and run them, and npm and the Homebrew tap receive the same bytes once their [one-time setup](#one-time-maintainer-steps) is done. The root `package.json` stays `private: true` with the TypeScript bin, so a contributor's `npm link` keeps running the live source and the source layout cannot be published by accident; only the generated `dist/package.json` describes the installable package. Users install as described in [installation](cli.md#install).
 
+## Website and release notes
+
+The public [website and release archive](https://rokas-tarasevicius.github.io/session-analytics/) are deployed independently by `.github/workflows/pages.yml`. Website changes rebuild on `master`; release notes rebuild from published GitHub Releases when a release changes or the `Release` workflow finishes. This also covers releases created using `GITHUB_TOKEN`. See [website development and deployment](../site/README.md) for local preview, the offline snapshot, manual rebuilds and one-time Pages setup.
+
 ## Validate a candidate
 
 From a clean checkout of the candidate commit:

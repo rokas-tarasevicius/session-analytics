@@ -16,7 +16,7 @@
     "type": "git",
     "url": "git+https://github.com/rokas-tarasevicius/session-analytics.git"
   },
-  "homepage": "https://github.com/rokas-tarasevicius/session-analytics#readme",
+  "homepage": "https://rokas-tarasevicius.github.io/session-analytics/",
   "bugs": {
     "url": "https://github.com/rokas-tarasevicius/session-analytics/issues"
   },
@@ -33,6 +33,7 @@
     "observability"
   ],
   "scripts": {
+    "site:build": "node scripts/build-site.mjs",
     "start": "node bin/session-analytics.ts",
     "report": "node bin/session-analytics.ts report",
     "demo": "node scripts/demo.ts",
