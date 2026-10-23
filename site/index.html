@@ -2,14 +2,14 @@
   <section class="hero wrap" aria-labelledby="hero-title">
     <a class="release-pill" href="./releases/#{{LATEST_ID}}"><span class="status-dot"></span>{{LATEST_TAG}} is here<span class="pill-divider"></span>See what’s new <span aria-hidden="true">↗</span></a>
     <div class="hero-grid">
-      <h1 id="hero-title">Your agents work hard.<br><em>See the whole picture.</em></h1>
-      <div class="hero-copy"><p>One local view of your coding agents. Understand usage, models, tools, and activity across every repository.</p><a class="button button-dark" href="#get-started">Get started <span aria-hidden="true">↗</span></a><a class="text-link" href="#dashboard">Take a look <span aria-hidden="true">↓</span></a></div>
+      <h1 id="hero-title">Your agents work hard.<br><span class="heading-secondary">See the whole picture.</span></h1>
+      <div class="hero-copy"><p>A command-line tool with a local web dashboard. Explore coding-agent usage, models, tools, and activity across every repository.</p><a class="button button-dark" href="#get-started">Get started <span aria-hidden="true">↗</span></a><a class="text-link" href="#dashboard">Take a look <span aria-hidden="true">↓</span></a></div>
     </div>
     <div class="hero-footnote"><span>Local &amp; read-only</span><span>No telemetry</span><span>Open source · MIT</span></div>
   </section>
 
   <section id="dashboard" class="showcase wrap" aria-label="Dashboard preview">
-    <div class="preview-toolbar"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span class="local-address"><span class="status-dot"></span>127.0.0.1:4174</span><span class="demo-label">SYNTHETIC DEMO DATA</span></div>
+    <div class="preview-meta"><p>THE WEB DASHBOARD <span>· Runs in your browser</span></p><span class="demo-label">SYNTHETIC DEMO DATA</span></div>
     <div class="preview-tabs" role="tablist" aria-label="Dashboard views" hidden>
       <button id="tab-summary" role="tab" aria-selected="true" aria-controls="dashboard-panel" data-view="summary">Overview</button>
       <button id="tab-velocity" role="tab" aria-selected="false" aria-controls="dashboard-panel" tabindex="-1" data-view="velocity">Velocity</button>
@@ -37,7 +37,7 @@
   </section>
 
   <section class="privacy-section wrap" aria-labelledby="privacy-title">
-    <div class="privacy-copy"><p class="eyebrow">03 / Privacy by construction</p><h2 id="privacy-title">The patterns.<br><em>Without the prompts.</em></h2><p>Your code has enough places to be. An analytics service doesn’t need to be one of them.</p><p>The dashboard runs on loopback and serves its assets locally. Prompts, replies, reasoning, file paths, and tool arguments are discarded during parsing.</p><a href="{{DOCS_URL}}/privacy.md">Read the privacy contract <span aria-hidden="true">↗</span></a></div>
+    <div class="privacy-copy"><p class="eyebrow">03 / Privacy by construction</p><h2 id="privacy-title">The patterns.<br>Without the prompts.</h2><p>Your code has enough places to be. An analytics service doesn’t need to be one of them.</p><p>The dashboard runs on loopback and serves its assets locally. Prompts, replies, reasoning, file paths, and tool arguments are discarded during parsing.</p><a href="{{DOCS_URL}}/privacy.md">Read the privacy contract <span aria-hidden="true">↗</span></a></div>
     <div class="privacy-ledger"><div class="ledger-heading"><span>WHAT REACHES YOUR DASHBOARD</span><span aria-hidden="true">↙</span></div><dl><div><dt>Token &amp; tool counters</dt><dd>kept</dd></div><div><dt>Model IDs &amp; timestamps</dt><dd>kept</dd></div><div><dt>Repository display names</dt><dd>kept</dd></div><div class="discarded"><dt>Prompts &amp; responses</dt><dd>discarded</dd></div><div class="discarded"><dt>Code &amp; file paths</dt><dd>discarded</dd></div><div class="discarded"><dt>Tool arguments &amp; results</dt><dd>discarded</dd></div></dl><p>Optional public pricing requests send no local evidence. Use <code>--offline</code> to disable them.</p></div>
   </section>
 

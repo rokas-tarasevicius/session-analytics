@@ -86,11 +86,6 @@ h3 {
   font-weight: 500;
   line-height: 1.12;
 }
-em {
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 400;
-  letter-spacing: -0.055em;
-}
 code {
   font-family: var(--mono);
   font-size: 0.88em;
@@ -197,12 +192,14 @@ code {
 }
 h1 {
   font-size: clamp(45px, 5.05vw, 70px);
-  letter-spacing: -3.9px;
-  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -3.5px;
+  line-height: 1.1;
 }
-h1 em {
+h1 .heading-secondary {
   display: inline-block;
   margin-top: 3px;
+  color: #65715d;
 }
 .hero-copy {
   padding-bottom: 3px;
@@ -259,40 +256,23 @@ h1 em {
   color: #64825a;
 }
 .showcase {
-  border: 1px solid #cdd0c4;
-  border-radius: 11px;
-  overflow: hidden;
-  background: #fff;
-  box-shadow: 0 26px 60px -40px #2e392b55;
+  margin-top: 12px;
 }
-.preview-toolbar {
-  height: 42px;
+.preview-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 18px;
-  background: #e9ebe3;
-  border-bottom: 1px solid #d6d9cf;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
   font-family: var(--mono);
   font-size: 10px;
   color: #5c6256;
 }
-.window-dots {
-  display: flex;
-  gap: 5px;
-  width: 85px;
-}
-.window-dots i {
-  height: 7px;
-  width: 7px;
-  border-radius: 50%;
-  background: #bbc0b1;
-}
-.local-address {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+.preview-meta p span {
+  margin-left: 10px;
+  font-family: Geist, system-ui, sans-serif;
+  font-size: 12px;
 }
 .demo-label {
   font-size: 8px;
@@ -300,11 +280,14 @@ h1 em {
 }
 .preview-tabs {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 9px;
-  padding: 9px;
-  background: #f5f6f1;
-  border-bottom: 1px solid var(--line);
+  padding: 0 0 16px;
+}
+.preview-tabs [role="tab"][aria-selected="true"] {
+  background: var(--ink);
+  color: #fff;
+  box-shadow: none;
 }
 [role="tab"] {
   padding: 7px 18px;
@@ -324,6 +307,8 @@ h1 em {
 .screenshot-window {
   max-height: 580px;
   overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
   scrollbar-width: thin;
   scrollbar-color: #bdc2b3 #f7f7f4;
   background: #fbfbfa;
@@ -336,10 +321,8 @@ h1 em {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 15px 22px;
-  border-top: 1px solid var(--line);
+  padding: 15px 0;
   font-size: 11px;
-  background: #fcfcfa;
   color: var(--muted);
 }
 .preview-caption a {
@@ -684,7 +667,7 @@ pre {
   border-radius: 50%;
   text-align: center;
   line-height: 19px;
-  font-family: Georgia, serif;
+  font-family: Geist, system-ui, sans-serif;
   margin-top: 2px;
 }
 .accounting-note strong {
@@ -1069,25 +1052,22 @@ details p {
     font-size: 9px;
     flex-wrap: wrap;
   }
-  .showcase {
-    border-radius: 7px;
+  .preview-meta {
+    align-items: flex-start;
+    font-size: 9px;
+    gap: 12px;
   }
-  .preview-toolbar {
-    padding: 0 12px;
-    height: 36px;
+  .preview-meta p span {
+    display: block;
+    margin: 4px 0 0;
+    font-size: 11px;
   }
   .demo-label {
     font-size: 7px;
     letter-spacing: 0;
   }
-  .window-dots {
-    width: auto;
-  }
-  .local-address {
-    font-size: 8px;
-  }
   .preview-tabs {
-    padding: 7px;
+    padding: 0 0 14px;
     gap: 0;
   }
   [role="tab"] {
@@ -1102,7 +1082,7 @@ details p {
   }
   .preview-caption {
     align-items: start;
-    padding: 13px;
+    padding: 13px 0;
     font-size: 10px;
     gap: 10px;
   }
