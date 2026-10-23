@@ -24,10 +24,11 @@ test("source checks project fixed provider labels and outcomes without forwardin
     { provider: "codex" as const, status: "incomplete" as const, sourcesRead: 1, missingSources: 1, unreadableSources: 1, error: sentinel },
     { provider: "cursor" as const, status: "unavailable" as const, sourcesRead: 0, missingSources: 1, unreadableSources: 0 },
     { provider: "gemini" as const, status: "unknown" as const, sourcesRead: 0, missingSources: 0, unreadableSources: 0 },
+    { provider: "copilot" as const, status: "unavailable" as const, sourcesRead: 0, missingSources: 0, unreadableSources: 0 },
   ];
   assert.deepEqual(sourceCheckNotes(health), [
     "Codex: history readable; history missing; history could not be read.",
-    "Claude Code: history readable.", "Cursor: history missing.", "Gemini CLI: discovery details unavailable.",
+    "Claude Code: history readable.", "Cursor: history missing.", "Copilot CLI: no sources discovered or selected.", "Gemini CLI: discovery details unavailable.",
   ]);
   assert.deepEqual(sourceCheckNotes(), []);
   assert.doesNotMatch(JSON.stringify(sourceCheckNotes(health)), /SOURCE-SECRET|private|raw error/);

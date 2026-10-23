@@ -13,7 +13,7 @@ import {
 } from "./view-model.js";
 import { parseUrlState, serializeUrlState } from "./url-state.js";
 import { matchShortcut, shortcutHint, shortcutRegistry } from "./shortcuts.js";
-import { providerMark, renderProviderEvidence, metricCoverage, sourceCheckNotes } from "./providers.js";
+import { providerIds, providerMark, renderProviderEvidence, metricCoverage, sourceCheckNotes } from "./providers.js";
 
 import { pricingFreshness, renderPricingPanel } from "./pricing.js";
 import { counterfactualValue } from "./counterfactual-data.js";
@@ -1725,14 +1725,16 @@ function setupLink() {
 
 /** Discovery is independent of the selected window. Only reported checks are named. */
 function appendSourceChecks(container) {
-  const notes = sourceCheckNotes(snapshot?.mcpSourceHealth);
+  const health = snapshot?.mcpSourceHealth ?? [];
+  const notes = sourceCheckNotes(health);
+  const unreported = providerIds.filter((id) => id !== "unsupported" && !health.some((item) => item.provider === id));
   container.append(node("p", "Supported providers: Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI and Antigravity."));
   if (notes.length) {
     container.append(node("p", "Reported source checks (readable history may still be empty or incomplete):"));
     const list = node("ul", null, "source-checks");
     for (const note of notes) list.append(node("li", note));
     container.append(list);
-    container.append(node("p", "Discovery details for other providers are not reported here. Missing history does not establish whether an agent is installed."));
+    container.append(node("p", `${unreported.length ? "Discovery details for other providers are not reported here. " : ""}Missing history does not establish whether an agent is installed.`));
   } else container.append(node("p", "Source discovery details are unavailable in this snapshot. Refresh to check local history again."));
 }
 
