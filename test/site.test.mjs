@@ -225,3 +225,35 @@ test("site: recent releases show three entries and label only the designated lat
     await rm(out, { recursive: true, force: true });
   }
 });
+
+test("site: search and social metadata fit result snippets, escape text and describe the latest release", async () => {
+  const out = await mkdtemp(join(tmpdir(), "session-analytics-site-"));
+  try {
+    await buildSite(
+      { latestTag: "v1.2.3", releases: [release("v1.2.3", { updated_at: "2026-10-24T12:00:00Z" })] },
+      out,
+    );
+    const homepage = await readFile(join(out, "index.html"), "utf8");
+    const archive = await readFile(join(out, "releases/index.html"), "utf8");
+    for (const html of [homepage, archive]) {
+      const title = html.match(/<title>([^<]+)<\/title>/)[1];
+      const description = html.match(/<meta name="description" content="([^"]+)"/)[1];
+      assert.ok(title.replace(/&amp;/g, "&").length <= 65, `Title too long for a result snippet: ${title}`);
+      assert.ok(description.length >= 100 && description.length <= 160, `Description outside 100–160 characters: ${description}`);
+      assert.doesNotMatch(title, /&(?!amp;)/, "Titles are escaped");
+      for (const property of ["og:site_name", "og:image:width", "og:image:height", "og:image:alt"])
+        assert.match(html, new RegExp(`<meta property="${property}" content="[^"]+"`));
+    }
+    const [script, ...others] = [...homepage.matchAll(/<script type="application\/ld\+json">([^<]*)<\/script>/g)];
+    assert.equal(others.length, 0);
+    const data = JSON.parse(script[1]);
+    assert.equal(data["@type"], "SoftwareApplication");
+    assert.equal(data.softwareVersion, "1.2.3");
+    assert.equal(data.offers.price, "0");
+    assert.doesNotMatch(archive, /application\/ld\+json/);
+    const sitemap = await readFile(join(out, "sitemap.xml"), "utf8");
+    assert.equal((sitemap.match(/<lastmod>2026-10-24T12:00:00.000Z<\/lastmod>/g) ?? []).length, 2);
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
