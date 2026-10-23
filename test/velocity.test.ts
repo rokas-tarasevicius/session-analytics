@@ -305,6 +305,37 @@ test("rolling history preserves prehistory and incomplete-evidence gaps at the w
   assert.deepEqual(partialData.rolling, [null, null, null, null, null, null, 7]);
 });
 
+test("a few unpriced tokens mark the rolling week partial instead of breaking the line", async () => {
+  const options = { start: "2026-09-01", end: "2026-09-14" };
+  const history = comparisonSpan(options.end, options.end);
+  const session = synthetic(calendarDays("2026-08-01", options.end).map((day) => [day, 7]));
+  const priced = (day: string) => session.velocity!.buckets.find(([bucket]) => bucket === day)![3];
+  priced("2026-09-03")[10] -= 1;
+  const data = buildVelocity([session], { ...options, rollingHistory: buildVelocity([session], history) });
+  assert.ok(data.rolling.every((value) => value === 7), "One unpriced token keeps every week above the evidence floor");
+  assert.deepEqual(data.rollingPartial, calendarDays(options.start, options.end).map((day) => day >= "2026-09-03" && day <= "2026-09-09"));
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });
+  try {
+    const { renderVelocityChart } = await import(new URL("../src/public/velocity.js", import.meta.url).href);
+    const container = new Element();
+    renderVelocityChart(container, data, { rolling: true });
+    const svg = container.querySelector("svg")!;
+    assert.equal(svg.querySelector(".velocity-average")!.getAttribute("d")!.match(/M/g)!.length, 1, "The line has no gaps");
+    svg.listeners.get("keydown")!({ key: "Home", preventDefault() {} });
+    assert.match(container.querySelector(".velocity-inspection")!.textContent, /7-day average: \$7\.00(?! · partially)/);
+    for (let step = 0; step < 4; step += 1) svg.listeners.get("keydown")!({ key: "ArrowRight", preventDefault() {} });
+    assert.match(container.querySelector(".velocity-inspection")!.textContent, /7-day average: \$7\.00 · partially priced/);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
+  }
+  // A whole unpriced day leaves its weeks below the floor (6 of 7 days priced), so they stay N/A.
+  priced("2026-09-12")[10] = 0;
+  const weak = buildVelocity([session], { ...options, rollingHistory: buildVelocity([session], history) });
+  assert.deepEqual(weak.rolling.slice(-4), [7, null, null, null]);
+});
+
 test("rolling average key is absent when every value is null", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
   Object.defineProperty(globalThis, "document", { configurable: true, value: documentFromHtml("") });

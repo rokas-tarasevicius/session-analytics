@@ -174,6 +174,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
   const remembered = keepInspected ? data.keys.indexOf(inspectedKeys.get(container)) : -1;
   let selected = remembered >= 0 ? remembered : data.keys.length - 1;
   let painted = -1;
+  const averageText = (index) => `7-day average: ${formatMetric(data.rolling[index], data.metric)}${data.rollingPartial[index] ? ` · partially ${data.metric === "value" ? "priced" : "observed"}` : ""}`;
   const inspect = (index, announce = false) => {
     selected = Math.max(0, Math.min(data.keys.length - 1, index));
     inspectedKeys.set(container, data.keys[selected]);
@@ -182,7 +183,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     if (painted !== selected) {
       inspection.replaceChildren(element("strong", `${caption(data.keys[selected], data.granularity)} · ${data.mode === "cumulative" ? "cumulative " : ""}${formatMetric(totals[selected], data.metric)}`));
       for (const series of data.series) inspection.append(element("span", `${series.label}: ${formatMetric(series.values[selected], data.metric)}`));
-      if (overlay) inspection.append(element("span", `7-day average: ${formatMetric(data.rolling[selected], data.metric)}`));
+      if (overlay) inspection.append(element("span", averageText(selected)));
       painted = selected;
     }
     // Pointer hover remains visual. Keyboard focus, keys and touch selection update
@@ -192,7 +193,7 @@ export function renderVelocityChart(container, data, { rolling = false, compactV
     if (available.length > 1) spoken.push(`Total: ${formatMetric(totals[selected], data.metric)}`);
     for (const series of available) spoken.push(`${series.label}: ${formatMetric(series.values[selected], data.metric)}`);
     if (!available.length) spoken.push("unavailable");
-    if (overlay && Number.isFinite(data.rolling[selected])) spoken.push(`7-day average: ${formatMetric(data.rolling[selected], data.metric)}`);
+    if (overlay && Number.isFinite(data.rolling[selected])) spoken.push(averageText(selected));
     const description = spoken.join("; ");
     if (announce && announcer && announcer.textContent !== description) announcer.textContent = description;
   };
@@ -277,7 +278,7 @@ export function renderVelocity(container, sessions, context) {
       mode.select.querySelector('[value="cumulative"]').disabled = options.granularity === "hour";
       if (options.granularity === "hour" && options.mode === "cumulative") { options.mode = "lines"; mode.select.value = "lines"; }
       rolling.disabled = options.granularity !== "day" || options.mode === "cumulative";
-      rollingLabel.title = rolling.disabled ? "A daily average is shown on non-cumulative daily charts." : "Seven calendar days, including inactive dates.";
+      rollingLabel.title = rolling.disabled ? "A daily average is shown on non-cumulative daily charts." : `Seven calendar days, including inactive dates. A week needs ${Math.round(comparisonEvidenceFloor * 100)}% metric evidence; below 100% it is marked partial.`;
       const today = localDay(normalizeTimestamp(current.generatedAt), current.timeZone);
       const comparison = comparisonSpan(current.end, today);
       // Long windows also need six dates before their first plotted day.
