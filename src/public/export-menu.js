@@ -42,6 +42,9 @@ export function installExportMenu(getSelection, { unavailableMessage = () => "Th
   let preview = null;
   let focusFirst = false;
   const reset = () => {
+    // Move focus before hiding/disabling its current control. A scope refresh may
+    // also invalidate an open preview; never steal focus from another control.
+    if (menu.open && buttons.includes(document.activeElement)) summary.focus();
     preview = null; menu.open = false; description.textContent = ""; status.textContent = "";
     for (const button of buttons) button.disabled = true;
   };

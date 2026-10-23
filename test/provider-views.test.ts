@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createContext, runInContext } from "node:vm";
 import test from "node:test";
+import { documentFromHtml } from "./release-dom.ts";
 import { emptySession, reportedModel, tokens } from "../src/providers/common.ts";
 import type { ProviderEvidence, SessionAnalytics } from "../src/types.ts";
 
@@ -28,7 +29,9 @@ class Element {
 async function harness() {
   const providers = await import(new URL("../src/public/providers.js", import.meta.url).href);
   const elements = new Map<string, Element>();
-  const document = { addEventListener() {}, querySelector: (s: string) => { if (!elements.has(s)) elements.set(s, new Element()); return elements.get(s); }, querySelectorAll: () => [], createElement: (tag: string) => new Element(tag), createElementNS: (_ns: string, tag: string) => new Element(tag), createTextNode: (text: string) => { const n = new Element("text"); n.textContent = text; return n; } };
+  const headers = documentFromHtml(await readFile(new URL("../src/public/index.html", import.meta.url), "utf8"));
+  const document = { addEventListener() {}, querySelector: (s: string) => { if (!elements.has(s)) elements.set(s, new Element()); return elements.get(s); }, querySelectorAll: (selector: string) => selector === "th .sort[data-sort]" ? headers.querySelectorAll(selector) : [], createElement: (tag: string) => new Element(tag), createElementNS: (_ns: string, tag: string) => new Element(tag), createTextNode: (text: string) => { const n = new Element("text"); n.textContent = text; return n; } };
+  const shortcuts = await import("../src/public/shortcuts.js");
   const viewModel = await import(new URL("../src/public/view-model.js", import.meta.url).href);
   const evidenceHelpers = await import(new URL("../src/public/evidence.js", import.meta.url).href);
   const exportHelpers = await import(new URL("../src/public/export-data.js", import.meta.url).href);
@@ -37,7 +40,7 @@ async function harness() {
   const tools = await import(new URL("../src/public/tools.js", import.meta.url).href);
   const toolsData = await import(new URL("../src/public/tools-data.js", import.meta.url).href);
   const charts = Object.assign({}, ...await Promise.all(["format", "chart-colors", "chart-scale", "chart-legend"].map((name) => import(new URL(`../src/public/${name}.js`, import.meta.url).href))));
-  const context = createContext({ renderHistoryCoverage() {}, ...charts, ...providers, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, ...tools, ...toolsData, document, Intl, Set, Map, console, HTMLElement: Element,
+  const context = createContext({ renderHistoryCoverage() {}, ...charts, ...providers, ...shortcuts, ...viewModel, ...evidenceHelpers, ...exportHelpers, ...ui, ...velocityData, ...tools, ...toolsData, document, Intl, Set, Map, console, HTMLElement: Element,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) }, localStorage: { getItem: () => null }, URLSearchParams });
   let source = await readFile(new URL("../src/public/app.js", import.meta.url), "utf8");
   source = source.replace(/^import[\s\S]*?from ["'][^"']+["'];\n/gm, "").split("const urlParameters =")[0]!;
@@ -139,7 +142,8 @@ test("Tools ranking selects and retains a profile, expands, and resets when the 
   assert.equal(buttons().length, 12); assert.equal(h.run("toolsSelectedName"), "tool_0");
   // The All window has no previous period: the KPI says so and every Change cell is an em dash, never 0%.
   assert.match(container.textContent, /Effective calls in this selection/); assert.doesNotMatch(container.textContent, /vs previous window/);
-  const changeCells = descend(container).filter((node) => node.tag === "tr").slice(1).map((row) => row.children.at(-1)!.textContent);
+  const ranking = descend(container).find((node) => node.className === "table-wrap tools-ranking")!;
+  const changeCells = descend(ranking).filter((node) => node.tag === "tr").slice(1).map((row) => row.children.at(-1)!.textContent);
   assert.equal(changeCells.length, 12); assert.ok(changeCells.every((cell) => cell === "—"));
   assert.equal(buttons()[0]!.attributes["aria-pressed"], "true");
   buttons()[1]!.listeners["click"]!();

@@ -6,7 +6,9 @@ export const staticRoutes: ReadonlyArray<readonly [route: string, file: string]>
   ["/activity-insights.js", "activity-insights.js"],
   ["/format.js", "format.js"],
   ["/view-model.js", "view-model.js"],
+  ["/quiet-repositories.js", "quiet-repositories.js"],
   ["/url-state.js", "url-state.js"],
+  ["/shortcuts.js", "shortcuts.js"],
   ["/theme-boot.js", "theme-boot.js"],
   ["/ui.js", "ui.js"],
 
@@ -33,6 +35,7 @@ export const staticRoutes: ReadonlyArray<readonly [route: string, file: string]>
 
   ["/pricing.js", "pricing.js"],
   ["/pricing-data.js", "pricing-data.js"],
+  ["/counterfactual-data.js", "counterfactual-data.js"],
   ["/model-id.js", "model-id.js"],
   ["/pricing.css", "pricing.css"],
   ["/export-data.js", "export-data.js"],

@@ -98,7 +98,7 @@
       <div class="frame">
         <header class="topbar">
           <div class="topbar-title">
-            <h1 id="page-title">Summary</h1>
+            <h1 id="page-title" tabindex="-1">Summary</h1>
             <button class="scope-chip" id="scope-chip" type="button" hidden aria-label="Clear repository focus"><svg class="scope-icon" aria-hidden="true"><use href="#i-repo"/></svg><span id="scope-chip-label"></span><svg class="scope-close" aria-hidden="true"><use href="#i-close"/></svg></button>
           </div>
           <div class="topbar-controls">
@@ -121,7 +121,7 @@
             </div>
           </div>
           <div class="topbar-actions">
-            <span class="status" id="sync-context" role="status" aria-label="Mapping local sessions" title="Mapping local sessions" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span><span class="sync-short" id="sync-short" aria-hidden="true">Reading…</span></span>
+            <span class="status" id="sync-context" role="status" aria-live="off" aria-label="Mapping local sessions" title="Mapping local sessions" data-state="loading"><i aria-hidden="true"></i><span id="sync-label">Mapping local sessions</span><span class="sync-short" id="sync-short" aria-hidden="true">Reading…</span></span>
             <button class="coverage-button" id="coverage-button" type="button" aria-label="Coverage: 0 notes" aria-haspopup="dialog" aria-controls="coverage-dialog" title="Data coverage" data-shortcut="e"><svg aria-hidden="true"><use href="#i-coverage"/></svg><span id="coverage-label">Coverage</span><i class="coverage-dot" id="coverage-dot" hidden aria-hidden="true"></i></button>
             <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh snapshot" title="Refresh snapshot" data-shortcut="r"><svg aria-hidden="true"><use href="#i-refresh"/></svg></button>
             <details id="export-menu" class="export-menu">
@@ -155,8 +155,8 @@
             <span class="machine-strip-meta" id="machine-strip-meta"></span>
             <button class="button machine-details-button" id="machine-details" type="button" aria-haspopup="dialog" aria-controls="machines-dialog">Machine details</button>
           </div>
-          <p class="scope-line"><span id="scope-description">Showing every repository evidenced by local agent history.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
-          <section class="view-status" id="view-status" aria-live="polite" aria-label="View status" hidden></section>
+          <p class="scope-line"><span id="scope-description">Reading saved local agent history. Results appear when the scan finishes.</span><span class="snapshot-meta" aria-label="Snapshot details"><span id="generated-at">Building snapshot…</span><span id="rate-card-date">Rate card pending</span></span></p>
+          <section class="view-status" id="view-status" aria-live="off" aria-label="View status" hidden></section>
 
           <section class="analytics-view" data-view-panel="summary" aria-labelledby="summary-title">
             <header class="view-header"><div><h2 class="sr-only" id="summary-title">Summary overview</h2><p>Usage value, sessions and tokens across repositories for the selected window.</p></div></header>
@@ -215,18 +215,28 @@
             <section class="panel comparison-section" id="repository-comparison" aria-labelledby="comparison-title">
               <header class="section-header"><div><h2 id="comparison-title">Repositories</h2></div><span class="table-hint" id="repository-table-hint">Click a column to sort · click a row to focus</span></header>
               <p class="chart-note">Activity-dated value · session-start counters</p>
-              <div class="table-wrap"><table class="data-table"><thead><tr>
-                <th scope="col"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col" class="col-bar"><button type="button" class="sort" data-sort="value">Usage value<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="input">Input<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="output">Output<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="tools">Tools<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="cache">Cache<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-                <th scope="col"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
-              </tr></thead><tbody id="repository-rows"></tbody><tfoot id="repository-footer"></tfoot></table></div>
+              <div class="table-wrap"><table class="data-table" role="table" aria-labelledby="comparison-title"><thead role="rowgroup"><tr role="row">
+                <th scope="col" role="columnheader" id="repository-column-name"><button type="button" class="sort" data-sort="name">Repository<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-sessions"><button type="button" class="sort" data-sort="sessions">Sessions<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-value" class="col-bar"><button type="button" class="sort" data-sort="value">Usage value<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-input"><button type="button" class="sort" data-sort="input">Input<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-output"><button type="button" class="sort" data-sort="output">Output<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-tools"><button type="button" class="sort" data-sort="tools">Tools<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-cache"><button type="button" class="sort" data-sort="cache">Cache<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+                <th scope="col" role="columnheader" id="repository-column-coverage"><button type="button" class="sort" data-sort="coverage">Priced<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></th>
+              </tr></thead><tbody id="repository-rows" role="rowgroup"></tbody><tfoot id="repository-footer" role="rowgroup"></tfoot></table></div>
             </section>
           </section>
+
+          <article class="panel quiet-repositories-panel" id="quiet-repositories" aria-labelledby="quiet-repository-title" hidden>
+            <header><div><h2 id="quiet-repository-title">Quiet repositories <span id="quiet-repository-count"></span></h2><p class="chart-note" id="quiet-repository-context"></p></div></header>
+            <ul class="quiet-repository-list" id="quiet-repository-list"></ul>
+            <details class="quiet-repository-more" id="quiet-repository-more" hidden>
+              <summary id="quiet-repository-remaining"></summary>
+              <ul class="quiet-repository-list" id="quiet-repository-overflow"></ul>
+            </details>
+            <p class="chart-note">Known starts and dated activity only · undated activity excluded · local history may be incomplete.</p>
+          </article>
 
           <section class="analytics-view" data-view-panel="activity" hidden aria-labelledby="activity-title">
             <header class="view-header"><div><h2 class="sr-only" id="activity-title">Activity overview</h2><p>Session starts by local weekday and hour for the selected providers.</p><p id="activity-evidence" class="evidence-line"></p></div><div class="provider-key" id="activity-provider-filters" role="group" aria-label="Filter session starts by provider"></div></header>
@@ -246,6 +256,11 @@
               <article class="kpi"><span class="kpi-label">Pricing coverage</span><strong id="cost-coverage">—</strong><small class="kpi-note" id="cost-coverage-note">Share of observed tokens with a rate</small></article>
             </div>
             <p class="chart-note" id="cost-reconciliation"></p>
+            <article class="panel counterfactual-panel" aria-labelledby="counterfactual-title">
+              <header><div><h2 id="counterfactual-title">What if these tokens used another model?</h2><p class="counterfactual-note">Hypothetical API list-price equivalent, not a bill or a savings forecast. Uses this window and repository focus.</p></div></header>
+              <div id="counterfactual-pricing"></div>
+              <p class="counterfactual-note">Current snapshot's ordinary rates only; context premiums omitted. Cache-write TTLs are unavailable, so cache writes are not re-priced. Recorded cache behavior is held constant; model quality and tokenization can differ. Exports and recorded totals are unchanged.</p>
+            </article>
             <div class="view-grid costs-grid">
               <article class="panel"><header><div><h2>Cost by provider</h2></div></header><div class="chart-slot" id="provider-cost-models"></div></article>
               <article class="panel"><header><div><h2>Cost by model</h2></div></header><div class="chart-slot" id="cost-models"></div></article>
@@ -280,6 +295,8 @@
 
     <div class="heatmap-tooltip" id="activity-tooltip" role="tooltip" hidden></div>
     <div class="sr-only" id="chart-announcer" aria-live="polite"></div>
+    <div class="sr-only" id="snapshot-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="sr-only" id="view-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <dialog class="palette" id="command-palette" aria-label="Command palette">
       <div class="palette-field">
@@ -305,6 +322,11 @@
           <p>Coverage is sessions with evidence / selected sessions. Summary and activity-only sources cannot establish all metrics. Unavailable is shown as a dash, never as zero activity. Counts do not prove success or quality.</p>
           <div class="table-wrap"><table class="data-table"><thead><tr><th class="align-left">Provider</th><th class="align-left">Source</th><th class="align-left">Fidelity</th><th>Sessions</th><th>Token evidence</th><th>Tool evidence</th><th class="align-left">Time basis</th></tr></thead><tbody id="provider-evidence-rows"></tbody></table></div>
         </section>
+        <section class="coverage-footnotes" aria-labelledby="source-checks-title">
+          <h3 id="source-checks-title">Source checks</h3>
+          <div id="coverage-source-checks"><p>Source checks appear after the scan finishes.</p></div>
+          <p><a id="coverage-setup-link" target="_blank" rel="noreferrer">Provider setup guide ↗</a></p>
+        </section>
         <section class="coverage-footnotes" aria-label="Interpretation notes">
           <h3>How to read these numbers</h3>
           <ul>
@@ -319,6 +341,7 @@
             <li>Request input includes repeated context; the cached share measures recorded cache reads.</li>
             <li>Ratios with tiny denominators are withheld; a dash means not applicable, never zero.</li>
             <li>Activity counters do not prove success, quality, or value delivered.</li>
+            <li>Quiet repositories have known session starts or dated ledger activity before the selected window and none observed inside it. Their last observed active day excludes undated activity, unknown starts and file-mtime fallbacks; incomplete local history can hide activity.</li>
             <li>Activity streaks count known session-start dates in the selected window, not continuous work or a current streak. Unknown starts and file modification dates are excluded.</li>
             <li id="coverage-machines-note" hidden>Agents on a server or VM too? Run <code>session-analytics machines add HOST</code> in a terminal, and every later scan reads that machine with this one. <a id="coverage-machines-link" target="_blank" rel="noreferrer">Combine machines ↗</a></li>
           </ul>
@@ -338,29 +361,7 @@
 
     <dialog class="help" id="help-overlay" aria-labelledby="help-title">
       <header><h2 id="help-title" tabindex="-1" autofocus>Keyboard shortcuts</h2><button class="icon-button" id="help-close" type="button" aria-label="Close"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
-      <div class="help-grid">
-        <section><h3>Navigate</h3><dl>
-          <div><dt>Summary</dt><dd><kbd>g</kbd><kbd>s</kbd></dd></div>
-          <div><dt>Velocity</dt><dd><kbd>g</kbd><kbd>v</kbd></dd></div>
-          <div><dt>Costs</dt><dd><kbd>g</kbd><kbd>c</kbd></dd></div>
-          <div><dt>Pricing</dt><dd><kbd>g</kbd><kbd>p</kbd></dd></div>
-          <div><dt>Subscription</dt><dd><kbd>g</kbd><kbd>u</kbd></dd></div>
-          <div><dt>Tools</dt><dd><kbd>g</kbd><kbd>t</kbd></dd></div>
-          <div><dt>Activity</dt><dd><kbd>g</kbd><kbd>a</kbd></dd></div>
-          <div><dt>Previous / next view</dt><dd><kbd>[</kbd><kbd>]</kbd></dd></div>
-        </dl></section>
-        <section><h3>Control</h3><dl>
-          <div><dt>Command palette</dt><dd><kbd><span class="key-command">⌘</span>K</kbd> or <kbd>/</kbd></dd></div>
-          <div><dt>Last 7 · 30 · 90 days · all</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
-          <div><dt>Toggle provider chips in order (Summary chart, Velocity, Tools, Activity)</dt><dd><kbd>p</kbd> <kbd>1</kbd>–<kbd>7</kbd></dd></div>
-          <div><dt>Data coverage</dt><dd><kbd>e</kbd></dd></div>
-          <div><dt>Clear repository focus</dt><dd><kbd>esc</kbd></dd></div>
-          <div><dt>Switch theme</dt><dd><kbd>t</kbd></dd></div>
-          <div><dt>Switch density</dt><dd><kbd>d</kbd></dd></div>
-          <div><dt>Refresh snapshot</dt><dd><kbd>r</kbd></dd></div>
-          <div><dt>This overlay</dt><dd><kbd>?</kbd></dd></div>
-        </dl></section>
-      </div>
+      <div class="help-grid" id="shortcut-list"></div>
       <p class="help-note">In charts, <kbd>←</kbd><kbd>→</kbd> move the crosshair and <kbd>esc</kbd> closes the readout; in the heatmap, arrow keys move between cells.</p>
       <label class="help-toggle"><input type="checkbox" id="shortcuts-toggle" checked /><span><strong>Single-key shortcuts</strong><small>Switch off to keep only <kbd><span class="key-command">⌘</span>K</kbd>, <kbd>esc</kbd>, and the buttons. The setting is remembered on this machine.</small></span></label>
     </dialog>

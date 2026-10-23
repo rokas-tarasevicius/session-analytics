@@ -21,7 +21,7 @@ class Element extends EventTarget {
   replaceChildren(...children: Element[]): void { this.children = children; }
   setAttribute(): void {}
   remove(): void {}
-  focus(): void { this.focused = true; }
+  focus(): void { this.focused = true; (globalThis as any).document.activeElement = this; }
   click(): void { if (!this.disabled) this.dispatchEvent(new Event("click")); }
   querySelectorAll(): Element[] { return this.children; }
   querySelector(): Element { return this.children[0]!; }
@@ -60,12 +60,15 @@ test("export menu disables unloaded/unsupported formats, downloads exactly the s
     };
     menu.dispatchEvent(new Event("toggle"));
     assert.equal(buttons[0]!.disabled, false); assert.equal(buttons[1]!.disabled, true); assert.equal(buttons[5]!.hidden, false);
+    buttons[0]!.focus();
     buttons[0]!.click();
+    assert.equal((adapter as any).activeElement, summary, "download returns focus before disabling the activated control");
     assert.equal(downloads[0]!.name, "shared.json");
     assert.deepEqual(validateSharedSnapshot(JSON.parse(await downloads[0]!.blob.text())), selection);
     menu.open = true; menu.dispatchEvent(new Event("toggle")); buttons[5]!.click();
     assert.equal(downloads[1]!.name, "shared.csv"); assert.match(await downloads[1]!.blob.text(), /^"schemaVersion","repository"/);
     assert.equal(menu.open, false); assert.match(status.textContent, /No data was uploaded/);
+    summary.focused = false;
     const escape = new Event("keydown"); Object.assign(escape, { key: "Escape" });
     document.dispatchEvent(escape); assert.equal(summary.focused, false);
     menu.open = true; document.dispatchEvent(escape); assert.equal(menu.open, false); assert.equal(summary.focused, true);
@@ -76,7 +79,9 @@ test("export menu disables unloaded/unsupported formats, downloads exactly the s
     const full = { ...shared, sessions: [], kind: undefined } as unknown as MachineAnalytics;
     selection = full;
     const downloadCount = downloads.length;
+    buttons[0]!.focus();
     buttons[0]!.click();
+    assert.equal((adapter as any).activeElement, summary, "a rejected stale preview also restores focus");
     assert.equal(downloads.length, downloadCount);
     assert.equal(menu.open, false);
     assert.equal(description.textContent, "");
@@ -102,6 +107,12 @@ test("export menu disables unloaded/unsupported formats, downloads exactly the s
       incompatible.dispatchEvent(new Event("click"));
       assert.equal(downloads.length, count);
     }
+    selection = shared; menu.open = true; menu.dispatchEvent(new Event("toggle"));
+    buttons[0]!.focus(); reset();
+    assert.equal((adapter as any).activeElement, summary, "scope invalidation restores focus from a download");
+    menu.open = true; menu.dispatchEvent(new Event("toggle"));
+    const outside = new Element(); outside.focus(); reset();
+    assert.equal((adapter as any).activeElement, outside, "invalidation does not steal focus from elsewhere");
   } finally { (globalThis as any).document = originalDocument; URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; }
 });
 

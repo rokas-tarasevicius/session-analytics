@@ -10,6 +10,10 @@ Fidelity labels:
 - **Inferred lower bound**: counted from indirect evidence, so true usage can be higher.
 - **Unavailable**: the local store does not record it.
 
+The provider-history JSONL/NDJSON readers accept one optional UTF-8 BOM at the beginning of a file, CRLF line endings, and a complete final record without a newline. A BOM inside a JSON string is preserved; a BOM before a later record is malformed. Empty and whitespace-only files provide no records. An incomplete final record remains malformed; this tolerance does not repair JSON or change provider deduplication keys.
+
+The private index fingerprints the parser source, including both JSONL readers. Parser changes automatically reparse present evidence on the next scan; deleted source files cannot be reparsed.
+
 ## Claude Code
 
 **Where:** every Claude Code profile's `projects` directory:

@@ -50,7 +50,9 @@ The [product strategy proposal](proposals/product-strategy.md) provides evidence
 
 ### Tool reliability and behavior
 
-Local histories already record tool errors, exit codes, timeouts, durations, MCP call status, hook timing, permission modes, and denials. An earlier tool-reliability analysis (outcomes, latency, opt-in loop/churn and verification detectors, MCP server, hook and permission tables) has been removed from analysis and every surface. The items below are not shipped.
+Local histories already record tool errors, exit codes, timeouts, durations, MCP call status, hook timing, permission modes, and denials. An earlier tool-reliability analysis (outcomes, latency, opt-in loop/churn and verification detectors, MCP server, hook and permission tables) has been removed from analysis and every surface. Tool-level error outcomes are not currently collected. The Tools dashboard derives MCP server usage from existing structured names only; it makes no reliability claims. Remaining unchecked items below are not shipped.
+
+- [x] MCP-prefixed versus other tool names and per-server call share, session reach and repository reach in the Tools dashboard, using existing eligible tool counters without new public fields.
 
 - [ ] Failing-to-passing test transitions.
 - [ ] MCP configured-but-unused servers and schema token cost.
