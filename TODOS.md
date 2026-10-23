@@ -6,7 +6,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Finish the mobile fleet table card layout. | §3.2 deferred mobile pass; §6 |
+| Done | Mobile fleet table cards retain all metrics, sorting, keyboard focus and table semantics at widths up to 800 px. | §3.2 deferred mobile pass; §6 |
 
 ## Dashboard behavior and copy
 
@@ -25,17 +25,19 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 
 ## Accessibility
 
+- **P3:** Make provider digit chords work on AZERTY layouts: after `p`, the Shift keydown needed to type `1` currently cancels the chord and the digit changes the time window instead of toggling provider 1. Preserve the chord across modifier keydowns and verify shifted digits without changing the chord deadline or browser modifier behavior. (#107 accessibility review; pre-existing.)
+
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Announce refresh and empty-window status through live regions. | §2 P3, Accessibility; §6 optional PR-B1 work |
-| P3 | Restore keyboard focus after export disables the activated download button. | §2 P3, Accessibility |
-| P3 | Avoid repeated Velocity live-region announcements during pointer movement and resize. | §2 P3, Accessibility |
+| P3 | Announce refresh and empty-window status through live regions. Fixed by accessibility audit on `t3/a11y-audit`, 2026-10-22. | §2 P3, Accessibility; §6 optional PR-B1 work |
+| P3 | Restore keyboard focus after export disables the activated download button. Fixed by accessibility audit on `t3/a11y-audit`, 2026-10-22. | §2 P3, Accessibility |
+| P3 | Avoid repeated Velocity live-region announcements during pointer movement and resize. Fixed by accessibility audit on `t3/a11y-audit`, 2026-10-22. | §2 P3, Accessibility |
 
 ## Rendering performance and dead code
 
 | Priority | Item | Plan reference |
 | --- | --- | --- |
-| P3 | Remove unused per-repository tools/warnings, avoid full model rebuilds on chip toggles and reduce repository-by-session activity scans. | §2 P3, Performance and dead code |
+| P3 | Remove unused per-repository tools/warnings and reduce repository-by-session activity scans. | §2 P3, Performance and dead code |
 | P3 | Consolidate element factories and duplicate warning renders; remove unused Summary Velocity code and review test-only exports. | §2 P3, Performance and dead code |
 
 ## Multiple machines
@@ -53,6 +55,7 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | Priority | Item | Plan reference |
 | --- | --- | --- |
 | P2 | Store Codex `plan_type` with each ledger reading, calibrate value per 1% per plan and prorate price per plan period; today every cycle uses the account's latest plan, so value per 1% spans plan changes. A plan type that changes within one stream could also set apart readings from a conflicting limit context, such as a cycle that looks like an early reset. | Subscription review (codex-conflicting-cycles) |
+| P3 | Accept a UTF-8 BOM when attributing Codex limit readings to accounts: `src/limits/accounts.ts` and the private limits inbox parse rollout metadata directly, so a BOM-prefixed rollout caches missing attribution even though the provider-history readers accept a BOM since #99. | #99 review (multi-machine) |
 
 ## Distribution and release metadata
 

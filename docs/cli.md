@@ -106,6 +106,13 @@ session-analytics report
 
 Prints repository totals, priced usage value split into API-equivalent and provider-reported parts, token and cache totals, the 15 highest-value sessions by hashed key, and coverage warnings. When other machines are read, the header names the machines it covers and a `Machines` block lists each one's sessions, repositories and read time, or its reason and the command that fixes it; see [machine status](interop.md#machine-status).
 
+Text wraps to the terminal width. `COLUMNS` overrides the detected width, including when piping to `cat` or saving a report; without either, output defaults to 80 columns. Valid widths are whole numbers from 20 to 1000; invalid values fall back to the detected width or 80. Tables align full evidence labels and switch to labeled rows when they cannot fit. Long model lists end with `…`; use `report --json` for full model names. Reports contain no ANSI colors, including with `NO_COLOR` or `FORCE_COLOR` set. JSON output is unaffected by terminal width.
+
+```bash
+COLUMNS=80 session-analytics report | cat
+COLUMNS=120 session-analytics report > report.txt
+```
+
 ## JSON snapshot
 
 ```bash
