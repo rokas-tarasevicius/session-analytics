@@ -120,6 +120,11 @@ export function normalizeReleases(releases, latestTag) {
       return {
         tag_name: release.tag_name,
         published_at: new Date(release.published_at).toISOString(),
+        updated_at: new Date(
+          Number.isFinite(Date.parse(release.updated_at))
+            ? release.updated_at
+            : release.published_at,
+        ).toISOString(),
         body: release.body,
       };
     });
@@ -309,13 +314,13 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
     JSON.stringify({ latestTag, releases }, null, 2) + "\n",
   );
   const updated = releases
-    .map((release) => release.published_at)
+    .map((release) => release.updated_at)
     .sort()
     .at(-1);
   await writeFile(
     join(out, "releases.xml"),
     `<?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom"><title>Session Analytics releases</title><id>${siteUrl}releases/</id><link href="${siteUrl}releases.xml" rel="self"/><link href="${siteUrl}releases/"/><updated>${updated}</updated><author><name>Session Analytics</name></author>${releases.map((release) => `<entry><title>${release.tag_name}</title><id>${releaseUrl(release)}</id><link href="${releaseUrl(release)}"/><updated>${release.published_at}</updated><content type="text">${escapeHtml(release.body)}</content></entry>`).join("")}</feed>\n`,
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Session Analytics releases</title><id>${siteUrl}releases/</id><link href="${siteUrl}releases.xml" rel="self"/><link href="${siteUrl}releases/"/><updated>${updated}</updated><author><name>Session Analytics</name></author>${releases.map((release) => `<entry><title>${release.tag_name}</title><id>${releaseUrl(release)}</id><link href="${releaseUrl(release)}"/><published>${release.published_at}</published><updated>${release.updated_at}</updated><content type="text">${escapeHtml(release.body)}</content></entry>`).join("")}</feed>\n`,
   );
   await writeFile(
     join(out, "robots.txt"),

@@ -25,6 +25,8 @@ npm run site:build -- --github --update-cache
 
 In repository **Settings → Pages**, select **GitHub Actions**. The `Pages` workflow builds `.site-dist` and deploys it using the `github-pages` environment. Website/asset changes on `master` rebuild the site; pull requests only test and build. You can also run **Pages → Run workflow**.
 
+The `github-pages` environment permits the `master` branch and `v*` tags. The tag rule allows manually published or edited release events to deploy; deployment still checks out the current `master` source. Keep both rules if recreating the environment. Atom entries retain their publication date and use GitHub's update timestamp so note edits reach feed readers.
+
 Release notes rebuild on published/edited/deleted release events and after the `Release` workflow completes on `master`. Completion is necessary because releases created with `GITHUB_TOKEN` do not start another workflow through the `release` event. It rebuilds even if npm or Homebrew fails after publication. Dry-run release workflows do not trigger it. Deployment always checks out trusted `master` and fetches published notes anew; it never downloads or executes artifacts from a triggering workflow.
 
 Production generates the landing page, `/releases/` archive, `releases.xml` Atom feed, `releases.json`, sitemap and robots file. Version anchors are stable; the latest badge follows GitHub's designation, so an older backport does not replace it. Only allowlisted public assets are copied, never analytics code or session data. The Markdown renderer supports headings, bullets, paragraphs, fenced code, inline code, bold and HTTP(S)/relative links; raw HTML is escaped. Every release links to its original notes and downloads on GitHub.

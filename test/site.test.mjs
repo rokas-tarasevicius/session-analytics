@@ -110,6 +110,7 @@ test("site: build complete static output with working project-subpath links, anc
         latestTag: "v1.0.0",
         releases: [
           release("v1.0.0", {
+            updated_at: "2026-10-24T12:00:00Z",
             body: "### Added\n\n- <script>bad</script> & `tokens`.\n\nLiteral {{ROOT}} remains release content.",
           }),
         ],
@@ -155,6 +156,12 @@ test("site: build complete static output with working project-subpath links, anc
     const feed = await readFile(join(out, "releases.xml"), "utf8");
     assert.match(feed, /xmlns="http:\/\/www.w3.org\/2005\/Atom"/);
     assert.match(feed, /&lt;script&gt;bad&lt;\/script&gt; &amp;/);
+    assert.match(feed, /<published>2026-10-23T00:46:59.000Z<\/published>/);
+    assert.equal(
+      (feed.match(/<updated>2026-10-24T12:00:00.000Z<\/updated>/g) ?? [])
+        .length,
+      2,
+    );
     assert.equal(
       JSON.parse(await readFile(join(out, "releases.json"), "utf8")).latestTag,
       "v1.0.0",
