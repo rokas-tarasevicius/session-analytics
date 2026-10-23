@@ -1,419 +1,461 @@
 <main id="main">
   <section class="hero wrap" aria-labelledby="hero-title">
-    <a class="release-pill" href="./releases/#{{LATEST_ID}}"
-      ><span class="status-dot"></span>{{LATEST_TAG}} is here<span
-        class="pill-divider"
-      ></span
-      >See what’s new <span aria-hidden="true">↗</span></a
+    <a class="release-link" href="./releases/#{{LATEST_ID}}"
+      ><span class="tag">{{LATEST_TAG}}</span><span>is out. Read what changed</span></a
     >
-    <div class="hero-grid">
+    <div class="hero-row">
       <h1 id="hero-title">
-        Your agents work hard.<br /><span class="heading-secondary"
-          >See the whole picture.</span
-        >
+        See what your coding agents are doing.
+        <span>Every repo, model and limit.</span>
       </h1>
-      <div class="hero-copy">
-        <p>
-          A command-line tool with a local web dashboard. Explore coding-agent
-          usage, models, tools, and activity across every repository.
+      <div class="hero-side">
+        <p class="lead">
+          Session Analytics reads the history Claude Code, Codex, Cursor and
+          four other agents already keep on your machine, and turns it into a
+          local dashboard. Nothing is uploaded.
         </p>
-        <div class="hero-actions">
-          <a class="button button-dark" href="#get-started"
-            >Install the CLI <span aria-hidden="true">↗</span></a
-          ><a class="text-link" href="#dashboard"
-            >See the dashboard <span aria-hidden="true">↓</span></a
-          >
+        <div class="install-inline">
+          <div class="cmd">
+            <span class="prompt" aria-hidden="true">$</span
+            ><code id="hero-command">npm install -g <span class="nowrap">session-analytics</span></code
+            ><button class="copy dark" type="button" data-copy="hero-command" hidden>
+              Copy
+            </button>
+          </div>
+          <p class="then">
+            Then run <code>session-analytics</code>. It opens at
+            <code>127.0.0.1:4174</code>.
+          </p>
         </div>
+        <p class="hero-links">
+          <a href="#get-started">Other install options</a
+          ><a href="{{REPO_URL}}">View the source</a>
+        </p>
       </div>
     </div>
-    <div class="hero-footnote">
-      <span>Local &amp; read-only</span><span>No telemetry</span
-      ><span>Open source · MIT</span>
-    </div>
-  </section>
 
-  <section id="dashboard" class="showcase wrap" aria-label="Dashboard preview">
-    <div class="preview-meta">
-      <p>THE WEB DASHBOARD <span>· Runs in your browser</span></p>
-      <span class="demo-label">SYNTHETIC DEMO DATA</span>
-    </div>
-    <div
-      class="preview-tabs"
-      role="tablist"
-      aria-label="Dashboard views"
-      hidden
-    >
-      <button
-        id="tab-summary"
-        role="tab"
-        aria-selected="true"
-        aria-controls="dashboard-panel"
-        data-view="summary"
-      >
-        Overview
-      </button>
-      <button
-        id="tab-velocity"
-        role="tab"
-        aria-selected="false"
-        aria-controls="dashboard-panel"
-        tabindex="-1"
-        data-view="velocity"
-      >
-        Velocity
-      </button>
-      <button
-        id="tab-costs"
-        role="tab"
-        aria-selected="false"
-        aria-controls="dashboard-panel"
-        tabindex="-1"
-        data-view="costs"
-      >
-        Costs
-      </button>
-      <button
-        id="tab-tools"
-        role="tab"
-        aria-selected="false"
-        aria-controls="dashboard-panel"
-        tabindex="-1"
-        data-view="tools"
-      >
-        Tools
-      </button>
-    </div>
-    <div
-      id="dashboard-panel"
-      class="screenshot-window"
-      data-view="summary"
-      role="tabpanel"
-      aria-labelledby="tab-summary"
-      tabindex="0"
-    >
-      <picture>
-        <source
-          id="preview-mobile-dark"
-          media="(max-width: 760px) and (prefers-color-scheme: dark)"
-          srcset="./assets/screenshot-mobile-dark.webp"
-          width="750"
-          height="1624"
-        />
-        <source
-          id="preview-mobile"
-          media="(max-width: 760px)"
-          srcset="./assets/screenshot-mobile.webp"
-          width="750"
-          height="1624"
-        />
-        <source
-          id="preview-dark"
-          media="(prefers-color-scheme: dark)"
-          srcset="./assets/screenshot-summary-dark.webp"
-        />
-        <img
-          id="dashboard-image"
-          src="./assets/screenshot-summary.webp"
-          width="1718"
-          height="1472"
-          alt="Summary dashboard showing usage value, sessions, and token totals from synthetic demo data"
-          fetchpriority="high"
-        />
-      </picture>
-    </div>
-    <div class="preview-caption">
-      <p id="view-caption">
-        All your agents. All your repositories. One place to understand the
-        work.
-      </p>
-      <a id="full-preview" href="./assets/screenshot-summary.webp"
-        >View full screenshot <span aria-hidden="true">↗</span></a
-      >
-    </div>
-  </section>
-
-  <section class="providers wrap" aria-label="Supported coding agents">
-    <p class="eyebrow">Different agents. A shared perspective.</p>
-    <div class="provider-list">{{PROVIDERS}}</div>
-    <p class="small-note">
-      Reads the history your agents already save. Available metrics vary by
-      provider. <a href="{{DOCS_URL}}/providers.md">See coverage ↗</a>
-    </p>
-  </section>
-
-  <section id="how-it-works" class="section wrap" aria-labelledby="how-title">
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">01 / Under the hood</p>
-        <h2 id="how-title">Your history, made useful.</h2>
+    <figure class="hero-shot">
+      <div class="shot fade hero-image" style="--W: 2560; --H: 2192; --h: 0.58">
+        <picture
+          ><source
+            media="(max-width: 680px) and (prefers-color-scheme: dark)"
+            data-dark
+            data-media="(max-width: 680px)"
+            srcset="./assets/screenshot-mobile-dark.webp"
+            width="750"
+            height="1624" />
+          <source
+            media="(max-width: 680px)"
+            srcset="./assets/screenshot-mobile.webp"
+            width="750"
+            height="1624" />
+          <source
+            media="(prefers-color-scheme: dark)"
+            data-dark
+            srcset="./assets/screenshot-summary-dark.webp" />
+          <img
+            src="./assets/screenshot-summary.webp"
+            width="2560"
+            height="2192"
+            alt="Summary view: daily usage value by provider over 30 days and a totals rail with usage value, sessions, tokens and tool calls"
+            fetchpriority="high"
+        /></picture>
       </div>
-      <p>
-        No instrumentation. No new habits.<br />Just run it where your agents
-        run.
-      </p>
-    </div>
-    <div class="steps">
-      <article>
-        <span class="step-number">01 <span aria-hidden="true">→</span></span>
-        <h3>Read what’s already there.</h3>
-        <p>
-          Discovers local agent histories, including profiles and archives.
-          Source stores are opened read-only, so your original sessions stay
-          untouched.
-        </p>
-        <a href="{{DOCS_URL}}/providers.md">Explore the sources ↗</a>
-      </article>
-      <article>
-        <span class="step-number">02 <span aria-hidden="true">→</span></span>
-        <h3>Keep the signals.</h3>
-        <p>
-          Extracts counters, deduplicates usage, and groups worktrees and clones
-          by repository. Dated price snapshots make the estimates inspectable.
-        </p>
-        <a href="{{DOCS_URL}}/metrics.md">Understand the numbers ↗</a>
-      </article>
-      <article>
-        <span class="step-number">03 <span aria-hidden="true">↗</span></span>
-        <h3>Find your perspective.</h3>
-        <p>
-          Explore seven dashboard views, get a terminal report, or bring the
-          same metrics into your agent with six read-only MCP tools.
-        </p>
-        <a href="{{DOCS_URL}}/dashboard.md">Tour the dashboard ↗</a>
-      </article>
-    </div>
-  </section>
-
-  <section class="section detail-section wrap" aria-labelledby="detail-title">
-    <div class="detail-copy">
-      <p class="eyebrow">02 / Follow the work</p>
-      <h2 id="detail-title">One repository.<br />The full story.</h2>
-      <p>
-        A project can span agents, models, worktrees, and machines. Bring its
-        activity together without losing sight of where the numbers came from.
-      </p>
-      <ul class="feature-list">
-        <li>Compare model usage and daily trends</li>
-        <li>Inspect tools, cache use, and coverage</li>
-        <li>Read other machines over your own SSH</li>
-        <li>Export JSON, CSV, NDJSON, or OTLP</li>
-      </ul>
-      <a class="text-link" href="{{DOCS_URL}}/interop.md"
-        >Explore exports &amp; remote machines ↗</a
-      >
-    </div>
-    <figure class="detail-image">
-      <picture
-        ><source
-          media="(prefers-color-scheme: dark)"
-          srcset="./assets/screenshot-repository-dark.webp" />
-        <img
-          src="./assets/screenshot-repository.webp"
-          alt="Synthetic repository dashboard bringing agent usage, sessions, and tools into one project view"
-          width="1718"
-          height="1472"
-          loading="lazy"
-      /></picture>
-      <figcaption>Repository focus · synthetic demo data</figcaption>
+      <figcaption class="shot-caption">
+        <span>Summary, last 30 days</span
+        ><span>Synthetic demo data: six fictional repositories, seven providers</span>
+      </figcaption>
     </figure>
   </section>
 
-  <section class="privacy-section wrap" aria-labelledby="privacy-title">
-    <div class="privacy-copy">
-      <p class="eyebrow">03 / Privacy by construction</p>
-      <h2 id="privacy-title">The patterns.<br />Without the prompts.</h2>
-      <p>
-        Your code has enough places to be. An analytics service doesn’t need to
-        be one of them.
-      </p>
-      <p>
-        The dashboard runs on loopback and serves its assets locally. Prompts,
-        replies, reasoning, file paths, and tool arguments are discarded during
-        parsing.
-      </p>
-      <a href="{{DOCS_URL}}/privacy.md"
-        >Read the privacy contract <span aria-hidden="true">↗</span></a
-      >
-    </div>
-    <div class="privacy-ledger">
-      <div class="ledger-heading">
-        <span>WHAT REACHES YOUR DASHBOARD</span
-        ><span aria-hidden="true">↙</span>
-      </div>
-      <dl>
-        <div>
-          <dt>Token &amp; tool counters</dt>
-          <dd>kept</dd>
-        </div>
-        <div>
-          <dt>Model IDs &amp; timestamps</dt>
-          <dd>kept</dd>
-        </div>
-        <div>
-          <dt>Repository display names</dt>
-          <dd>kept</dd>
-        </div>
-        <div class="discarded">
-          <dt>Prompts &amp; responses</dt>
-          <dd>discarded</dd>
-        </div>
-        <div class="discarded">
-          <dt>Code &amp; file paths</dt>
-          <dd>discarded</dd>
-        </div>
-        <div class="discarded">
-          <dt>Tool arguments &amp; results</dt>
-          <dd>discarded</dd>
-        </div>
-      </dl>
-      <p>
-        Optional public pricing requests send no local evidence. Use
-        <code>--offline</code> to disable them.
-      </p>
-    </div>
-  </section>
-
-  <section
-    id="get-started"
-    class="section install-section wrap"
-    aria-labelledby="install-title"
-  >
-    <div class="install-copy">
-      <p class="eyebrow">04 / Make yourself at home</p>
-      <h2 id="install-title">A small install.<br />A lot of clarity.</h2>
-      <p>
-        Requires Node.js 24+ on macOS or Linux. macOS is the primary platform;
-        provider support varies on Linux.
-      </p>
-      <p class="install-meta">
-        <span>Zero runtime dependencies</span><span>No account required</span>
-      </p>
-      <a href="{{DOCS_URL}}/cli.md#install"
-        >Installation &amp; platform details ↗</a
-      >
-    </div>
-    <div class="install-card">
-      <div
-        class="install-tabs"
-        role="tablist"
-        aria-label="Installation method"
-        hidden
-      >
-        <button
-          id="install-npm"
-          role="tab"
-          aria-controls="install-panel"
-          aria-selected="true"
-          data-install="npm"
-        >
-          npm</button
-        ><button
-          id="install-homebrew"
-          role="tab"
-          aria-controls="install-panel"
-          aria-selected="false"
-          tabindex="-1"
-          data-install="homebrew"
-        >
-          Homebrew</button
-        ><button
-          id="install-source"
-          role="tab"
-          aria-controls="install-panel"
-          aria-selected="false"
-          tabindex="-1"
-          data-install="source"
-        >
-          From source
-        </button>
-      </div>
-      <div
-        id="install-panel"
-        role="tabpanel"
-        aria-labelledby="install-npm"
-        tabindex="0"
-      >
-        <div class="code-heading">
-          <span id="install-label">INSTALL &amp; LAUNCH</span
-          ><button id="copy-command" class="copy-button" type="button" hidden>
-            Copy commands
-          </button>
-        </div>
-        <pre><code id="install-command">npm install -g session-analytics
-session-analytics</code></pre>
-        <p id="install-note">Opens your dashboard at http://127.0.0.1:4174.</p>
-      </div>
-      <p id="copy-status" role="status" class="copy-status"></p>
-      <div class="terminal-footer">
-        <span class="status-dot"></span>Your machine. Your data. Your dashboard.
-      </div>
-    </div>
-  </section>
-
-  <section class="accounting-note wrap">
-    <span class="note-symbol" aria-hidden="true">i</span>
-    <p>
-      <strong>A note on the numbers.</strong> Usage value is an API list-price
-      equivalent, not your bill. Unknown prices stay unpriced, and missing
-      evidence stays visible.
-      <a href="{{DOCS_URL}}/metrics.md">How accounting works ↗</a>
+  <section class="providers wrap" aria-labelledby="providers-title">
+    <p id="providers-title">
+      Reads the history these agents already save. No hooks, proxies or new
+      habits. <a href="{{DOCS_URL}}/providers.md">Coverage by provider</a>
     </p>
+    <ul class="chips">
+      {{PROVIDERS}}
+    </ul>
   </section>
 
-  <section
-    class="section releases-section wrap"
-    aria-labelledby="releases-title"
-  >
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">05 / Built in the open</p>
-        <h2 id="releases-title">Always getting clearer.</h2>
-      </div>
-      <a class="text-link" href="./releases/"
-        >All release notes <span aria-hidden="true">↗</span></a
-      >
+  <section id="features" class="section wrap" aria-labelledby="features-title">
+    <div class="section-head">
+      <h2 id="features-title">The questions you used to answer with grep.</h2>
+      <p>
+        Seven views share one time window and one repository focus. Each
+        figure says how many sessions carry the evidence behind it.
+      </p>
     </div>
-    <div class="release-preview-list">{{RECENT_RELEASES}}</div>
+
+    <article class="feature">
+      <div class="feature-copy">
+        <p class="caps">Subscription</p>
+        <h3>Which account still has room this week?</h3>
+        <p>
+          Five-hour and weekly meters for every Claude and Codex account, with
+          the pace you are on and when you would run out.
+        </p>
+        <ul>
+          <li>Warns before a limit lands mid-task</li>
+          <li>Shows allowance that will expire unused</li>
+          <li>Covers every machine signed in to the account</li>
+        </ul>
+        <a class="more" href="{{DOCS_URL}}/subscription.md">How limits are read</a>
+      </div>
+      <div class="shot" style="--W: 2560; --H: 2856; --x: 0.178; --y: 0.105; --w: 0.822; --h: 0.275">
+        <picture
+          ><source
+            media="(prefers-color-scheme: dark)"
+            data-dark
+            srcset="./assets/screenshot-subscription-dark.webp" />
+          <img
+            src="./assets/screenshot-subscription.webp"
+            width="2560"
+            height="2856"
+            alt="Limits for three accounts: Claude Max 20x at 89% left this week with a warning that its 5-hour limit runs out early, ChatGPT Pro at 37%, Claude Team at 46%"
+            loading="lazy"
+        /></picture>
+      </div>
+    </article>
+
+    <article class="feature flip">
+      <div class="feature-copy">
+        <p class="caps">Velocity</p>
+        <h3>What changed since last week?</h3>
+        <p>
+          Top increases ranks the models and agents that grew most between the
+          last two completed weeks, with the evidence for both sides.
+        </p>
+        <ul>
+          <li>Group by model, agent, repository or effort</li>
+          <li>Daily trends with a keyboard-readable chart</li>
+        </ul>
+      </div>
+      <div class="shot" style="--W: 2080; --H: 810; --y: 0.08; --h: 0.92">
+        <picture
+          ><source
+            media="(prefers-color-scheme: dark)"
+            data-dark
+            srcset="./assets/screenshot-velocity-movers-dark.webp" />
+          <img
+            src="./assets/screenshot-velocity-movers.webp"
+            width="2080"
+            height="810"
+            alt="Top increases table: claude-fable-5-1 up $5.20, claude-opus-4-8 up 52%, gpt-5.4-mini up 679%, each with previous and current evidence"
+            loading="lazy"
+        /></picture>
+      </div>
+    </article>
+
+    <article class="feature">
+      <div class="feature-copy">
+        <p class="caps">Costs and pricing</p>
+        <h3>Where did the value go?</h3>
+        <p>
+          Usage value by provider and model at dated API list prices.
+          Provider-reported amounts and unpriced tokens stay separate, so
+          nothing is quietly guessed.
+        </p>
+        <ul>
+          <li>Inspect the rate card behind every price</li>
+          <li>Ask what the same tokens would cost on another model</li>
+        </ul>
+        <a class="more" href="{{DOCS_URL}}/pricing.md">How pricing works</a>
+      </div>
+      <div class="shot" style="--W: 2560; --H: 3114; --x: 0.18; --y: 0.083; --w: 0.82; --h: 0.335">
+        <picture
+          ><source
+            media="(prefers-color-scheme: dark)"
+            data-dark
+            srcset="./assets/screenshot-costs-dark.webp" />
+          <img
+            src="./assets/screenshot-costs.webp"
+            width="2560"
+            height="3114"
+            alt="Costs view: $1,427.32 usage value, 97.7% pricing coverage, and cost by provider led by Claude at $1,234.83"
+            loading="lazy"
+        /></picture>
+      </div>
+    </article>
+
+    <article class="feature flip">
+      <div class="feature-copy">
+        <p class="caps">Activity</p>
+        <h3>When do your agents actually work?</h3>
+        <p>
+          Session starts by weekday and hour, filtered by provider, next to how
+          sessions spread across repositories.
+        </p>
+      </div>
+      <div class="shot" style="--W: 2560; --H: 1762; --x: 0.185; --y: 0.222; --w: 0.815; --h: 0.37">
+        <picture
+          ><source
+            media="(prefers-color-scheme: dark)"
+            data-dark
+            srcset="./assets/screenshot-activity-dark.webp" />
+          <img
+            src="./assets/screenshot-activity.webp"
+            width="2560"
+            height="1762"
+            alt="Heatmap of session starts by weekday and hour, busiest on weekday afternoons"
+            loading="lazy"
+        /></picture>
+      </div>
+    </article>
+
+    <div class="details">
+      <div class="detail">
+        <h3>Keyboard first</h3>
+        <p>
+          <kbd>Ctrl</kbd> <kbd>K</kbd> jumps to any view or repository.
+          Two-key shortcuts like <kbd>g</kbd> <kbd>s</kbd> do the rest.
+        </p>
+        <div class="shot" style="--W: 1392; --H: 1164; --x: 0.045; --y: 0.052; --w: 0.91; --h: 0.6">
+          <picture
+            ><source
+              media="(prefers-color-scheme: dark)"
+              data-dark
+              srcset="./assets/screenshot-palette-dark.webp" />
+            <img
+              src="./assets/screenshot-palette.webp"
+              width="1392"
+              height="1164"
+              alt="Command palette listing every view with its two-key shortcut"
+              loading="lazy"
+          /></picture>
+        </div>
+      </div>
+      <div class="detail">
+        <h3>One repository, the full story</h3>
+        <p>
+          Focus a repository to see its models, tools and value against the
+          rest of your work, across worktrees and clones.
+        </p>
+        <div class="shot" style="--W: 2080; --H: 2392; --y: 0.33; --w: 0.67; --h: 0.42">
+          <picture
+            ><source
+              media="(prefers-color-scheme: dark)"
+              data-dark
+              srcset="./assets/screenshot-repository-dark.webp" />
+            <img
+              src="./assets/screenshot-repository.webp"
+              width="2080"
+              height="2392"
+              alt="The data-pipeline repository in focus: usage value by model and its most-used tools"
+              loading="lazy"
+          /></picture>
+        </div>
+      </div>
+      <div class="detail">
+        <h3>Fits a phone</h3>
+        <p>Check limits from the sofa.</p>
+        <div class="shot" style="--W: 750; --H: 1624; --h: 0.62">
+          <picture
+            ><source
+              media="(prefers-color-scheme: dark)"
+              data-dark
+              srcset="./assets/screenshot-mobile-dark.webp" />
+            <img
+              src="./assets/screenshot-mobile.webp"
+              width="750"
+              height="1624"
+              alt="Summary on a phone with stacked usage metrics"
+              loading="lazy"
+          /></picture>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <section class="faq-section wrap" aria-labelledby="faq-title">
-    <h2 id="faq-title">A few good questions.</h2>
-    <div>
-      <details>
-        <summary>Does it upload my sessions?</summary>
+  <section class="section wrap" aria-labelledby="interop-title">
+    <div class="section-head">
+      <h2 id="interop-title">Also in your terminal, and in your agent.</h2>
+      <p>The same content-free metrics, wherever you need them.</p>
+    </div>
+    <div class="interop">
+      <div class="terminal">
+        <div class="terminal-head"><span class="caps">Terminal</span></div>
+        <pre><span class="p" aria-hidden="true">$ </span>session-analytics report
+<span class="c"># totals, value split, top sessions, coverage warnings</span>
+
+<span class="p" aria-hidden="true">$ </span>session-analytics export --format otlp-json --out ./otlp
+<span class="c"># also csv and ndjson</span>
+
+<span class="p" aria-hidden="true">$ </span>session-analytics machines add agentbox
+<span class="c"># read a server or VM over your own SSH</span>
+
+<span class="p" aria-hidden="true">$ </span>session-analytics mcp
+<span class="c"># six read-only tools for Claude Code, Codex, Cursor</span></pre>
+      </div>
+      <div class="ways">
+        <div class="way">
+          <h3>Reports and JSON</h3>
+          <p>
+            Plain-text reports that wrap to your terminal, and a versioned JSON
+            snapshot with a published schema.
+            <a href="{{DOCS_URL}}/cli.md#terminal-report">Command reference</a>
+          </p>
+        </div>
+        <div class="way">
+          <h3>Other machines</h3>
+          <p>
+            Add a server where agents run. It needs only Node.js 24 and returns
+            a content-free snapshot; an unreachable machine stays on screen,
+            marked stale. <a href="{{DOCS_URL}}/interop.md">Combine machines</a>
+          </p>
+        </div>
+        <div class="way">
+          <h3>MCP and an agent skill</h3>
+          <p>
+            Let your agent check its own budget and habits.
+            <a href="{{DOCS_URL}}/mcp.md">Set up MCP</a>
+          </p>
+          <p class="tools">
+            <code>usage_summary</code><code>budget_status</code
+            ><code>repo_profile</code><code>tool_stats</code
+            ><code>recent_sessions</code><code>compare_agents</code>
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy" class="section wrap" aria-labelledby="privacy-title">
+    <div class="privacy">
+      <div>
+        <h2 id="privacy-title">Counts, not content.</h2>
         <p>
-          No. Analysis runs locally and the dashboard is served on loopback.
-          Public pricing refreshes send no session data. Exports to a remote
-          endpoint require an explicit option; reading another machine requires
-          your SSH setup.
-          <a href="{{DOCS_URL}}/privacy.md">Read the privacy contract.</a>
+          Source stores are opened read-only. Prompts, replies, reasoning, file
+          paths and tool arguments are dropped while parsing, before anything
+          is stored.
         </p>
-      </details>
-      <details>
-        <summary>Is usage value what I actually pay?</summary>
         <p>
-          No. It is the equivalent value at API list prices, with
-          provider-reported amounts identified separately. Subscription
-          allowances are compared with that value in the Subscription view.
-          Discounts are not modeled.
+          The dashboard runs on loopback and serves every asset itself. There
+          is no telemetry and no account.
+          <a href="{{DOCS_URL}}/privacy.md">Read the privacy contract</a>
         </p>
-      </details>
-      <details>
-        <summary>Can I try it without reading my history?</summary>
+      </div>
+      <div class="ledger">
+        <table>
+          <thead>
+            <tr>
+              <th class="caps" scope="col">From each session</th>
+              <th class="caps" scope="col">In the dashboard</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Token and tool-call counters</td><td><span class="state">Kept</span></td></tr>
+            <tr><td>Model IDs and timestamps</td><td><span class="state">Kept</span></td></tr>
+            <tr><td>Repository display names</td><td><span class="state">Kept</span></td></tr>
+            <tr><td>Prompts and responses</td><td><span class="state off">Discarded</span></td></tr>
+            <tr><td>Code and file paths</td><td><span class="state off">Discarded</span></td></tr>
+            <tr><td>Tool arguments and results</td><td><span class="state off">Discarded</span></td></tr>
+          </tbody>
+        </table>
+        <p class="foot">
+          Public price lists are the only network request, and they send no
+          local evidence. <code>--offline</code> turns them off.
+        </p>
+      </div>
+    </div>
+    <div class="note">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.5" /><path d="M8 7.2v4M8 4.8v.1" stroke-linecap="round" /></svg>
+      <p>
+        <strong>A note on the numbers.</strong> Usage value is what the tokens
+        would cost at API list prices, not your bill. Unknown prices stay
+        unpriced and missing evidence stays visible.
+        <a href="{{DOCS_URL}}/metrics.md">How accounting works</a>
+      </p>
+    </div>
+  </section>
+
+  <section id="get-started" class="section wrap" aria-labelledby="install-title">
+    <div class="install">
+      <div class="install-copy">
+        <h2 id="install-title">Running in under a minute.</h2>
         <p>
-          Yes. Clone the repository and run <code>npm run demo</code> with
-          Node.js 24+. The demo uses synthetic history only and never reads your
-          sessions. The “From source” install option above has the commands.
+          One package, zero runtime dependencies. The first scan of a long
+          history takes a few minutes; after that it reads only what changed.
         </p>
-      </details>
-      <details>
-        <summary>Can my agent use these analytics?</summary>
-        <p>
-          Yes. Six read-only MCP tools and a bundled agent skill expose the same
-          content-free metrics. You can also use terminal reports and structured
-          exports. <a href="{{DOCS_URL}}/mcp.md">Set up MCP.</a>
+        <p class="req">
+          Needs Node.js 24 or later on macOS or Linux. macOS is the primary
+          platform; provider support varies on Linux.
+          <a href="{{DOCS_URL}}/cli.md#install">Platform details</a>
         </p>
-      </details>
+      </div>
+      <div class="install-card">
+        <div class="segmented install-tabs" role="tablist" aria-label="Installation method" hidden>
+          <button id="install-npm" role="tab" aria-controls="install-panel" aria-selected="true" data-install="npm">npm</button
+          ><button id="install-homebrew" role="tab" aria-controls="install-panel" aria-selected="false" tabindex="-1" data-install="homebrew">Homebrew</button
+          ><button id="install-source" role="tab" aria-controls="install-panel" aria-selected="false" tabindex="-1" data-install="source">Demo from source</button>
+        </div>
+        <div id="install-panel" class="terminal" role="tabpanel" aria-labelledby="install-npm" tabindex="0">
+          <div class="terminal-head">
+            <span class="caps" id="install-label">Install and launch</span
+            ><button class="copy" type="button" data-copy="install-command" hidden>Copy</button>
+          </div>
+          <pre><code id="install-command">npm install -g session-analytics
+session-analytics</code></pre>
+        </div>
+        <p class="after" id="install-note">Opens your dashboard at http://127.0.0.1:4174.</p>
+        <p id="copy-status" class="copy-status" role="status"></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="releases" class="section wrap" aria-labelledby="releases-title">
+    <div class="section-head">
+      <h2 id="releases-title">Shipped often, in the open.</h2>
+      <p>
+        <a href="./releases/">All release notes</a> ·
+        <a href="./releases.xml">Atom feed</a>
+      </p>
+    </div>
+    <ol class="releases">
+      {{RECENT_RELEASES}}
+    </ol>
+  </section>
+
+  <section class="section wrap" aria-labelledby="faq-title">
+    <div class="faq">
+      <h2 id="faq-title">Questions</h2>
+      <div>
+        <details>
+          <summary>Does it upload my sessions?</summary>
+          <p>
+            No. Analysis runs locally and the dashboard is served on loopback.
+            Public pricing refreshes send no session data. Sending exports to a
+            remote endpoint needs an explicit option, and reading another
+            machine uses your own SSH.
+            <a href="{{DOCS_URL}}/privacy.md">Read the privacy contract.</a>
+          </p>
+        </details>
+        <details>
+          <summary>Is usage value what I actually pay?</summary>
+          <p>
+            No. It is the equivalent at API list prices, with provider-reported
+            amounts shown separately. The Subscription view compares it with
+            what your plans include. Discounts are not modelled.
+          </p>
+        </details>
+        <details>
+          <summary>Can I try it without reading my history?</summary>
+          <p>
+            Yes. Clone the repository and run <code>npm run demo</code> with
+            Node.js 24+. It uses synthetic history only and never reads your
+            sessions. The “Demo from source” install option above has the
+            commands.
+          </p>
+        </details>
+        <details>
+          <summary>Can my agent use these analytics?</summary>
+          <p>
+            Yes. Six read-only MCP tools and a bundled agent skill expose the
+            same content-free metrics, alongside terminal reports and
+            structured exports. <a href="{{DOCS_URL}}/mcp.md">Set up MCP.</a>
+          </p>
+        </details>
+      </div>
     </div>
   </section>
 </main>

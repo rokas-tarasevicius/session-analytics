@@ -120,10 +120,20 @@ test("site: build complete static output with working project-subpath links, anc
     assert.equal(result.count, 1);
     const homepage = await readFile(join(out, "index.html"), "utf8");
     const archive = await readFile(join(out, "releases/index.html"), "utf8");
-    assert.match(homepage, /v1.0.0 is here/);
+    assert.match(homepage, /class="release-link" href="\.\/releases\/#release-v1\.0\.0"/);
+    assert.match(homepage, /<li class="chip" style="--c: var\(--provider-claude\)">/);
     assert.match(archive, /id="release-v1.0.0"/);
     assert.match(archive, /Literal \{\{ROOT\}\} remains release content/);
     assert.doesNotMatch(homepage + archive, /<script>bad|\{\{TITLE\}\}/);
+    // site.js finds its elements by id and its commands by data-install key.
+    const ids = new Set([...homepage.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]));
+    for (const [, id] of homepage.matchAll(/(?:data-copy|aria-controls)="([^"]+)"/g))
+      assert.ok(ids.has(id), `Missing element #${id}`);
+    const script = await readFile(join(out, "site.js"), "utf8");
+    for (const id of ["theme-switch", "install-command", "install-note", "install-label", "copy-status"])
+      assert.ok(ids.has(id) && script.includes(`"${id}"`), `site.js and markup disagree on #${id}`);
+    for (const [, key] of homepage.matchAll(/data-install="([^"]+)"/g))
+      assert.match(script, new RegExp(`\\n  ${key}: \\[`), `No command for ${key}`);
     for (const [path, html] of [
       ["index.html", homepage],
       ["releases/index.html", archive],
@@ -182,6 +192,35 @@ test("site: build complete static output with working project-subpath links, anc
       "sitemap.xml",
       "style.css",
     ]);
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test("site: recent releases show three entries and label only the designated latest, even after a backport", async () => {
+  const out = await mkdtemp(join(tmpdir(), "session-analytics-site-"));
+  try {
+    await buildSite(
+      {
+        latestTag: "v2.0.0",
+        releases: [
+          release("v1.9.1", { published_at: "2026-10-25T00:00:00Z" }),
+          release("v2.0.0", { published_at: "2026-10-24T00:00:00Z" }),
+          release("v1.9.0", { published_at: "2026-10-20T00:00:00Z" }),
+          release("v1.8.0", { published_at: "2026-10-10T00:00:00Z" }),
+        ],
+      },
+      out,
+    );
+    const homepage = await readFile(join(out, "index.html"), "utf8");
+    const list = homepage.match(/<ol class="releases">([\s\S]*?)<\/ol>/)[1];
+    const items = [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => m[1]);
+    assert.deepEqual(
+      items.map((item) => item.match(/class="ver">([^<]+)/)[1]),
+      ["v2.0.0", "v1.9.1", "v1.9.0"],
+    );
+    assert.equal((list.match(/latest-label/g) ?? []).length, 1);
+    assert.match(items[0], /latest-label/);
   } finally {
     await rm(out, { recursive: true, force: true });
   }

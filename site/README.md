@@ -11,7 +11,9 @@ npm run site:build
 python3 -m http.server 4175 --directory .site-dist
 ```
 
-Open `http://localhost:4175`. Re-run the build after edits. `layout.html` supplies the shared head, navigation and footer; `index.html` and `releases.html` are page bodies. `style.css` owns the responsive design and `site.js` enhances screenshot and installation tabs and copy buttons. Content, default installation commands, navigation, FAQ and release notes remain available without JavaScript.
+Open `http://localhost:4175`. Re-run the build after edits. `layout.html` supplies the shared head, navigation and footer; `index.html` and `releases.html` are page bodies. `style.css` owns the responsive design and reuses the dashboard's colour, type and geometry tokens from `src/public/styles.css` (see [branding](../docs/branding.md)), so a token change there should be mirrored here. Colours use CSS `light-dark()`, so the site follows the system theme without JavaScript; `site.js` adds the theme switch (saved in `localStorage`), the installation tabs and copy buttons. Content, the default installation command, navigation, FAQ and release notes remain available without JavaScript.
+
+Feature screenshots are the synthetic captures in `assets/`, cropped in CSS: each `.shot` sets `--x`/`--y`/`--w`/`--h` as fractions of the capture and `--W`/`--H` as its pixel size. Light and dark variants are `<picture>` sources; the theme switch rewrites their `media` so a pinned theme also swaps images. After regenerating screenshots, check that each crop still frames its panel.
 
 `site/releases.json` is a checked-in snapshot of published stable GitHub Releases for deterministic, offline development and PR builds. It is not the production source of truth. Refresh it deliberately with:
 
@@ -37,4 +39,4 @@ Production generates the landing page, `/releases/` archive, `releases.xml` Atom
 node --test test/site.test.mjs
 ```
 
-These tests also run in `npm test`. They cover pagination, latest/backport ordering, draft/prerelease filtering, API failures, HTML escaping, release anchors, asset completeness (including responsive image sources) and project-subpath links. For visual review, check desktop and phone widths in light and dark mode, keyboard navigation in both tab groups, command copying, FAQ, archive, and JavaScript-disabled behavior. Verify that the Overview uses the mobile screenshot on phones and that the full-screenshot link follows changes to the selected view, viewport and color scheme. Use only synthetic demo assets.
+These tests also run in `npm test`. They cover pagination, latest/backport ordering, draft/prerelease filtering, API failures, HTML escaping, release anchors, asset completeness (including responsive image sources) and project-subpath links. For visual review, check desktop and phone widths in light and dark mode, keyboard navigation in the installation tabs, the theme switch, command copying, FAQ, archive, and JavaScript-disabled behavior. Verify that the hero uses the mobile screenshot on phones, that each feature crop frames its panel, and that the theme switch swaps screenshots. Use only synthetic demo assets.
