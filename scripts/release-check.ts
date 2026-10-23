@@ -108,7 +108,7 @@ function main(): void {
   console.log(`Release metadata agrees at ${version}.`);
 
   function run(command: string, arguments_: string[]): string {
-    const result = spawnSync(command, arguments_, { cwd: root, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 120_000 });
+    const result = spawnSync(command, arguments_, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 300_000 });
     if (result.error || result.status !== 0) {
       if (result.stderr) process.stderr.write(result.stderr);
       throw new Error(`Release check failed: ${command} ${arguments_.join(" ")}`);

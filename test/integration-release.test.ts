@@ -680,7 +680,7 @@ test("release: every dispatcher command shares help and version without scanning
   }
 });
 
-test("release: complete demo API, all providers and renderers, static modules and privacy work together", { timeout: 120_000 }, async (t) => {
+test("release: complete demo API, all providers and renderers, static modules and privacy work together", { timeout: 240_000 }, async (t) => {
   const listener = createServer(); await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
   const address = listener.address(); assert.ok(address && typeof address === "object");
   await new Promise<void>((resolve) => listener.close(() => resolve()));
@@ -694,7 +694,7 @@ test("release: complete demo API, all providers and renderers, static modules an
   try {
     let ready = false;
     // Seeding seven providers includes many SQLite commits and can exceed 20 seconds on a busy filesystem.
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0; i < 1_500; i++) {
       assert.equal(child.exitCode, null, errors);
       try { ready = (await realFetch(`${base}/api/health`)).ok; } catch { /* Starting. */ }
       if (ready) break; await delay(100);

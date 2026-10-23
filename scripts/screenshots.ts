@@ -55,7 +55,7 @@ const CAPTURES: Capture[] = [
     name: "subscription", view: "subscription", waitJs: "document.querySelectorAll('.limit-row').length > 0 && Boolean(document.querySelector('.worth-totals'))",
     fitJs: "Math.max(...[...document.querySelectorAll('.subscription-card')].slice(0, 2).map((card) => card.getBoundingClientRect().bottom))",
   },
-  { name: "tools", view: "tools", fitJs: "Math.max(...['Top tools', 'Read'].map((t) => { const r = __rect(__p(t)); return r[1] + r[3]; }))" },
+  { name: "tools", view: "tools", fitJs: "Math.max(...['#tools-ranking-title', '#tools-profile-title'].map((id) => { const r = __rect(document.querySelector(id).closest('article.panel, section.panel')); return r[1] + r[3]; }))" },
   { name: "activity", view: "activity", fitJs: "document.querySelector('#activity-repositories-panel').getBoundingClientRect().bottom" },
   { name: "coverage", view: "summary", js: "document.querySelector('#coverage-button').click()", clipJs: "__rect(document.querySelector('#coverage-dialog'))", pad: 28 },
   { name: "palette", view: "summary", js: "document.querySelector('#command-button').click()", clipJs: "__rect(document.querySelector('#command-palette'))", pad: 28 },

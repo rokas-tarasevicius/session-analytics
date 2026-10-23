@@ -146,8 +146,8 @@ const repositorySpecs = [
 ] as const;
 
 const claudeModels = [
-  ["claude-opus-5", 55],
-  ["claude-sonnet-5", 33],
+  ["claude-opus-5", 64],
+  ["claude-sonnet-5", 24],
   ["claude-fable-5-1", 6],
   ["claude-opus-4-8", 6],
 ] as const;
@@ -214,7 +214,7 @@ interface ClaudeTurnState {
 }
 
 function claudeUsage(model: string, state: ClaudeTurnState, output: number, longCache: boolean) {
-  const created = integer(400, 4_500);
+  const created = integer(4_000, 16_000);
   const thinking = model.includes("haiku") ? 0 : Math.round(output * between(0.15, 0.55));
   const usage = {
     input_tokens: integer(2, 40),
@@ -257,7 +257,7 @@ interface ClaudeTranscriptOptions {
 function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[]; end: number; spawned: number } {
   const { cwd, model, repository, sessionId } = options;
   const records: unknown[] = [];
-  const state: ClaudeTurnState = { clock: options.start, compactions: 0, context: options.subagent ? integer(9_000, 16_000) : integer(18_000, 32_000) };
+  const state: ClaudeTurnState = { clock: options.start, compactions: 0, context: options.subagent ? integer(20_000, 36_000) : integer(36_000, 64_000) };
   const effort = model.includes("haiku") ? undefined : weighted(effortLevels);
   const coldCache = repository.name === "data-pipeline" && !options.subagent;
   const longCache = !coldCache && !options.subagent && chance(0.35);
@@ -285,7 +285,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
     }
     const messageId = `msg_${hex(24)}`;
     const requestId = `req_${hex(24)}`;
-    const output = heavy(options.subagent ? 260 : 420, 0.8, 6_000);
+    const output = heavy(options.subagent ? 900 : 2_600, 0.8, 20_000);
     const tools: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
     const toolCount = weighted([[0, 18], [1, 62], [2, 15], [3, 5]] as const);
     for (let tool = 0; tool < toolCount; tool += 1) {
@@ -340,7 +340,7 @@ function claudeTranscript(options: ClaudeTranscriptOptions): { records: unknown[
       push({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: tool.id, is_error: Number.parseInt(tool.id.slice(-2), 16) % 17 === 0, content: "[synthetic tool result PRIVATE_DEMO_CONTENT_SENTINEL]" }] } });
       state.clock += integer(1, 30) * 1000;
     }
-    state.context += integer(600, 3_200);
+    state.context += integer(3_000, 10_000);
     if (state.context > 165_000) {
       const postTokens = integer(24_000, 38_000);
       push({ type: "system", subtype: "compact_boundary", content: "Conversation compacted",
@@ -366,7 +366,7 @@ function writeClaudeSession(root: string, repository: Repository, start: number)
   const cwd = workingDirectory(repository);
   const sessionId = uuid();
   const model = weighted(claudeModels);
-  const messages = heavy(34, 0.85, 420);
+  const messages = heavy(110, 0.8, 700);
   const projectDirectory = join(root, claudeProjectDirectory(cwd));
   const entrypoint = weighted([["cli", 40], ["sdk-ts", 50], ["local-agent", 10]] as const);
   const main = claudeTranscript({ entrypoint, cwd, messages, model, repository, sessionId, start, subagent: false });
@@ -426,20 +426,20 @@ function writeCodexSession(
   push("session_meta", { id, cwd, source, originator: source === "exec" ? "codex_exec" : source === "vscode" ? "codex_vscode" : "codex_cli_rs", cli_version: "0.140.0", timestamp: iso(clock), creator_account_id: demoCodexAccount });
   push("turn_context", { cwd, model, effort, approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } });
   const total: CodexCounter = { cached_input_tokens: 0, input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 };
-  let context = integer(9_000, 18_000);
-  const turns = parentThreadId ? 1 : heavy(5, 0.7, 40);
+  let context = integer(36_000, 64_000);
+  const turns = parentThreadId ? 1 : heavy(12, 0.7, 60);
   const children: number[] = [];
   for (let turn = 0; turn < turns; turn += 1) {
     clock += integer(20, 600) * 1000;
     const turnStarted = clock;
     push("event_msg", { type: "user_message", message: "[synthetic demo prompt PRIVATE_DEMO_CONTENT_SENTINEL]", images: [] });
     push("event_msg", { type: "task_started", turn_id: `turn-${turn}`, model_context_window: 272_000 });
-    const calls = heavy(parentThreadId ? 5 : 7, 0.7, 60);
+    const calls = heavy(parentThreadId ? 5 : 11, 0.7, 70);
     for (let call = 0; call < calls; call += 1) {
       clock += integer(2, 45) * 1000;
       const input = context + integer(200, 1_500);
       const cached = Math.round(input * between(0.82, 0.96));
-      const output = heavy(380, 0.8, 9_000);
+      const output = heavy(3_000, 0.8, 24_000);
       const reasoning = Math.round(output * between(0.25, 0.65));
       const last = { cached_input_tokens: cached, input_tokens: input, output_tokens: output, reasoning_output_tokens: reasoning, total_tokens: input + output };
       for (const key of Object.keys(total) as Array<keyof CodexCounter>) total[key] += last[key];
@@ -466,12 +466,12 @@ function writeCodexSession(
           }),
         });
       }
-      context += integer(800, 4_000);
+      context += integer(4_000, 12_000);
       if (context > 210_000) {
         push("event_msg", { type: "context_compacted" });
         context = integer(20_000, 34_000);
       }
-      if (!parentThreadId && chance(0.012)) children.push(clock);
+      if (!parentThreadId && chance(0.004)) children.push(clock);
     }
     clock += integer(2, 20) * 1000;
     push("event_msg", { type: "agent_message", message: "[synthetic demo response PRIVATE_DEMO_CONTENT_SENTINEL]" });
@@ -503,7 +503,7 @@ function writeCursorDatabase(path: string, sessions: Array<{ repository: Reposit
   const insert = database.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)");
   for (const { repository, start } of sessions) {
     const composerId = uuid();
-    const bubbles = integer(4, 22);
+    const bubbles = integer(24, 80);
     let clock = start;
     let costInCents = 0;
     for (let index = 0; index < bubbles; index += 1) {
@@ -512,7 +512,7 @@ function writeCursorDatabase(path: string, sessions: Array<{ repository: Reposit
       const tool = assistant && chance(0.7)
         ? { name: pick(["read_file", "edit_file", "run_terminal_cmd", "codebase_search", "grep_search"]), toolCallId: `tool_${hex(16)}` }
         : null;
-      const input = assistant ? integer(6_000, 48_000) : 0;
+      const input = assistant ? integer(120_000, 400_000) : 0;
       const output = assistant ? heavy(320, 0.7, 4_000) : 0;
       costInCents += assistant ? Math.round(input * 0.0003 + output * 0.0015) : 0;
       clock += integer(10, 90) * 1000;
@@ -607,12 +607,12 @@ function generate(root: string): {
     const weekend = day.getDay() === 0 || day.getDay() === 6;
     // Usage ramps up over the window, as it does when a team adopts agents.
     const ramp = 0.55 + 0.45 * ((DAYS - offset) / DAYS);
-    const count = Math.round((weekend ? between(0, 3) : between(4, 10)) * ramp);
+    const count = Math.round((weekend ? between(0, 4) : between(11, 21)) * ramp);
     for (let index = 0; index < count; index += 1) {
       const start = sessionStart(day.valueOf());
       if (start > now) continue;
       const repository = weighted(repositories.map((item) => [item, item.weight] as const));
-      const provider = weighted([["claude", 54], ["codex", 38], ["cursor", 8]] as const);
+      const provider = weighted([["claude", 52], ["codex", 43], ["cursor", 5]] as const);
       if (provider === "claude") {
         // Company repositories run on the Team seat, the rest on the personal Max plan.
         const profile = workRepositories.has(repository.name) ? "work" : "default";
