@@ -210,15 +210,16 @@ test("laptop tables and mobile fleet cards fit in both themes and densities", { 
           }))`);
         for (const wrap of wraps) assert.ok(wrap.scroll <= wrap.client, `${view}: ${wrap.name} at ${label}: ${wrap.scroll} > ${wrap.client}`);
         if (view === "summary") {
-          const chips = await browser.evaluate<{ row: number; chip: number; count: number; belowTitle: boolean; fits: boolean }>(`(() => {
+          const chips = await browser.evaluate<{ rows: number; count: number; belowTitle: boolean; fits: boolean }>(`(() => {
             const header = document.querySelector('.daily-usage-header'), row = header.querySelector('.provider-key');
             const chips = [...row.querySelectorAll('.chip')].filter((chip) => !chip.hidden);
-            return { row: row.getBoundingClientRect().height, chip: chips[0].getBoundingClientRect().height, count: chips.length,
+            // Count wrapped lines by their top edges: two full rows measure exactly two chips plus the gap, so a height bound fails on sub-pixel noise.
+            return { rows: new Set(chips.map((chip) => Math.round(chip.getBoundingClientRect().top))).size, count: chips.length,
               belowTitle: row.getBoundingClientRect().top >= header.querySelector('h2').getBoundingClientRect().bottom,
               fits: chips.every((chip) => chip.getBoundingClientRect().left >= row.getBoundingClientRect().left && chip.getBoundingClientRect().right <= row.getBoundingClientRect().right + 1) };
           })()`);
           assert.equal(chips.count, 7, label);
-          assert.ok(chips.row <= chips.chip * 2 + 6, `Daily usage chips need at most two rows at ${label}`);
+          assert.ok(chips.rows <= 2, `Daily usage chips need at most two rows at ${label}: ${chips.rows}`);
           assert.equal(chips.fits, true, `Provider chips fit at ${label}`);
           assert.equal(chips.belowTitle, true, label);
         }
