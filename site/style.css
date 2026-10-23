@@ -62,6 +62,36 @@
 :root[data-theme="light"] {
   color-scheme: light;
 }
+/* Browsers without light-dark() (Safari before 17.5) get the light theme; site.js hides the switch. */
+@supports not (color: light-dark(#000, #fff)) {
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+    --bg: #fbfbfa;
+    --sidebar-surface: #f6f6f4;
+    --surface: #ffffff;
+    --surface-2: #efefec;
+    --surface-3: #e7e7e4;
+    --surface-hover: #f2f2f0;
+    --line: #e7e7e4;
+    --line-strong: #dcdcd8;
+    --text: #18181b;
+    --text-2: #4f4f55;
+    --muted: #696970;
+    --focus: #71717a;
+    --shadow-1: 0 1px 2px rgb(24 24 27 / 4%);
+    --shadow-2: 0 1px 2px rgb(24 24 27 / 4%), 0 12px 32px rgb(24 24 27 / 8%);
+    --provider-codex: #5c5c59;
+    --provider-claude: #c96442;
+    --provider-cursor: #008aa0;
+    --provider-copilot: #8250df;
+    --provider-opencode: #a8820d;
+    --provider-gemini: #3a7be0;
+    --provider-antigravity: #90908a;
+    --logo-tile: #18181b;
+    --logo-tile-line: transparent;
+  }
+}
 :root[data-theme="dark"] {
   color-scheme: dark;
 }
@@ -123,7 +153,7 @@ img {
 code,
 kbd {
   font-family: var(--mono);
-  font-size: 0.9em;
+  font-size: max(12px, 0.9em);
   font-variant-numeric: tabular-nums;
 }
 kbd {
@@ -131,7 +161,7 @@ kbd {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-xs);
   background: var(--surface);
-  font-size: 0.82em;
+  font-size: max(12px, 0.82em);
 }
 button {
   font: inherit;
@@ -172,8 +202,10 @@ button {
   filter: invert(1) brightness(0.95);
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .brand-mark:not(.keep) {
-    filter: invert(1) brightness(0.95);
+  @supports (color: light-dark(#000, #fff)) {
+    :root:not([data-theme="light"]) .brand-mark:not(.keep) {
+      filter: invert(1) brightness(0.95);
+    }
   }
 }
 
@@ -1101,6 +1133,12 @@ button {
     grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
   }
 }
+@media (max-width: 820px) {
+  /* The hero and footer link to the source, so the narrow header keeps only Releases. */
+  .site-header nav a:not(.keep-on-phone) {
+    display: none;
+  }
+}
 @media (max-width: 680px) {
   .wrap {
     width: calc(100% - 40px);
@@ -1108,17 +1146,29 @@ button {
   .site-header .wrap {
     gap: 8px;
   }
-  .site-header nav a:not(.gh-link),
-  .gh-link .count {
-    display: none;
-  }
   /* Touch targets stay at least 44px on phones. */
   .site-header nav a,
   .icon-button,
   .copy,
-  .segmented button {
+  .segmented button,
+  .button {
     min-height: 44px;
     min-width: 44px;
+  }
+  .wordmark,
+  .release-link,
+  .release-header-links a,
+  .release-index nav a,
+  .release-entry h2 a,
+  .release-source,
+  .feature .more,
+  .site-footer nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  .site-footer nav {
+    gap: 0 24px;
   }
   .site-header nav a {
     display: inline-flex;
@@ -1161,11 +1211,12 @@ button {
     grid-template-columns: 1fr;
   }
   .releases a {
-    grid-template-columns: auto 1fr;
+    display: flex;
+    flex-wrap: wrap;
     gap: 4px 16px;
   }
   .releases .sum {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
   }
   .releases .latest-label {
     display: none;
@@ -1174,12 +1225,29 @@ button {
     grid-template-columns: 1fr;
   }
 }
+@media (max-width: 400px) {
+  .install-inline .cmd code {
+    white-space: normal;
+  }
+  .nowrap {
+    white-space: nowrap;
+  }
+}
+@media (max-width: 360px) {
+  .wordmark-text {
+    display: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }
 }
 @media print {
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+  }
   .site-header {
     position: static;
   }

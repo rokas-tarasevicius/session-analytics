@@ -31,11 +31,16 @@ function applyTheme() {
         : "not all"
       : [width, "(prefers-color-scheme: dark)"].filter(Boolean).join(" and ");
   }
+  for (const meta of themeColors)
+    meta.content = pinned ? (dark ? "#141413" : "#fbfbfa") : meta.dataset.content;
   themeSwitch.dataset.dark = String(dark);
   themeSwitch.setAttribute("aria-label", dark ? "Use light theme" : "Use dark theme");
 }
 const themeSwitch = document.getElementById("theme-switch");
-themeSwitch.hidden = false;
+const themeColors = document.querySelectorAll('meta[name="theme-color"]');
+for (const meta of themeColors) meta.dataset.content = meta.content;
+// Without light-dark() the stylesheet only has the light theme, so there is nothing to switch.
+themeSwitch.hidden = !CSS.supports("color", "light-dark(#000, #fff)");
 themeSwitch.addEventListener("click", () => {
   const next = themeSwitch.dataset.dark === "true" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
@@ -101,15 +106,20 @@ for (const button of document.querySelectorAll("[data-copy]")) {
       if (revision !== commandRevision) return;
       button.textContent = "Copied";
       setTimeout(() => (button.textContent = "Copy"), 1400);
-      if (status) status.textContent = "Commands copied.";
+      if (button.closest("#install-panel") && status)
+        status.textContent = "Commands copied.";
     } catch {
       if (revision !== commandRevision) return;
       const range = document.createRange();
       range.selectNodeContents(code);
       window.getSelection().removeAllRanges();
       window.getSelection().addRange(range);
-      if (status)
+      if (button.closest("#install-panel") && status)
         status.textContent = "Commands selected. Press Ctrl+C or ⌘C to copy.";
+      else {
+        button.textContent = "Selected";
+        setTimeout(() => (button.textContent = "Copy"), 2400);
+      }
     }
   });
 }
