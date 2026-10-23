@@ -4,6 +4,7 @@ import { renderLegend } from "./chart-legend.js";
 import { axisTickIndexes, barPercent, scaleMaximum, stackPercents } from "./chart-scale.js";
 import { renderHistoryCoverage } from "./history-coverage.js";
 import { quietRepositories } from "./quiet-repositories.js";
+import { activityInsights } from "./activity-insights.js";
 import {
   activityGrid, coverageWarnings, dailyCountSeries, daysBetween, deltaDescription, downsample,
   groupByRepository, heatLegend, heatLevel, ledgerAvailability, ledgerMoney, namedTotals, percent, presentProviders, previousPeriod, pricedPercent, pricedShare, providerLabels,
@@ -28,7 +29,7 @@ import { localMachine, machineAge, machineNote, machineReasons, machineTally, ma
 import { filterSnapshot, selectSessions } from "./export-data.js";
 import { installExportMenu, openExportMenu } from "./export-menu.js";
 import { sharedHiddenSelectors, renderSharedSnapshot } from "./shared-view.js";
-import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize, selectField } from "./ui.js";
+import { DASH, coverageBadge, setValue, valueWithCoverage, chartWidth, redrawOnResize, selectField, kpi } from "./ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const readPreference = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
@@ -570,6 +571,21 @@ function renderActivity(view) {
   elements.activityTooltip.hidden = true;
   const eligible = sessionsForProviders(view.sessions, "activity");
   const { grid, counted, maximum } = activityGrid(eligible, snapshotTimeZone());
+  const insights = $("#activity-insights");
+  clear(insights); insights.hidden = !counted;
+  $("#activity-insights-note").hidden = !counted;
+  if (counted) {
+    const rhythm = activityInsights(eligible, snapshotTimeZone());
+    insights.append(kpi({ label: "Longest streak", value: `${integer(rhythm.longestStreak)} ${rhythm.longestStreak === 1 ? "day" : "days"}`, note: `${integer(rhythm.activeDays)} active ${rhythm.activeDays === 1 ? "day" : "days"}` }));
+    const peak = (label, result, labels, unit) => {
+      const winners = result.indexes.map((index) => labels[index]);
+      const item = kpi({ label, value: winners[0], note: `${integer(result.starts)} ${result.starts === 1 ? "start" : "starts"}${winners.length > 1 ? ` · ${integer(winners.length)} ${unit} tied` : ""}` });
+      if (winners.length > 1) item.append(node("span", `Tied: ${winners.join(", ")}`, "sr-only"));
+      insights.append(item);
+    };
+    peak("Busiest hour", rhythm.busiestHour, Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00–${String(hour).padStart(2, "0")}:59`), "hours");
+    peak("Busiest weekday", rhythm.busiestWeekday, ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], "weekdays");
+  }
   $("#activity-evidence").textContent = `${counted}/${eligible.length} sessions have provider start timestamps. Unknown starts and file modification dates are excluded.`;
   const status = document.querySelector?.("#activity-status");
   const heatmapPanel = document.querySelector?.("#activity-heatmap-panel"), repositoriesPanel = document.querySelector?.("#activity-repositories-panel");

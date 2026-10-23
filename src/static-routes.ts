@@ -3,6 +3,7 @@ export const staticRoutes: ReadonlyArray<readonly [route: string, file: string]>
   ["/history-coverage.js", "history-coverage.js"],
   ["/", "index.html"],
   ["/app.js", "app.js"],
+  ["/activity-insights.js", "activity-insights.js"],
   ["/format.js", "format.js"],
   ["/view-model.js", "view-model.js"],
   ["/quiet-repositories.js", "quiet-repositories.js"],

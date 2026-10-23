@@ -625,6 +625,8 @@ test("dashboard interactions in a real browser", { skip: browserSkip }, async (t
     // Per-view provider filters are independent and the heatmap tooltip never survives a view switch.
     await browser.evaluate(`document.querySelector('[data-view-button="activity"]').click()`);
     await browser.until(`document.querySelector('#activity-provider-filters [data-focus-key="filter:activity:claude"]')`);
+    assert.equal(await browser.evaluate(`document.querySelector('#activity-insights').hidden`), false);
+    assert.equal(await browser.evaluate(`document.querySelectorAll('#activity-insights .kpi').length`), 3);
     await browser.evaluate(`document.querySelector('#activity-provider-filters [data-focus-key="filter:activity:claude"]').click()`);
     await browser.until(`document.querySelector('#activity-provider-filters [data-focus-key="filter:activity:claude"]').checked`, false);
     await browser.evaluate(`document.querySelector('.heat-cell').focus()`);
