@@ -37,4 +37,4 @@ Production generates the landing page, `/releases/` archive, `releases.xml` Atom
 node --test test/site.test.mjs
 ```
 
-These tests also run in `npm test`. They cover pagination, latest/backport ordering, draft/prerelease filtering, API failures, HTML escaping, release anchors, asset completeness and project-subpath links. For visual review, check desktop and phone widths, keyboard navigation in both tab groups, command copying, FAQ, archive, and JavaScript-disabled behavior. Use only synthetic demo assets.
+These tests also run in `npm test`. They cover pagination, latest/backport ordering, draft/prerelease filtering, API failures, HTML escaping, release anchors, asset completeness (including responsive image sources) and project-subpath links. For visual review, check desktop and phone widths in light and dark mode, keyboard navigation in both tab groups, command copying, FAQ, archive, and JavaScript-disabled behavior. Verify that the Overview uses the mobile screenshot on phones and that the full-screenshot link follows changes to the selected view, viewport and color scheme. Use only synthetic demo assets.

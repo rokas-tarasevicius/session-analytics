@@ -1,7 +1,7 @@
 const views = {
   summary: [
     "All your agents. All your repositories. One place to understand the work.",
-    "Summary dashboard showing daily usage value, provider breakdowns, and repository totals from synthetic demo data",
+    "Summary dashboard showing usage value, sessions, and token totals from synthetic demo data",
   ],
   velocity: [
     "See how usage changes over time, grouped by model or provider.",
@@ -70,11 +70,34 @@ function setupTabs(selector, activate) {
 setupTabs(".preview-tabs", (tab) => {
   const view = tab.dataset.view;
   const img = document.getElementById("dashboard-image");
+  const mobileView = view === "summary" ? "mobile" : view;
+  for (const [id, asset] of [
+    ["preview-mobile-dark", `${mobileView}-dark`],
+    ["preview-mobile", mobileView],
+    ["preview-dark", `${view}-dark`],
+  ]) {
+    const source = document.getElementById(id);
+    source.srcset = `./assets/screenshot-${asset}.webp`;
+    source.width = view === "summary" && id !== "preview-dark" ? 750 : 1718;
+    source.height = view === "summary" && id !== "preview-dark" ? 1624 : 1472;
+  }
   img.src = `./assets/screenshot-${view}.webp`;
   img.alt = views[view][1];
-  document.getElementById("full-preview").href = img.src;
+  const panel = document.getElementById("dashboard-panel");
+  panel.dataset.view = view;
+  panel.scrollTo(0, 0);
   document.getElementById("view-caption").textContent = views[view][0];
 });
+
+const dashboardImage = document.getElementById("dashboard-image");
+if (dashboardImage) {
+  const updatePreviewLink = () => {
+    document.getElementById("full-preview").href =
+      dashboardImage.currentSrc || dashboardImage.src;
+  };
+  dashboardImage.addEventListener("load", updatePreviewLink);
+  updatePreviewLink();
+}
 
 let commandRevision = 0;
 setupTabs(".install-tabs", (tab) => {

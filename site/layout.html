@@ -1,39 +1,83 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f6f2">
-  <title>{{TITLE}}</title>
-  <meta name="description" content="{{DESCRIPTION}}">
-  <link rel="canonical" href="{{CANONICAL}}">
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="{{TITLE}}">
-  <meta property="og:description" content="{{DESCRIPTION}}">
-  <meta property="og:url" content="{{CANONICAL}}">
-  <meta property="og:image" content="{{SITE_URL}}assets/social-preview.png">
-  <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="{{ROOT}}assets/logo.svg" type="image/svg+xml">
-  <link rel="preload" href="{{ROOT}}fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="{{ROOT}}style.css">
-  <link rel="alternate" type="application/atom+xml" title="Session Analytics releases" href="{{ROOT}}releases.xml">
-  <script src="{{ROOT}}site.js" defer></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-header wrap">
-    <a class="wordmark" href="{{ROOT}}" aria-label="Session Analytics home"><img src="{{ROOT}}assets/logo.svg" width="32" height="32" alt="">Session Analytics<span class="preview-label">preview</span></a>
-    <nav aria-label="Main navigation">
-      <a href="{{ROOT}}#how-it-works">How it works</a>
-      <a href="{{ROOT}}releases/" {{RELEASE_CURRENT}}>Releases</a>
-      <a class="nav-github" href="{{REPO_URL}}">GitHub <span aria-hidden="true">↗</span></a>
-    </nav>
-  </header>
-  {{CONTENT}}
-  <footer class="site-footer wrap">
-    <div><a class="wordmark" href="{{ROOT}}"><img src="{{ROOT}}assets/logo.svg" width="26" height="26" alt="">Session Analytics</a><p>A little more clarity. All on your machine.</p></div>
-    <nav aria-label="Footer navigation"><a href="{{DOCS_URL}}/cli.md">Documentation ↗</a><a href="{{REPO_URL}}/blob/master/LICENSE">MIT license ↗</a><a href="{{ROOT}}releases.xml">Release feed ↗</a><a href="{{REPO_URL}}">Source code ↗</a></nav>
-    <p class="footer-note">Built in the open by <a href="https://github.com/rokas-tarasevicius">Rokas Tarasevičius</a>. Provider names and marks belong to their owners.</p>
-  </footer>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f6f2" />
+    <meta
+      name="theme-color"
+      content="#191e1a"
+      media="(prefers-color-scheme: dark)"
+    />
+    <title>{{TITLE}}</title>
+    <meta name="description" content="{{DESCRIPTION}}" />
+    <link rel="canonical" href="{{CANONICAL}}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="{{TITLE}}" />
+    <meta property="og:description" content="{{DESCRIPTION}}" />
+    <meta property="og:url" content="{{CANONICAL}}" />
+    <meta property="og:image" content="{{SITE_URL}}assets/social-preview.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="{{ROOT}}assets/logo.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="{{ROOT}}fonts/geist-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="{{ROOT}}style.css" />
+    <link
+      rel="alternate"
+      type="application/atom+xml"
+      title="Session Analytics releases"
+      href="{{ROOT}}releases.xml"
+    />
+    <script src="{{ROOT}}site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header wrap">
+      <a class="wordmark" href="{{ROOT}}" aria-label="Session Analytics home"
+        ><img
+          src="{{ROOT}}assets/logo.svg"
+          width="32"
+          height="32"
+          alt=""
+        />Session Analytics<span class="preview-label">preview</span></a
+      >
+      <nav aria-label="Main navigation">
+        <a href="{{ROOT}}#how-it-works">How it works</a>
+        <a href="{{ROOT}}releases/" {{RELEASE_CURRENT}}>Releases</a>
+        <a class="nav-github" href="{{REPO_URL}}"
+          >GitHub <span aria-hidden="true">↗</span></a
+        >
+      </nav>
+    </header>
+    {{CONTENT}}
+    <footer class="site-footer wrap">
+      <div>
+        <a class="wordmark" href="{{ROOT}}"
+          ><img
+            src="{{ROOT}}assets/logo.svg"
+            width="26"
+            height="26"
+            alt=""
+          />Session Analytics</a
+        >
+        <p>A little more clarity. All on your machine.</p>
+      </div>
+      <nav aria-label="Footer navigation">
+        <a href="{{DOCS_URL}}/cli.md">Documentation ↗</a
+        ><a href="{{REPO_URL}}/blob/master/LICENSE">MIT license ↗</a
+        ><a href="{{ROOT}}releases.xml">Release feed ↗</a
+        ><a href="{{REPO_URL}}">Source code ↗</a>
+      </nav>
+      <p class="footer-note">
+        Built in the open by
+        <a href="https://github.com/rokas-tarasevicius">Rokas Tarasevičius</a>.
+        Provider names and marks belong to their owners.
+      </p>
+    </footer>
+  </body>
 </html>

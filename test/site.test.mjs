@@ -129,7 +129,7 @@ test("site: build complete static output with working project-subpath links, anc
       ["releases/index.html", archive],
     ]) {
       const base = new URL(path, "https://example.test/session-analytics/");
-      for (const [, target] of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
+      for (const [, target] of html.matchAll(/(?:href|src|srcset)="([^"]+)"/g)) {
         const url = new URL(target, base);
         if (url.origin !== base.origin) continue;
         assert.ok(
