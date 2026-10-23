@@ -8,7 +8,8 @@ export interface VelocityData {
   start: string; end: string; group: string; metric: Metric; granularity: string; mode: string;
   keys: string[]; series: Series[]; allSeries: Series[];
   daily: Array<{ day: string; values: number[]; total: number; evidence: Evidence }>;
-  rolling: Array<number | null>; totals: number[]; undated: number[];
+  /** Seven-day averages, and whether each one's week has incomplete (but at least `comparisonEvidenceFloor`) metric evidence. */
+  rolling: Array<number | null>; rollingPartial: boolean[]; totals: number[]; undated: number[];
   /** In-window totals of session-dated cells (already included in `totals`), and the sessions session-dating some of the selected metric. */
   sessionDated: number[]; sessionDatedSessions: number;
   coverage: { priceTokens: number; cacheReadInput: number; cacheWriteInput: number; reasoningOutput: number };

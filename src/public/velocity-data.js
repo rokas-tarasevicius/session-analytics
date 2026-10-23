@@ -185,11 +185,25 @@ export function buildVelocity(sessions, { start, end, group = "provider", metric
   }
   const daily = [...dailyMap.values()];
   // Comparison history already includes the preceding dates and the same evidence guards.
-  const historyRolling = rollingHistory && new Map(rollingHistory.daily.map(({ day }, i) => [day, rollingHistory.rolling[i]]));
-  const rolling = historyRolling ? daily.map(({ day }) => historyRolling.get(day) ?? null)
-    : daily.map((_, i) => i < 6 || daily[i - 6].day < earliest || missingSessions || !daily.slice(i - 6, i + 1).every((item) => item.evidence.complete) ? null : sum(daily.slice(i - 6, i + 1).map((item) => item.total)) / 7);
+  const historyDays = rollingHistory && new Map(rollingHistory.daily.map(({ day }, i) => [day, i]));
+  const fromHistory = (values, fallback) => daily.map(({ day }) => historyDays.has(day) ? values[historyDays.get(day)] : fallback);
+  const weeks = historyDays ? null : daily.map((_, i) => trailingWeek(daily, i, earliest, missingSessions));
+  const rolling = weeks ? weeks.map((week) => week?.value ?? null) : fromHistory(rollingHistory.rolling, null);
+  const rollingPartial = weeks ? weeks.map((week) => week?.partial ?? false) : fromHistory(rollingHistory.rollingPartial, false);
   if (mode === "cumulative" && granularity !== "hour") series = series.map((item) => { let running = 0; return { ...item, values: item.values.map((value) => running += value) }; });
-  return { start, end, group, metric, granularity, mode, keys, series, allSeries, daily, rolling, totals, undated, sessionDated, sessionDatedSessions, coverage, evidence, earliest, missingSessions, unledgered, contributingSessions };
+  return { start, end, group, metric, granularity, mode, keys, series, allSeries, daily, rolling, rollingPartial, totals, undated, sessionDated, sessionDatedSessions, coverage, evidence, earliest, missingSessions, unledgered, contributingSessions };
+}
+
+/**
+ * The seven-day average ending on `daily[i]`, inactive dates included. The week must lie inside observed
+ * history and meet the period comparisons' evidence floor, so a few unpriced tokens on one day mark the
+ * week partial instead of erasing it from the chart.
+ */
+function trailingWeek(daily, i, earliest, missingSessions) {
+  if (i < 6 || daily[i - 6].day < earliest || missingSessions) return null;
+  const week = daily.slice(i - 6, i + 1), weekEvidence = week.reduce((total, item) => addEvidence(total, item.evidence), blankEvidence());
+  if (weekEvidence.unsupported || evidenceShare(weekEvidence) < comparisonEvidenceFloor) return null;
+  return { value: sum(week.map((item) => item.total)) / 7, partial: !weekEvidence.complete };
 }
 
 /** Percentages need enough observed activity as well as a nonzero denominator. */

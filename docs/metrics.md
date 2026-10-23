@@ -366,10 +366,12 @@ Activity's rhythm KPIs use the same known session starts as its weekday-hour hea
   occurrences, and the missing spring hour contributes no activity. Cumulative lines
   restart at the selected start date and are disabled for unordered hour profiles.
 - The rolling overlay is the total over the last seven calendar dates divided by seven,
-  including zero-activity dates. It needs seven dates within observed history with complete
-  metric evidence; dates before the selected range are included, so the first plotted day
-  can have an average. It is available on daily lines/areas; it is disabled for cumulative,
-  weekly, monthly and hour views so incompatible units are never overlaid.
+  including zero-activity dates. It needs seven dates within observed history whose
+  combined metric evidence meets the same **90%** floor as the week and month comparisons
+  (below 100%, the readout marks that average partially priced/observed); dates before the
+  selected range are included, so the first plotted day can have an average. It is available
+  on daily lines/areas; it is disabled for cumulative, weekly, monthly and hour views so
+  incompatible units are never overlaid.
 
 ### Session-dated value
 
@@ -504,9 +506,9 @@ Calendar coverage and **metric evidence** are separate. Known/eligible counters 
 per day, period and mover group, including groups with zero measured value. Week and month
 comparisons need at least **90%** metric evidence (for value: priced tokens) over the eligible
 tokens of **each** period; between 90% and 100% the change is shown on observed values and marked
-partially priced/observed, with both sides' counts in the explanation. Burn, rolling averages,
-projections and movers still require 100% evidence on both sides. Even equally partial coverage
-is insufficient for those. Known and
+partially priced/observed, with both sides' counts in the explanation. The rolling average
+uses the same floor over each seven-day week. Burn, projections and movers still require 100%
+evidence on both sides. Even equally partial coverage is insufficient for those. Known and
 eligible counts for current/prior periods are displayed beside percentages; incomplete
 evidence returns N/A. Recorded zeroes and inactive dates remain valid observations, but
 0/0 evidence coverage is labeled N/A, never 100%. Unsupported providers have no eligible

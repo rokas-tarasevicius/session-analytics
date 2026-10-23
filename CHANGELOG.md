@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - A public GitHub Pages website in the dashboard's own light and dark design, with feature crops from the synthetic demo, installation options, privacy overview, release archive and Atom feed. Published release notes update automatically after releases, including those created by the release workflow.
 
+### Fixed
+
+- Velocity's 7-day average spans the chart again. It needed every token in a week to be priced, so one day with a few unpriced tokens erased seven days of the line, and on real histories it covered only a short stretch mid-chart. A week now needs the same 90% priced (or observed) share as the week and month comparisons; one short of complete is marked partially priced or observed in the readout. Plotted totals are unchanged.
+
 ## [0.13.0] - 2026-10-23
 
 ### Added
