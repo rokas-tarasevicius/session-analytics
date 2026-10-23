@@ -296,9 +296,17 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
   for (const file of [
     "logo.svg",
     "social-preview.png",
-    ...["summary", "velocity", "costs", "tools", "repository"].map(
-      (view) => `screenshot-${view}.webp`,
-    ),
+    ...[
+      "summary",
+      "velocity",
+      "costs",
+      "tools",
+      "repository",
+      "mobile",
+    ].flatMap((view) => [
+      `screenshot-${view}.webp`,
+      `screenshot-${view}-dark.webp`,
+    ]),
   ]) {
     await cp(join(root, "assets", file), join(out, "assets", file));
   }
