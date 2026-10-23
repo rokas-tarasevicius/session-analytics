@@ -94,6 +94,8 @@ session-analytics                                         # this machine and age
 
 `agentbox` is any SSH destination your `ssh` reaches without a prompt: a host alias from `~/.ssh/config`, `user@host` or `ssh://user@host:port`. `--user agent-t3` names the account whose history is read there, for agents that run as their own user; without it, the account you log in as is read. That account needs Node.js 24 or later on its login `PATH` and nothing else, because session-analytics brings its own code ([the bundled runtime](#the-bundled-runtime)). Snapshot files combine machines [without SSH](#from-files).
 
+Each machine discovers providers using its own platform, home and environment. For example, a Linux server reads Cursor from `~/.config/Cursor` (or `$XDG_CONFIG_HOME/Cursor`) while a Mac reads `~/Library/Application Support/Cursor`. A provider's absent default store, including an unused Codex archive, means no sources discovered or selected and does not add a missing-source coverage note to the combined snapshot. Explicitly configured missing stores and unreadable stores still report coverage problems. Missing history does not establish whether an agent is installed; an installed agent may have no saved history or use another profile or location. Readable sources alongside failures are incomplete; explicitly selected absent sources are missing. See [provider defaults and overrides](providers.md#source-overrides-and-isolation).
+
 ### Save a machine
 
 `machines add` connects first and runs the same checks as [`machines check`](#check-a-machine), each with its fix:

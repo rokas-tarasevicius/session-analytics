@@ -20,6 +20,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Cursor history discovery uses each machine's platform defaults, including Linux's `~/.config/Cursor` and Windows's `%APPDATA%\Cursor`. Absent default provider stores, including Codex archives, no longer add missing-source warnings; explicit missing paths and unreadable stores still report coverage problems. Source-health counts cover all seven providers. Previously missed Cursor sessions on Linux and Windows can now be included; existing session totals are unchanged.
 - Dashboard screen readers receive refresh outcomes and empty-window status without repeated Velocity hover or resize announcements. Downloads and refreshes restore displaced keyboard focus, Velocity Escape dismisses its readout, and command-palette search has a visible focus ring in both themes.
 - The Summary repository table becomes labeled cards on phone and portrait-tablet screens, keeping every metric, column sorting and keyboard repository focus without horizontal scrolling. Long repository names also stay within Summary’s repository breakdown charts on these screens. Desktop layouts and totals are unchanged.
 - Terminal reports wrap prose to the terminal width (or `COLUMNS`, defaulting to 80 when piped), align repository columns including evidence labels, and use labeled rows when a table cannot fit. Shortened model lists now show an ellipsis. Accounting totals and JSON snapshots are unchanged.

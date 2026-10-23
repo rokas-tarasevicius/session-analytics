@@ -1,4 +1,5 @@
 // @ts-check
+import { providerLabels } from "./providers.js";
 import { antigravityWarnings } from "./provider-warnings.js";
 
 // Public vocabulary shared by ingestion, schema generation, and browser exports.
@@ -14,7 +15,23 @@ export const indexParityWarning = "The local index failed a consistency check; a
 export const duplicateMachineWarning = "Some sessions appeared on more than one machine; each is counted once.";
 export const remoteUnavailableWarning = "A remote machine could not be read; its sessions are missing from this snapshot.";
 export const staleMachineWarning = "A remote machine could not be read; its last good snapshot is used instead.";
+// Fixed, provider-named discovery notes. These describe source selection and
+// readability, never installation status or completeness of retained history.
+const sourceStates = ["no sources discovered or selected", "missing sources", "unreadable sources", "missing and unreadable sources", "incomplete sources: missing", "incomplete sources: unreadable", "incomplete sources: missing and unreadable", "discovery details unavailable"];
+export const sourceDiscoveryNotes = Object.entries(providerLabels).filter(([provider]) => provider !== "unsupported").flatMap(([, label]) => sourceStates.map((state) => `${label}: ${state}.`));
+/** @param {ReadonlyArray<import("../types.ts").McpSourceHealth>} sources */
+export function sourceHealthNotes(sources) {
+  return sources.flatMap((source) => {
+    if (source.provider === "unsupported") return [];
+    const failures = source.missingSources && source.unreadableSources ? "missing and unreadable" : source.missingSources ? "missing" : source.unreadableSources ? "unreadable" : "";
+    const state = source.status === "unknown" ? "discovery details unavailable"
+      : failures ? source.sourcesRead ? `incomplete sources: ${failures}` : `${failures} sources`
+      : !source.sourcesRead ? "no sources discovered or selected" : null;
+    return state ? [`${providerLabels[source.provider]}: ${state}.`] : [];
+  });
+}
 export const discoveryWarnings = [
+  ...sourceDiscoveryNotes,
   antigravityWarnings.unreadable, antigravityWarnings.legacy,
   "A provider evidence store could not be fully read; identified sessions were retained.",
   "A provider evidence directory could not be read; sibling directories were retained.",
@@ -141,7 +158,8 @@ export function scanWarnings(warnings) {
   return warnings.flatMap((warning) => {
     if (discoveryWarnings.includes(warning)) return [warning];
     // Older analyzers joined these two fixed messages across provider profiles.
-    if (warning === `${discoveryWarnings[0]} ${discoveryWarnings[1]}` || warning === `${discoveryWarnings[1]} ${discoveryWarnings[0]}`) return discoveryWarnings.slice(0, 2);
+    const native = ["A provider transcript root is missing.", "A provider transcript root could not be read."];
+    if (warning === native.join(" ") || warning === [...native].reverse().join(" ")) return native;
     return [];
   });
 }

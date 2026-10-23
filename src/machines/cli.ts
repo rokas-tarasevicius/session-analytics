@@ -194,7 +194,7 @@ async function run(subcommand: string, args: string[]): Promise<number> {
       process.stderr.write(`Warning: ${machine.name} failed a check; after the fix, run ${command} machines check ${machine.name}.\n`);
     } else {
       write(`${result ? "\n" : ""}Saved ${machine.name}. A plain ${command} now reads ${label(saved)} and ${saved.machines.filter(({ enabled }) => enabled).map(({ name }) => name).join(", ")}.`);
-      if (empty) write(`It has no agent history for that account yet; ${empty.fix ?? ""}`);
+      if (empty) write(`No sessions were observed for that account; ${empty.fix ?? ""}`);
       if (!result) write(`Test it with ${command} machines check ${machine.name}.`);
     }
     return 0;

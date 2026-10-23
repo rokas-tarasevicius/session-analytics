@@ -1,3 +1,4 @@
+import { providerRoots } from "./roots.ts";
 import { basename, dirname, join } from "node:path";
 import { VelocityAccumulator, velocityDimension } from "../metrics/velocity.ts";
 import type { ProviderAdapter } from "./adapter.ts";
@@ -6,7 +7,7 @@ import { emptySession, files, finish, increment, jsonLines, name, observeTime, r
 /** Persisted activity events, verified against github/copilot-sdk's generated session event schema. */
 export const copilotAdapter: ProviderAdapter = {
   id: "copilot-events", provider: "copilot",
-  async discoverRoots({ home, options }) { return [options.copilotRoot ?? join(home, ".copilot/session-state")]; },
+  async discoverRoots({ home, options }) { return providerRoots(options.copilotRoot, [join(home, ".copilot/session-state")]); },
   async *identify(root, onWarning) {
     for await (const path of files(root, (p) => basename(p) === "events.jsonl", 0, onWarning)) {
       try {

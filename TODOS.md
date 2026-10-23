@@ -49,7 +49,6 @@ Open work after the [2026-10-13 readiness plan](docs/proposals/open-source-readi
 | P3 | Stop the remote work of `--runtime installed` and `--remote` reads when the connection closes, as the bundled runtime does; needs a report flag that older versions reject. | Machines review |
 | P3 | Compare ad-hoc `--remote` machines, and installed ones without a recorded check, for the same machine twice; needs `--identify-machine` there, which older versions reject. Return compact JSON from installed runtimes for the same reason. | Machines review (same-machine-twice, uncompressed-pretty-json) |
 | P3 | Add a Machines column (or filter chips) to the repository table. | Machines review (no-machine-dimension) |
-| P3 | Stop every saved Linux server from adding "Cursor local session history is missing." and an incomplete Cursor source: the default Cursor database is the macOS path on every platform. Use each platform's default (`~/.config/Cursor` on Linux, `%APPDATA%\Cursor` on Windows), and count an absent default store as not installed rather than missing for every provider's default roots alike, the Codex archive root included, so source health stays consistent. | Machines end-to-end review (cursor-missing-on-every-server) |
 
 ## Subscription limits
 

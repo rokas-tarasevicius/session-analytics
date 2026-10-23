@@ -15,7 +15,8 @@ export function sourceCheckNotes(health = []) {
     if (checks.some(({ sourcesRead }) => sourcesRead > 0)) outcomes.push("history readable");
     if (checks.some(({ missingSources }) => missingSources > 0)) outcomes.push("history missing");
     if (checks.some(({ unreadableSources }) => unreadableSources > 0)) outcomes.push("history could not be read");
-    notes.push(`${label}: ${outcomes.length ? outcomes.join("; ") : "discovery details unavailable"}.`);
+    const knownEmpty = checks.every(({ status }) => status !== "unknown");
+    notes.push(`${label}: ${outcomes.length ? outcomes.join("; ") : knownEmpty ? "no sources discovered or selected" : "discovery details unavailable"}.`);
   }
   return notes;
 }
