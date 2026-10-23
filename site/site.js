@@ -1,38 +1,54 @@
-const views = {
-  summary: [
-    "All your agents. All your repositories. One place to understand the work.",
-    "Summary dashboard showing usage value, sessions, and token totals from synthetic demo data",
-  ],
-  velocity: [
-    "See how usage changes over time, grouped by model or provider.",
-    "Velocity dashboard showing model usage over time with synthetic demo data",
-  ],
-  costs: [
-    "Inspect the API-equivalent value of your usage and its pricing coverage.",
-    "Costs dashboard showing API-equivalent usage value and coverage with synthetic demo data",
-  ],
-  tools: [
-    "Understand the tools your agents reach for, across sessions and repositories.",
-    "Tools dashboard showing tool-call patterns with synthetic demo data",
-  ],
-};
+const themeKey = "session-analytics-site-theme";
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
 const commands = {
   npm: [
     "npm install -g session-analytics\nsession-analytics",
     "Opens your dashboard at http://127.0.0.1:4174.",
-    "INSTALL & LAUNCH",
+    "Install and launch",
   ],
   homebrew: [
     "brew install rokas-tarasevicius/tap/session-analytics\nsession-analytics",
     "Homebrew installs the same compiled package as the GitHub Release.",
-    "INSTALL & LAUNCH",
+    "Install and launch",
   ],
   source: [
     "git clone https://github.com/rokas-tarasevicius/session-analytics.git\ncd session-analytics\nnpm run demo",
-    "Try synthetic history only. No install step and no access to your sessions.",
-    "CLONE & TRY THE DEMO",
+    "Synthetic history only. No install step and no access to your sessions.",
+    "Clone and try the demo",
   ],
 };
+
+// Screenshots switch with prefers-color-scheme; a pinned theme overrides each <source>.
+function applyTheme() {
+  const pinned = document.documentElement.dataset.theme;
+  const dark = pinned ? pinned === "dark" : systemDark.matches;
+  for (const source of document.querySelectorAll("picture source")) {
+    source.media = pinned
+      ? dark
+        ? "all"
+        : "not all"
+      : "(prefers-color-scheme: dark)";
+  }
+  const toggle = document.getElementById("theme-switch");
+  if (toggle) {
+    toggle.dataset.dark = String(dark);
+    toggle.setAttribute("aria-label", dark ? "Use light theme" : "Use dark theme");
+  }
+}
+const themeSwitch = document.getElementById("theme-switch");
+if (themeSwitch) {
+  themeSwitch.hidden = false;
+  themeSwitch.addEventListener("click", () => {
+    const next = themeSwitch.dataset.dark === "true" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem(themeKey, next);
+    } catch {}
+    applyTheme();
+  });
+}
+systemDark.addEventListener("change", applyTheme);
+applyTheme();
 
 function setupTabs(selector, activate) {
   const list = document.querySelector(selector);
@@ -67,66 +83,36 @@ function setupTabs(selector, activate) {
   }
 }
 
-setupTabs(".preview-tabs", (tab) => {
-  const view = tab.dataset.view;
-  const img = document.getElementById("dashboard-image");
-  const mobileView = view === "summary" ? "mobile" : view;
-  for (const [id, asset] of [
-    ["preview-mobile-dark", `${mobileView}-dark`],
-    ["preview-mobile", mobileView],
-    ["preview-dark", `${view}-dark`],
-  ]) {
-    const source = document.getElementById(id);
-    source.srcset = `./assets/screenshot-${asset}.webp`;
-    source.width = view === "summary" && id !== "preview-dark" ? 750 : 1718;
-    source.height = view === "summary" && id !== "preview-dark" ? 1624 : 1472;
-  }
-  img.src = `./assets/screenshot-${view}.webp`;
-  img.alt = views[view][1];
-  const panel = document.getElementById("dashboard-panel");
-  panel.dataset.view = view;
-  panel.scrollTo(0, 0);
-  document.getElementById("view-caption").textContent = views[view][0];
-});
-
-const dashboardImage = document.getElementById("dashboard-image");
-if (dashboardImage) {
-  const updatePreviewLink = () => {
-    document.getElementById("full-preview").href =
-      dashboardImage.currentSrc || dashboardImage.src;
-  };
-  dashboardImage.addEventListener("load", updatePreviewLink);
-  updatePreviewLink();
-}
-
 let commandRevision = 0;
+const status = document.getElementById("copy-status");
 setupTabs(".install-tabs", (tab) => {
   commandRevision++;
   const [command, note, label] = commands[tab.dataset.install];
   document.getElementById("install-command").textContent = command;
   document.getElementById("install-note").textContent = note;
   document.getElementById("install-label").textContent = label;
-  document.getElementById("copy-status").textContent = "";
+  if (status) status.textContent = "";
 });
 
-const copy = document.getElementById("copy-command");
-if (copy) {
-  copy.hidden = false;
-  copy.addEventListener("click", async () => {
-    const code = document.getElementById("install-command");
+for (const button of document.querySelectorAll("[data-copy]")) {
+  button.hidden = false;
+  button.addEventListener("click", async () => {
+    const code = document.getElementById(button.dataset.copy);
     const revision = commandRevision;
     try {
       await navigator.clipboard.writeText(code.textContent);
-      if (revision === commandRevision)
-        document.getElementById("copy-status").textContent = "Commands copied.";
+      if (revision !== commandRevision) return;
+      button.textContent = "Copied";
+      setTimeout(() => (button.textContent = "Copy"), 1400);
+      if (status) status.textContent = "Commands copied.";
     } catch {
       if (revision !== commandRevision) return;
       const range = document.createRange();
       range.selectNodeContents(code);
       window.getSelection().removeAllRanges();
       window.getSelection().addRange(range);
-      document.getElementById("copy-status").textContent =
-        "Commands selected. Press Ctrl+C or ⌘C to copy.";
+      if (status)
+        status.textContent = "Commands selected. Press Ctrl+C or ⌘C to copy.";
     }
   });
 }

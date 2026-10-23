@@ -228,20 +228,20 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
     PROVIDERS: providers
       .map(
         ([id, name]) =>
-          `<span class="provider"><img src="./brands/${id}.svg" width="21" height="21" alt="">${name}</span>`,
+          `<li class="chip" style="--c: var(--provider-${id})"><span class="dot"></span><img class="brand-mark${id === "claude" ? " keep" : ""}" src="./brands/${id}.svg" width="15" height="15" alt="">${name}</li>`,
       )
       .join(""),
     RECENT_RELEASES: releases
       .slice(0, 3)
       .map(
         (release) =>
-          `<a class="release-preview" href="./releases/#${releaseId(release)}"><div><span class="release-version">${release.tag_name}${release.tag_name === latestTag ? latestBadge : ""}</span><time datetime="${release.published_at}">${date(release)}</time></div><p class="release-summary">${escapeHtml(summary(release))}</p><span class="release-arrow" aria-hidden="true">↗</span></a>`,
+          `<li><a href="./releases/#${releaseId(release)}"><span class="ver">${release.tag_name}</span><time datetime="${release.published_at}">${date(release)}</time><span class="sum">${escapeHtml(summary(release))}</span>${release.tag_name === latestTag ? latestBadge : "<span></span>"}</a></li>`,
       )
       .join("\n"),
     RELEASE_INDEX: releases
       .map(
         (release) =>
-          `<a href="#${releaseId(release)}">${release.tag_name}${release.tag_name === latestTag ? " ↗" : ""}</a>`,
+          `<a href="#${releaseId(release)}">${release.tag_name}${release.tag_name === latestTag ? " · latest" : ""}</a>`,
       )
       .join("\n"),
     ALL_RELEASES: releases
@@ -263,8 +263,8 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
     [
       "index.html",
       "index.html",
-      "Session Analytics — See the whole picture",
-      "Local, content-free analytics for your coding agents. Understand usage, models, tools, and activity across repositories. Open source. No telemetry.",
+      "Session Analytics: see what your coding agents are doing",
+      "A local dashboard and CLI for coding-agent usage, value and subscription limits across every repository. Reads the history your agents already keep. Nothing is uploaded. Open source.",
       "./",
     ],
     [
@@ -298,11 +298,13 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
     "social-preview.png",
     ...[
       "summary",
-      "velocity",
-      "costs",
-      "tools",
-      "repository",
       "mobile",
+      "subscription",
+      "velocity-movers",
+      "costs",
+      "activity",
+      "palette",
+      "repository",
     ].flatMap((view) => [
       `screenshot-${view}.webp`,
       `screenshot-${view}-dark.webp`,

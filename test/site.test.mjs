@@ -120,7 +120,8 @@ test("site: build complete static output with working project-subpath links, anc
     assert.equal(result.count, 1);
     const homepage = await readFile(join(out, "index.html"), "utf8");
     const archive = await readFile(join(out, "releases/index.html"), "utf8");
-    assert.match(homepage, /v1.0.0 is here/);
+    assert.match(homepage, /v1.0.0<\/span><span>is out/);
+    assert.match(homepage, /<li class="chip" style="--c: var\(--provider-claude\)">/);
     assert.match(archive, /id="release-v1.0.0"/);
     assert.match(archive, /Literal \{\{ROOT\}\} remains release content/);
     assert.doesNotMatch(homepage + archive, /<script>bad|\{\{TITLE\}\}/);
