@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-23
+
 ### Added
 
 - A public GitHub Pages website in the dashboard's own light and dark design, with feature crops from the synthetic demo, installation options, privacy overview, release archive and Atom feed. Published release notes update automatically after releases, including those created by the release workflow.
@@ -708,7 +710,8 @@ First standalone release.
 - Public results exclude titles, branches, workspace metadata, repository roots/remotes, raw Conductor/provider IDs, transcript paths/content, commands, credentials, and raw local exceptions.
 - The server binds to `127.0.0.1`, rejects non-loopback Host/Origin values, has no CORS or telemetry, and coalesces concurrent refresh scans.
 
-[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/rokas-tarasevicius/session-analytics/compare/v0.11.0...v0.12.0
