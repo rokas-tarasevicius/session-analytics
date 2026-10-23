@@ -7,6 +7,8 @@
 
 <h3>Content-free analytics for your coding-agent sessions.</h3>
 
+<p><a href="https://rokas-tarasevicius.github.io/session-analytics/">Website</a> · <a href="https://rokas-tarasevicius.github.io/session-analytics/releases/">Release notes</a></p>
+
 <p>See usage value, models, tools and activity by repository across Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Gemini CLI and Antigravity.<br />
 Local and read-only. No prompts, messages or file paths in its outputs.</p>
 

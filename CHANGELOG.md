@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- A public GitHub Pages website with a dashboard tour, installation options, privacy overview, release archive and Atom feed. Published release notes update automatically after releases, including those created by the release workflow.
+
 ## [0.13.0] - 2026-10-23
 
 ### Added
