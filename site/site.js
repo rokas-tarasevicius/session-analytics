@@ -18,35 +18,32 @@ const commands = {
   ],
 };
 
-// Screenshots switch with prefers-color-scheme; a pinned theme overrides each <source>.
+// Screenshots switch with prefers-color-scheme; a pinned theme rewrites each dark <source>,
+// keeping any width condition (data-media) such as the phone hero.
 function applyTheme() {
   const pinned = document.documentElement.dataset.theme;
   const dark = pinned ? pinned === "dark" : systemDark.matches;
-  for (const source of document.querySelectorAll("picture source")) {
+  for (const source of document.querySelectorAll("source[data-dark]")) {
+    const width = source.dataset.media;
     source.media = pinned
       ? dark
-        ? "all"
+        ? width || "all"
         : "not all"
-      : "(prefers-color-scheme: dark)";
+      : [width, "(prefers-color-scheme: dark)"].filter(Boolean).join(" and ");
   }
-  const toggle = document.getElementById("theme-switch");
-  if (toggle) {
-    toggle.dataset.dark = String(dark);
-    toggle.setAttribute("aria-label", dark ? "Use light theme" : "Use dark theme");
-  }
+  themeSwitch.dataset.dark = String(dark);
+  themeSwitch.setAttribute("aria-label", dark ? "Use light theme" : "Use dark theme");
 }
 const themeSwitch = document.getElementById("theme-switch");
-if (themeSwitch) {
-  themeSwitch.hidden = false;
-  themeSwitch.addEventListener("click", () => {
-    const next = themeSwitch.dataset.dark === "true" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem(themeKey, next);
-    } catch {}
-    applyTheme();
-  });
-}
+themeSwitch.hidden = false;
+themeSwitch.addEventListener("click", () => {
+  const next = themeSwitch.dataset.dark === "true" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem(themeKey, next);
+  } catch {}
+  applyTheme();
+});
 systemDark.addEventListener("change", applyTheme);
 applyTheme();
 

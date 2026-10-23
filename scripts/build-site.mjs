@@ -235,7 +235,7 @@ export async function buildSite(data, out = join(root, ".site-dist")) {
       .slice(0, 3)
       .map(
         (release) =>
-          `<li><a href="./releases/#${releaseId(release)}"><span class="ver">${release.tag_name}</span><time datetime="${release.published_at}">${date(release)}</time><span class="sum">${escapeHtml(summary(release))}</span>${release.tag_name === latestTag ? latestBadge : "<span></span>"}</a></li>`,
+          `<li><a href="./releases/#${releaseId(release)}"><span class="ver">${release.tag_name}</span><time datetime="${release.published_at}">${date(release)}</time><span class="sum">${escapeHtml(summary(release))}</span>${release.tag_name === latestTag ? latestBadge : ""}</a></li>`,
       )
       .join("\n"),
     RELEASE_INDEX: releases

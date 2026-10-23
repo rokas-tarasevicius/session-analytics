@@ -26,16 +26,16 @@
   --surface: light-dark(#ffffff, #1d1d1b);
   --surface-2: light-dark(#efefec, #2a2a27);
   --surface-3: light-dark(#e7e7e4, #30302d);
-  --surface-hover: light-dark(#f2f2f0, #242422);
+  --surface-hover: light-dark(#f2f2f0, #232321);
   --line: light-dark(#e7e7e4, #2f2f2d);
   --line-strong: light-dark(#dcdcd8, #3d3d3b);
   --text: light-dark(#18181b, #ececea);
   --text-2: light-dark(#4f4f55, #b3b3ad);
   --muted: light-dark(#696970, #979791);
   --focus: light-dark(#71717a, #a1a19b);
-  --shadow-1: 0 1px 2px light-dark(rgb(24 24 27 / 4%), rgb(0 0 0 / 40%));
+  --shadow-1: 0 1px 2px light-dark(rgb(24 24 27 / 4%), rgb(0 0 0 / 30%));
   --shadow-2: 0 1px 2px light-dark(rgb(24 24 27 / 4%), rgb(0 0 0 / 40%)),
-    0 12px 32px light-dark(rgb(24 24 27 / 8%), rgb(0 0 0 / 50%));
+    light-dark(0 12px 32px rgb(24 24 27 / 8%), 0 16px 40px rgb(0 0 0 / 50%));
   --provider-codex: light-dark(#5c5c59, #9a9a96);
   --provider-claude: light-dark(#c96442, #d8683f);
   --provider-cursor: light-dark(#008aa0, #13a0b3);
@@ -43,6 +43,8 @@
   --provider-opencode: light-dark(#a8820d, #b98a14);
   --provider-gemini: light-dark(#3a7be0, #4f8ae8);
   --provider-antigravity: light-dark(#90908a, #80807a);
+  --logo-tile: light-dark(#18181b, #30302d);
+  --logo-tile-line: light-dark(transparent, #3d3d3b);
   --radius: 12px;
   --radius-md: 9px;
   --radius-sm: 7px;
@@ -165,23 +167,13 @@ button {
   top: 12px;
 }
 
-/* Dark-only details that a colour token cannot express. */
+/* Monochrome provider marks invert in dark; a filter cannot be a light-dark() token. */
 :root[data-theme="dark"] .brand-mark:not(.keep) {
   filter: invert(1) brightness(0.95);
-}
-:root[data-theme="dark"] .logo-tile {
-  fill: var(--surface-3);
-  stroke: var(--line-strong);
-  stroke-width: 3;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .brand-mark:not(.keep) {
     filter: invert(1) brightness(0.95);
-  }
-  :root:not([data-theme="light"]) .logo-tile {
-    fill: var(--surface-3);
-    stroke: var(--line-strong);
-    stroke-width: 3;
   }
 }
 
@@ -212,14 +204,15 @@ button {
 .wordmark b {
   font-weight: 600;
 }
-.wordmark .logo,
-.wordmark img {
+.wordmark .logo {
   width: 26px;
   height: 26px;
   flex: 0 0 auto;
 }
 .logo-tile {
-  fill: #18181b;
+  fill: var(--logo-tile);
+  stroke: var(--logo-tile-line);
+  stroke-width: 3;
 }
 .site-header nav {
   display: flex;
@@ -378,7 +371,7 @@ button {
   font-size: 12.5px;
   font-weight: 500;
 }
-.copy:hover {
+.copy:not(.dark):hover {
   background: var(--surface-hover);
 }
 .copy.dark {
@@ -387,7 +380,6 @@ button {
   color: var(--bg);
 }
 .copy.dark:hover {
-  background: var(--text);
   opacity: 0.88;
 }
 .hero-links {
@@ -429,11 +421,6 @@ button {
 }
 .hero-shot .shot {
   box-shadow: var(--shadow-2);
-}
-.hero-shot .phone {
-  display: none;
-  max-width: 340px;
-  margin-inline: auto;
 }
 .shot-caption {
   display: flex;
@@ -835,6 +822,7 @@ button {
   color: var(--text-2);
 }
 .latest-label {
+  grid-column: 4;
   justify-self: end;
   padding: 1px 8px;
   border: 1px solid var(--line-strong);
@@ -1152,11 +1140,13 @@ button {
   .hero {
     padding: 48px 0 40px;
   }
-  .hero-shot .desktop {
-    display: none;
-  }
-  .hero-shot .phone {
-    display: block;
+  /* The <picture> switches to the phone capture at this width; crop to match. */
+  .hero-image {
+    --W: 750 !important;
+    --H: 1624 !important;
+    --h: 0.7 !important;
+    max-width: 340px;
+    margin-inline: auto;
   }
   .shot-caption {
     flex-direction: column;
